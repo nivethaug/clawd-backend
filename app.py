@@ -209,11 +209,70 @@ async def create_project(request: CreateProjectRequest):
 
 @app.delete("/projects/{project_id}")
 async def delete_project(project_id: int):
+    # Step 1: Get all session_keys linked to this project before deletion
     with get_db() as conn:
-        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-        conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
+        sessions_to_delete = conn.execute(
+            "SELECT session_key FROM sessions WHERE project_id = ?",
+            (project_id,)
+        ).fetchall()
+        session_keys = [row['session_key'] for row in sessions_to_delete]
+        
+        # Step 2: Delete messages first (foreign key dependency)
         conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))
+        
+        # Step 3: Delete sessions from backend database
+        conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
+        
+        # Step 4: Delete project from database
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        
         conn.commit()
+    
+    # Step 5: Delete corresponding OpenClaw sessions
+    # OpenClaw session key format: "agent:main:openai-user:adapter-session-{session_key}"
+    # Note: The key prefix may vary, so we match by suffix
+    sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
+    
+    if os.path.exists(sessions_json_path):
+        try:
+            with open(sessions_json_path, 'r') as f:
+                sessions_data = json.load(f)
+            
+            # Find OpenClaw session keys to delete by matching suffix
+            # The full format is: "agent:main:openai-user:adapter-session-{session_key}"
+            openclaw_keys_to_delete = []
+            for key in sessions_data.keys():
+                for session_key in session_keys:
+                    if key.endswith(f"adapter-session-{session_key}"):
+                        openclaw_keys_to_delete.append(key)
+                        break  # Each session key matches at most once
+            
+            # Delete entries from sessions.json
+            deleted_count = 0
+            for key in openclaw_keys_to_delete:
+                if key in sessions_data:
+                    # Get session_id before deleting the entry
+                    session_id = sessions_data.get(key, {}).get('sessionId')
+                    
+                    # Delete the entry
+                    del sessions_data[key]
+                    deleted_count += 1
+                    
+                    # Optionally delete the corresponding JSONL transcript file
+                    if session_id:
+                        jsonl_path = os.path.join(os.path.dirname(sessions_json_path), f"{session_id}.jsonl")
+                        if os.path.exists(jsonl_path):
+                            os.remove(jsonl_path)
+            
+            # Write back the updated sessions.json
+            with open(sessions_json_path, 'w') as f:
+                json.dump(sessions_data, f, indent=2)
+            
+            print(f"Deleted {deleted_count} OpenClaw sessions for project {project_id}")
+            
+        except Exception as e:
+            # Log error but don't fail the project deletion
+            print(f"Warning: Failed to delete OpenClaw sessions: {e}")
     
     return {"status": "deleted", "message": "Project deleted"}
 
@@ -266,19 +325,62 @@ async def delete_session(session_id: int):
 @app.delete("/projects/{project_id}/sessions/{session_id}")
 async def delete_project_session(project_id: int, session_id: int):
     """Delete a specific session within a project."""
+    # Step 1: Get session_key before deletion (needed for OpenClaw cleanup)
     with get_db() as conn:
-        # Verify session belongs to project
-        session_check = conn.execute(
-            "SELECT id FROM sessions WHERE id = ? AND project_id = ?",
+        session_info = conn.execute(
+            "SELECT session_key FROM sessions WHERE id = ? AND project_id = ?",
             (session_id, project_id)
         ).fetchone()
 
-        if not session_check:
+        if not session_info:
             raise HTTPException(status_code=404, detail="Session not found in this project")
 
+        session_key = session_info['session_key']
+
+        # Step 2: Delete messages and session from backend database
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE id = ? AND project_id = ?", (session_id, project_id))
         conn.commit()
+
+    # Step 3: Delete corresponding OpenClaw session
+    # OpenClaw session key format: "agent:main:openai-user:adapter-session-{session_key}"
+    sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
+
+    if os.path.exists(sessions_json_path):
+        try:
+            with open(sessions_json_path, 'r') as f:
+                sessions_data = json.load(f)
+
+            # Find OpenClaw session key to delete by matching suffix
+            openclaw_key_to_delete = None
+            for key in sessions_data.keys():
+                if key.endswith(f"adapter-session-{session_key}"):
+                    openclaw_key_to_delete = key
+                    break
+
+            # Delete entry from sessions.json if found
+            if openclaw_key_to_delete:
+                # Get session_id before deleting entry
+                oclaw_session_id = sessions_data.get(openclaw_key_to_delete, {}).get('sessionId')
+
+                # Delete entry
+                del sessions_data[openclaw_key_to_delete]
+
+                # Optionally delete corresponding JSONL transcript file
+                if oclaw_session_id:
+                    jsonl_path = os.path.join(os.path.dirname(sessions_json_path), f"{oclaw_session_id}.jsonl")
+                    if os.path.exists(jsonl_path):
+                        os.remove(jsonl_path)
+
+                # Write back updated sessions.json
+                with open(sessions_json_path, 'w') as f:
+                    json.dump(sessions_data, f, indent=2)
+
+                print(f"Deleted OpenClaw session {openclaw_key_to_delete} for session {session_key}")
+
+        except Exception as e:
+            # Log error but don't fail session deletion
+            print(f"Warning: Failed to delete OpenClaw session: {e}")
 
     return {"status": "deleted", "message": "Session deleted"}
 
