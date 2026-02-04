@@ -10,21 +10,25 @@ from httpx import AsyncClient
 
 from fastapi import HTTPException
 from image_handler import save_base64_image, call_chat_completion_with_image, delete_image
+from context_injector import ContextInjector
 
 # Configuration from app.py (will be imported)
 CLAWDBOT_BASE_URL = os.getenv("CLAWDBOT_BASE_URL", "http://localhost:18789")
 CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a")
 
+# Initialize context injector
+context_injector = ContextInjector()
+
 
 async def generate_sse_stream(request, session_id, user_content):
     """
     Generate SSE stream for chat responses.
-    
+
     Args:
         request: ChatRequest with image
         session_id: Session ID for image storage
         user_content: User message content
-        
+
     Yields:
         SSE formatted strings
     """
@@ -53,15 +57,24 @@ async def generate_sse_stream(request, session_id, user_content):
         # CRITICAL: Use "user" field to maintain session continuity in OpenClaw
         # Format: "adapter-session-{session_key}"
         user_field = f"adapter-session-{request.session_key}"
-        
+
         # Debug logging to verify correct format
         print(f"[CHAT] Original session_key: {request.session_key}")
         print(f"[CHAT] Sending to OpenClaw with 'user' field: {user_field}")
-        
+
+        # Inject system context (project path + rules)
+        user_messages = [{"role": "user", "content": user_content}]
+        messages_with_context = context_injector.inject_system_context(
+            request.session_key,
+            user_messages
+        )
+
+        print(f"[CHAT] Injected system context for session {request.session_key}")
+
         request_body = {
             "model": "agent:main",
             "user": user_field,
-            "messages": [{"role": "user", "content": user_content}],
+            "messages": messages_with_context,
             "stream": True
         }
 
@@ -109,18 +122,21 @@ async def generate_sse_stream(request, session_id, user_content):
 async def handle_chat_with_image(request, session_id, user_content):
     """
     Handle chat request with image attachment.
-    
+
     Args:
         request: ChatRequest with image data
         session_id: Session ID for image storage
         user_content: User message content
-        
+
     Returns:
         Assistant response content string
     """
     try:
         public_path, workspace_path, http_url = save_base64_image(request.image, session_id)
 
+        # Inject system context for image chat
+        # Note: call_chat_completion_with_image handles the actual API call
+        # System context injection for images will be handled there if needed
         result = await call_chat_completion_with_image(
             workspace_path,
             request.session_key,
@@ -184,11 +200,11 @@ async def generate_sse_stream_with_db_save(request, session_id, user_content):
 async def handle_chat_text_only(request, user_content):
     """
     Handle text-only chat request (no image).
-    
+
     Args:
         request: ChatRequest
         user_content: User message content
-        
+
     Returns:
         Assistant response content string
     """
@@ -196,15 +212,24 @@ async def handle_chat_text_only(request, user_content):
         # CRITICAL: Use "user" field to maintain session continuity in OpenClaw
         # Format: "adapter-session-{session_key}"
         user_field = f"adapter-session-{request.session_key}"
-        
+
         # Debug logging to verify correct format
         print(f"[CHAT] Original session_key: {request.session_key}")
         print(f"[CHAT] Sending to OpenClaw with 'user' field: {user_field}")
-        
+
+        # Inject system context (project path + rules)
+        user_messages = [{"role": "user", "content": user_content}]
+        messages_with_context = context_injector.inject_system_context(
+            request.session_key,
+            user_messages
+        )
+
+        print(f"[CHAT] Injected system context for session {request.session_key}")
+
         request_body = {
             "model": "agent:main",
             "user": user_field,
-            "messages": [{"role": "user", "content": user_content}]
+            "messages": messages_with_context
         }
 
         headers = {

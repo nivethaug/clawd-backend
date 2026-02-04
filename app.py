@@ -174,9 +174,9 @@ async def create_project(request: CreateProjectRequest):
         conn.commit()
         project_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-    # Step 2: Create project folder with atomicity using ProjectFileManager
+    # Step 2: Create project folder with Git initialization
     project_manager = ProjectFileManager()
-    project_folder_path, folder_success = project_manager.create_project_with_readme(project_id, request.name)
+    project_folder_path, folder_success = project_manager.create_project_with_git(project_id, request.name)
 
     if not folder_success:
         # Rollback: Delete project from database
@@ -187,7 +187,7 @@ async def create_project(request: CreateProjectRequest):
         # Abort: Raise error to client
         raise HTTPException(
             status_code=500,
-            detail="Failed to create project folder and README.md"
+            detail="Failed to create project folder, Git repository, and required files"
         )
 
     # Step 3: Update database with project_path
