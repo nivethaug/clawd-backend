@@ -100,10 +100,14 @@ async def call_chat_completion_with_image(workspace_image_path: str, session_key
     # Get just filename for workspace path reference
     image_filename = os.path.basename(workspace_image_path)
 
+    # CRITICAL: Use "user" field to maintain session continuity in OpenClaw
+    # Format: "adapter-session-{session_key}"
+    user_field = f"adapter-session-{session_key}"
+
     # Send text with workspace path - agent will find and analyze the image
     request_body = {
         "model": "agent:main",
-        "session_key": session_key,
+        "user": user_field,
         "messages": [
             {
                 "role": "user",
@@ -118,7 +122,8 @@ async def call_chat_completion_with_image(workspace_image_path: str, session_key
 
     print(f"[DEBUG] Sending request to completion API:")
     print(f"[DEBUG]   URL: {CHAT_COMPLETION_API_URL}/v1/chat/completions")
-    print(f"[DEBUG]   Session key: {session_key}")
+    print(f"[DEBUG]   Original session_key: {session_key}")
+    print(f"[DEBUG]   Sending to OpenClaw with 'user' field: {user_field}")
     print(f"[DEBUG]   Workspace image path: {workspace_image_path}")
     print(f"[DEBUG]   Image filename: {image_filename}")
 

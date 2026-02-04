@@ -484,3 +484,51 @@ pm2 restart clawd-backend
 ---
 
 **Last Updated:** 2026-02-04
+
+---
+
+## Recent Changes
+
+### Session Handling Fix (2026-02-04)
+
+**Issue:** Session loss when `stream=false` with images
+
+**Problem:**
+- `stream=true` → Session correctly maintained
+- `stream=false` with images → New session created per message
+- OpenClaw gateway wasn't recognizing session due to wrong field
+
+**Root Cause:**
+`image_handler.py` was sending `"session_key"` field instead of `"user"` field to OpenClaw API. OpenClaw uses `"user"` field for session management, not `"session_key"`.
+
+**Fix Applied:**
+File: `image_handler.py`
+```python
+# Before (wrong):
+request_body = {
+    "model": "agent:main",
+    "session_key": session_key,  # ← Incorrect field
+    "messages": [...]
+}
+
+# After (correct):
+user_field = f"adapter-session-{session_key}"
+request_body = {
+    "model": "agent:main",
+    "user": user_field,  # ← Correct field for session continuity
+    "messages": [...]
+}
+```
+
+**Reference:** `SESSION_KEY_IMPLEMENTATION.md` (authoritative specification)
+
+**Testing:**
+- Development environment: Port 8001 (feature branch `fix/session-handling-stream-false`)
+- Frontend: Port 3001 (mapped to backend 8001)
+- Verified: Messages now maintain session across multiple requests
+- Log confirmation: `[CHAT] Sending to OpenClaw with 'user' field: adapter-session-{uuid}`
+
+**Impact:**
+- All chat paths now use consistent session handling
+- Memory/context persists correctly across messages
+- No breaking API changes introduced
