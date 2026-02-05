@@ -191,7 +191,13 @@ class ContextInjector:
             logger.error(f"Security: Project path outside allowed directory: {project_path}")
             return None
 
-        content = f"Project folder path: {project_path}"
+        content = f"""Project folder path: {project_path}
+
+**CRITICAL RULE:** ALL file operations (read, write, edit, exec with files) MUST happen inside the project folder.
+- When creating files: Always use the project folder path
+- When reading files: Check project folder first
+- When using `exec`: Set `workdir` to project folder
+- Never save project files to workspace or other locations"""
         logger.debug(f"Built project context message: {project_path}")
 
         return {
