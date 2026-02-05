@@ -7,6 +7,7 @@ import os
 import base64
 import httpx
 from datetime import datetime
+from context_injector import ContextInjector
 
 # Configuration
 IMAGES_DIR = "/root/clawd/public/images"
@@ -14,6 +15,9 @@ WORKSPACE_IMAGES_DIR = "/root/.openclaw/workspace/clawd-images"
 IMAGES_BASE_URL = "http://195.200.14.37:8002/images"
 CHAT_COMPLETION_API_URL = "http://localhost:18789"
 CHAT_COMPLETION_TOKEN = "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a"
+
+# Initialize context injector
+context_injector = ContextInjector()
 
 def save_base64_image(base64_data: str, session_id: int) -> tuple:
     """
@@ -104,21 +108,17 @@ async def call_chat_completion_with_image(workspace_image_path: str, session_key
     # Format: "adapter-session-{session_key}"
     user_field = f"adapter-session-{session_key}"
 
-    # Send text with workspace path - agent will find and analyze the image
-    request_body = {
-        "model": "agent:main",
-        "user": user_field,
-        "messages": [
-            {
-                "role": "user",
-                "content": f"{prompt}\n\n[Image: {image_filename}]"
-            }
-        ]
-    }
-
-    headers = {
-        "Authorization": f"Bearer {CHAT_COMPLETION_TOKEN}",
-    }
+    # Inject system context (project path + rules)
+    user_messages = [
+        {
+            "role": "user",
+            "content": f"{prompt}\n\n[Image: {image_filename}]"
+        }
+    ]
+    messages_with_context = context_injector.inject_system_context(
+        session_key,
+        user_messages
+    )
 
     print(f"[DEBUG] Sending request to completion API:")
     print(f"[DEBUG]   URL: {CHAT_COMPLETION_API_URL}/v1/chat/completions")
@@ -126,6 +126,17 @@ async def call_chat_completion_with_image(workspace_image_path: str, session_key
     print(f"[DEBUG]   Sending to OpenClaw with 'user' field: {user_field}")
     print(f"[DEBUG]   Workspace image path: {workspace_image_path}")
     print(f"[DEBUG]   Image filename: {image_filename}")
+    print(f"[DEBUG]   Injected system context for session {session_key}")
+
+    request_body = {
+        "model": "agent:main",
+        "user": user_field,
+        "messages": messages_with_context
+    }
+
+    headers = {
+        "Authorization": f"Bearer {CHAT_COMPLETION_TOKEN}",
+    }
 
     try:
         # Use httpx module-level import from app.py
