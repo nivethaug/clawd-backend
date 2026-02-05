@@ -16,7 +16,7 @@ from context_injector import ContextInjector
 CLAWDBOT_BASE_URL = os.getenv("CLAWDBOT_BASE_URL", "http://localhost:18789")
 CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a")
 
-# Initialize context injector
+# Get singleton instance (no more duplicate ContextInjector instances)
 context_injector = ContextInjector()
 
 
@@ -59,8 +59,6 @@ async def generate_sse_stream(request, session_id, user_content):
         user_field = f"adapter-session-{request.session_key}"
 
         # Debug logging to verify correct format
-        print(f"[CHAT] Original session_key: {request.session_key}")
-        print(f"[CHAT] Sending to OpenClaw with 'user' field: {user_field}")
 
         # Inject system context (project path + rules)
         user_messages = [{"role": "user", "content": user_content}]
@@ -69,7 +67,10 @@ async def generate_sse_stream(request, session_id, user_content):
             user_messages
         )
 
-        print(f"[CHAT] Injected system context for session {request.session_key}")
+        # Debug: Log the messages being sent
+        for i, msg in enumerate(messages_with_context):
+            role = msg.get("role", "unknown")
+            content_preview = msg.get("content", "")[:100]
 
         request_body = {
             "model": "agent:main",
@@ -214,8 +215,6 @@ async def handle_chat_text_only(request, user_content):
         user_field = f"adapter-session-{request.session_key}"
 
         # Debug logging to verify correct format
-        print(f"[CHAT] Original session_key: {request.session_key}")
-        print(f"[CHAT] Sending to OpenClaw with 'user' field: {user_field}")
 
         # Inject system context (project path + rules)
         user_messages = [{"role": "user", "content": user_content}]
@@ -223,8 +222,6 @@ async def handle_chat_text_only(request, user_content):
             request.session_key,
             user_messages
         )
-
-        print(f"[CHAT] Injected system context for session {request.session_key}")
 
         request_body = {
             "model": "agent:main",
