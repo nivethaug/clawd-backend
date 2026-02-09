@@ -731,7 +731,7 @@ async def get_session_details(key: str):
     response_data = {
         "session_key": key,  # Database session_key (input)
         "session_id": found_session.get("sessionId"),  # OpenClaw sessionId
-        "agent_id": "main",  # This is from ~/.openclaw/agents/main/sessions/
+        "agent_id": found_session.get("agentId", "main"),  # Derive from session object
         "kind": found_session.get("chatType"),
         "model": found_session.get("model"),
         "context_tokens": found_session.get("contextTokens"),
@@ -739,10 +739,15 @@ async def get_session_details(key: str):
             "input_tokens": found_session.get("inputTokens"),
             "output_tokens": found_session.get("outputTokens"),
             "total_tokens": found_session.get("totalTokens"),
-            "remaining_tokens": (found_session.get("contextTokens", 0) - found_session.get("totalTokens", 0))
-                if found_session.get("contextTokens") and found_session.get("totalTokens") else None,
-            "percent_used": round((found_session.get("totalTokens", 0) / found_session.get("contextTokens", 1)) * 100, 2)
-                if found_session.get("contextTokens") and found_session.get("totalTokens") else None
+            "remaining_tokens": max(
+                (found_session.get("contextTokens") or 0) - (found_session.get("totalTokens") or 0),
+                0
+            ),
+            "percent_used": (
+                round(found_session["totalTokens"] / found_session["contextTokens"] * 100, 2)
+                if found_session.get("contextTokens")
+                else None
+            )
         } if found_session.get("inputTokens") is not None or found_session.get("outputTokens") is not None else None,
         "timestamps": {
             "updated_at": found_session.get("updatedAt"),
