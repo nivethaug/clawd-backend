@@ -648,7 +648,8 @@ async def test_endpoint(data: dict):
 
 class SessionDetailResponse(BaseModel):
     """Full session object from OpenClaw status endpoint"""
-    session_id: str
+    session_key: str  # Database session_key (input)
+    session_id: str  # OpenClaw sessionId
     agent_id: str
     kind: Optional[str] = None
     model: Optional[str] = None
@@ -659,29 +660,33 @@ class SessionDetailResponse(BaseModel):
     # Include any other fields from the session object
 
 
-@app.get("/sessions/{session_id}/details", response_model=SessionDetailResponse)
-async def get_session_details(session_id: str):
+@app.get("/sessions/details", response_model=SessionDetailResponse)
+async def get_session_details(key: str):
     """
-    Get full session details from OpenClaw status endpoint by session_id.
+    Get full session details from OpenClaw by database session_key.
 
     This endpoint:
-    1. Calls the OpenClaw status endpoint
-    2. Filters the response for the matching session_id
-    3. Returns the full session object as-is
+    1. Accepts a database session_key (UUID)
+    2. Constructs the OpenClaw session key: agent:main:openai-user:adapter-session-{session_key}
+    3. Looks up the session in OpenClaw's sessions.json
+    4. Returns the full session object with all fields
 
     Args:
-        session_id: The session ID to look up
+        key: The database session_key (UUID) to look up
 
     Returns:
-        Full session object with all fields from OpenClaw
+        Full session object with all fields from OpenClaw including:
+        - session_id (OpenClaw sessionId)
+        - model, token usage, timestamps, flags, etc.
 
     Raises:
-        404: If session_id is not found
-        500: If unable to read OpenClaw status
+        400: If key is empty or invalid
+        404: If session_key not found in OpenClaw
+        500: If unable to read OpenClaw sessions file
     """
-    # Validate session_id is not empty
-    if not session_id or session_id.strip() == "":
-        raise HTTPException(status_code=400, detail="session_id cannot be empty")
+    # Validate session_key is not empty
+    if not key or key.strip() == "":
+        raise HTTPException(status_code=400, detail="session_key (key parameter) cannot be empty")
 
     # OpenClaw sessions file path
     sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
@@ -707,24 +712,25 @@ async def get_session_details(session_id: str):
             detail=f"Failed to read OpenClaw sessions file: {str(e)}"
         )
 
-    # Search for the matching session_id across all sessions
-    found_session = None
-    for session_key, session_info in sessions_data.items():
-        if session_info.get("sessionId") == session_id:
-            found_session = session_info
-            break
+    # Construct the OpenClaw session key from the database session_key
+    # Format: agent:main:openai-user:adapter-session-{session_key}
+    openclaw_session_key = f"agent:main:openai-user:adapter-session-{key}"
+
+    # Search for the matching OpenClaw session
+    found_session = sessions_data.get(openclaw_session_key)
 
     # If not found, return 404
     if not found_session:
         raise HTTPException(
             status_code=404,
-            detail=f"Session with ID '{session_id}' not found"
+            detail=f"Session with key '{key}' not found in OpenClaw"
         )
 
     # Build the response object from the session data
     # Extract common fields; the full session object is returned
     response_data = {
-        "session_id": found_session.get("sessionId"),
+        "session_key": key,  # Database session_key (input)
+        "session_id": found_session.get("sessionId"),  # OpenClaw sessionId
         "agent_id": "main",  # This is from ~/.openclaw/agents/main/sessions/
         "kind": found_session.get("chatType"),
         "model": found_session.get("model"),
