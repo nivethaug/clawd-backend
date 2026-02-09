@@ -642,6 +642,127 @@ async def health_check():
 async def test_endpoint(data: dict):
     return {"received": data}
 
+# ============================================================================
+# Session Details API - Calls OpenClaw Status Endpoint
+# ============================================================================
+
+class SessionDetailResponse(BaseModel):
+    """Full session object from OpenClaw status endpoint"""
+    session_id: str
+    agent_id: str
+    kind: Optional[str] = None
+    model: Optional[str] = None
+    context_tokens: Optional[int] = None
+    token_usage: Optional[dict] = None
+    timestamps: Optional[dict] = None
+    flags: Optional[list] = None
+    # Include any other fields from the session object
+
+
+@app.get("/sessions/{session_id}/details", response_model=SessionDetailResponse)
+async def get_session_details(session_id: str):
+    """
+    Get full session details from OpenClaw status endpoint by session_id.
+
+    This endpoint:
+    1. Calls the OpenClaw status endpoint
+    2. Filters the response for the matching session_id
+    3. Returns the full session object as-is
+
+    Args:
+        session_id: The session ID to look up
+
+    Returns:
+        Full session object with all fields from OpenClaw
+
+    Raises:
+        404: If session_id is not found
+        500: If unable to read OpenClaw status
+    """
+    # Validate session_id is not empty
+    if not session_id or session_id.strip() == "":
+        raise HTTPException(status_code=400, detail="session_id cannot be empty")
+
+    # OpenClaw sessions file path
+    sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
+
+    # Read the sessions.json file
+    if not os.path.exists(sessions_json_path):
+        raise HTTPException(
+            status_code=500,
+            detail="OpenClaw sessions file not found - OpenClaw gateway may not be running"
+        )
+
+    try:
+        with open(sessions_json_path, 'r') as f:
+            sessions_data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to parse OpenClaw sessions file: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read OpenClaw sessions file: {str(e)}"
+        )
+
+    # Search for the matching session_id across all sessions
+    found_session = None
+    for session_key, session_info in sessions_data.items():
+        if session_info.get("sessionId") == session_id:
+            found_session = session_info
+            break
+
+    # If not found, return 404
+    if not found_session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session with ID '{session_id}' not found"
+        )
+
+    # Build the response object from the session data
+    # Extract common fields; the full session object is returned
+    response_data = {
+        "session_id": found_session.get("sessionId"),
+        "agent_id": "main",  # This is from ~/.openclaw/agents/main/sessions/
+        "kind": found_session.get("chatType"),
+        "model": found_session.get("model"),
+        "context_tokens": found_session.get("contextTokens"),
+        "token_usage": {
+            "input_tokens": found_session.get("inputTokens"),
+            "output_tokens": found_session.get("outputTokens"),
+            "total_tokens": found_session.get("totalTokens"),
+            "remaining_tokens": (found_session.get("contextTokens", 0) - found_session.get("totalTokens", 0))
+                if found_session.get("contextTokens") and found_session.get("totalTokens") else None,
+            "percent_used": round((found_session.get("totalTokens", 0) / found_session.get("contextTokens", 1)) * 100, 2)
+                if found_session.get("contextTokens") and found_session.get("totalTokens") else None
+        } if found_session.get("inputTokens") is not None or found_session.get("outputTokens") is not None else None,
+        "timestamps": {
+            "updated_at": found_session.get("updatedAt"),
+            "age": int((datetime.now().timestamp() * 1000) - found_session.get("updatedAt", 0))
+                if found_session.get("updatedAt") else None
+        } if found_session.get("updatedAt") else None,
+        "flags": []
+    }
+
+    # Add system flag if applicable
+    if found_session.get("systemSent"):
+        response_data["flags"].append("system")
+
+    # Include any other fields from the session object
+    # Add fields like modelProvider, origin, deliveryContext, etc.
+    if found_session.get("modelProvider"):
+        response_data["model_provider"] = found_session.get("modelProvider")
+
+    if found_session.get("origin"):
+        response_data["origin"] = found_session.get("origin")
+
+    # Note: We intentionally do NOT expose systemPromptReport or skillsSnapshot
+    # as they contain internal prompts and may be large
+
+    return response_data
+
 if __name__ == "__main__":
     import uvicorn
     print(f"Starting Clawdbot Adapter API...")
