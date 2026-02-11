@@ -74,7 +74,13 @@ class ProjectResponse(BaseModel):
     name: str
     description: Optional[str] = None
     project_path: Optional[str] = None
+    type_id: Optional[int] = None
     created_at: str
+
+class ProjectTypeResponse(BaseModel):
+    id: int
+    type: str
+    display_name: str
 
 class SessionResponse(BaseModel):
     id: int
@@ -92,6 +98,7 @@ class CreateProjectRequest(BaseModel):
     name: str
     description: Optional[str] = None
     user_id: Optional[int] = None
+    type_id: Optional[int] = None
 
 class CreateSessionRequest(BaseModel):
     label: str
@@ -165,11 +172,38 @@ async def create_project(request: CreateProjectRequest):
     # Default to user_id=1 if not provided
     user_id = request.user_id if request.user_id is not None else 1
 
+    # Handle type_id: default to Website (id=1) if not provided or invalid
+    type_id = None
+    if request.type_id is not None:
+        # Validate that the type_id exists
+        with get_db() as conn:
+            type_exists = conn.execute(
+                "SELECT id FROM project_types WHERE id = ?",
+                (request.type_id,)
+            ).fetchone()
+            if type_exists:
+                type_id = request.type_id
+            else:
+                # Reject if type_id is provided but invalid
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid type_id: {request.type_id}. Project type does not exist."
+                )
+
+    # If type_id is None (not provided), default to Website
+    if type_id is None:
+        with get_db() as conn:
+            website_type = conn.execute(
+                "SELECT id FROM project_types WHERE type = 'website'"
+            ).fetchone()
+            if website_type:
+                type_id = website_type['id']
+
     # Step 1: Get project_id first to use in folder naming
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO projects (user_id, name, description, project_path) VALUES (?, ?, ?, '')",
-            (user_id, request.name, request.description)
+            "INSERT INTO projects (user_id, name, description, project_path, type_id) VALUES (?, ?, ?, '', ?)",
+            (user_id, request.name, request.description, type_id)
         )
         conn.commit()
         project_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -204,8 +238,17 @@ async def create_project(request: CreateProjectRequest):
         name=request.name,
         description=request.description,
         project_path=project_folder_path,
+        type_id=type_id,
         created_at=datetime.now().isoformat()
     )
+
+@app.get("/project-types", response_model=list[ProjectTypeResponse])
+async def get_project_types():
+    """Get all available project types."""
+    with get_db() as conn:
+        types = conn.execute("SELECT id, type, display_name FROM project_types ORDER BY id").fetchall()
+    
+    return [ProjectTypeResponse(**dict(t)) for t in types]
 
 @app.delete("/projects/{project_id}")
 async def delete_project(project_id: int):
