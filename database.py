@@ -48,6 +48,32 @@ def init_schema():
         except:
             pass
 
+        # Project types table
+        conn.execute("""CREATE TABLE IF NOT EXISTS project_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT UNIQUE NOT NULL,
+            display_name TEXT NOT NULL,
+            template_md_path TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+
+        # Seed default project types
+        default_types = [
+            ('website', 'Website', 'templates/website.md'),
+            ('telegrambot', 'Telegram Bot', 'templates/telegram_bot.md'),
+            ('discordbot', 'Discord Bot', 'templates/discord_bot.md'),
+            ('tradingbot', 'Trading Bot', 'templates/trading_bot.md'),
+            ('scheduler', 'Scheduler', 'templates/scheduler.md'),
+            ('custom', 'Custom', 'templates/custom.md'),
+        ]
+        
+        for type_slug, display_name, template_path in default_types:
+            conn.execute(
+                "INSERT OR IGNORE INTO project_types (type, display_name, template_md_path) VALUES (?, ?, ?)",
+                (type_slug, display_name, template_path)
+            )
+
         # Projects table
         conn.execute("""CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +81,9 @@ def init_schema():
             name TEXT NOT NULL,
             description TEXT,
             project_path TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            type_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (type_id) REFERENCES project_types(id) ON DELETE RESTRICT ON UPDATE CASCADE
         )""")
 
         # Projects table migrations
@@ -67,6 +95,13 @@ def init_schema():
 
         try:
             conn.execute("ALTER TABLE projects ADD COLUMN project_path TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except:
+            pass
+
+        # Projects table migration: type_id
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN type_id INTEGER")
             conn.commit()
         except:
             pass
