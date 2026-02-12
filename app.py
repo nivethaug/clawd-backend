@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import AsyncClient
 
@@ -98,7 +98,7 @@ class CreateProjectRequest(BaseModel):
     name: str
     description: Optional[str] = None
     user_id: Optional[int] = None
-    type_id: Optional[int] = None
+    type_id: Optional[int] = Field(None, alias="typeId")
 
 class CreateSessionRequest(BaseModel):
     label: str
