@@ -2,13 +2,14 @@
 Groq LLM Service
 
 Handles all Groq API interactions for multi-turn chat completion.
-Stateless, secure, with proper error handling.
+Uses official Groq Python SDK.
 """
 
 import os
 import logging
 from typing import Optional, List
-from httpx import AsyncClient, TimeoutException, HTTPStatusError
+
+from groq import Groq
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +17,7 @@ logger = logging.getLogger(__name__)
 class GroqService:
     """Service for interacting with Groq API."""
 
-    GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-    DEFAULT_MODEL = "llama3-70b-8192"
+    DEFAULT_MODEL = "llama-3.3-70b-versatile"
     DEFAULT_TEMPERATURE = 0.4
     DEFAULT_MAX_TOKENS = 2000
     TIMEOUT_SECONDS = 30
@@ -32,6 +32,9 @@ class GroqService:
             logger.error("GROQ_API_KEY not configured or not set")
             raise ValueError("GROQ_API_KEY is not configured")
 
+        # Initialize Groq client
+        self.client = Groq(api_key=self.api_key)
+
     async def generate_chat_completion(
         self,
         messages: List[dict],
@@ -39,7 +42,7 @@ class GroqService:
         max_tokens: Optional[int] = None,
     ) -> str:
         """
-        Generate a chat completion using Groq API.
+        Generate a chat completion using Groq API via SDK.
 
         Args:
             messages: Array of message dicts with 'role' and 'content'
@@ -56,42 +59,37 @@ class GroqService:
         if not self.api_key or self.api_key == "your_key_here":
             raise ValueError("GROQ_API_KEY is not configured")
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature or self.DEFAULT_TEMPERATURE,
-            "max_tokens": max_tokens or self.DEFAULT_MAX_TOKENS,
-        }
-
         try:
-            async with AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
-                response = await client.post(
-                    self.GROQ_API_URL,
-                    headers=headers,
-                    json=payload,
-                )
-                response.raise_for_status()
+            # Use Groq SDK to create completion
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature or self.DEFAULT_TEMPERATURE,
+                max_tokens=max_tokens or self.DEFAULT_MAX_TOKENS,
+            )
 
-                data = response.json()
-                return data["choices"][0]["message"]["content"]
-
-        except TimeoutException:
-            logger.error("Groq API timeout")
-            raise RuntimeError("Groq API request timed out")
-
-        except HTTPStatusError as e:
-            logger.error(f"Groq API HTTP error: {e.response.status_code}")
-            raise RuntimeError(f"Groq API error: {e.response.status_code}")
+            # Return the assistant's message content
+            return completion.choices[0].message.content
 
         except Exception as e:
-            logger.error(f"Groq API unexpected error: {type(e).__name__}")
-            # Never log the API key
-            raise RuntimeError(f"Groq API request failed: {type(e).__name__}")
+            # Handle Groq API errors
+            error_str = str(e).lower()
+
+            if "invalid api key" in error_str or "unauthorized" in error_str:
+                logger.error(f"Groq API invalid key: {type(e).__name__}")
+                raise RuntimeError("Invalid Groq API key")
+
+            elif "timeout" in error_str or "timed out" in error_str:
+                logger.error(f"Groq API timeout: {e}")
+                raise RuntimeError("Groq API request timed out")
+
+            elif "rate limit" in error_str or "quota" in error_str:
+                logger.error(f"Groq API rate limit: {e}")
+                raise RuntimeError("Groq API rate limit exceeded")
+
+            else:
+                logger.error(f"Groq API unexpected error: {type(e).__name__}: {e}")
+                raise RuntimeError(f"Groq API request failed: {type(e).__name__}")
 
     def is_configured(self) -> bool:
         """
