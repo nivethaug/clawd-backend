@@ -3,6 +3,7 @@ import uuid
 import json
 import shutil
 import re
+import logging
 from datetime import datetime
 from typing import AsyncGenerator, Any, Optional
 from contextlib import contextmanager
@@ -19,6 +20,14 @@ from database import get_db, init_schema
 from project_manager import ProjectFileManager
 from chat_handlers import generate_sse_stream, generate_sse_stream_with_db_save, handle_chat_with_image, handle_chat_text_only
 from file_utils import FileUtils
+from completion_service import CompletionService
+
+# ============================================================================
+# Logging
+# ============================================================================
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Configuration
@@ -139,6 +148,30 @@ class SaveFileResponse(BaseModel):
     success: bool
     message: Optional[str] = None
     size: Optional[int] = None
+
+# ============================================================================
+# AI Chat Completion Models
+# ============================================================================
+
+class ChatMessage(BaseModel):
+    role: str = Field(..., description="Message role (user or assistant)")
+    content: str = Field(..., description="Message content")
+
+class CompletionRequest(BaseModel):
+    projectType: str = Field(..., description="Type of project (website, telegrambot, discordbot, tradingbot, scheduler, custom)")
+    mode: str = Field(..., description="Operation mode (create or modify)")
+    messages: list[ChatMessage] = Field(..., description="Array of chat messages (conversation history)")
+
+class CompletionResponse(BaseModel):
+    success: bool
+    message: Optional[dict] = None
+    error: Optional[str] = None
+
+# ============================================================================
+# Initialize Completion Service
+# ============================================================================
+
+completion_service = CompletionService()
 
 # ============================================================================
 # API Routes
@@ -816,6 +849,76 @@ async def get_session_details(key: str):
     # as they contain internal prompts and may be large
 
     return response_data
+
+# ============================================================================
+# AI Chat Completion Endpoint
+# ============================================================================
+
+@app.post("/ai/completion", response_model=CompletionResponse)
+async def completion(request: CompletionRequest):
+    """
+    AI Multi-turn Chat Completion - Stateful conversation support.
+
+    This endpoint acts as a chatbot, accepting the full conversation history
+    and returning the next AI response. It maintains conversation context
+    across multiple turns.
+
+    It does NOT generate code or execute anything - it only prepares
+    structured prompts for project creation or modification.
+
+    Request:
+        projectType: Type of project (website, telegrambot, discordbot,
+                    tradingbot, scheduler, custom)
+        mode: Operation mode (create or modify)
+        messages: Array of chat messages (full conversation history)
+                Must contain at least one user message
+                Only allows 'user' and 'assistant' roles (no 'system')
+
+    Response:
+        success: Whether the operation succeeded
+        message: Chat message with role "assistant" and AI response
+        error: Error message (if failed)
+
+    This endpoint is stateless - no database storage of history.
+    The client must maintain and send full conversation history.
+
+    Security:
+        - Rejects 'system' role from client
+        - Sanitizes message roles
+        - Limits message array length (max 50)
+    """
+    try:
+        # Convert Pydantic messages to dict for the service
+        messages_dict = [msg.dict() for msg in request.messages]
+
+        result = await completion_service.complete(
+            project_type=request.projectType,
+            mode=request.mode,
+            messages=messages_dict,
+        )
+
+        # If validation failed, return 400
+        if not result["success"] and "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        return CompletionResponse(**result)
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+
+    except RuntimeError as e:
+        # Service unavailable (e.g., Groq not configured)
+        if "not available" in str(e).lower() or "not configured" in str(e).lower():
+            return CompletionResponse(
+                success=False,
+                error="Completion service not available - GROQ_API_KEY not configured"
+            )
+        raise HTTPException(status_code=502, detail=str(e))
+
+    except Exception as e:
+        # Unexpected errors
+        logger.error(f"Completion unexpected error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 if __name__ == "__main__":
     import uvicorn
