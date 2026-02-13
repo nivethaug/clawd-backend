@@ -407,6 +407,73 @@ async def delete_project(project_id: int):
     
     return {"status": "deleted", "message": "Project deleted"}
 
+class UpdateProjectRequest(BaseModel):
+    """Request model for updating project name and description only."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    type_id: Optional[int] = Field(None, alias="typeId")
+    domain: Optional[str] = None
+
+@app.put("/projects/{project_id}", response_model=ProjectResponse, status_code=200)
+async def update_project(project_id: int, request: UpdateProjectRequest):
+    """Update project name and description only. type_id and domain cannot be modified."""
+
+    # Validate that project exists
+    with get_db() as conn:
+        project = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Project with id {project_id} not found"
+            )
+
+    # Reject if trying to modify type_id or domain
+    if request.type_id is not None or request.domain is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Project type and domain cannot be modified once created"
+        )
+
+    # Build UPDATE statement dynamically based on provided fields
+    update_fields = []
+    update_values = []
+
+    if request.name is not None:
+        if not request.name.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Project name cannot be empty"
+            )
+        update_fields.append("name = ?")
+        update_values.append(request.name.strip())
+
+    if request.description is not None:
+        update_fields.append("description = ?")
+        update_values.append(request.description)
+
+    # If no valid fields to update, return current project
+    if not update_fields:
+        return ProjectResponse(**dict(project))
+
+    # Update project
+    with get_db() as conn:
+        update_values.append(project_id)  # Add project_id as last parameter
+        set_clause = ", ".join(update_fields)
+        conn.execute(
+            f"UPDATE projects SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            update_values
+        )
+        conn.commit()
+
+    # Fetch and return updated project
+    with get_db() as conn:
+        updated_project = conn.execute(
+            "SELECT * FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+
+    return ProjectResponse(**dict(updated_project))
+
 @app.get("/projects/{project_id}/sessions", response_model=list[SessionResponse])
 async def get_sessions(project_id: int):
     with get_db() as conn:
