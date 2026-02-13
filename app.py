@@ -81,6 +81,7 @@ class ProjectResponse(BaseModel):
     id: int
     user_id: int
     name: str
+    domain: str
     description: Optional[str] = None
     project_path: Optional[str] = None
     type_id: Optional[int] = None
@@ -105,6 +106,7 @@ class SessionResponse(BaseModel):
 
 class CreateProjectRequest(BaseModel):
     name: str
+    domain: str = Field(..., min_length=3, max_length=50)
     description: Optional[str] = None
     user_id: Optional[int] = None
     type_id: Optional[int] = Field(None, alias="typeId")
@@ -168,6 +170,39 @@ class CompletionResponse(BaseModel):
     error: Optional[str] = None
 
 # ============================================================================
+# Subdomain Validation
+# ============================================================================
+
+def validate_subdomain(domain: str) -> bool:
+    """
+    Validate subdomain format.
+
+    Rules:
+    - Lowercase only
+    - Only a-z, 0-9, hyphens
+    - No dots, underscores, spaces, or special characters
+    - Must start with a letter
+    - Length: 3-50 characters
+
+    Args:
+        domain: Subdomain string to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    # Check length
+    if len(domain) < 3 or len(domain) > 50:
+        return False
+
+    # Check if lowercase
+    if domain != domain.lower():
+        return False
+
+    # Check format: lowercase letters, numbers, hyphens only, must start with letter
+    pattern = r'^[a-z][a-z0-9-]*$'
+    return bool(re.match(pattern, domain))
+
+# ============================================================================
 # Initialize Completion Service
 # ============================================================================
 
@@ -202,8 +237,27 @@ async def get_projects():
 
 @app.post("/projects", response_model=ProjectResponse, status_code=201)
 async def create_project(request: CreateProjectRequest):
+    # Validate subdomain format
+    if not validate_subdomain(request.domain):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter."
+        )
+
     # Default to user_id=1 if not provided
     user_id = request.user_id if request.user_id is not None else 1
+
+    # Check for duplicate domain
+    with get_db() as conn:
+        existing_domain = conn.execute(
+            "SELECT id FROM projects WHERE domain = ?",
+            (request.domain,)
+        ).fetchone()
+        if existing_domain:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Domain '{request.domain}' is already in use. Please choose a different subdomain."
+            )
 
     # Handle type_id: default to Website (id=1) if not provided or invalid
     type_id = None
@@ -235,8 +289,8 @@ async def create_project(request: CreateProjectRequest):
     # Step 1: Get project_id first to use in folder naming
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO projects (user_id, name, description, project_path, type_id) VALUES (?, ?, ?, '', ?)",
-            (user_id, request.name, request.description, type_id)
+            "INSERT INTO projects (user_id, name, domain, description, project_path, type_id) VALUES (?, ?, ?, ?, '', ?)",
+            (user_id, request.name, request.domain, request.description, type_id)
         )
         conn.commit()
         project_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]

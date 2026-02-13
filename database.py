@@ -106,6 +106,15 @@ def init_schema():
         except:
             pass
 
+        # Projects table migration: domain
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN domain VARCHAR(255) NOT NULL DEFAULT ''")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain)")
+            conn.commit()
+            print("✓ Added domain column and unique index")
+        except:
+            pass
+
         # Sessions table
         conn.execute("""CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
