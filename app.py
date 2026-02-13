@@ -323,6 +323,7 @@ async def create_project(request: CreateProjectRequest):
         id=project_id,
         user_id=user_id,
         name=request.name,
+        domain=request.domain,
         description=request.description,
         project_path=project_folder_path,
         type_id=type_id,
