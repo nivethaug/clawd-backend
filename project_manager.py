@@ -8,8 +8,20 @@ import shutil
 import re
 import subprocess
 from datetime import datetime
+from typing import Optional
+from database import get_db
 
-BASE_PROJECTS_DIR = "/var/lib/openclaw/projects"
+BASE_PROJECTS_DIR = "/root/dreampilot/projects"
+
+# Type to folder name mapping
+TYPE_FOLDER_MAP = {
+    'website': 'website',
+    'telegrambot': 'telegram',
+    'discordbot': 'discord',
+    'tradingbot': 'trading',
+    'scheduler': 'scheduler',
+    'custom': 'custom',
+}
 
 
 class ProjectFileManager:
@@ -36,23 +48,91 @@ class ProjectFileManager:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{project_id}_{sanitized}_{timestamp}"
 
-    def create_project_folder(self, project_id: int, name: str) -> str:
+    def get_project_type(self, type_id: Optional[int]) -> str:
         """
-        Create project folder on filesystem.
+        Get project type from type_id.
+        
+        Args:
+            type_id: Project type ID from database
+            
+        Returns:
+            Type string (e.g., 'website', 'telegrambot'), or 'website' as fallback
+        """
+        if type_id is None:
+            return 'website'
+
+        try:
+            with get_db() as conn:
+                type_row = conn.execute(
+                    "SELECT type FROM project_types WHERE id = ?",
+                    (type_id,)
+                ).fetchone()
+                if type_row:
+                    return type_row['type']
+        except Exception as e:
+            print(f"Failed to fetch project type: {e}")
+
+        # Fallback to website if type_id is invalid
+        return 'website'
+
+    def map_type_to_folder(self, project_type: str) -> str:
+        """
+        Map project type to folder name.
+        
+        Args:
+            project_type: Type string (e.g., 'website', 'telegrambot')
+            
+        Returns:
+            Folder name (e.g., 'website', 'telegram')
+        """
+        return TYPE_FOLDER_MAP.get(project_type, 'website')
+
+    def build_type_based_path(self, project_id: int, name: str, type_id: Optional[int]) -> str:
+        """
+        Build full project path with type-based subfolder.
         
         Args:
             project_id: Project ID from database
             name: Project name
+            type_id: Project type ID from database
             
         Returns:
+            Absolute path to project folder
+        """
+        # Get project type and map to folder name
+        project_type = self.get_project_type(type_id)
+        type_folder = self.map_type_to_folder(project_type)
+
+        # Generate folder name
+        folder_name = self.generate_folder_name(project_id, name)
+
+        # Build full path: /root/dreampilot/projects/{type}/{folder_name}
+        folder_path = os.path.join(self.base_dir, type_folder, folder_name)
+
+        return folder_path
+
+    def create_project_folder(self, project_id: int, name: str, type_id: Optional[int] = None) -> str:
+        """
+        Create project folder on filesystem with type-based subfolder.
+
+        Args:
+            project_id: Project ID from database
+            name: Project name
+            type_id: Project type ID from database (optional, defaults to website)
+
+        Returns:
             Absolute path to created folder
-            
+
         Raises:
             OSError: If folder creation fails
         """
-        folder_name = self.generate_folder_name(project_id, name)
-        folder_path = os.path.join(self.base_dir, folder_name)
-        
+        folder_path = self.build_type_based_path(project_id, name, type_id)
+
+        # Ensure type-based parent directory exists
+        type_based_dir = os.path.dirname(folder_path)
+        os.makedirs(type_based_dir, exist_ok=True)
+
+        # Create project folder (fail if already exists)
         os.makedirs(folder_path, exist_ok=False)
         return folder_path
 
@@ -226,13 +306,14 @@ The absolute path to this project folder is available as system context.
             print(f"Failed to initialize Git repository: {e}")
             return False
 
-    def create_project_with_git(self, project_id: int, name: str) -> tuple[str, bool]:
+    def create_project_with_git(self, project_id: int, name: str, type_id: Optional[int] = None) -> tuple[str, bool]:
         """
         Create project folder with README.md, .gitignore, changerule.md, and Git initialization.
 
         Args:
             project_id: Project ID from database
             name: Project name
+            type_id: Project type ID from database (optional, defaults to website)
 
         Returns:
             Tuple of (project_path, success)
@@ -243,7 +324,7 @@ The absolute path to this project folder is available as system context.
 
         try:
             # Create folder
-            project_path = self.create_project_folder(project_id, name)
+            project_path = self.create_project_folder(project_id, name, type_id)
 
             # Create README
             if not self.create_readme(project_path):
@@ -288,35 +369,36 @@ The absolute path to this project folder is available as system context.
             print(f"Failed to delete project folder: {e}")
             return False
 
-    def create_project_with_readme(self, project_id: int, name: str) -> tuple[str, bool]:
+    def create_project_with_readme(self, project_id: int, name: str, type_id: Optional[int] = None) -> tuple[str, bool]:
         """
         Create project folder and README.md atomically.
-        
+
         Args:
             project_id: Project ID from database
             name: Project name
-            
+            type_id: Project type ID from database (optional, defaults to website)
+
         Returns:
             Tuple of (project_path, success)
             - project_path: Absolute path to created folder (empty if failed)
             - success: True if both folder and README created
         """
         project_path = ""
-        
+
         try:
             # Create folder
-            project_path = self.create_project_folder(project_id, name)
-            
+            project_path = self.create_project_folder(project_id, name, type_id)
+
             # Create README
             readme_success = self.create_readme(project_path)
-            
+
             if not readme_success:
                 # Rollback folder creation
                 self.delete_project_folder(project_path)
                 return ("", False)
-            
+
             return (project_path, True)
-            
+
         except Exception as e:
             # Cleanup on any error
             if project_path and os.path.exists(project_path):

@@ -52,9 +52,6 @@ os.makedirs(IMAGES_DIR, exist_ok=True)
 
 IMAGES_BASE_URL = "http://195.200.14.37:8002/images"
 
-BASE_PROJECTS_DIR = "/var/lib/openclaw/projects"
-os.makedirs(BASE_PROJECTS_DIR, exist_ok=True)
-
 # ============================================================================
 # Initialize Schema
 # ============================================================================
@@ -297,7 +294,7 @@ async def create_project(request: CreateProjectRequest):
 
     # Step 2: Create project folder with Git initialization
     project_manager = ProjectFileManager()
-    project_folder_path, folder_success = project_manager.create_project_with_git(project_id, request.name)
+    project_folder_path, folder_success = project_manager.create_project_with_git(project_id, request.name, type_id)
 
     if not folder_success:
         # Rollback: Delete project from database

@@ -14,7 +14,7 @@ from database import get_db
 logger = logging.getLogger(__name__)
 
 # Configuration
-PROJECT_BASE_PATH = "/var/lib/openclaw/projects"
+PROJECT_BASE_PATH = "/root/dreampilot/projects"
 RULE_FILE_MAX_SIZE = 1024 * 50  # 50KB
 RULE_FILE_MAX_READ_SIZE = 1024 * 100  # 100KB
 
