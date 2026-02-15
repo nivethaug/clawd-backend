@@ -50,17 +50,18 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             logger.info(f"Project path: {project_path}")
             logger.info(f"Session name for tracking: {session_name}")
 
-            # Run Claude Code step-by-step wrapper script
-            # The wrapper breaks initialization into 5 focused tasks
-            # Each task is a separate Claude Code call with clear tracking
-            # If template_id is provided, Task 1 (select template) is skipped
-            logger.info(f"Executing: python3 claude_wrapper_final.py {project_id} {project_path} '{project_name}' (template_id: {template_id})")
+            # Run fast wrapper script (no Claude Code CLI needed!)
+            # The wrapper does everything fast and reliable:
+            # - Task 1: Skipped (Groq API used before)
+            # - Task 2: Fast git clone via subprocess
+            # - Tasks 3-5: Simple file creation via Python
+            logger.info(f"Executing: python3 fast_wrapper.py {project_id} {project_path} '{project_name}' (template_id: {template_id})")
 
             # Build command args
-            cmd_args = ["python3", "/root/clawd-backend/claude_wrapper_final.py",
+            cmd_args = ["python3", "/root/clawd-backend/fast_wrapper.py",
                        str(project_id), project_path, project_name, description or ""]
 
-            # Add template_id if provided (tells wrapper to skip Task 1)
+            # Add template_id if provided
             if template_id:
                 cmd_args.append(template_id)
 
