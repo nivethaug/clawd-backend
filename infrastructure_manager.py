@@ -41,13 +41,13 @@ FRONTEND_PORT_MAX = 4000
 BACKEND_PORT_MIN = 8010
 BACKEND_PORT_MAX = 9000
 
-# Domain settings
+# DNS settings
 BASE_DOMAIN = "dreambigwithai.com"
 NGINX_CONFIG_DIR = "/etc/nginx/sites-available"
 NGINX_ENABLED_DIR = "/etc/nginx/sites-enabled"
 
 # DNS settings
-HOSTINGER_DNS_SKILL = "/root/clawdbot/skills/hostinger-dns"
+HOSTINGER_DNS_SKILL = "/root/clawdbot/skills/hostinger-dns/hostinger_dns.py"
 SERVER_IP = "195.200.14.37"  # Default server IP for DNS A records
 
 # Shared runtime venv
@@ -603,7 +603,7 @@ class DNSProvisioner:
                 f"source {self.skill_path}/.env && "
                 f"{self.skill_path}/venv/bin/python {self.skill_path}/hostinger_dns.py "
                 f"check_subdomain_existence "
-                f"'{{\\\"domain\\\": \\\"{domain}\\\", \\\"subdomain\\\": \\\"{subdomain}\\\"}}'"
+                f"'{{\"domain\": \"{domain}\", \"subdomain\": \"{subdomain}\"}}'"
             ]
 
             result = subprocess.run(
@@ -652,7 +652,7 @@ class DNSProvisioner:
                 f"source {self.skill_path}/.env && "
                 f"{self.skill_path}/venv/bin/python {self.skill_path}/hostinger_dns.py "
                 f"create_a_record "
-                f"'{{\\\"domain\\\": \\\"{domain}\\\", \\\"subdomain\\\": \\\"{subdomain}\\\", \\\"ip\\\": \\\"{ip}\\\", \\\"ttl\\\": {ttl}}}'"
+                f"'{{\"domain\": \"{domain}\", \"subdomain\": \"{subdomain}\", \"ip\": \"{ip}\", \"ttl\": {ttl}}}'"
             ]
 
             result = subprocess.run(
