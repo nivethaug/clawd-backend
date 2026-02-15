@@ -285,14 +285,15 @@ class ServiceManager:
             logger.error(f"Failed to create backend service config: {e}")
             raise
 
-    def start_backend_service(self, app_name: str) -> bool:
+    def start_backend_service(self, app_name: str, backend_path: Path) -> bool:
         """Start backend service."""
         try:
             logger.info(f"Starting service: {app_name}")
 
-            # Start with PM2
+            # Start with PM2 using ecosystem config
+            ecosystem_path = backend_path / "ecosystem.config.json"
             result = subprocess.run(
-                ["pm2", "start", "--name", app_name, "--cwd", "/root/clawd-backend"],
+                ["pm2", "start", str(ecosystem_path)],
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -527,9 +528,9 @@ class DeploymentVerifier:
             import json
 
             url = f"http://127.0.0.1:{port}{path}"
-            req = urllib.request.Request(url, timeout=timeout)
+            req = urllib.request.Request(url)
 
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 data = response.read().decode('utf-8')
                 result = json.loads(data)
 
@@ -823,7 +824,7 @@ class InfrastructureManager:
 
             # Phase 7: Start service
             logger.info("Phase 7/7: Service startup")
-            self.service_manager.start_backend_service(self.service_name)
+            self.service_manager.start_backend_service(self.service_name, self.project_path / "backend")
             logger.info(f"✓ Service started: {self.service_name}")
 
             # Verification
