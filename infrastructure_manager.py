@@ -46,6 +46,10 @@ BASE_DOMAIN = "dreambigwithai.com"
 NGINX_CONFIG_DIR = "/etc/nginx/sites-available"
 NGINX_ENABLED_DIR = "/etc/nginx/sites-enabled"
 
+# DNS settings
+HOSTINGER_DNS_SKILL = "/root/clawdbot/skills/hostinger-dns"
+SERVER_IP = "195.200.14.37"  # Default server IP for DNS A records
+
 # Shared runtime venv
 SHARED_VENV_PATH = "/root/dreampilotvenv"
 
@@ -575,6 +579,171 @@ class DeploymentVerifier:
         return results
 
 
+class DNSProvisioner:
+    """Provisions DNS A records using Hostinger DNS skill."""
+
+    def __init__(self):
+        self.skill_path = HOSTINGER_DNS_SKILL
+        self.server_ip = SERVER_IP
+
+    def check_subdomain_exists(self, subdomain: str, domain: str = None) -> Tuple[bool, Optional[str]]:
+        """
+        Check if subdomain already exists.
+
+        Returns:
+            Tuple of (exists: bool, current_ip: str or None)
+        """
+        try:
+            if not domain:
+                domain = BASE_DOMAIN
+
+            # Call Hostinger DNS skill
+            cmd = [
+                "/bin/bash", "-c",
+                f"source {self.skill_path}/.env && "
+                f"{self.skill_path}/venv/bin/python {self.skill_path}/hostinger_dns.py "
+                f"check_subdomain_existence "
+                f"'{{\\\"domain\\\": \\\"{domain}\\\", \\\"subdomain\\\": \\\"{subdomain}\\\"}}'"
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                # Parse output to check if exists and get IP
+                if "exists" in output.lower() or "found" in output.lower():
+                    # Try to extract IP from output
+                    import re
+                    ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', output)
+                    current_ip = ip_match.group(0) if ip_match else None
+                    return (True, current_ip)
+                return (False, None)
+            else:
+                logger.error(f"DNS check failed: {result.stderr}")
+                return (False, None)
+
+        except Exception as e:
+            logger.error(f"Failed to check subdomain: {e}")
+            return (False, None)
+
+    def create_a_record(self, subdomain: str, domain: str = None, ip: str = None, ttl: int = 14400) -> bool:
+        """
+        Create A record for subdomain.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not domain:
+                domain = BASE_DOMAIN
+            if not ip:
+                ip = self.server_ip
+
+            logger.info(f"Creating A record: {subdomain}.{domain} → {ip}")
+
+            # Call Hostinger DNS skill
+            cmd = [
+                "/bin/bash", "-c",
+                f"source {self.skill_path}/.env && "
+                f"{self.skill_path}/venv/bin/python {self.skill_path}/hostinger_dns.py "
+                f"create_a_record "
+                f"'{{\\\"domain\\\": \\\"{domain}\\\", \\\"subdomain\\\": \\\"{subdomain}\\\", \\\"ip\\\": \\\"{ip}\\\", \\\"ttl\\\": {ttl}}}'"
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                logger.info(f"✓ A record created: {subdomain}.{domain} → {ip}")
+                logger.info(f"  Note: DNS propagation takes 5-60 minutes")
+                return True
+            else:
+                logger.error(f"Failed to create A record: {result.stderr}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to create A record: {e}")
+            return False
+
+    def provision_project_dns(self, project_name: str) -> Dict[str, bool]:
+        """
+        Provision DNS records for a project (frontend + backend).
+
+        Returns:
+            Dict with results for frontend and backend DNS
+        """
+        results = {
+            "frontend": False,
+            "backend": False,
+            "frontend_exists": False,
+            "backend_exists": False
+        }
+
+        try:
+            frontend_subdomain = project_name
+            backend_subdomain = f"{project_name}-api"
+
+            logger.info(f"Provisioning DNS for project: {project_name}")
+            logger.info(f"  Frontend: {frontend_subdomain}.{BASE_DOMAIN}")
+            logger.info(f"  Backend:  {backend_subdomain}.{BASE_DOMAIN}")
+
+            # Check if frontend subdomain exists
+            frontend_exists, frontend_current_ip = self.check_subdomain_exists(frontend_subdomain)
+            results["frontend_exists"] = frontend_exists
+
+            if frontend_exists:
+                logger.info(f"  Frontend subdomain already exists: {frontend_subdomain}.{BASE_DOMAIN}")
+                if frontend_current_ip:
+                    logger.info(f"    Currently pointing to: {frontend_current_ip}")
+                    if frontend_current_ip == self.server_ip:
+                        logger.info(f"    ✓ Already pointing to correct server IP")
+                        results["frontend"] = True
+                    else:
+                        logger.warning(f"    ⚠️ Pointing to different IP: {frontend_current_ip} (ours: {self.server_ip})")
+            else:
+                # Create frontend A record
+                if self.create_a_record(frontend_subdomain):
+                    results["frontend"] = True
+
+            # Check if backend subdomain exists
+            backend_exists, backend_current_ip = self.check_subdomain_exists(backend_subdomain)
+            results["backend_exists"] = backend_exists
+
+            if backend_exists:
+                logger.info(f"  Backend subdomain already exists: {backend_subdomain}.{BASE_DOMAIN}")
+                if backend_current_ip:
+                    logger.info(f"    Currently pointing to: {backend_current_ip}")
+                    if backend_current_ip == self.server_ip:
+                        logger.info(f"    ✓ Already pointing to correct server IP")
+                        results["backend"] = True
+                    else:
+                        logger.warning(f"    ⚠️ Pointing to different IP: {backend_current_ip} (ours: {self.server_ip})")
+            else:
+                # Create backend A record
+                if self.create_a_record(backend_subdomain):
+                    results["backend"] = True
+
+            # Summary
+            logger.info(f"✓ DNS provisioning complete:")
+            logger.info(f"    Frontend: {'✓' if results['frontend'] else '✗'} {frontend_subdomain}.{BASE_DOMAIN}")
+            logger.info(f"    Backend:  {'✓' if results['backend'] else '✗'} {backend_subdomain}.{BASE_DOMAIN}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Failed to provision project DNS: {e}")
+            return results
+
+
 class InfrastructureManager:
     """Main infrastructure manager orchestrating all components."""
 
@@ -586,10 +755,12 @@ class InfrastructureManager:
         self.service_manager = ServiceManager()
         self.nginx_configurator = NginxConfigurator()
         self.verifier = DeploymentVerifier()
+        self.dns_provisioner = DNSProvisioner()
 
         self.ports = {}
         self.domains = {}
         self.database_info = {}
+        self.dns_results = {}
 
     def provision_all(self) -> bool:
         """
@@ -643,8 +814,13 @@ class InfrastructureManager:
             self.nginx_configurator.reload_nginx()
             logger.info(f"✓ Nginx configured: {self.domains}")
 
-            # Phase 6: Start service
-            logger.info("Phase 6/6: Service startup")
+            # Phase 6: DNS provisioning
+            logger.info("Phase 6/6: DNS provisioning")
+            self.dns_results = self.dns_provisioner.provision_project_dns(self.project_name)
+            logger.info(f"✓ DNS provisioned: {self.domains}")
+
+            # Phase 7: Start service
+            logger.info("Phase 7/7: Service startup")
             self.service_manager.start_backend_service(self.service_name)
             logger.info(f"✓ Service started: {self.service_name}")
 
@@ -718,6 +894,7 @@ class InfrastructureManager:
                 "project_name": self.project_name,
                 "ports": self.ports,
                 "domains": self.domains,
+                "dns": self.dns_results,
                 "database": {
                     "name": self.database_info["database_name"],
                     "user": self.database_info["username"]
@@ -758,6 +935,9 @@ class InfrastructureManager:
                     self.ports.get("frontend"),
                     self.ports.get("backend")
                 )
+
+            # Note: DNS A records are not deleted on rollback
+            # This requires manual cleanup via Hostinger hPanel or DNS skill update
 
             logger.info("✓ Rollback complete")
 
