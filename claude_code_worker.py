@@ -50,15 +50,19 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             logger.info(f"Project path: {project_path}")
             logger.info(f"Session name for tracking: {session_name}")
 
-            # Run fast wrapper script (no Claude Code CLI needed!)
-            # The wrapper does everything fast and reliable:
-            # - Task 1: Skipped (Groq API used before)
-            # - Task 2: Fast git clone via subprocess
-            # - Tasks 3-5: Simple file creation via Python
-            logger.info(f"Executing: python3 fast_wrapper.py {project_id} {project_path} '{project_name}' (template_id: {template_id})")
+            # Run OpenClaw wrapper for infrastructure provisioning
+            # The wrapper reads all rule files and executes phases 3-7:
+            # - Phase 1: Analyze Project (already done via Groq)
+            # - Phase 2: Template Setup (already done via fast_wrapper)
+            # - Phase 3: Database Provisioning (infrastructure_manager)
+            # - Phase 4: Port Allocation (infrastructure_manager)
+            # - Phase 5: Service Setup (infrastructure_manager)
+            # - Phase 6: Nginx Routing (infrastructure_manager)
+            # - Phase 7: Verification (infrastructure_manager)
+            logger.info(f"Executing: python3 openclaw_wrapper.py {project_id} {project_path} '{project_name}' (template_id: {template_id})")
 
             # Build command args
-            cmd_args = ["python3", "/root/clawd-backend/fast_wrapper.py",
+            cmd_args = ["python3", "/root/clawd-backend/openclaw_wrapper.py",
                        str(project_id), project_path, project_name, description or ""]
 
             # Add template_id if provided
