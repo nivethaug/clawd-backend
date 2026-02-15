@@ -575,9 +575,6 @@ class DeploymentVerifier:
             # results["frontend_port_open"],  # Frontend is optional for now
             # results["backend_health_ok"]  # Health check is optional for now
         ])
-            results["backend_port_open"],
-            results["backend_health_ok"]
-        ])
 
         logger.info(f"Overall deployment: {'✓' if results['overall'] else '✗'}")
 
