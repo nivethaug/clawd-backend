@@ -4,6 +4,7 @@ import json
 import shutil
 import re
 import logging
+import subprocess
 from datetime import datetime
 from typing import AsyncGenerator, Any, Optional
 from contextlib import contextmanager
@@ -21,6 +22,8 @@ from project_manager import ProjectFileManager
 from chat_handlers import generate_sse_stream, generate_sse_stream_with_db_save, handle_chat_with_image, handle_chat_text_only
 from file_utils import FileUtils
 from completion_service import CompletionService
+from claude_code_worker import run_claude_code_background
+from template_selector import TemplateSelector
 
 # ============================================================================
 # Logging
@@ -82,6 +85,8 @@ class ProjectResponse(BaseModel):
     description: Optional[str] = None
     project_path: Optional[str] = None
     type_id: Optional[int] = None
+    status: Optional[str] = None
+    claude_code_session_name: Optional[str] = None
     created_at: str
 
 class ProjectTypeResponse(BaseModel):
@@ -107,6 +112,7 @@ class CreateProjectRequest(BaseModel):
     description: Optional[str] = None
     user_id: Optional[int] = None
     type_id: Optional[int] = Field(None, alias="typeId")
+    template_id: Optional[str] = None  # Optional pre-selected template ID (bypasses Task 1)
 
 class CreateSessionRequest(BaseModel):
     label: str
@@ -286,7 +292,7 @@ async def create_project(request: CreateProjectRequest):
     # Step 1: Get project_id first to use in folder naming
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO projects (user_id, name, domain, description, project_path, type_id) VALUES (?, ?, ?, ?, '', ?)",
+            "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name) VALUES (?, ?, ?, ?, '', ?, 'creating', NULL)",
             (user_id, request.name, request.domain, request.description, type_id)
         )
         conn.commit()
@@ -316,15 +322,79 @@ async def create_project(request: CreateProjectRequest):
         )
         conn.commit()
 
+    # Step 4: Select template (if not provided)
+    selected_template_id = request.template_id
+    if type_id == 1 and not selected_template_id:
+        # Auto-select template for website projects using Groq
+        try:
+            selector = TemplateSelector()
+            if selector.is_available():
+                logger.info(f"Auto-selecting template for project {project_id}")
+                result = await selector.select_template(
+                    project_name=request.name,
+                    project_description=request.description or "",
+                    project_type="website"
+                )
+                if result.get("template"):
+                    selected_template_id = result["template"]["id"]
+                    logger.info(f"Auto-selected template: {selected_template_id}")
+                else:
+                    logger.warning(f"Template selection returned no result, will use fallback in worker")
+            else:
+                logger.warning("Template selector not available, worker will use fallback")
+        except Exception as e:
+            logger.error(f"Template selection failed: {e}, worker will use fallback")
+
+    # Step 5: Trigger background Claude Code worker for website projects only
+    # Project type 'website' has type_id = 1
+    if type_id == 1:
+        # Generate unique session name for Claude Code
+        session_name = f"project-{project_id}-{request.name.replace(' ', '-')}"
+
+        # Save session name to database
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE projects SET claude_code_session_name = ? WHERE id = ?",
+                (session_name, project_id)
+            )
+            conn.commit()
+
+        logger.info(f"Triggering background Claude Code worker for website project {project_id}")
+        logger.info(f"Claude Code session name: {session_name}")
+        if selected_template_id:
+            logger.info(f"Using pre-selected template: {selected_template_id}")
+        try:
+            run_claude_code_background(
+                project_id=project_id,
+                project_path=project_folder_path,
+                project_name=request.name,
+                description=request.description,
+                session_name=session_name,
+                template_id=selected_template_id  # Pass selected template ID
+            )
+        except Exception as e:
+            # Log error but don't fail the project creation
+            # Project will remain in 'creating' status
+            logger.error(f"Failed to start Claude Code background worker: {e}")
+
+    # Fetch the final project data from database (includes status and session_key)
+    with get_db() as conn:
+        final_project = conn.execute(
+            "SELECT * FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+
     return ProjectResponse(
-        id=project_id,
-        user_id=user_id,
-        name=request.name,
-        domain=request.domain,
-        description=request.description,
-        project_path=project_folder_path,
-        type_id=type_id,
-        created_at=datetime.now().isoformat()
+        id=final_project["id"],
+        user_id=final_project["user_id"],
+        name=final_project["name"],
+        domain=final_project["domain"],
+        description=final_project["description"],
+        project_path=final_project["project_path"],
+        type_id=final_project["type_id"],
+        status=final_project["status"],
+        claude_code_session_name=final_project["claude_code_session_name"],
+        created_at=final_project["created_at"]
     )
 
 @app.get("/project-types", response_model=list[ProjectTypeResponse])
@@ -332,8 +402,73 @@ async def get_project_types():
     """Get all available project types."""
     with get_db() as conn:
         types = conn.execute("SELECT id, type, display_name FROM project_types ORDER BY id").fetchall()
-    
+
     return [ProjectTypeResponse(**dict(t)) for t in types]
+
+
+class TemplateSelectionRequest(BaseModel):
+    project_name: str
+    description: str
+    project_type: str = "website"
+
+
+@app.post("/templates/select")
+async def select_template(request: TemplateSelectionRequest):
+    """
+    Select the best frontend template based on project description using Groq LLM.
+
+    This is much faster than using Claude Code for template selection.
+    The selected template ID can be passed to project creation to skip the slow Task 1.
+    """
+    selector = TemplateSelector()
+
+    if not selector.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Template selector not available - Groq not configured or registry missing"
+        )
+
+    try:
+        result = await selector.select_template(
+            project_name=request.project_name,
+            project_description=request.description,
+            project_type=request.project_type
+        )
+
+        if result.get("success"):
+            return {
+                "success": True,
+                "template": result["template"]
+            }
+        else:
+            # Return fallback template even on failure
+            return {
+                "success": False,
+                "error": result.get("error"),
+                "template": result.get("template")  # fallback template
+            }
+
+    except Exception as e:
+        logger.error(f"Template selection failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Template selection failed: {str(e)}"
+        )
+
+
+@app.get("/templates")
+async def list_templates():
+    """List all available templates from the registry."""
+    selector = TemplateSelector()
+
+    if not selector.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Template selector not available"
+        )
+
+    return selector.list_templates()
+
 
 @app.delete("/projects/{project_id}")
 async def delete_project(project_id: int):
@@ -411,6 +546,10 @@ class UpdateProjectRequest(BaseModel):
     type_id: Optional[int] = Field(None, alias="typeId")
     domain: Optional[str] = None
 
+class ProjectStatusResponse(BaseModel):
+    """Response model for project status endpoint."""
+    status: str  # "creating", "ready", or "failed"
+
 @app.put("/projects/{project_id}", response_model=ProjectResponse, status_code=200)
 async def update_project(project_id: int, request: UpdateProjectRequest):
     """Update project name and description only. type_id and domain cannot be modified."""
@@ -470,6 +609,102 @@ async def update_project(project_id: int, request: UpdateProjectRequest):
         ).fetchone()
 
     return ProjectResponse(**dict(updated_project))
+
+@app.get("/projects/{project_id}/status", response_model=ProjectStatusResponse)
+async def get_project_status(project_id: int):
+    """
+    Get project creation status.
+
+    Returns the current status of the project:
+    - "creating": OpenClaw is running in background
+    - "ready": OpenClaw completed successfully
+    - "failed": OpenClaw failed
+
+    Args:
+        project_id: Project ID
+
+    Returns:
+        Project status
+
+    Raises:
+        404: If project not found
+    """
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT status FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+
+    if not project:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project with id {project_id} not found"
+        )
+
+    return ProjectStatusResponse(status=project["status"])
+
+@app.get("/projects/{project_id}/claude-session")
+async def get_claude_session(project_id: int):
+    """
+    Get Claude Code session details for a project.
+
+    Returns Claude Code session information for tracking progress.
+
+    Args:
+        project_id: Project ID
+
+    Returns:
+        Claude Code session details including session_name and status
+
+    Raises:
+        404: If project not found or has no session
+    """
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, claude_code_session_name, status FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+
+    if not project:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project with id {project_id} not found"
+        )
+
+    if not project["claude_code_session_name"]:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project has no Claude Code session (only website projects get sessions)"
+        )
+
+    # Check if Claude Code wrapper process is running
+    try:
+        # Check for Python wrapper process running
+        result = subprocess.run(
+            ["pgrep", "-f", f"python3.*claude_wrapper.py.*{project_id}"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        is_running = result.returncode == 0 and result.stdout.strip()
+
+        return {
+            "project_id": project_id,
+            "session_name": project["claude_code_session_name"],
+            "status": project["status"],
+            "is_running": is_running,
+            "message": "Claude Code wrapper is running" if is_running else "Claude Code wrapper has finished"
+        }
+    except Exception as e:
+        logger.error(f"Failed to check Claude Code wrapper process status: {e}")
+        return {
+            "project_id": project_id,
+            "session_name": project["claude_code_session_name"],
+            "status": project["status"],
+            "is_running": None,
+            "message": f"Could not determine process status: {str(e)}"
+        }
 
 @app.get("/projects/{project_id}/sessions", response_model=list[SessionResponse])
 async def get_sessions(project_id: int):
