@@ -52,8 +52,8 @@ HOSTINGER_DNS_SKILL_DIR = "/usr/lib/node_modules/openclaw/skills/hostinger-dns"
 HOSTINGER_DNS_SKILL_SCRIPT = f"{HOSTINGER_DNS_SKILL_DIR}/hostinger_dns.py"
 SERVER_IP = "195.200.14.37"  # Default server IP for DNS A records
 
-# Shared runtime venv (using system python)
-SHARED_VENV_PATH = "/usr"
+# Shared runtime venv
+SHARED_VENV_PATH = "/root/dreampilot/dreampilotvenv"
 
 
 class PortAllocator:
@@ -264,7 +264,7 @@ class ServiceManager:
   "name": "{app_name}",
   "script": "main.py",
   "cwd": "{backend_path}",
-  "interpreter": "/usr/bin/python3",
+  "interpreter": "{self.venv_path}/bin/python",
   "env": {{
     "BACKEND_PORT": "{backend_port}",
     "PROJECT_NAME": "{project_name}"
