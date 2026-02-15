@@ -14,6 +14,7 @@ import sqlite3
 import random
 import string
 import logging
+import json
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
@@ -263,7 +264,7 @@ class ServiceManager:
   "name": "{app_name}",
   "script": "main.py",
   "cwd": "{backend_path}",
-  "interpreter": "{self.venv_path}/bin/python",
+  "interpreter": "/usr/bin/python3",
   "env": {{
     "BACKEND_PORT": "{backend_port}",
     "PROJECT_NAME": "{project_name}"
