@@ -13,6 +13,7 @@ Each task is a separate Claude Code call with clear completion tracking.
 """
 
 import sys
+import json
 import subprocess
 import logging
 import sqlite3
@@ -58,6 +59,61 @@ class StepByStepWrapper:
                 conn.close()
         except Exception as e:
             logger.error(f"✗ Failed to update project status: {e}")
+
+    def run_git_clone(self, repo_url: str, target_dir: str = "frontend", timeout: int = 600) -> bool:
+        """
+        Run git clone directly with subprocess (much faster than Claude Code).
+
+        Args:
+            repo_url: Repository URL to clone
+            target_dir: Target directory name
+            timeout: Timeout in seconds
+
+        Returns:
+            True if clone succeeded, False otherwise
+        """
+        try:
+            logger.info(f"🚀 Running git clone: {repo_url} → {target_dir}")
+
+            # Check if target directory already exists
+            target_path = self.project_path / target_dir
+            if target_path.exists():
+                logger.warning(f"⚠️ Target directory '{target_dir}' already exists, skipping clone")
+                return True
+
+            # Run git clone
+            result = subprocess.run(
+                ["git", "clone", "--depth", "1", repo_url, target_dir],
+                cwd=self.project_path,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+
+            # Check result
+            if result.returncode == 0:
+                logger.info(f"✅ Git clone completed successfully")
+                logger.info(f"✓ Repository cloned to {target_dir}")
+
+                # Verify clone
+                if target_path.exists():
+                    logger.info(f"✓ Target directory verified: {target_dir}")
+                    return True
+                else:
+                    logger.error(f"❌ Target directory not created: {target_dir}")
+                    return False
+
+            else:
+                logger.error(f"❌ Git clone failed with code: {result.returncode}")
+                logger.error(f"Error output: {result.stderr}")
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ Git clone timed out after {timeout} seconds")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Git clone error: {e}")
+            return False
 
     def run_task(self, task_name: str, task_prompt: str, expected_files: list = None, timeout: int = 600) -> bool:
         """
@@ -154,26 +210,39 @@ When you've selected a template, respond with exactly: "TASK_1_COMPLETE" and not
                     logger.error("❌ Initialization failed at task 1")
                     return
 
-            # Task 2: Clone repository
+            # Task 2: Clone repository (use subprocess directly for speed)
             logger.info(f"📋 Task 2/{total_tasks}: Clone repository")
 
-            # Build Task 2 prompt - include template_id if provided
-            if self.template_id:
-                task2_prompt = f"""Clones the frontend template repository for template ID: {self.template_id}.
-First, read the template registry at /root/dreampilot/website/frontend/template-registry.json.
-Find the template with id="{self.template_id}" and get its repository URL.
-Uses git to clone that repository.
-Ensure clone is complete before continuing.
-Clones to frontend/ directory.
-When clone is complete, respond with exactly: "TASK_2_COMPLETE" and nothing else."""
-            else:
-                task2_prompt = f"""Clones selected frontend template repository.
-Uses git to clone repository.
-Ensure clone is complete before continuing.
-Clones to frontend/ directory.
-When clone is complete, respond with exactly: "TASK_2_COMPLETE" and nothing else."""
+            # Get template repository URL
+            template_registry_path = Path("/root/dreampilot/website/frontend/template-registry.json")
+            repo_url = None
 
-            if self.run_task("Clone repository", task2_prompt, timeout=1800):
+            if template_id or self.template_id:
+                # Use provided template_id or pre-selected template_id
+                tid = template_id if template_id else self.template_id
+                logger.info(f"Looking up template ID: {tid}")
+
+                try:
+                    with open(template_registry_path, 'r') as f:
+                        registry = json.load(f)
+
+                    for template in registry.get('templates', []):
+                        if template.get('id') == tid:
+                            repo_url = template.get('repo')
+                            logger.info(f"Found repository URL: {repo_url}")
+                            break
+                except Exception as e:
+                    logger.error(f"Failed to read template registry: {e}")
+
+            if not repo_url:
+                logger.error(f"❌ Could not find repository URL for template ID: {template_id or self.template_id}")
+                self.failed_tasks.append("Clone repository")
+                self.update_status("failed")
+                logger.error("❌ Initialization failed at task 2")
+                return
+
+            # Clone repository directly with subprocess (much faster than Claude Code)
+            if self.run_git_clone(repo_url, "frontend", timeout=1800):
                 self.completed_tasks.append("Clone repository")
                 tasks_succeeded += 1
                 logger.info(f"✓ Task 2 completed!")
