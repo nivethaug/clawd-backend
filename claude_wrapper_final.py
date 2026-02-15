@@ -217,17 +217,15 @@ When you've selected a template, respond with exactly: "TASK_1_COMPLETE" and not
             template_registry_path = Path("/root/dreampilot/website/frontend/template-registry.json")
             repo_url = None
 
-            if template_id or self.template_id:
-                # Use provided template_id or pre-selected template_id
-                tid = template_id if template_id else self.template_id
-                logger.info(f"Looking up template ID: {tid}")
+            if self.template_id:
+                logger.info(f"Looking up template ID: {self.template_id}")
 
                 try:
                     with open(template_registry_path, 'r') as f:
                         registry = json.load(f)
 
                     for template in registry.get('templates', []):
-                        if template.get('id') == tid:
+                        if template.get('id') == self.template_id:
                             repo_url = template.get('repo')
                             logger.info(f"Found repository URL: {repo_url}")
                             break
@@ -235,7 +233,7 @@ When you've selected a template, respond with exactly: "TASK_1_COMPLETE" and not
                     logger.error(f"Failed to read template registry: {e}")
 
             if not repo_url:
-                logger.error(f"❌ Could not find repository URL for template ID: {template_id or self.template_id}")
+                logger.error(f"❌ Could not find repository URL for template ID: {self.template_id}")
                 self.failed_tasks.append("Clone repository")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at task 2")
