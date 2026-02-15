@@ -32,8 +32,8 @@ PROJECT_DB_PATH = "/root/clawd-backend/projects.db"
 POSTGRES_CONTAINER = "dreampilot-postgres"
 POSTGRES_HOST = "localhost"
 POSTGRES_PORT = 5432
-POSTGRES_USER = "postgres"
-POSTGRES_PASSWORD = "postgres_password"  # TODO: Load from secure config
+POSTGRES_USER = "admin"
+POSTGRES_PASSWORD = "StrongAdminPass123"
 
 # Port ranges
 FRONTEND_PORT_MIN = 3000
@@ -47,7 +47,8 @@ NGINX_CONFIG_DIR = "/etc/nginx/sites-available"
 NGINX_ENABLED_DIR = "/etc/nginx/sites-enabled"
 
 # DNS settings
-HOSTINGER_DNS_SKILL = "/usr/lib/node_modules/openclaw/skills/hostinger-dns/hostinger_dns.py"
+HOSTINGER_DNS_SKILL_DIR = "/usr/lib/node_modules/openclaw/skills/hostinger-dns"
+HOSTINGER_DNS_SKILL_SCRIPT = f"{HOSTINGER_DNS_SKILL_DIR}/hostinger_dns.py"
 SERVER_IP = "195.200.14.37"  # Default server IP for DNS A records
 
 # Shared runtime venv
@@ -447,7 +448,7 @@ server {{
 
             # Test configuration first
             test_result = subprocess.run(
-                ["nginx", "-t"],
+                ["/usr/sbin/nginx", "-t"],
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -459,7 +460,7 @@ server {{
 
             # Reload nginx
             result = subprocess.run(
-                ["nginx", "-s", "reload"],
+                ["/usr/sbin/nginx", "-s", "reload"],
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -583,7 +584,8 @@ class DNSProvisioner:
     """Provisions DNS A records using Hostinger DNS skill."""
 
     def __init__(self):
-        self.skill_path = HOSTINGER_DNS_SKILL
+        self.skill_dir = HOSTINGER_DNS_SKILL_DIR
+        self.skill_script = HOSTINGER_DNS_SKILL_SCRIPT
         self.server_ip = SERVER_IP
 
     def check_subdomain_exists(self, subdomain: str, domain: str = None) -> Tuple[bool, Optional[str]]:
@@ -600,8 +602,8 @@ class DNSProvisioner:
             # Call Hostinger DNS skill
             cmd = [
                 "/bin/bash", "-c",
-                f"source {self.skill_path}/.env && "
-                f"{self.skill_path}/venv/bin/python {self.skill_path}/hostinger_dns.py "
+                f"source {self.skill_dir}/.env && "
+                f"{self.skill_dir}/venv/bin/python {self.skill_script} "
                 f"check_subdomain_existence "
                 f"'{{\"domain\": \"{domain}\", \"subdomain\": \"{subdomain}\"}}'"
             ]
@@ -649,8 +651,8 @@ class DNSProvisioner:
             # Call Hostinger DNS skill
             cmd = [
                 "/bin/bash", "-c",
-                f"source {self.skill_path}/.env && "
-                f"{self.skill_path}/venv/bin/python {self.skill_path}/hostinger_dns.py "
+                f"source {self.skill_dir}/.env && "
+                f"{self.skill_dir}/venv/bin/python {self.skill_script} "
                 f"create_a_record "
                 f"'{{\"domain\": \"{domain}\", \"subdomain\": \"{subdomain}\", \"ip\": \"{ip}\", \"ttl\": {ttl}}}'"
             ]
