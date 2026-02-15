@@ -47,7 +47,7 @@ NGINX_CONFIG_DIR = "/etc/nginx/sites-available"
 NGINX_ENABLED_DIR = "/etc/nginx/sites-enabled"
 
 # DNS settings
-HOSTINGER_DNS_SKILL = "/root/clawdbot/skills/hostinger-dns/hostinger_dns.py"
+HOSTINGER_DNS_SKILL = "/usr/lib/node_modules/openclaw/skills/hostinger-dns/hostinger_dns.py"
 SERVER_IP = "195.200.14.37"  # Default server IP for DNS A records
 
 # Shared runtime venv
