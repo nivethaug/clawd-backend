@@ -306,7 +306,7 @@ class ServiceManager:
   "cwd": "{backend_path}",
   "interpreter": "{self.venv_path}/bin/python",
   "env": {{
-    "BACKEND_PORT": "{backend_port}",
+    "API_PORT": "{backend_port}",
     "PROJECT_NAME": "{project_name}"
   }},
   "error_file": "{backend_path}/logs/error.log",
@@ -1149,8 +1149,8 @@ class InfrastructureManager:
             if 'DATABASE_URL' not in updated_vars:
                 updated_lines.append(f'DATABASE_URL={self.database_info["database_url"]}')
 
-            if 'BACKEND_PORT' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
-                updated_lines.append(f'BACKEND_PORT={self.ports["backend"]}')
+            if 'API_PORT' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
+                updated_lines.append(f'API_PORT={self.ports["backend"]}')
 
             if 'PROJECT_NAME' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
                 updated_lines.append(f'PROJECT_NAME={self.project_name}')
