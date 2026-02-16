@@ -41,6 +41,11 @@ FRONTEND_PORT_MAX = 4000
 BACKEND_PORT_MIN = 8010
 BACKEND_PORT_MAX = 9000
 
+# Clawsd-ui settings
+CLAWD_UI_PATH = "/root/clawd-ui"
+CLAWD_UI_DIST = "/root/clawd-ui/dist"
+CLAWD_UI_DEV_PORT = 3001
+
 # DNS settings
 BASE_DOMAIN = "dreambigwithai.com"
 NGINX_CONFIG_DIR = "/etc/nginx/sites-available"
@@ -352,6 +357,131 @@ class ServiceManager:
 
         except Exception as e:
             logger.error(f"Failed to delete service: {e}")
+            return False
+
+    def build_frontend(self) -> bool:
+        """
+        Build the clawd-ui frontend.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info("Building clawd-ui frontend...")
+
+            result = subprocess.run(
+                ["npm", "run", "build"],
+                cwd=CLAWD_UI_PATH,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes
+            )
+
+            if result.returncode == 0:
+                logger.info(f"✓ Frontend built successfully")
+                return True
+            else:
+                logger.error(f"Failed to build frontend: {result.stderr}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to build frontend: {e}")
+            return False
+
+    def create_frontend_service(self, project_name: str, frontend_port: int, project_path: Path) -> str:
+        """
+        Create PM2 config for frontend service.
+
+        Returns:
+            PM2 app name
+        """
+        try:
+            app_name = f"{project_name}-frontend"
+            frontend_dist_path = CLAWD_UI_DIST
+
+            # Check if dist exists
+            if not Path(frontend_dist_path).exists():
+                raise FileNotFoundError(f"Frontend dist directory not found: {frontend_dist_path}")
+
+            # Create serve.py if it doesn't exist
+            serve_py = frontend_dist_path / "serve.py"
+            if not serve_py.exists():
+                serve_script = """#!/usr/bin/env python3
+import http.server
+import socketserver
+import os
+from urllib.parse import unquote
+
+class CORSHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        super().end_headers()
+
+    def do_GET(self):
+        # Serve index.html for SPA routing
+        if self.path != '/' and not self.path.startswith('/assets') and '.' not in self.path.split('?')[0]:
+            self.path = '/index.html'
+        return super().do_GET()
+
+if __name__ == "__main__":
+    PORT = int(os.environ.get("PORT", 3000))
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    with socketserver.TCPServer(("", PORT), CORSHTTPRequestHandler) as httpd:
+        print(f"Serving on port {PORT}...")
+        httpd.serve_forever()
+"""
+                serve_py.write_text(serve_script)
+
+            # PM2 ecosystem config
+            ecosystem = f"""{{
+  "name": "{app_name}",
+  "script": "serve.py",
+  "cwd": "{frontend_dist_path}",
+  "interpreter": "python3",
+  "env": {{
+    "PORT": "{frontend_port}",
+    "PROJECT_NAME": "{project_name}"
+  }},
+  "error_file": "{project_path}/frontend/logs/error.log",
+  "out_file": "{project_path}/frontend/logs/out.log",
+  "log_date_format": "YYYY-MM-DD HH:mm:ss Z"
+}}
+"""
+
+            # Save ecosystem file
+            ecosystem_path = frontend_dist_path / f"{app_name}.config.json"
+            ecosystem_path.write_text(ecosystem)
+
+            logger.info(f"✓ Frontend PM2 config created: {app_name}")
+            return app_name
+
+        except Exception as e:
+            logger.error(f"Failed to create frontend service config: {e}")
+            raise
+
+    def start_frontend_service(self, app_name: str) -> bool:
+        """Start frontend service."""
+        try:
+            logger.info(f"Starting frontend service: {app_name}")
+
+            result = subprocess.run(
+                ["pm2", "start", f"{CLAWD_UI_DIST}/{app_name}.config.json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                logger.info(f"✓ Frontend service started: {app_name}")
+                return True
+            else:
+                logger.error(f"Failed to start frontend service: {result.stderr}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to start frontend service: {e}")
             return False
 
 
@@ -800,7 +930,7 @@ class InfrastructureManager:
             logger.info(f"✓ Service configured: {self.service_name}")
 
             # Phase 5: Nginx configuration
-            logger.info("Phase 5/6: Nginx configuration")
+            logger.info("Phase 5/7: Nginx configuration")
             frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
                 self.project_name,
                 self.ports["frontend"],
@@ -815,14 +945,36 @@ class InfrastructureManager:
             logger.info(f"✓ Nginx configured: {self.domains}")
 
             # Phase 6: DNS provisioning
-            logger.info("Phase 6/6: DNS provisioning")
+            logger.info("Phase 6/7: DNS provisioning")
             self.dns_results = self.dns_provisioner.provision_project_dns(self.project_name)
             logger.info(f"✓ DNS provisioned: {self.domains}")
 
-            # Phase 7: Start service
+            # Phase 7: Service startup
             logger.info("Phase 7/7: Service startup")
+
+            # Start backend service
             self.service_manager.start_backend_service(self.service_name)
-            logger.info(f"✓ Service started: {self.service_name}")
+            logger.info(f"✓ Backend service started: {self.service_name}")
+
+            # Create and start frontend service
+            logger.info("Creating frontend service...")
+            self.frontend_app_name = self.service_manager.create_frontend_service(
+                self.project_name,
+                self.ports["frontend"],
+                self.project_path
+            )
+
+            logger.info(f"✓ Frontend service configured: {self.frontend_app_name}")
+
+            if self.service_manager.start_frontend_service(self.frontend_app_name):
+                logger.info(f"✓ Frontend service started: {self.frontend_app_name}")
+            else:
+                logger.warning(f"⚠️ Frontend service failed to start: {self.frontend_app_name}")
+
+            # Wait for services to start up
+            logger.info("Waiting for services to initialize...")
+            import time
+            time.sleep(3)
 
             # Verification
             logger.info("Verifying deployment...")
@@ -903,6 +1055,10 @@ class InfrastructureManager:
                 "status": "ready"
             }
 
+            # Add frontend_app_name if it exists
+            if hasattr(self, 'frontend_app_name'):
+                metadata["frontend_app_name"] = self.frontend_app_name
+
             metadata_path = self.project_path / "project.json"
             metadata_path.write_text(
                 json.dumps(metadata, indent=2)
@@ -918,10 +1074,15 @@ class InfrastructureManager:
         logger.info("Rolling back infrastructure changes...")
 
         try:
-            # Stop service
+            # Stop backend service
             if hasattr(self, 'service_name'):
                 self.service_manager.stop_service(self.service_name)
                 self.service_manager.delete_service(self.service_name)
+
+            # Stop frontend service
+            if hasattr(self, 'frontend_app_name'):
+                self.service_manager.stop_service(self.frontend_app_name)
+                self.service_manager.delete_service(self.frontend_app_name)
 
             # Remove nginx config
             self.nginx_configurator.remove_config(self.project_name)
@@ -954,11 +1115,17 @@ class InfrastructureManager:
             try:
                 metadata = json.loads(metadata_path.read_text())
 
-                # Stop service
+                # Stop backend service
                 service_name = metadata.get("service_name")
                 if service_name:
                     self.service_manager.stop_service(service_name)
                     self.service_manager.delete_service(service_name)
+
+                # Stop frontend service
+                frontend_app_name = metadata.get("frontend_app_name")
+                if frontend_app_name:
+                    self.service_manager.stop_service(frontend_app_name)
+                    self.service_manager.delete_service(frontend_app_name)
 
                 # Remove nginx config
                 self.nginx_configurator.remove_config(self.project_name)
