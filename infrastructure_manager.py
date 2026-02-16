@@ -994,7 +994,7 @@ class InfrastructureManager:
             # Wait for services to start up
             logger.info("Waiting for services to initialize...")
             import time
-            time.sleep(3)
+            time.sleep(5)
 
             # Verification
             logger.info("Verifying deployment...")
