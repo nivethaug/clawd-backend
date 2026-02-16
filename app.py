@@ -87,6 +87,8 @@ class ProjectResponse(BaseModel):
     type_id: Optional[int] = None
     status: Optional[str] = None
     claude_code_session_name: Optional[str] = None
+    template_id: Optional[str] = None  # Selected frontend template ID
+    frontend: Optional[dict] = None  # Frontend template details
     created_at: str
 
 class ProjectTypeResponse(BaseModel):
@@ -235,8 +237,31 @@ app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 async def get_projects():
     with get_db() as conn:
         projects = conn.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()
-    
-    return [ProjectResponse(**dict(p)) for p in projects]
+
+    # Populate frontend info for projects with template_id
+    response_projects = []
+    selector = TemplateSelector()
+
+    for project in projects:
+        project_dict = dict(project)
+
+        # Add frontend info if template_id is set
+        if "template_id" in project_dict and project_dict["template_id"]:
+            try:
+                template = selector._find_template_by_id(project_dict["template_id"])
+                if template:
+                    project_dict["frontend"] = {
+                        "template": template.get("id"),
+                        "repo": template.get("repo"),
+                        "category": template.get("category"),
+                        "modified": False
+                    }
+            except Exception as e:
+                logger.error(f"Failed to fetch template details for project {project_dict.get('id')}: {e}")
+
+        response_projects.append(ProjectResponse(**project_dict))
+
+    return response_projects
 
 @app.post("/projects", response_model=ProjectResponse, status_code=201)
 async def create_project(request: CreateProjectRequest):
@@ -363,6 +388,15 @@ async def create_project(request: CreateProjectRequest):
         logger.info(f"Claude Code session name: {session_name}")
         if selected_template_id:
             logger.info(f"Using pre-selected template: {selected_template_id}")
+
+            # Save template_id to database
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET template_id = ? WHERE id = ?",
+                    (selected_template_id, project_id)
+                )
+                conn.commit()
+
         try:
             run_claude_code_background(
                 project_id=project_id,
@@ -384,6 +418,22 @@ async def create_project(request: CreateProjectRequest):
             (project_id,)
         ).fetchone()
 
+    # Get template details if template_id is set
+    frontend_info = None
+    if "template_id" in final_project and final_project["template_id"]:
+        try:
+            selector = TemplateSelector()
+            template = selector._find_template_by_id(final_project["template_id"])
+            if template:
+                frontend_info = {
+                    "template": template.get("id"),
+                    "repo": template.get("repo"),
+                    "category": template.get("category"),
+                    "modified": False
+                }
+        except Exception as e:
+            logger.error(f"Failed to fetch template details: {e}")
+
     return ProjectResponse(
         id=final_project["id"],
         user_id=final_project["user_id"],
@@ -394,6 +444,8 @@ async def create_project(request: CreateProjectRequest):
         type_id=final_project["type_id"],
         status=final_project["status"],
         claude_code_session_name=final_project["claude_code_session_name"],
+        template_id=final_project["template_id"] if "template_id" in final_project else None,
+        frontend=frontend_info,
         created_at=final_project["created_at"]
     )
 
