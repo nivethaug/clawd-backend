@@ -666,13 +666,13 @@ class DeploymentVerifier:
             import json
 
             url = f"http://127.0.0.1:{port}{path}"
-            req = urllib.request.Request(url, timeout=timeout)
+            req = urllib.request.Request(url)
 
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 data = response.read().decode('utf-8')
                 result = json.loads(data)
 
-                return result.get('status') == 'ok'
+                return result.get('status') == 'healthy' or result.get('status') == 'ok'
 
         except Exception as e:
             logger.error(f"Health check failed: {e}")
@@ -756,14 +756,23 @@ class DNSProvisioner:
 
             if result.returncode == 0:
                 output = result.stdout.strip()
-                # Parse output to check if exists and get IP
-                if "exists" in output.lower() or "found" in output.lower():
-                    # Try to extract IP from output
-                    import re
-                    ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', output)
-                    current_ip = ip_match.group(0) if ip_match else None
-                    return (True, current_ip)
-                return (False, None)
+                # Parse JSON output
+                try:
+                    import json
+                    data = json.loads(output)
+                    if data.get("success") and data.get("exists"):
+                        # Extract IP from value or current_ip field
+                        current_ip = data.get("value") or data.get("current_ip")
+                        return (True, current_ip)
+                    return (False, None)
+                except json.JSONDecodeError:
+                    # Fallback to string matching
+                    if "exists" in output.lower() or "found" in output.lower():
+                        import re
+                        ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', output)
+                        current_ip = ip_match.group(0) if ip_match else None
+                        return (True, current_ip)
+                    return (False, None)
             else:
                 logger.error(f"DNS check failed: {result.stderr}")
                 return (False, None)
