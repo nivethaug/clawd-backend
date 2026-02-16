@@ -604,9 +604,64 @@ class NginxConfigurator:
         self.config_dir = NGINX_CONFIG_DIR
         self.enabled_dir = NGINX_ENABLED_DIR
 
-    def generate_config(self, project_name: str, frontend_port: int, backend_port: int) -> Tuple[str, str]:
+    def generate_ssl_certificates(self, project_name: str) -> bool:
+        """
+        Generate SSL certificates using certbot for both frontend and backend domains.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            frontend_domain = f"{project_name}.{BASE_DOMAIN}"
+            backend_domain = f"{project_name}-api.{BASE_DOMAIN}"
+
+            logger.info(f"🔐 Generating SSL certificates for {project_name}")
+            logger.info(f"   Frontend: {frontend_domain}")
+            logger.info(f"   Backend:  {backend_domain}")
+
+            # Generate SSL certificate for frontend
+            frontend_result = subprocess.run(
+                ["certbot", "--nginx", "-d", frontend_domain, "--non-interactive", "--agree-tos"],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes
+            )
+
+            if frontend_result.returncode != 0:
+                logger.error(f"Failed to generate SSL for frontend: {frontend_result.stderr}")
+                return False
+
+            logger.info(f"✓ SSL certificate generated for {frontend_domain}")
+
+            # Generate SSL certificate for backend
+            backend_result = subprocess.run(
+                ["certbot", "--nginx", "-d", backend_domain, "--non-interactive", "--agree-tos"],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes
+            )
+
+            if backend_result.returncode != 0:
+                logger.error(f"Failed to generate SSL for backend: {backend_result.stderr}")
+                return False
+
+            logger.info(f"✓ SSL certificate generated for {backend_domain}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to generate SSL certificates: {e}")
+            return False
+
+    def generate_config(self, project_name: str, frontend_port: int, backend_port: int, enable_ssl: bool = False) -> Tuple[str, str]:
         """
         Generate nginx configuration for project.
+
+        Args:
+            project_name: Project name
+            frontend_port: Frontend service port
+            backend_port: Backend service port
+            enable_ssl: Whether to generate SSL config (default: False)
 
         Returns:
             Tuple of (frontend_domain, backend_domain)
@@ -615,7 +670,65 @@ class NginxConfigurator:
             frontend_domain = f"{project_name}.{BASE_DOMAIN}"
             backend_domain = f"{project_name}-api.{BASE_DOMAIN}"
 
-            config = f"""# Frontend: {frontend_domain}
+            if enable_ssl:
+                # Generate HTTPS configuration with SSL
+                config = f"""# Frontend: {frontend_domain}
+server {{
+    listen 80;
+    server_name {frontend_domain};
+    return 301 https://$host$request_uri;
+}}
+
+server {{
+    listen 443 ssl;
+    server_name {frontend_domain};
+
+    ssl_certificate /etc/letsencrypt/live/{frontend_domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{frontend_domain}/privkey.pem;
+
+    location / {{
+        proxy_pass http://127.0.0.1:{frontend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }}
+}}
+
+# Backend: {backend_domain}
+server {{
+    listen 80;
+    server_name {backend_domain};
+    return 301 https://$host$request_uri;
+}}
+
+server {{
+    listen 443 ssl;
+    server_name {backend_domain};
+
+    ssl_certificate /etc/letsencrypt/live/{backend_domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{backend_domain}/privkey.pem;
+
+    location / {{
+        proxy_pass http://127.0.0.1:{backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+    }}
+}}
+"""
+            else:
+                # Generate HTTP-only configuration
+                config = f"""# Frontend: {frontend_domain}
 server {{
     listen 80;
     server_name {frontend_domain};
@@ -652,7 +765,7 @@ server {{
 }}
 """
 
-            logger.info(f"✓ Nginx config generated for {project_name}")
+            logger.info(f"✓ Nginx config generated for {project_name} (SSL: {enable_ssl})")
             return (frontend_domain, backend_domain, config)
 
         except Exception as e:
@@ -1055,7 +1168,7 @@ class InfrastructureManager:
             logger.info(f"✓ Service configured: {self.service_name}")
 
             # Phase 5: Nginx configuration
-            logger.info("Phase 5/7: Nginx configuration")
+            logger.info("Phase 5/8: Nginx configuration")
             frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
                 self.project_name,
                 self.ports["frontend"],
@@ -1069,13 +1182,31 @@ class InfrastructureManager:
             self.nginx_configurator.reload_nginx()
             logger.info(f"✓ Nginx configured: {self.domains}")
 
-            # Phase 6: DNS provisioning
-            logger.info("Phase 6/7: DNS provisioning")
+            # Phase 6: SSL certificate provisioning
+            logger.info("Phase 6/8: SSL certificate provisioning")
+            if self.nginx_configurator.generate_ssl_certificates(self.project_name):
+                logger.info("✓ SSL certificates generated successfully")
+                
+                # Regenerate nginx config with SSL
+                frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
+                    self.project_name,
+                    self.ports["frontend"],
+                    self.ports["backend"],
+                    enable_ssl=True
+                )
+                self.nginx_configurator.install_config(self.project_name, config)
+                self.nginx_configurator.reload_nginx()
+                logger.info("✓ Nginx reconfigured with SSL")
+            else:
+                logger.warning("⚠️ SSL certificate generation failed, continuing with HTTP-only")
+            
+            # Phase 7: DNS provisioning
+            logger.info("Phase 7/8: DNS provisioning")
             self.dns_results = self.dns_provisioner.provision_project_dns(self.project_name)
             logger.info(f"✓ DNS provisioned: {self.domains}")
 
-            # Phase 7: Service startup
-            logger.info("Phase 7/7: Service startup")
+            # Phase 8: Service startup
+            logger.info("Phase 8/8: Service startup")
 
             # Start backend service
             self.service_manager.start_backend_service(self.service_name, self.project_path / "backend")
