@@ -434,16 +434,68 @@ class ServiceManager:
         """
         Create PM2 config for frontend service.
 
+        Uses project-specific frontend if available, otherwise falls back to shared dist.
+
         Returns:
             PM2 app name
         """
         try:
             app_name = f"{project_name}-frontend"
-            frontend_dist_path = Path(CLAWD_UI_DIST)
+            
+            # Check if project has its own frontend directory
+            project_frontend_path = project_path / "frontend"
+            
+            if project_frontend_path.exists() and (project_frontend_path / "index.html").exists():
+                # Use project-specific frontend
+                logger.info(f"Using project-specific frontend: {project_frontend_path}")
+                frontend_dist_path = project_frontend_path
+                
+                # Create serve.py if it doesn't exist
+                serve_py = frontend_dist_path / "serve.py"
+                if not serve_py.exists():
+                    serve_script = """#!/usr/bin/env python3
+import http.server
+import socketserver
+import os
+from pathlib import Path
 
-            # Check if dist exists
-            if not frontend_dist_path.exists():
-                raise FileNotFoundError(f"Frontend dist directory not found: {frontend_dist_path}")
+PORT = int(os.getenv('FRONTEND_PORT', '3000'))
+FRONTEND_DIR = os.path.dirname(os.path.abspath(__file__))
+
+class FrontendHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=FRONTEND_DIR, **kwargs)
+
+    def end_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        super().end_headers()
+
+    def do_GET(self):
+        request_path = self.path.split('?')[0]
+        if request_path == '/' or not Path(FRONTEND_DIR, request_path.lstrip('/')).exists():
+            self.path = '/index.html'
+        return super().do_GET()
+
+def main():
+    with socketserver.TCPServer(("", PORT), FrontendHTTPRequestHandler) as httpd:
+        print(f"Serving from {FRONTEND_DIR} on port {PORT}")
+        httpd.serve_forever()
+
+if __name__ == "__main__":
+    main()
+"""
+                    serve_py.write_text(serve_script)
+                    logger.info(f"✓ Created serve.py for project-specific frontend")
+            else:
+                # Use shared frontend (fallback)
+                logger.info(f"Using shared frontend: {CLAWD_UI_DIST}")
+                frontend_dist_path = Path(CLAWD_UI_DIST)
+                
+                # Check if dist exists
+                if not frontend_dist_path.exists():
+                    raise FileNotFoundError(f"Frontend dist directory not found: {frontend_dist_path}")
 
             # Create serve.py if it doesn't exist
             serve_py = frontend_dist_path / "serve.py"
@@ -503,13 +555,31 @@ if __name__ == "__main__":
             logger.error(f"Failed to create frontend service config: {e}")
             raise
 
-    def start_frontend_service(self, app_name: str) -> bool:
+    def start_frontend_service(self, app_name: str, project_path: Path = None) -> bool:
         """Start frontend service."""
         try:
             logger.info(f"Starting frontend service: {app_name}")
 
+            # Try project-specific frontend first, then fallback to shared
+            config_paths = []
+            if project_path:
+                config_paths.append(project_path / "frontend" / f"{app_name}.config.json")
+            config_paths.append(Path(CLAWD_UI_DIST) / f"{app_name}.config.json")
+
+            # Find the first existing config file
+            config_path = None
+            for path in config_paths:
+                if path.exists():
+                    config_path = path
+                    logger.info(f"Using frontend config: {config_path}")
+                    break
+
+            if not config_path:
+                logger.error(f"Frontend config file not found")
+                return False
+
             result = subprocess.run(
-                ["pm2", "start", f"{CLAWD_UI_DIST}/{app_name}.config.json"],
+                ["pm2", "start", str(config_path)],
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -1021,7 +1091,7 @@ class InfrastructureManager:
 
             logger.info(f"✓ Frontend service configured: {self.frontend_app_name}")
 
-            if self.service_manager.start_frontend_service(self.frontend_app_name):
+            if self.service_manager.start_frontend_service(self.frontend_app_name, self.project_path):
                 logger.info(f"✓ Frontend service started: {self.frontend_app_name}")
             else:
                 logger.warning(f"⚠️ Frontend service failed to start: {self.frontend_app_name}")
