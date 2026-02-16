@@ -397,10 +397,10 @@ class ServiceManager:
         """
         try:
             app_name = f"{project_name}-frontend"
-            frontend_dist_path = CLAWD_UI_DIST
+            frontend_dist_path = Path(CLAWD_UI_DIST)
 
             # Check if dist exists
-            if not Path(frontend_dist_path).exists():
+            if not frontend_dist_path.exists():
                 raise FileNotFoundError(f"Frontend dist directory not found: {frontend_dist_path}")
 
             # Create serve.py if it doesn't exist
