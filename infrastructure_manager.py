@@ -629,9 +629,9 @@ server {{
                 logger.error(f"Nginx config test failed: {test_result.stderr}")
                 return False
 
-            # Reload nginx
+            # Reload nginx using systemctl
             result = subprocess.run(
-                ["nginx", "-s", "reload"],
+                ["systemctl", "reload", "nginx"],
                 capture_output=True,
                 text=True,
                 timeout=30
