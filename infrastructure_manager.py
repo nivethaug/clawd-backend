@@ -290,14 +290,19 @@ class ServiceManager:
             logger.error(f"Failed to create backend service config: {e}")
             raise
 
-    def start_backend_service(self, app_name: str) -> bool:
+    def start_backend_service(self, app_name: str, backend_path: Path) -> bool:
         """Start backend service."""
         try:
             logger.info(f"Starting service: {app_name}")
 
-            # Start with PM2
+            # Start with PM2 using ecosystem config
+            ecosystem_path = backend_path / "ecosystem.config.json"
+            if not ecosystem_path.exists():
+                logger.error(f"Ecosystem config not found: {ecosystem_path}")
+                return False
+
             result = subprocess.run(
-                ["pm2", "start", "--name", app_name, "--cwd", "/root/clawd-backend"],
+                ["pm2", "start", str(ecosystem_path)],
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -955,7 +960,7 @@ class InfrastructureManager:
             logger.info("Phase 7/7: Service startup")
 
             # Start backend service
-            self.service_manager.start_backend_service(self.service_name)
+            self.service_manager.start_backend_service(self.service_name, self.project_path / "backend")
             logger.info(f"✓ Backend service started: {self.service_name}")
 
             # Create and start frontend service
