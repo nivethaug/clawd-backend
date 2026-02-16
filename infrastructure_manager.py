@@ -57,7 +57,7 @@ HOSTINGER_DNS_SKILL = "/usr/lib/node_modules/openclaw/skills/hostinger-dns/hosti
 SERVER_IP = "195.200.14.37"  # Default server IP for DNS A records
 
 # Shared runtime venv
-SHARED_VENV_PATH = "/root/dreampilotvenv"
+SHARED_VENV_PATH = "/root/dreampilot/dreampilotvenv"
 
 
 class PortAllocator:
@@ -121,6 +121,10 @@ class DatabaseProvisioner:
     def __init__(self):
         self.container = POSTGRES_CONTAINER
 
+    def _sanitize_db_name(self, name: str) -> str:
+        """Sanitize database name by replacing hyphens with underscores."""
+        return name.replace("-", "_")
+
     def _execute_sql(self, sql: str) -> List[Tuple]:
         """Execute SQL command in PostgreSQL container."""
         try:
@@ -164,8 +168,8 @@ class DatabaseProvisioner:
             Dict with database_name, username, password
         """
         try:
-            db_name = f"{project_name}_db"
-            username = f"{project_name}_user"
+            db_name = f"{self._sanitize_db_name(project_name)}_db"
+            username = f"{self._sanitize_db_name(project_name)}_user"
             password = self._generate_password()
 
             logger.info(f"Creating database: {db_name}")
@@ -201,8 +205,8 @@ class DatabaseProvisioner:
     def drop_database_and_user(self, project_name: str):
         """Drop database and user for project."""
         try:
-            db_name = f"{project_name}_db"
-            username = f"{project_name}_user"
+            db_name = f"{self._sanitize_db_name(project_name)}_db"
+            username = f"{self._sanitize_db_name(project_name)}_user"
 
             logger.info(f"Dropping database: {db_name}")
 
@@ -228,7 +232,7 @@ class DatabaseProvisioner:
     def get_database_size(self, project_name: str) -> int:
         """Get database size in MB."""
         try:
-            db_name = f"{project_name}_db"
+            db_name = f"{self._sanitize_db_name(project_name)}_db"
 
             result = self._execute_sql(
                 f"SELECT pg_database_size('{db_name}') AS size;"
