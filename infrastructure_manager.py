@@ -126,7 +126,7 @@ class DatabaseProvisioner:
         try:
             cmd = [
                 "docker", "exec", self.container,
-                "psql", "-U", POSTGRES_USER, "-c", sql
+                "psql", "-U", POSTGRES_USER, "-d", "defaultdb", "-c", sql
             ]
 
             result = subprocess.run(
