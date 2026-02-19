@@ -16,6 +16,9 @@ import logging
 import sqlite3
 from pathlib import Path
 
+# Import fixed template lookup function
+import template_lookup_fix
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -317,17 +320,33 @@ SECRET_KEY=your-secret-key-here-generate-new-one-in-production
                 try:
                     with open(template_registry_path, 'r') as f:
                         registry = json.load(f)
-
-                    for template in registry.get('templates', []):
-                        if template.get('id') == self.template_id:
-                            repo_url = template.get('repo')
-                            logger.info(f"Found repository URL: {repo_url}")
-                            break
+                        logger.info(f"Registry loaded successfully, {len(registry.get('templates', []))} templates available")
                 except Exception as e:
                     logger.error(f"Failed to read template registry: {e}")
+                    return None
+
+                # Search for template
+                if registry:
+                    templates = registry.get('templates', [])
+                    logger.info(f"Searching through templates for ID: '{self.template_id}'")
+                    
+                    for i, template in enumerate(templates):
+                        template_id_check = template.get('id')
+                        logger.info(f"  Template {i}: ID='{template_id_check}' (comparing to '{self.template_id}')")
+                        
+                        if template_id_check == self.template_id:
+                            repo_url = template.get('repo')
+                            logger.info(f"✓ MATCH FOUND! Template ID '{self.template_id}' matches at index {i}")
+                            logger.info(f"✓ Repository URL: {repo_url}")
+                            logger.info(f"✓ Template Category: {template.get('category')}")
+                            break
+                    else:
+                        logger.error("No templates found in registry (registry is None)")
 
             if not repo_url:
                 logger.error(f"❌ Could not find repository URL for template ID: {self.template_id}")
+                logger.error(f"❌ Template registry path: {template_registry_path}")
+                logger.error(f"❌ Template ID provided: '{self.template_id}'")
                 self.failed_tasks.append("Clone repository")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at task 2")
