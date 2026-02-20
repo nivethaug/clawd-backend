@@ -115,6 +115,30 @@ def init_schema():
         except:
             pass
 
+        # Projects table migration: status (for background OpenClaw initialization)
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'creating'")
+            conn.commit()
+            print("✓ Added status column with default 'creating'")
+        except:
+            pass
+
+        # Projects table migration: openclaw_session_key (for tracking)
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN openclaw_session_key TEXT")
+            conn.commit()
+            print("✓ Added openclaw_session_key column")
+        except:
+            pass
+
+        # Rename: openclaw_session_key → claude_code_session_name
+        try:
+            conn.execute("ALTER TABLE projects RENAME COLUMN openclaw_session_key TO claude_code_session_name")
+            conn.commit()
+            print("✓ Renamed column to claude_code_session_name")
+        except:
+            pass
+
         # Sessions table
         conn.execute("""CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
