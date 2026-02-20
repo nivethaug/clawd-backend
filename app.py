@@ -748,12 +748,12 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
     # Remove frontend DNS record
     try:
         result = subprocess.run(
-            [venv_python, dns_script, "delete_dns_record"],
-            input=json.dumps({
-                "domain": base_domain,
-                "name": frontend_domain,
-                "type": "A"
-            }),
+            [venv_python, dns_script, "delete_dns_record",
+             json.dumps({
+                 "domain": base_domain,
+                 "name": frontend_domain,
+                 "record_type": "A"
+             })],
             capture_output=True,
             text=True,
             timeout=30
@@ -776,12 +776,12 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
     # Remove backend DNS record
     try:
         result = subprocess.run(
-            [venv_python, dns_script, "delete_dns_record"],
-            input=json.dumps({
-                "domain": base_domain,
-                "name": backend_domain,
-                "type": "A"
-            }),
+            [venv_python, dns_script, "delete_dns_record",
+             json.dumps({
+                 "domain": base_domain,
+                 "name": backend_domain,
+                 "record_type": "A"
+             })],
             capture_output=True,
             text=True,
             timeout=30
@@ -938,7 +938,24 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         logger.warning(f"project.json not found at: {project_json_path}")
 
     # Extract project details from metadata or path
-    project_name = project_metadata.get("project_name") or os.path.basename(project_path)
+    project_name = project_metadata.get("project_name")
+    if not project_name:
+        # Extract from path (e.g., "124_test-api-project_20260220_153219" -> "test-api-project")
+        path_basename = os.path.basename(project_path)
+        # Remove ID prefix and timestamp suffix
+        parts = path_basename.split('_', 1)
+        if len(parts) > 1:
+            # Remove timestamp suffix (last _ followed by digits)
+            name_part = parts[1]
+            timestamp_parts = name_part.rsplit('_', 1)
+            if timestamp_parts[-1].isdigit() and len(timestamp_parts[-1]) == 14:  # YYYYMMDDHHMMSS format
+                project_name = timestamp_parts[0]
+            else:
+                project_name = name_part
+        else:
+            project_name = path_basename
+        logger.warning(f"Extracted project name from path: {project_name}")
+
     frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
     backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(".dreambigwithai.com", "")
     db_name = project_metadata.get("database", {}).get("name", "")
@@ -960,6 +977,21 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         db_name = project_metadata.get("database", "")
         if db_name:
             db_user = db_name.replace("_db", "_user")
+
+    # Final fallback: construct from project_name if metadata is incomplete
+    if not frontend_domain and project_name:
+        frontend_domain = project_name
+        logger.info(f"Using constructed frontend domain: {frontend_domain}")
+
+    if not backend_domain and project_name:
+        backend_domain = f"{project_name}-api"
+        logger.info(f"Using constructed backend domain: {backend_domain}")
+
+    if not db_name and project_name:
+        # Convert project name to database format (e.g., "test-api-project" -> "test_api_project_db")
+        db_name = project_name.replace("-", "_") + "_db"
+        db_user = project_name.replace("-", "_") + "_user"
+        logger.info(f"Using constructed database: {db_name}, user: {db_user}")
 
     cleanup_results = {
         "project_name": project_name,
