@@ -466,7 +466,7 @@ def cleanup_nginx_config(project_name: str) -> Dict[str, Any]:
 
     # Test and reload nginx
     try:
-        subprocess.run(["nginx", "-t"], capture_output=True, check=True, timeout=10)
+        subprocess.run(["/usr/sbin/nginx", "-t"], capture_output=True, check=True, timeout=10)
         subprocess.run(["systemctl", "reload", "nginx"], capture_output=True, check=True, timeout=10)
         results["nginx_reloaded"] = True
         logger.info("Nginx configuration tested and reloaded successfully")
