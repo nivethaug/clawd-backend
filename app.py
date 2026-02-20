@@ -625,6 +625,19 @@ def cleanup_nginx_config(project_name: str) -> Dict[str, Any]:
         "errors": []
     }
 
+    # Remove symlink FIRST (must be removed before config file to avoid nginx test failure)
+    if os.path.exists(symlink_path) or os.path.islink(symlink_path):
+        try:
+            subprocess.run(["rm", "-f", symlink_path], capture_output=True, check=True)
+            results["symlink_removed"] = True
+            logger.info(f"Removed Nginx symlink: {symlink_path}")
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to remove symlink: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+    else:
+        logger.info(f"Nginx symlink not found (already removed): {symlink_path}")
+
     # Remove config file
     if os.path.exists(config_path):
         try:
@@ -637,19 +650,6 @@ def cleanup_nginx_config(project_name: str) -> Dict[str, Any]:
             logger.error(error_msg)
     else:
         logger.info(f"Nginx config not found (already removed): {config_path}")
-
-    # Remove symlink
-    if os.path.exists(symlink_path):
-        try:
-            subprocess.run(["rm", "-f", symlink_path], capture_output=True, check=True)
-            results["symlink_removed"] = True
-            logger.info(f"Removed Nginx symlink: {symlink_path}")
-        except subprocess.CalledProcessError as e:
-            error_msg = f"Failed to remove symlink: {e}"
-            results["errors"].append(error_msg)
-            logger.error(error_msg)
-    else:
-        logger.info(f"Nginx symlink not found (already removed): {symlink_path}")
 
     # Test and reload nginx
     try:
