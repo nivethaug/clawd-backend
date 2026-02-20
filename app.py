@@ -615,8 +615,8 @@ def cleanup_nginx_config(project_name: str) -> Dict[str, Any]:
     """
     logger.info(f"Cleaning up Nginx config for project: {project_name}")
 
-    config_path = f"/etc/nginx/sites-available/{project_name}"
-    symlink_path = f"/etc/nginx/sites-enabled/{project_name}"
+    config_path = f"/etc/nginx/sites-available/{project_name}.conf"
+    symlink_path = f"/etc/nginx/sites-enabled/{project_name}.conf"
 
     results = {
         "config_removed": False,
@@ -624,6 +624,19 @@ def cleanup_nginx_config(project_name: str) -> Dict[str, Any]:
         "nginx_reloaded": False,
         "errors": []
     }
+
+    # Remove symlink FIRST (must be removed before config file to avoid nginx test failure)
+    if os.path.exists(symlink_path) or os.path.islink(symlink_path):
+        try:
+            subprocess.run(["rm", "-f", symlink_path], capture_output=True, check=True)
+            results["symlink_removed"] = True
+            logger.info(f"Removed Nginx symlink: {symlink_path}")
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to remove symlink: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+    else:
+        logger.info(f"Nginx symlink not found (already removed): {symlink_path}")
 
     # Remove config file
     if os.path.exists(config_path):
@@ -637,19 +650,6 @@ def cleanup_nginx_config(project_name: str) -> Dict[str, Any]:
             logger.error(error_msg)
     else:
         logger.info(f"Nginx config not found (already removed): {config_path}")
-
-    # Remove symlink
-    if os.path.exists(symlink_path):
-        try:
-            subprocess.run(["rm", "-f", symlink_path], capture_output=True, check=True)
-            results["symlink_removed"] = True
-            logger.info(f"Removed Nginx symlink: {symlink_path}")
-        except subprocess.CalledProcessError as e:
-            error_msg = f"Failed to remove symlink: {e}"
-            results["errors"].append(error_msg)
-            logger.error(error_msg)
-    else:
-        logger.info(f"Nginx symlink not found (already removed): {symlink_path}")
 
     # Test and reload nginx
     try:
@@ -748,12 +748,12 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
     # Remove frontend DNS record
     try:
         result = subprocess.run(
-            [venv_python, dns_script, "delete_dns_record"],
-            input=json.dumps({
-                "domain": base_domain,
-                "name": frontend_domain,
-                "type": "A"
-            }),
+            [venv_python, dns_script, "delete_dns_record",
+             json.dumps({
+                 "domain": base_domain,
+                 "name": frontend_domain,
+                 "record_type": "A"
+             })],
             capture_output=True,
             text=True,
             timeout=30
@@ -776,12 +776,12 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
     # Remove backend DNS record
     try:
         result = subprocess.run(
-            [venv_python, dns_script, "delete_dns_record"],
-            input=json.dumps({
-                "domain": base_domain,
-                "name": backend_domain,
-                "type": "A"
-            }),
+            [venv_python, dns_script, "delete_dns_record",
+             json.dumps({
+                 "domain": base_domain,
+                 "name": backend_domain,
+                 "record_type": "A"
+             })],
             capture_output=True,
             text=True,
             timeout=30
@@ -896,12 +896,33 @@ def cleanup_project_directory(project_path: str) -> Dict[str, Any]:
         logger.error(error_msg)
         return results
 
-    # Remove directory
+    # Remove directory with better error handling
     if os.path.exists(project_path):
         try:
+            # First pass: try normal removal
             shutil.rmtree(project_path)
             results["removed"] = True
             logger.info(f"Removed project directory: {project_path}")
+        except OSError as e:
+            # Second pass: if directory not empty, try removing subdirectories individually
+            logger.warning(f"First pass failed ({e}), trying subdirectory removal...")
+            try:
+                for item in os.listdir(project_path):
+                    item_path = os.path.join(project_path, item)
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                        logger.info(f"Removed subdirectory: {item_path}")
+                    else:
+                        os.remove(item_path)
+                        logger.info(f"Removed file: {item_path}")
+                # Finally remove the parent directory
+                os.rmdir(project_path)
+                results["removed"] = True
+                logger.info(f"Removed project directory (second pass): {project_path}")
+            except Exception as e2:
+                error_msg = f"Failed to remove directory (both attempts): {e}, {e2}"
+                results["error"] = error_msg
+                logger.error(error_msg)
         except Exception as e:
             error_msg = f"Failed to remove directory: {e}"
             results["error"] = error_msg
@@ -938,7 +959,22 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         logger.warning(f"project.json not found at: {project_json_path}")
 
     # Extract project details from metadata or path
-    project_name = project_metadata.get("project_name") or os.path.basename(project_path)
+    project_name = project_metadata.get("project_name")
+    if not project_name:
+        # Extract from path (e.g., "124_test-api-project_20260220_153219" -> "test-api-project")
+        import re
+        path_basename = os.path.basename(project_path)
+        # Remove ID prefix and timestamp suffix (pattern: _YYYYMMDD_HHMMSS at the end)
+        # Matches: 123_project-name_20260220_153219 -> extracts "project-name"
+        match = re.match(r'^\d+_(.+?)_\d{8}_\d{6}$', path_basename)
+        if match:
+            project_name = match.group(1)
+        else:
+            # Fallback: just remove ID prefix
+            parts = path_basename.split('_', 1)
+            project_name = parts[1] if len(parts) > 1 else path_basename
+        logger.warning(f"Extracted project name from path: {project_name}")
+
     frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
     backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(".dreambigwithai.com", "")
     db_name = project_metadata.get("database", {}).get("name", "")
@@ -960,6 +996,21 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         db_name = project_metadata.get("database", "")
         if db_name:
             db_user = db_name.replace("_db", "_user")
+
+    # Final fallback: construct from project_name if metadata is incomplete
+    if not frontend_domain and project_name:
+        frontend_domain = project_name
+        logger.info(f"Using constructed frontend domain: {frontend_domain}")
+
+    if not backend_domain and project_name:
+        backend_domain = f"{project_name}-api"
+        logger.info(f"Using constructed backend domain: {backend_domain}")
+
+    if not db_name and project_name:
+        # Convert project name to database format (e.g., "test-api-project" -> "test_api_project_db")
+        db_name = project_name.replace("-", "_") + "_db"
+        db_user = project_name.replace("-", "_") + "_user"
+        logger.info(f"Using constructed database: {db_name}, user: {db_user}")
 
     cleanup_results = {
         "project_name": project_name,
