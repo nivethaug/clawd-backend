@@ -615,8 +615,8 @@ def cleanup_nginx_config(project_name: str) -> Dict[str, Any]:
     """
     logger.info(f"Cleaning up Nginx config for project: {project_name}")
 
-    config_path = f"/etc/nginx/sites-available/{project_name}"
-    symlink_path = f"/etc/nginx/sites-enabled/{project_name}"
+    config_path = f"/etc/nginx/sites-available/{project_name}.conf"
+    symlink_path = f"/etc/nginx/sites-enabled/{project_name}.conf"
 
     results = {
         "config_removed": False,
