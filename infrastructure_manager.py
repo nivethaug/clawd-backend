@@ -451,67 +451,66 @@ class ServiceManager:
                 logger.info(f"Using project-specific frontend: {project_frontend_path}")
                 frontend_dist_path = project_frontend_path
                 
-                # Create serve.py if it doesn't exist
-                serve_py = frontend_dist_path / "serve.py"
-                if not serve_py.exists():
-                    serve_script = """#!/usr/bin/env python3
-import http.server
-import socketserver
-import os
-from pathlib import Path
-
-PORT = int(os.getenv('FRONTEND_PORT', '3000'))
-FRONTEND_DIR = os.path.dirname(os.path.abspath(__file__))
-
-class FrontendHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=FRONTEND_DIR, **kwargs)
-
-    def end_headers(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        super().end_headers()
-
-    def do_GET(self):
-        request_path = self.path.split('?')[0]
-        if request_path == '/' or not Path(FRONTEND_DIR, request_path.lstrip('/')).exists():
-            self.path = '/index.html'
-        return super().do_GET()
-
-def main():
-    with socketserver.TCPServer(("", PORT), FrontendHTTPRequestHandler) as httpd:
-        print(f"Serving from {FRONTEND_DIR} on port {PORT}")
-        httpd.serve_forever()
-
-if __name__ == "__main__":
-    main()
-"""
-                    serve_py.write_text(serve_script)
-                    logger.info(f"✓ Created serve.py for project-specific frontend")
+                # Build the Vite app for production serving with correct MIME types
+                package_json = frontend_dist_path / "package.json"
+                dist_dir = frontend_dist_path / "dist"
                 
-                # Create PM2 ecosystem config for project-specific frontend
+                if package_json.exists():
+                    logger.info(f"Building frontend for production (correct MIME types)...")
+                    try:
+                        # Install dependencies
+                        install_result = subprocess.run(
+                            ["npm", "install"],
+                            capture_output=True,
+                            text=True,
+                            timeout=300,
+                            cwd=str(frontend_dist_path)
+                        )
+                        
+                        if install_result.returncode != 0:
+                            logger.warning(f"npm install warnings: {install_result.stderr}")
+                        else:
+                            logger.info(f"✓ npm install completed")
+                        
+                        # Build the app
+                        build_result = subprocess.run(
+                            ["npm", "run", "build"],
+                            capture_output=True,
+                            text=True,
+                            timeout=300,
+                            cwd=str(frontend_dist_path)
+                        )
+                        
+                        if build_result.returncode != 0:
+                            logger.error(f"Frontend build failed: {build_result.stderr}")
+                            raise Exception(f"Frontend build failed: {build_result.stderr}")
+                        else:
+                            logger.info(f"✓ Frontend built successfully")
+                            frontend_dist_path = dist_dir
+                    except subprocess.TimeoutExpired:
+                        logger.error("Frontend build timed out")
+                        raise Exception("Frontend build timed out")
+                
+                # Create PM2 ecosystem config for project-specific frontend using serve package
                 ecosystem = f"""{{
   "name": "{app_name}",
-  "script": "serve.py",
-  "cwd": "{frontend_dist_path}",
-  "interpreter": "python3",
+  "script": "npx",
+  "args": "serve dist -l {frontend_port}",
+  "cwd": "{project_path}/frontend",
+  "interpreter": "none",
   "env": {{
-    "FRONTEND_PORT": "{frontend_port}",
     "PROJECT_NAME": "{project_name}"
   }},
   "error_file": "{project_path}/frontend/logs/error.log",
   "out_file": "{project_path}/frontend/logs/out.log",
   "log_date_format": "YYYY-MM-DD HH:mm:ss Z"
-}}
-"""
-                
+}}"""                
                 # Create logs directory
                 logs_dir = project_path / "frontend" / "logs"
                 logs_dir.mkdir(parents=True, exist_ok=True)
                 
                 # Save ecosystem file
-                ecosystem_path = frontend_dist_path / f"{app_name}.config.json"
+                ecosystem_path = project_path / "frontend" / f"{app_name}.config.json"
                 ecosystem_path.write_text(ecosystem)
                 
                 logger.info(f"✓ Frontend PM2 config created: {app_name}")
@@ -603,7 +602,7 @@ if __name__ == "__main__":
 """
 
                 # Save ecosystem file
-                ecosystem_path = frontend_dist_path / f"{app_name}.config.json"
+                ecosystem_path = project_path / "frontend" / f"{app_name}.config.json"
                 ecosystem_path.write_text(ecosystem)
 
                 logger.info(f"✓ Frontend PM2 config created: {app_name}")
