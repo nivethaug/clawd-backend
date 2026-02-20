@@ -16,8 +16,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-# Import fixed template lookup function
-import template_lookup_fix
+# Note: template_lookup_fix was removed - not needed
 
 # Configure logging
 logging.basicConfig(
