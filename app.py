@@ -1,11 +1,13 @@
 import os
+import sys
 import uuid
 import json
 import shutil
 import re
 import logging
+import subprocess
 from datetime import datetime
-from typing import AsyncGenerator, Any, Optional
+from typing import AsyncGenerator, Any, Optional, Dict, List
 from contextlib import contextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Body
@@ -335,25 +337,555 @@ async def get_project_types():
     
     return [ProjectTypeResponse(**dict(t)) for t in types]
 
+
+# ============================================================================
+# Infrastructure Cleanup Helpers
+# ============================================================================
+
+def cleanup_pm2_services(project_name: str) -> Dict[str, Any]:
+    """
+    Stop and remove PM2 services for a project.
+
+    Args:
+        project_name: Project name (used to build service names)
+
+    Returns:
+        Dict with cleanup status
+    """
+    logger.info(f"Cleaning up PM2 services for project: {project_name}")
+
+    frontend_service = f"{project_name}-frontend"
+    backend_service = f"{project_name}-backend"
+
+    results = {
+        "frontend": {"stopped": False, "deleted": False, "error": None},
+        "backend": {"stopped": False, "deleted": False, "error": None}
+    }
+
+    # Stop and delete frontend service
+    try:
+        subprocess.run(["pm2", "stop", frontend_service], capture_output=True, timeout=10)
+        results["frontend"]["stopped"] = True
+        logger.info(f"Stopped PM2 service: {frontend_service}")
+    except subprocess.TimeoutExpired:
+        results["frontend"]["error"] = "Timeout stopping service"
+        logger.warning(f"Timeout stopping {frontend_service}")
+    except Exception as e:
+        logger.warning(f"Failed to stop {frontend_service}: {e}")
+
+    try:
+        subprocess.run(["pm2", "delete", frontend_service], capture_output=True, timeout=10)
+        results["frontend"]["deleted"] = True
+        logger.info(f"Deleted PM2 service: {frontend_service}")
+    except subprocess.TimeoutExpired:
+        if results["frontend"]["stopped"]:
+            results["frontend"]["error"] = "Timeout deleting service"
+        logger.warning(f"Timeout deleting {frontend_service}")
+    except Exception as e:
+        logger.warning(f"Failed to delete {frontend_service}: {e}")
+
+    # Stop and delete backend service
+    try:
+        subprocess.run(["pm2", "stop", backend_service], capture_output=True, timeout=10)
+        results["backend"]["stopped"] = True
+        logger.info(f"Stopped PM2 service: {backend_service}")
+    except subprocess.TimeoutExpired:
+        results["backend"]["error"] = "Timeout stopping service"
+        logger.warning(f"Timeout stopping {backend_service}")
+    except Exception as e:
+        logger.warning(f"Failed to stop {backend_service}: {e}")
+
+    try:
+        subprocess.run(["pm2", "delete", backend_service], capture_output=True, timeout=10)
+        results["backend"]["deleted"] = True
+        logger.info(f"Deleted PM2 service: {backend_service}")
+    except subprocess.TimeoutExpired:
+        if results["backend"]["stopped"]:
+            results["backend"]["error"] = "Timeout deleting service"
+        logger.warning(f"Timeout deleting {backend_service}")
+    except Exception as e:
+        logger.warning(f"Failed to delete {backend_service}: {e}")
+
+    # Save PM2 process list
+    try:
+        subprocess.run(["pm2", "save"], capture_output=True, timeout=10)
+        logger.info("Saved PM2 process list")
+    except Exception as e:
+        logger.warning(f"Failed to save PM2 list: {e}")
+
+    return results
+
+
+def cleanup_nginx_config(project_name: str) -> Dict[str, Any]:
+    """
+    Remove Nginx configuration for a project.
+
+    Args:
+        project_name: Project name (used for config filename)
+
+    Returns:
+        Dict with cleanup status
+    """
+    logger.info(f"Cleaning up Nginx config for project: {project_name}")
+
+    config_path = f"/etc/nginx/sites-available/{project_name}"
+    symlink_path = f"/etc/nginx/sites-enabled/{project_name}"
+
+    results = {
+        "config_removed": False,
+        "symlink_removed": False,
+        "nginx_reloaded": False,
+        "errors": []
+    }
+
+    # Remove config file
+    if os.path.exists(config_path):
+        try:
+            subprocess.run(["rm", "-f", config_path], capture_output=True, check=True)
+            results["config_removed"] = True
+            logger.info(f"Removed Nginx config: {config_path}")
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to remove config: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+    else:
+        logger.info(f"Nginx config not found (already removed): {config_path}")
+
+    # Remove symlink
+    if os.path.exists(symlink_path):
+        try:
+            subprocess.run(["rm", "-f", symlink_path], capture_output=True, check=True)
+            results["symlink_removed"] = True
+            logger.info(f"Removed Nginx symlink: {symlink_path}")
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to remove symlink: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+    else:
+        logger.info(f"Nginx symlink not found (already removed): {symlink_path}")
+
+    # Test and reload nginx
+    try:
+        subprocess.run(["nginx", "-t"], capture_output=True, check=True, timeout=10)
+        subprocess.run(["systemctl", "reload", "nginx"], capture_output=True, check=True, timeout=10)
+        results["nginx_reloaded"] = True
+        logger.info("Nginx configuration tested and reloaded successfully")
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Failed to reload nginx: {e}"
+        results["errors"].append(error_msg)
+        logger.error(error_msg)
+    except subprocess.TimeoutExpired:
+        error_msg = "Timeout reloading nginx"
+        results["errors"].append(error_msg)
+        logger.error(error_msg)
+
+    return results
+
+
+def cleanup_ssl_certificates(frontend_domain: str, backend_domain: str) -> Dict[str, Any]:
+    """
+    Remove SSL certificates for a project.
+
+    Args:
+        frontend_domain: Frontend domain (e.g., "project.dreambigwithai.com")
+        backend_domain: Backend domain (e.g., "project-api.dreambigwithai.com")
+
+    Returns:
+        Dict with cleanup status
+    """
+    logger.info(f"Cleaning up SSL certificates for {frontend_domain} and {backend_domain}")
+
+    frontend_cert_path = f"/etc/letsencrypt/live/{frontend_domain}"
+    backend_cert_path = f"/etc/letsencrypt/live/{backend_domain}"
+
+    results = {
+        "frontend_removed": False,
+        "backend_removed": False,
+        "errors": []
+    }
+
+    # Remove frontend certificate
+    if os.path.exists(frontend_cert_path):
+        try:
+            subprocess.run(["rm", "-rf", frontend_cert_path], capture_output=True, check=True)
+            results["frontend_removed"] = True
+            logger.info(f"Removed SSL certificate: {frontend_cert_path}")
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to remove frontend cert: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+    else:
+        logger.info(f"Frontend SSL cert not found: {frontend_cert_path}")
+
+    # Remove backend certificate
+    if os.path.exists(backend_cert_path):
+        try:
+            subprocess.run(["rm", "-rf", backend_cert_path], capture_output=True, check=True)
+            results["backend_removed"] = True
+            logger.info(f"Removed SSL certificate: {backend_cert_path}")
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to remove backend cert: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+    else:
+        logger.info(f"Backend SSL cert not found: {backend_cert_path}")
+
+    return results
+
+
+def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, Any]:
+    """
+    Remove DNS A records using Hostinger DNS API.
+
+    Args:
+        frontend_domain: Frontend domain name (e.g., "project")
+        backend_domain: Backend domain name (e.g., "project-api")
+
+    Returns:
+        Dict with cleanup status
+    """
+    logger.info(f"Cleaning up DNS records for {frontend_domain} and {backend_domain}")
+
+    results = {
+        "frontend_removed": False,
+        "backend_removed": False,
+        "errors": []
+    }
+
+    # Import hostinger-dns skill
+    skill_dir = "/usr/lib/node_modules/openclaw/skills/hostinger-dns"
+    venv_python = f"{skill_dir}/venv/bin/python"
+    dns_script = f"{skill_dir}/hostinger_dns.py"
+    base_domain = "dreambigwithai.com"
+
+    # Remove frontend DNS record
+    try:
+        result = subprocess.run(
+            [venv_python, dns_script, "delete_dns_record"],
+            input=json.dumps({
+                "domain": base_domain,
+                "name": frontend_domain,
+                "type": "A"
+            }),
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode == 0:
+            results["frontend_removed"] = True
+            logger.info(f"Removed DNS record: {frontend_domain}.{base_domain}")
+        else:
+            logger.warning(f"Failed to remove DNS record: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        error_msg = "Timeout removing frontend DNS record"
+        results["errors"].append(error_msg)
+        logger.warning(error_msg)
+    except Exception as e:
+        error_msg = f"Error removing frontend DNS: {e}"
+        results["errors"].append(error_msg)
+        logger.warning(error_msg)
+
+    # Remove backend DNS record
+    try:
+        result = subprocess.run(
+            [venv_python, dns_script, "delete_dns_record"],
+            input=json.dumps({
+                "domain": base_domain,
+                "name": backend_domain,
+                "type": "A"
+            }),
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode == 0:
+            results["backend_removed"] = True
+            logger.info(f"Removed DNS record: {backend_domain}.{base_domain}")
+        else:
+            logger.warning(f"Failed to remove DNS record: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        error_msg = "Timeout removing backend DNS record"
+        results["errors"].append(error_msg)
+        logger.warning(error_msg)
+    except Exception as e:
+        error_msg = f"Error removing backend DNS: {e}"
+        results["errors"].append(error_msg)
+        logger.warning(error_msg)
+
+    return results
+
+
+def cleanup_postgresql_database(db_name: str, db_user: str) -> Dict[str, Any]:
+    """
+    Drop PostgreSQL database and user for a project.
+
+    Args:
+        db_name: Database name (e.g., "project_db")
+        db_user: Database user (e.g., "project_user")
+
+    Returns:
+        Dict with cleanup status
+    """
+    logger.info(f"Cleaning up PostgreSQL database: {db_name}, user: {db_user}")
+
+    results = {
+        "database_dropped": False,
+        "user_dropped": False,
+        "errors": []
+    }
+
+    # Drop database
+    try:
+        subprocess.run(
+            ["docker", "exec", "-i", "dreampilot-postgres", "psql", "-U", "admin", "-d", "defaultdb"],
+            input=f"DROP DATABASE IF EXISTS {db_name};\n",
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10
+        )
+        results["database_dropped"] = True
+        logger.info(f"Dropped database: {db_name}")
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Failed to drop database: {e.stderr if e.stderr else str(e)}"
+        results["errors"].append(error_msg)
+        logger.warning(error_msg)
+    except subprocess.TimeoutExpired:
+        error_msg = "Timeout dropping database"
+        results["errors"].append(error_msg)
+        logger.warning(error_msg)
+
+    # Drop user
+    try:
+        subprocess.run(
+            ["docker", "exec", "-i", "dreampilot-postgres", "psql", "-U", "admin", "-d", "defaultdb"],
+            input=f"DROP USER IF EXISTS {db_user};\n",
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10
+        )
+        results["user_dropped"] = True
+        logger.info(f"Dropped database user: {db_user}")
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Failed to drop user: {e.stderr if e.stderr else str(e)}"
+        results["errors"].append(error_msg)
+        logger.warning(error_msg)
+    except subprocess.TimeoutExpired:
+        error_msg = "Timeout dropping user"
+        results["errors"].append(error_msg)
+        logger.warning(error_msg)
+
+    return results
+
+
+def cleanup_project_directory(project_path: str) -> Dict[str, Any]:
+    """
+    Remove project directory safely with validation.
+
+    Args:
+        project_path: Full path to project directory
+
+    Returns:
+        Dict with cleanup status
+    """
+    logger.info(f"Cleaning up project directory: {project_path}")
+
+    results = {
+        "removed": False,
+        "error": None
+    }
+
+    # Validate path is within DreamPilot root
+    dreampilot_root = "/root/dreampilot/projects/website"
+    normalized_path = os.path.abspath(project_path)
+    normalized_root = os.path.abspath(dreampilot_root)
+
+    if not normalized_path.startswith(normalized_root):
+        error_msg = f"Path traversal attempt detected: {project_path}"
+        results["error"] = error_msg
+        logger.error(error_msg)
+        return results
+
+    # Remove directory
+    if os.path.exists(project_path):
+        try:
+            shutil.rmtree(project_path)
+            results["removed"] = True
+            logger.info(f"Removed project directory: {project_path}")
+        except Exception as e:
+            error_msg = f"Failed to remove directory: {e}"
+            results["error"] = error_msg
+            logger.error(error_msg)
+    else:
+        logger.info(f"Project directory not found (already removed): {project_path}")
+
+    return results
+
+
+def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
+    """
+    Full infrastructure cleanup for a project.
+
+    Args:
+        project_path: Full path to project directory
+
+    Returns:
+        Dict with complete cleanup status
+    """
+    logger.info(f"Starting infrastructure cleanup for: {project_path}")
+
+    # Load project metadata
+    project_json_path = os.path.join(project_path, "project.json")
+    project_metadata = {}
+
+    if os.path.exists(project_json_path):
+        try:
+            with open(project_json_path, 'r') as f:
+                project_metadata = json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load project.json: {e}")
+    else:
+        logger.warning(f"project.json not found at: {project_json_path}")
+
+    # Extract project details from metadata or path
+    project_name = project_metadata.get("project_name") or os.path.basename(project_path)
+    frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
+    backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(".dreambigwithai.com", "")
+    db_name = project_metadata.get("database", {}).get("name", "")
+    db_user = project_metadata.get("database", {}).get("user", "")
+
+    # Fallback: extract from full domains
+    if not frontend_domain:
+        full_frontend = project_metadata.get("frontend_domain", "")
+        if full_frontend:
+            frontend_domain = full_frontend.replace(".dreambigwithai.com", "")
+
+    if not backend_domain:
+        full_backend = project_metadata.get("backend_domain", "")
+        if full_backend:
+            backend_domain = full_backend.replace(".dreambigwithai.com", "")
+
+    # Fallback: extract from project.json database field
+    if not db_name:
+        db_name = project_metadata.get("database", "")
+        if db_name:
+            db_user = db_name.replace("_db", "_user")
+
+    cleanup_results = {
+        "project_name": project_name,
+        "project_path": project_path,
+        "steps": {}
+    }
+
+    # STEP 1: Stop and remove PM2 services
+    try:
+        cleanup_results["steps"]["pm2"] = cleanup_pm2_services(project_name)
+    except Exception as e:
+        logger.error(f"Error in PM2 cleanup: {e}")
+        cleanup_results["steps"]["pm2"] = {"error": str(e)}
+
+    # STEP 2: Remove Nginx configuration
+    try:
+        cleanup_results["steps"]["nginx"] = cleanup_nginx_config(project_name)
+    except Exception as e:
+        logger.error(f"Error in Nginx cleanup: {e}")
+        cleanup_results["steps"]["nginx"] = {"error": str(e)}
+
+    # STEP 3: Remove SSL certificates
+    try:
+        full_frontend = f"{frontend_domain}.dreambigwithai.com" if frontend_domain else ""
+        full_backend = f"{backend_domain}.dreambigwithai.com" if backend_domain else ""
+        if full_frontend or full_backend:
+            cleanup_results["steps"]["ssl"] = cleanup_ssl_certificates(full_frontend, full_backend)
+        else:
+            logger.info("Skipping SSL cleanup: no domains found in metadata")
+            cleanup_results["steps"]["ssl"] = {"skipped": True}
+    except Exception as e:
+        logger.error(f"Error in SSL cleanup: {e}")
+        cleanup_results["steps"]["ssl"] = {"error": str(e)}
+
+    # STEP 4: Remove DNS records
+    try:
+        if frontend_domain or backend_domain:
+            cleanup_results["steps"]["dns"] = cleanup_dns_records(frontend_domain, backend_domain)
+        else:
+            logger.info("Skipping DNS cleanup: no domains found in metadata")
+            cleanup_results["steps"]["dns"] = {"skipped": True}
+    except Exception as e:
+        logger.error(f"Error in DNS cleanup: {e}")
+        cleanup_results["steps"]["dns"] = {"error": str(e)}
+
+    # STEP 5: Drop PostgreSQL database
+    try:
+        if db_name and db_user:
+            cleanup_results["steps"]["database"] = cleanup_postgresql_database(db_name, db_user)
+        else:
+            logger.info("Skipping database cleanup: no database info found in metadata")
+            cleanup_results["steps"]["database"] = {"skipped": True}
+    except Exception as e:
+        logger.error(f"Error in database cleanup: {e}")
+        cleanup_results["steps"]["database"] = {"error": str(e)}
+
+    # STEP 6: Remove project directory
+    try:
+        cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path)
+    except Exception as e:
+        logger.error(f"Error in directory cleanup: {e}")
+        cleanup_results["steps"]["directory"] = {"error": str(e)}
+
+    # Log final status
+    logger.info(f"Infrastructure cleanup completed for {project_name}")
+
+    return cleanup_results
+
+
 @app.delete("/projects/{project_id}")
 async def delete_project(project_id: int):
-    # Step 1: Get all session_keys linked to this project before deletion
+    # Step 1: Get project info before deletion
     with get_db() as conn:
+        project = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project with id {project_id} not found")
+
+        project_path = project['project_path']
+        project_name = project['name']
+
+        # Get all session_keys linked to this project before deletion
         sessions_to_delete = conn.execute(
             "SELECT session_key FROM sessions WHERE project_id = ?",
             (project_id,)
         ).fetchall()
         session_keys = [row['session_key'] for row in sessions_to_delete]
-        
-        # Step 2: Delete messages first (foreign key dependency)
+
+    # Step 2: Infrastructure cleanup (BEFORE database deletion)
+    cleanup_status = {"infrastructure": None, "error": None}
+
+    if project_path and os.path.exists(project_path):
+        try:
+            logger.info(f"Starting infrastructure cleanup for project {project_id}: {project_path}")
+            cleanup_status["infrastructure"] = cleanup_infrastructure(project_path)
+        except Exception as e:
+            logger.error(f"Infrastructure cleanup failed: {e}")
+            cleanup_status["error"] = str(e)
+            # Continue with database deletion even if cleanup fails
+    else:
+        logger.info(f"Project path not found or empty: {project_path}")
+        cleanup_status["infrastructure"] = {"skipped": True, "reason": "No project path"}
+
+    # Step 3: Delete messages first (foreign key dependency)
+    with get_db() as conn:
         conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))
-        
-        # Step 3: Delete sessions from backend database
+
+        # Step 4: Delete sessions from backend database
         conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
-        
-        # Step 4: Delete project from database
+
+        # Step 5: Delete project from database
         conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-        
+
         conn.commit()
     
     # Step 5: Delete corresponding OpenClaw sessions
@@ -395,14 +927,18 @@ async def delete_project(project_id: int):
             # Write back the updated sessions.json
             with open(sessions_json_path, 'w') as f:
                 json.dump(sessions_data, f, indent=2)
-            
+
             print(f"Deleted {deleted_count} OpenClaw sessions for project {project_id}")
-            
+
         except Exception as e:
             # Log error but don't fail the project deletion
             print(f"Warning: Failed to delete OpenClaw sessions: {e}")
-    
-    return {"status": "deleted", "message": "Project deleted"}
+
+    return {
+        "status": "deleted",
+        "message": "Project deleted",
+        "cleanup": cleanup_status
+    }
 
 class UpdateProjectRequest(BaseModel):
     """Request model for updating project name and description only."""
