@@ -896,12 +896,33 @@ def cleanup_project_directory(project_path: str) -> Dict[str, Any]:
         logger.error(error_msg)
         return results
 
-    # Remove directory
+    # Remove directory with better error handling
     if os.path.exists(project_path):
         try:
+            # First pass: try normal removal
             shutil.rmtree(project_path)
             results["removed"] = True
             logger.info(f"Removed project directory: {project_path}")
+        except OSError as e:
+            # Second pass: if directory not empty, try removing subdirectories individually
+            logger.warning(f"First pass failed ({e}), trying subdirectory removal...")
+            try:
+                for item in os.listdir(project_path):
+                    item_path = os.path.join(project_path, item)
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                        logger.info(f"Removed subdirectory: {item_path}")
+                    else:
+                        os.remove(item_path)
+                        logger.info(f"Removed file: {item_path}")
+                # Finally remove the parent directory
+                os.rmdir(project_path)
+                results["removed"] = True
+                logger.info(f"Removed project directory (second pass): {project_path}")
+            except Exception as e2:
+                error_msg = f"Failed to remove directory (both attempts): {e}, {e2}"
+                results["error"] = error_msg
+                logger.error(error_msg)
         except Exception as e:
             error_msg = f"Failed to remove directory: {e}"
             results["error"] = error_msg
@@ -941,19 +962,17 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     project_name = project_metadata.get("project_name")
     if not project_name:
         # Extract from path (e.g., "124_test-api-project_20260220_153219" -> "test-api-project")
+        import re
         path_basename = os.path.basename(project_path)
-        # Remove ID prefix and timestamp suffix
-        parts = path_basename.split('_', 1)
-        if len(parts) > 1:
-            # Remove timestamp suffix (last _ followed by digits)
-            name_part = parts[1]
-            timestamp_parts = name_part.rsplit('_', 1)
-            if timestamp_parts[-1].isdigit() and len(timestamp_parts[-1]) == 14:  # YYYYMMDDHHMMSS format
-                project_name = timestamp_parts[0]
-            else:
-                project_name = name_part
+        # Remove ID prefix and timestamp suffix (pattern: _YYYYMMDD_HHMMSS at the end)
+        # Matches: 123_project-name_20260220_153219 -> extracts "project-name"
+        match = re.match(r'^\d+_(.+?)_\d{8}_\d{6}$', path_basename)
+        if match:
+            project_name = match.group(1)
         else:
-            project_name = path_basename
+            # Fallback: just remove ID prefix
+            parts = path_basename.split('_', 1)
+            project_name = parts[1] if len(parts) > 1 else path_basename
         logger.warning(f"Extracted project name from path: {project_name}")
 
     frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
