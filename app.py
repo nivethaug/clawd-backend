@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from httpx import AsyncClient
 
 import image_handler
-from database import get_db, init_schema
+from database_adapter import get_db, init_schema, is_master_database, validate_project_database_deletion, delete_project_database, get_database_info
 from project_manager import ProjectFileManager
 from chat_handlers import generate_sse_stream, generate_sse_stream_with_db_save, handle_chat_with_image, handle_chat_text_only
 from file_utils import FileUtils
@@ -1059,7 +1059,8 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     # STEP 5: Drop PostgreSQL database
     try:
         if db_name and db_user:
-            cleanup_results["steps"]["database"] = cleanup_postgresql_database(db_name, db_user)
+            # Use validated database deletion with master DB protection
+            cleanup_results["steps"]["database"] = delete_project_database(project_name, force=False)
         else:
             logger.info("Skipping database cleanup: no database info found in metadata")
             cleanup_results["steps"]["database"] = {"skipped": True}
@@ -1081,7 +1082,21 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
 
 
 @app.delete("/projects/{project_id}")
-async def delete_project(project_id: int):
+async def delete_project(project_id: int, force: bool = False):
+    """
+    Delete a project with infrastructure cleanup and master DB protection.
+    
+    Args:
+        project_id: ID of the project to delete
+        force: Force deletion even if validation fails (DANGEROUS)
+    
+    Returns:
+        Deletion status with cleanup results
+    """
+    # Security: Log force deletion attempts
+    if force:
+        logger.warning(f"⚠️ FORCE deletion requested for project {project_id}")
+    
     # Step 1: Get project info before deletion
     with get_db() as conn:
         project = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
@@ -1091,6 +1106,36 @@ async def delete_project(project_id: int):
 
         project_path = project['project_path']
         project_name = project['name']
+
+        # Master DB Protection: Validate no master database is being deleted
+        db_info = get_database_info()
+        if db_info["backend"] == "postgresql":
+            # Check if project database matches project pattern (not master DB)
+            # Project DBs are named: {project_name}_db
+            # Master DB is protected and should never be deleted
+            if is_master_database(f"{project_name}_db"):
+                error_msg = "CRITICAL: Attempt to delete master database blocked!"
+                logger.error(f"❌ {error_msg}")
+                raise HTTPException(status_code=403, detail=error_msg)
+        else:
+            logger.info("✓ Master database validation passed (SQLite mode)")
+
+        # Validate project database deletion if in PostgreSQL mode
+        if db_info["backend"] == "postgresql":
+            db_name = f"{project_name.replace('-', '_')}_db"
+            is_allowed, reason = validate_project_database_deletion(project_name, db_name)
+            
+            if not is_allowed and not force:
+                error_msg = f"Project database deletion rejected: {reason}"
+                logger.error(f"❌ {error_msg}")
+                raise HTTPException(status_code=400, detail={
+                    "success": False,
+                    "error": reason,
+                    "database": db_name,
+                    "force_required": True
+                })
+            elif force:
+                logger.warning(f"⚠️ FORCE deletion: {reason}")
 
         # Get all session_keys linked to this project before deletion
         sessions_to_delete = conn.execute(
