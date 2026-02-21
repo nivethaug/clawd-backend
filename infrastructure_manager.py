@@ -661,18 +661,21 @@ class NginxConfigurator:
         self.config_dir = NGINX_CONFIG_DIR
         self.enabled_dir = NGINX_ENABLED_DIR
 
-    def generate_ssl_certificates(self, project_name: str) -> bool:
+    def generate_ssl_certificates(self, domain: str) -> bool:
         """
         Generate SSL certificates using certbot for both frontend and backend domains.
+
+        Args:
+            domain: Domain name (e.g., "ecommerce22")
 
         Returns:
             True if successful, False otherwise
         """
         try:
-            frontend_domain = f"{project_name}.{BASE_DOMAIN}"
-            backend_domain = f"{project_name}-api.{BASE_DOMAIN}"
+            frontend_domain = f"{domain}.{BASE_DOMAIN}"
+            backend_domain = f"{domain}-api.{BASE_DOMAIN}"
 
-            logger.info(f"🔐 Generating SSL certificates for {project_name}")
+            logger.info(f"🔐 Generating SSL certificates for {domain}")
             logger.info(f"   Frontend: {frontend_domain}")
             logger.info(f"   Backend:  {backend_domain}")
 
@@ -710,22 +713,22 @@ class NginxConfigurator:
             logger.error(f"Failed to generate SSL certificates: {e}")
             return False
 
-    def generate_config(self, project_name: str, frontend_port: int, backend_port: int, enable_ssl: bool = False) -> Tuple[str, str]:
+    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = False) -> Tuple[str, str]:
         """
         Generate nginx configuration for project.
 
         Args:
-            project_name: Project name
+            domain: Domain name (e.g., "ecommerce22")
             frontend_port: Frontend service port
             backend_port: Backend service port
             enable_ssl: Whether to generate SSL config (default: False)
 
         Returns:
-            Tuple of (frontend_domain, backend_domain)
+            Tuple of (frontend_domain, backend_domain, config)
         """
         try:
-            frontend_domain = f"{project_name}.{BASE_DOMAIN}"
-            backend_domain = f"{project_name}-api.{BASE_DOMAIN}"
+            frontend_domain = f"{domain}.{BASE_DOMAIN}"
+            backend_domain = f"{domain}-api.{BASE_DOMAIN}"
 
             if enable_ssl:
                 # Generate HTTPS configuration with SSL
@@ -822,18 +825,24 @@ server {{
 }}
 """
 
-            logger.info(f"✓ Nginx config generated for {project_name} (SSL: {enable_ssl})")
+            logger.info(f"✓ Nginx config generated for {domain} (SSL: {enable_ssl})")
             return (frontend_domain, backend_domain, config)
 
         except Exception as e:
             logger.error(f"Failed to generate nginx config: {e}")
             raise
 
-    def install_config(self, project_name: str, config: str) -> bool:
-        """Install nginx configuration and enable it."""
+    def install_config(self, domain: str, config: str) -> bool:
+        """
+        Install nginx configuration and enable it.
+
+        Args:
+            domain: Domain name (e.g., "ecommerce22")
+            config: Nginx configuration content
+        """
         try:
-            config_path = Path(self.config_dir) / f"{project_name}.conf"
-            symlink_path = Path(self.enabled_dir) / f"{project_name}.conf"
+            config_path = Path(self.config_dir) / f"{domain}.conf"
+            symlink_path = Path(self.enabled_dir) / f"{domain}.conf"
 
             # Write config file
             config_path.write_text(config)
@@ -1099,9 +1108,13 @@ class DNSProvisioner:
             logger.error(f"Failed to create A record: {e}")
             return False
 
-    def provision_project_dns(self, project_name: str) -> Dict[str, bool]:
+    def provision_project_dns(self, domain: str, project_name: str = "project") -> Dict[str, bool]:
         """
         Provision DNS records for a project (frontend + backend).
+
+        Args:
+            domain: Domain name (e.g., "ecommerce22")
+            project_name: Project name (for logging, optional)
 
         Returns:
             Dict with results for frontend and backend DNS
@@ -1114,10 +1127,11 @@ class DNSProvisioner:
         }
 
         try:
-            frontend_subdomain = project_name
-            backend_subdomain = f"{project_name}-api"
+            # Use the provided domain parameter
+            frontend_subdomain = domain
+            backend_subdomain = f"{domain}-api"
 
-            logger.info(f"Provisioning DNS for project: {project_name}")
+            logger.info(f"Provisioning DNS for project: {project_name} (domain: {domain})")
             logger.info(f"  Frontend: {frontend_subdomain}.{BASE_DOMAIN}")
             logger.info(f"  Backend:  {backend_subdomain}.{BASE_DOMAIN}")
 
@@ -1172,9 +1186,10 @@ class DNSProvisioner:
 class InfrastructureManager:
     """Main infrastructure manager orchestrating all components."""
 
-    def __init__(self, project_name: str, project_path: Path):
+    def __init__(self, project_name: str, project_path: Path, domain: str = None):
         self.project_name = project_name
         self.project_path = project_path
+        self.domain = domain or project_name  # Use domain if provided, otherwise fall back to project_name
         self.port_allocator = PortAllocator()
         self.db_provisioner = DatabaseProvisioner()
         self.service_manager = ServiceManager()
@@ -1227,7 +1242,7 @@ class InfrastructureManager:
             # Phase 5: Nginx configuration
             logger.info("Phase 5/8: Nginx configuration")
             frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
-                self.project_name,
+                self.domain,
                 self.ports["frontend"],
                 self.ports["backend"]
             )
@@ -1235,23 +1250,23 @@ class InfrastructureManager:
                 "frontend": frontend_domain,
                 "backend": backend_domain
             }
-            self.nginx_configurator.install_config(self.project_name, config)
+            self.nginx_configurator.install_config(self.domain, config)
             self.nginx_configurator.reload_nginx()
             logger.info(f"✓ Nginx configured: {self.domains}")
 
             # Phase 6: SSL certificate provisioning
             logger.info("Phase 6/8: SSL certificate provisioning")
-            if self.nginx_configurator.generate_ssl_certificates(self.project_name):
+            if self.nginx_configurator.generate_ssl_certificates(self.domain):
                 logger.info("✓ SSL certificates generated successfully")
-                
+
                 # Regenerate nginx config with SSL
                 frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
-                    self.project_name,
+                    self.domain,
                     self.ports["frontend"],
                     self.ports["backend"],
                     enable_ssl=True
                 )
-                self.nginx_configurator.install_config(self.project_name, config)
+                self.nginx_configurator.install_config(self.domain, config)
                 self.nginx_configurator.reload_nginx()
                 logger.info("✓ Nginx reconfigured with SSL")
             else:
@@ -1259,7 +1274,7 @@ class InfrastructureManager:
             
             # Phase 7: DNS provisioning
             logger.info("Phase 7/8: DNS provisioning")
-            self.dns_results = self.dns_provisioner.provision_project_dns(self.project_name)
+            self.dns_results = self.dns_provisioner.provision_project_dns(self.domain, self.project_name)
             logger.info(f"✓ DNS provisioned: {self.domains}")
 
             # Phase 8: Service startup

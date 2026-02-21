@@ -73,6 +73,30 @@ class OpenClawWrapper:
         except Exception as e:
             logger.error(f"✗ Failed to update project status: {e}")
 
+    def get_project_domain(self) -> str:
+        """Load project domain from database."""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            try:
+                cursor = conn.execute(
+                    "SELECT domain FROM projects WHERE id = ?",
+                    (self.project_id,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    domain = row['domain']
+                    logger.info(f"✓ Loaded project domain: {domain}")
+                    return domain
+                else:
+                    logger.warning(f"⚠️ Project {self.project_id} not found in database")
+                    return self.project_name  # Fall back to project name
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"✗ Failed to load project domain: {e}")
+            return self.project_name  # Fall back to project name
+
     def load_rules(self) -> str:
         """Load all rule files for OpenClaw context."""
         try:
@@ -273,8 +297,12 @@ That's all. Execute Phase {phase} now.
         try:
             from infrastructure_manager import InfrastructureManager
 
-            # Create infrastructure manager
-            infra = InfrastructureManager(self.project_name, self.project_path)
+            # Load domain from database
+            domain = self.get_project_domain()
+            logger.info(f"Using domain: {domain}")
+
+            # Create infrastructure manager with domain parameter
+            infra = InfrastructureManager(self.project_name, self.project_path, domain=domain)
 
             # Provision all infrastructure (DB, ports, service, nginx)
             success = infra.provision_all()
