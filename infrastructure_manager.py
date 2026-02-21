@@ -1108,12 +1108,13 @@ class DNSProvisioner:
             logger.error(f"Failed to create A record: {e}")
             return False
 
-    def provision_project_dns(self, domain: str) -> Dict[str, bool]:
+    def provision_project_dns(self, domain: str, project_name: str = "project") -> Dict[str, bool]:
         """
         Provision DNS records for a project (frontend + backend).
 
         Args:
             domain: Domain name (e.g., "ecommerce22")
+            project_name: Project name (for logging, optional)
 
         Returns:
             Dict with results for frontend and backend DNS
@@ -1130,7 +1131,7 @@ class DNSProvisioner:
             frontend_subdomain = domain
             backend_subdomain = f"{domain}-api"
 
-            logger.info(f"Provisioning DNS for project: {self.project_name} (domain: {domain})")
+            logger.info(f"Provisioning DNS for project: {project_name} (domain: {domain})")
             logger.info(f"  Frontend: {frontend_subdomain}.{BASE_DOMAIN}")
             logger.info(f"  Backend:  {backend_subdomain}.{BASE_DOMAIN}")
 
@@ -1273,7 +1274,7 @@ class InfrastructureManager:
             
             # Phase 7: DNS provisioning
             logger.info("Phase 7/8: DNS provisioning")
-            self.dns_results = self.dns_provisioner.provision_project_dns(self.domain)
+            self.dns_results = self.dns_provisioner.provision_project_dns(self.domain, self.project_name)
             logger.info(f"✓ DNS provisioned: {self.domains}")
 
             # Phase 8: Service startup
