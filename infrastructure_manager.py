@@ -1067,7 +1067,10 @@ class DNSProvisioner:
                         return (True, current_ip)
                     return (False, None)
             else:
-                logger.error(f"DNS check failed: {result.stderr}")
+                logger.error(f"DNS check failed:")
+                logger.error(f"  Return code: {result.returncode}")
+                logger.error(f"  Stdout: {result.stdout}")
+                logger.error(f"  Stderr: {result.stderr}")
                 return (False, None)
 
         except Exception as e:
@@ -1115,7 +1118,10 @@ class DNSProvisioner:
                 logger.info(f"  Note: DNS propagation takes 5-60 minutes")
                 return True
             else:
-                logger.error(f"Failed to create A record: {result.stderr}")
+                logger.error(f"Failed to create A record:")
+                logger.error(f"  Return code: {result.returncode}")
+                logger.error(f"  Stdout: {result.stdout}")
+                logger.error(f"  Stderr: {result.stderr}")
                 return False
 
         except Exception as e:
