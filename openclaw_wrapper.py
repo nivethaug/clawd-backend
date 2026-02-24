@@ -57,11 +57,12 @@ TEMPLATE_REGISTRY = RULES_DIR / "frontend" / "template-registry.json"
 class OpenClawWrapper:
     """Wrapper that uses OpenClaw sub-agent for infrastructure provisioning."""
 
-    def __init__(self, project_id: int, project_path: str, project_name: str, description: str = None):
+    def __init__(self, project_id: int, project_path: str, project_name: str, description: str = None, template_id: str = None):
         self.project_id = project_id
         self.project_path = Path(project_path)
         self.project_name = project_name
         self.description = description or ""
+        self.template_id = template_id
         self.completed_phases = []
         self.failed_phases = []
 
@@ -254,7 +255,7 @@ That's all. Execute Phase {phase} now.
         - Read description
         - Determine best template (already done via Groq)
         """
-        logger.info("📋 Phase 1/7: Analyze Project")
+        logger.info("📋 Phase 1/8: Analyze Project")
 
         # Template already selected via Groq in app.py
         # This phase is just confirmation
@@ -274,7 +275,7 @@ That's all. Execute Phase {phase} now.
         - Backend files already created
         - This phase just verifies completion
         """
-        logger.info("📋 Phase 2/7: Template Setup")
+        logger.info("📋 Phase 2/8: Template Setup")
 
         # Verify frontend exists
         frontend_path = self.project_path / "frontend"
@@ -304,7 +305,7 @@ That's all. Execute Phase {phase} now.
         - Grant privileges
         - Update backend environment variables
         """
-        logger.info("📋 Phase 3/7: Database Provisioning")
+        logger.info("📋 Phase 3/8: Database Provisioning")
 
         try:
             from infrastructure_manager import InfrastructureManager
@@ -328,7 +329,7 @@ That's all. Execute Phase {phase} now.
         - Assign backend port (8010-9000)
         - Ensure no conflict
         """
-        logger.info("📋 Phase 4/7: Port Allocation")
+        logger.info("📋 Phase 4/8: Port Allocation")
 
         try:
             from infrastructure_manager import InfrastructureManager
@@ -351,7 +352,7 @@ That's all. Execute Phase {phase} now.
         - Start backend FastAPI service
         - Verify health endpoint
         """
-        logger.info("📋 Phase 5/7: Service Setup")
+        logger.info("📋 Phase 5/8: Service Setup")
 
         try:
             from infrastructure_manager import InfrastructureManager
@@ -390,7 +391,7 @@ That's all. Execute Phase {phase} now.
         - Map subdomains
         - Reload nginx
         """
-        logger.info("📋 Phase 6/7: Nginx Routing")
+        logger.info("📋 Phase 6/8: Nginx Routing")
 
         # Nginx routing is handled by infrastructure_manager in phase 5
         logger.info("✓ Nginx routing handled in infrastructure manager")
@@ -406,13 +407,125 @@ That's all. Execute Phase {phase} now.
         - Verify backend reachable
         - Verify database connection
         """
-        logger.info("📋 Phase 7/7: Verification")
+        logger.info("📋 Phase 7/8: Verification")
 
         # Verification is handled by infrastructure_manager in phase 5
         logger.info("✓ Verification handled in infrastructure manager")
 
         self.completed_phases.append("Verification")
         return True
+
+    def phase_8_frontend_optimization(self) -> bool:
+        """
+        Phase 8: Frontend Optimization & Personalization
+
+        - Clean cloned frontend repository
+        - Remove unnecessary pages/components
+        - Modify existing pages with project branding
+        - Add minimal new pages if required
+        - Ensure build succeeds
+        - Restart PM2 frontend service
+
+        ONLY applies to website projects (type_id = 1)
+        """
+        logger.info("📋 Phase 8/8: Frontend Optimization & Personalization")
+
+        try:
+            # Check if this is a website project (type_id = 1)
+            # We need to check the database for type_id
+            project_type_id = self._get_project_type_id()
+
+            if project_type_id != 1:
+                logger.info("✓ Skipping frontend optimization (not a website project)")
+                logger.info(f"  Project type_id: {project_type_id}")
+                self.completed_phases.append("Frontend Optimization (Skipped)")
+                return True
+
+            # Import FrontendOptimizer
+            from frontend_optimizer import FrontendOptimizer
+
+            # Create optimizer instance
+            optimizer = FrontendOptimizer(
+                project_id=self.project_id,
+                project_path=self.project_path,
+                project_name=self.project_name,
+                description=self.description,
+                template_id=self.template_id or "generic"
+            )
+
+            # Run optimization
+            success = optimizer.run_optimization()
+
+            if success:
+                # Restart PM2 frontend service
+                service_name = f"{self.project_name.lower().replace(' ', '-')}-frontend"
+                if optimizer.restart_pm2_service(service_name):
+                    logger.info("✓ PM2 frontend service restarted")
+                else:
+                    logger.warning("⚠️ PM2 frontend service restart failed, continuing...")
+
+                self.completed_phases.append("Frontend Optimization")
+                logger.info("✓ Frontend optimization completed successfully")
+                return True
+            else:
+                logger.error("❌ Frontend optimization failed")
+                return False
+
+        except ImportError as e:
+            logger.warning(f"⚠️ FrontendOptimizer module not available: {e}")
+            logger.info("✓ Skipping frontend optimization (module not found)")
+            self.completed_phases.append("Frontend Optimization (Skipped)")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Frontend optimization failed: {e}")
+            return False
+
+    def _get_project_type_id(self) -> int:
+        """Load project type_id from database.
+
+        Returns:
+            Project type_id (1 = website, other = simple project)
+        """
+        try:
+            if USE_POSTGRES:
+                # PostgreSQL mode
+                conn = psycopg2.connect(
+                    host=DB_HOST,
+                    port=DB_PORT,
+                    database=DB_NAME,
+                    user=DB_USER,
+                    password=DB_PASSWORD
+                )
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT type_id FROM projects WHERE id = %s",
+                        (self.project_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return row[0] if isinstance(row, (tuple, list)) else row.get('type_id')
+                    return None
+                finally:
+                    conn.close()
+            else:
+                # SQLite mode
+                conn = sqlite3.connect(DB_PATH)
+                conn.row_factory = sqlite3.Row
+                try:
+                    cursor = conn.execute(
+                        "SELECT type_id FROM projects WHERE id = ?",
+                        (self.project_id,)
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        return row['type_id']
+                    return None
+                finally:
+                    conn.close()
+        except Exception as e:
+            logger.error(f"✗ Failed to load project type_id: {e}")
+            return None
 
     def run_all_phases(self):
         """Execute all 7 phases in order."""
@@ -421,7 +534,7 @@ That's all. Execute Phase {phase} now.
             logger.info(f"📁 Project path: {self.project_path}")
             logger.info(f"📝 Project name: {self.project_name}")
 
-            total_phases = 7
+            total_phases = 8
             phases_succeeded = 0
 
             # Phase 1: Analyze Project
@@ -501,8 +614,19 @@ That's all. Execute Phase {phase} now.
                 logger.error("❌ Initialization failed at phase 7")
                 return
 
+            # Phase 8: Frontend Optimization & Personalization
+            logger.info(f"📋 Phase 8/{total_phases}: Frontend Optimization & Personalization")
+            if self.phase_8_frontend_optimization():
+                phases_succeeded += 1
+                logger.info(f"✓ Phase 8 completed!")
+            else:
+                self.failed_phases.append("Frontend Optimization")
+                self.update_status("failed")
+                logger.error("❌ Initialization failed at phase 8")
+                return
+
             # All phases completed!
-            if phases_succeeded == 7:
+            if phases_succeeded == 8:
                 logger.info(f"✅ All {total_phases} infrastructure provisioning phases completed successfully!")
                 self.update_status("ready")
                 logger.info(f"✓ Project {self.project_id} status updated to 'ready'")
@@ -522,24 +646,27 @@ That's all. Execute Phase {phase} now.
 def main():
     """Main entry point."""
     if len(sys.argv) < 4:
-        print("Usage: python3 openclaw_wrapper.py <project_id> <project_path> <project_name> [description]")
+        print("Usage: python3 openclaw_wrapper.py <project_id> <project_path> <project_name> [description] [template_id]")
         print("  project_id: Database project ID")
         print("  project_path: Absolute path to project folder")
         print("  project_name: Project name")
         print("  description: (optional) Project description")
+        print("  template_id: (optional) Selected frontend template ID")
         sys.exit(1)
 
     project_id = int(sys.argv[1])
     project_path = sys.argv[2]
     project_name = sys.argv[3]
     description = sys.argv[4] if len(sys.argv) > 4 else None
+    template_id = sys.argv[5] if len(sys.argv) > 5 else None
 
     # Create and run wrapper
     wrapper = OpenClawWrapper(
         project_id=project_id,
         project_path=project_path,
         project_name=project_name,
-        description=description
+        description=description,
+        template_id=template_id
     )
 
     wrapper.run_all_phases()
