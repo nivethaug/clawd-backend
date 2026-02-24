@@ -1,13 +1,6 @@
-"""
-PostgreSQL Database Module for Clawd Backend.
-Handles schema initialization, migrations, and database connections.
-Supports PostgreSQL with connection pooling and transaction safety.
-"""
-
 import os
 import psycopg2
 from psycopg2 import pool, sql
-from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
 from typing import Optional, Dict, Any, List
 import logging
@@ -24,6 +17,10 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "StrongAdminPass123")
 # Connection pool (for better performance)
 connection_pool: Optional[pool.ThreadedConnectionPool] = None
 
+# Use RealDictCursor (dict-like rows) for SQLite compatibility
+# This makes psycopg2 behave like SQLite's Row factory
+USE_DICT_CURSOR = os.getenv("USE_DICT_CURSOR", "true").lower() == "true"
+
 
 def get_connection_pool() -> pool.ThreadedConnectionPool:
     """
@@ -34,6 +31,18 @@ def get_connection_pool() -> pool.ThreadedConnectionPool:
 
     if connection_pool is None:
         logger.info("Creating PostgreSQL connection pool...")
+        
+        # Set cursor_factory based on environment
+        cursor_factory = None
+        if USE_DICT_CURSOR:
+            try:
+                from psycopg2.extras import RealDictCursor as _RealDictCursor
+                cursor_factory = _RealDictCursor
+                logger.info("✓ Using RealDictCursor for dict-like rows")
+            except ImportError:
+                logger.warning("RealDictCursor not available, using standard cursor")
+                cursor_factory = None
+        
         connection_pool = pool.ThreadedConnectionPool(
             minconn=5,
             maxconn=20,
@@ -42,172 +51,259 @@ def get_connection_pool() -> pool.ThreadedConnectionPool:
             database=DB_NAME,
             user=DB_USER,
             password=DB_PASSWORD,
-            cursor_factory=RealDictCursor
+            cursor_factory=cursor_factory
         )
         logger.info(f"✓ Connection pool created (host={DB_HOST}, db={DB_NAME})")
 
     return connection_pool
 
 
+class CursorAsConnection:
+    """
+    Wrapper to make a psycopg2 cursor behave like a SQLite connection.
+    This allows app.py code to use conn.execute() without modification.
+    """
+    def __init__(self, cursor, connection):
+        self._cursor = cursor
+        self._connection = connection
+        self.closed = False
+
+    def execute(self, query, params=None):
+        """
+        Execute query through cursor and return self for chaining.
+        Converts SQLite-style '?' placeholders to PostgreSQL '%s'.
+        """
+        # Convert SQLite-style ? placeholders to PostgreSQL %s
+        postgres_query = query.replace('?', '%s')
+        if query != postgres_query:
+            logger.debug(f"Converted query placeholders: '?' → '%s'")
+        self._cursor.execute(postgres_query, params or ())
+        return self
+
+    def executemany(self, query, params):
+        """
+        Execute many queries through cursor.
+        Converts SQLite-style '?' placeholders to PostgreSQL '%s'.
+        """
+        # Convert SQLite-style ? placeholders to PostgreSQL %s
+        postgres_query = query.replace('?', '%s')
+        return self._cursor.executemany(postgres_query, params)
+
+    def fetchall(self):
+        """Fetch all results."""
+        return self._cursor.fetchall()
+
+    def fetchone(self):
+        """Fetch one result."""
+        return self._cursor.fetchone()
+
+    def fetchmany(self, size=1):
+        """Fetch many results."""
+        return self._cursor.fetchmany(size)
+
+    def commit(self):
+        """Commit transaction."""
+        return self._connection.commit()
+
+    def rollback(self):
+        """Rollback transaction."""
+        return self._connection.rollback()
+
+    def cursor(self):
+        """Return the underlying cursor (for cursor operations)."""
+        return self._cursor
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        if exc_type is None:
+            self._connection.commit()
+        else:
+            self._connection.rollback()
+        self.closed = True
+
+
 @contextmanager
 def get_db():
     """
     Database connection context manager.
-    Yields a connection with dict-like access (RealDictCursor).
+    Yields a cursor-as-connection wrapper for SQLite compatibility.
     Automatically returns connection to pool on exit.
     Uses connection pooling for better performance.
+
+    Note: Uses CursorAsConnection wrapper to make psycopg2 cursor
+    behave like SQLite connection (execute(), fetchall(), etc.).
     """
     pool = get_connection_pool()
     conn = pool.getconn()
     try:
-        yield conn
+        with conn.cursor() as cur:
+            yield CursorAsConnection(cur, conn)
     finally:
         pool.putconn(conn)
 
 
 def init_schema():
     """
-    Initialize PostgreSQL database schema with all required tables.
-    Creates tables if they don't exist.
-    Uses parameterized queries for SQL injection protection.
+    Initialize database schema with all required tables and migrations.
+    Creates tables if they don't exist, runs migrations for missing columns.
+    Uses direct cursor/connection access for schema operations.
     """
-    with get_db() as conn:
+    pool = get_connection_pool()
+    conn = pool.getconn()
+    try:
+        def _run_migration(migration_fn):
+            """Helper to run migrations safely with rollback on error."""
+            try:
+                migration_fn()
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.debug(f"Migration failed (expected if already exists): {e}")
+
         with conn.cursor() as cur:
             # Users table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    email TEXT UNIQUE NOT NULL,
-                    name TEXT,
-                    password TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            logger.info("✓ Users table created/verified")
+            cur.execute("""CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email TEXT UNIQUE,
+                name TEXT,
+                password TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.commit()
+
+            # Users table migrations (each in its own transaction)
+            def migrate_email():
+                cur.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            _run_migration(migrate_email)
+
+            def migrate_password():
+                cur.execute("ALTER TABLE users ADD COLUMN password TEXT")
+            _run_migration(migrate_password)
 
             # Project types table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS project_types (
-                    id SERIAL PRIMARY KEY,
-                    type TEXT UNIQUE NOT NULL,
-                    display_name TEXT NOT NULL,
-                    template_md_path TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            logger.info("✓ Project types table created/verified")
+            cur.execute("""CREATE TABLE IF NOT EXISTS project_types (
+                id SERIAL PRIMARY KEY,
+                type TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL,
+                template_md_path TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.commit()
 
-            # Seed default project types (idempotent)
-            cur.execute("""
-                INSERT INTO project_types (type, display_name, template_md_path)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (type) DO NOTHING
-            """, ('website', 'Website', 'templates/website.md'))
+            # Seed default project types
+            default_types = [
+                ('website', 'Website', 'templates/website.md'),
+                ('telegrambot', 'Telegram Bot', 'templates/telegram_bot.md'),
+                ('discordbot', 'Discord Bot', 'templates/discord_bot.md'),
+                ('tradingbot', 'Trading Bot', 'templates/trading_bot.md'),
+                ('scheduler', 'Scheduler', 'templates/scheduler.md'),
+                ('custom', 'Custom', 'templates/custom.md'),
+            ]
             
-            cur.execute("""
-                INSERT INTO project_types (type, display_name, template_md_path)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (type) DO NOTHING
-            """, ('telegrambot', 'Telegram Bot', 'templates/telegram_bot.md'))
-            
-            cur.execute("""
-                INSERT INTO project_types (type, display_name, template_md_path)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (type) DO NOTHING
-            """, ('discordbot', 'Discord Bot', 'templates/discord_bot.md'))
-            
-            cur.execute("""
-                INSERT INTO project_types (type, display_name, template_md_path)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (type) DO NOTHING
-            """, ('tradingbot', 'Trading Bot', 'templates/trading_bot.md'))
-            
-            cur.execute("""
-                INSERT INTO project_types (type, display_name, template_md_path)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (type) DO NOTHING
-            """, ('scheduler', 'Scheduler', 'templates/scheduler.md'))
-            
-            cur.execute("""
-                INSERT INTO project_types (type, display_name, template_md_path)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (type) DO NOTHING
-            """, ('custom', 'Custom', 'templates/custom.md'))
-            logger.info("✓ Default project types seeded (idempotent)")
+            for type_slug, display_name, template_path in default_types:
+                cur.execute(
+                    "INSERT INTO project_types (type, display_name, template_md_path) VALUES (%s, %s, %s) ON CONFLICT (type) DO NOTHING",
+                    (type_slug, display_name, template_path)
+                )
+            conn.commit()
 
             # Projects table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS projects (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    project_path TEXT NOT NULL DEFAULT '',
-                    type_id INTEGER,
-                    domain VARCHAR(255) NOT NULL DEFAULT '',
-                    status TEXT NOT NULL DEFAULT 'creating',
-                    archived INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    claude_code_session_name TEXT,
-                    openclaw_session_key TEXT,
-                    template_id TEXT,
-                    FOREIGN KEY (type_id) REFERENCES project_types(id) ON DELETE RESTRICT ON UPDATE CASCADE
-                )
-            """)
-            logger.info("✓ Projects table created/verified")
+            cur.execute("""CREATE TABLE IF NOT EXISTS projects (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                project_path TEXT NOT NULL DEFAULT '',
+                type_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (type_id) REFERENCES project_types(id) ON DELETE RESTRICT ON UPDATE CASCADE
+            )""")
+            conn.commit()
 
-            # Unique index on domain
-            cur.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain)
-                WHERE domain IS NOT NULL AND domain != ''
-            """)
-            logger.info("✓ Domain unique index created/verified")
+            # Projects table migrations (each in its own transaction)
+            def migrate_description():
+                cur.execute("ALTER TABLE projects ADD COLUMN description TEXT")
+            _run_migration(migrate_description)
+
+            def migrate_project_path():
+                cur.execute("ALTER TABLE projects ADD COLUMN project_path TEXT NOT NULL DEFAULT ''")
+            _run_migration(migrate_project_path)
+
+            def migrate_type_id():
+                cur.execute("ALTER TABLE projects ADD COLUMN type_id INTEGER")
+            _run_migration(migrate_type_id)
+
+            def migrate_domain():
+                cur.execute("ALTER TABLE projects ADD COLUMN domain VARCHAR(255) NOT NULL DEFAULT ''")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain)")
+                logger.info("✓ Added domain column and unique index")
+            _run_migration(migrate_domain)
+
+            def migrate_status():
+                cur.execute("ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'creating'")
+                logger.info("✓ Added status column with default 'creating'")
+            _run_migration(migrate_status)
+
+            def migrate_openclaw_session_key():
+                cur.execute("ALTER TABLE projects ADD COLUMN openclaw_session_key TEXT")
+                logger.info("✓ Added openclaw_session_key column")
+            _run_migration(migrate_openclaw_session_key)
+
+            def rename_claude_code_session_name():
+                cur.execute("ALTER TABLE projects RENAME COLUMN openclaw_session_key TO claude_code_session_name")
+                logger.info("✓ Renamed column to claude_code_session_name")
+            _run_migration(rename_claude_code_session_name)
 
             # Sessions table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id SERIAL PRIMARY KEY,
-                    project_id INTEGER NOT NULL,
-                    session_key TEXT UNIQUE NOT NULL,
-                    label TEXT,
-                    archived INTEGER DEFAULT 0,
-                    scope TEXT,
-                    channel TEXT DEFAULT 'webchat',
-                    agent_id TEXT DEFAULT 'main',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            logger.info("✓ Sessions table created/verified")
+            cur.execute("""CREATE TABLE IF NOT EXISTS sessions (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL,
+                session_key TEXT UNIQUE NOT NULL,
+                label TEXT,
+                archived INTEGER DEFAULT 0,
+                scope TEXT,
+                channel TEXT DEFAULT 'webchat',
+                agent_id TEXT DEFAULT 'main',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.commit()
 
             # Messages table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS messages (
-                    id SERIAL PRIMARY KEY,
-                    session_id INTEGER NOT NULL,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    image TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            logger.info("✓ Messages table created/verified")
-
+            cur.execute("""CREATE TABLE IF NOT EXISTS messages (
+                id SERIAL PRIMARY KEY,
+                session_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                image TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
             conn.commit()
-            logger.info("✅ PostgreSQL schema initialization complete")
+
+            # Messages table migration
+            def migrate_image():
+                cur.execute("ALTER TABLE messages ADD COLUMN image TEXT")
+            _run_migration(migrate_image)
+
+            logger.info("✓ Database schema initialized")
+    finally:
+        pool.putconn(conn)
 
 
 def is_master_database(db_name: str) -> bool:
     """
-    Check if a database name is the master database (protected).
+    Check if a database name is master database (protected).
     
     Args:
         db_name: Database name to check
     
     Returns:
-        True if it's the master database, False otherwise
+        True if it's master database, False otherwise
     """
     protected_names = [DB_NAME, 'dreampilot', 'defaultdb', 'postgres']
     return db_name.lower() in [name.lower() for name in protected_names]
@@ -270,27 +366,28 @@ def delete_project_database(project_name: str, force: bool = False) -> Dict[str,
         logger.warning(f"⚠️ FORCE deletion requested for database: {db_name}")
     
     try:
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                # Drop user (if exists)
-                try:
-                    cur.execute(sql.SQL("DROP USER IF EXISTS %s"), (sql.Identifier(db_user),))
-                    logger.info(f"✓ Dropped user: {db_user}")
-                except Exception as e:
-                    logger.warning(f"User drop warning: {e}")
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        
+        with conn.cursor() as cur:
+            # Drop user (if exists)
+            try:
+                cur.execute(sql.SQL(f"DROP USER IF EXISTS {sql.Identifier(db_user)}"))
+                logger.info(f"✓ Dropped user: {db_user}")
+            except Exception as e:
+                logger.warning(f"User drop warning: {e}")
+            
+            # Drop database (if exists)
+            cur.execute(sql.SQL(f"DROP DATABASE IF EXISTS {sql.Identifier(db_name)}"))
+            logger.info(f"✓ Dropped database: {db_name}")
+            conn.commit()
                 
-                # Drop database (if exists)
-                cur.execute(sql.SQL("DROP DATABASE IF EXISTS %s"), (sql.Identifier(db_name),))
-                logger.info(f"✓ Dropped database: {db_name}")
-                
-                conn.commit()
-                
-                return {
-                    "success": True,
-                    "database": db_name,
-                    "user": db_user,
-                    "reason": reason
-                }
+            return {
+                "success": True,
+                "database": db_name,
+                "user": db_user,
+                "reason": reason
+            }
                 
     except Exception as e:
         logger.error(f"❌ Failed to delete project database: {e}")
@@ -304,23 +401,22 @@ def delete_project_database(project_name: str, force: bool = False) -> Dict[str,
 def test_connection() -> Dict[str, Any]:
     """
     Test PostgreSQL connection and return connection details.
-    
+
     Returns:
         Dict with connection status and details
     """
     try:
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT version()")
-                version = cur.fetchone()
-                logger.info(f"✅ PostgreSQL connection successful: {version}")
-                return {
-                    "status": "ok",
-                    "version": version,
-                    "host": DB_HOST,
-                    "port": DB_PORT,
-                    "database": DB_NAME
-                }
+        with get_db() as cur:
+            cur.execute("SELECT version()")
+            version = cur.fetchone()
+            logger.info(f"✅ PostgreSQL connection successful: {version}")
+            return {
+                "status": "ok",
+                "version": version,
+                "host": DB_HOST,
+                "port": DB_PORT,
+                "database": DB_NAME
+            }
     except Exception as e:
         logger.error(f"❌ PostgreSQL connection failed: {e}")
         return {
@@ -333,7 +429,7 @@ def test_connection() -> Dict[str, Any]:
 
 
 def close_pool():
-    """Close all connections in the pool."""
+    """Close all connections in pool."""
     global connection_pool
     if connection_pool:
         connection_pool.closeall()

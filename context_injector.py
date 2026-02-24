@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 from functools import lru_cache
 
-from database import get_db
+from database_adapter import get_db
 
 # Configure logging
 logger = logging.getLogger(__name__)

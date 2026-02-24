@@ -17,7 +17,7 @@ Phases:
 import sys
 import json
 import logging
-import sqlite3
+import os
 from pathlib import Path
 
 # Configure logging
@@ -27,8 +27,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Database path
+# Database configuration
+USE_POSTGRES = os.getenv("USE_POSTGRES", "true").lower() == "true"
 DB_PATH = "/root/clawd-backend/clawdbot_adapter.db"
+
+# PostgreSQL imports
+if USE_POSTGRES:
+    import psycopg2
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_PORT = os.getenv("DB_PORT", "5432")
+    DB_NAME = os.getenv("DB_NAME", "dreampilot")
+    DB_USER = os.getenv("DB_USER", "admin")
+    DB_PASSWORD = os.getenv("DB_PASSWORD", "StrongAdminPass123")
 
 # Rules files
 RULES_DIR = Path("/root/dreampilot/website")
@@ -59,40 +69,89 @@ class OpenClawWrapper:
         """Update project status in database."""
         try:
             logger.info(f"Updating project {self.project_id} status to '{status}'")
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            try:
-                conn.execute(
-                    "UPDATE projects SET status = ? WHERE id = ?",
-                    (status, self.project_id)
+            
+            if USE_POSTGRES:
+                # PostgreSQL mode
+                conn = psycopg2.connect(
+                    host=DB_HOST,
+                    port=DB_PORT,
+                    database=DB_NAME,
+                    user=DB_USER,
+                    password=DB_PASSWORD
                 )
-                conn.commit()
-                logger.info(f"✓ Project {self.project_id} status updated to '{status}'")
-            finally:
-                conn.close()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE projects SET status = %s WHERE id = %s",
+                        (status, self.project_id)
+                    )
+                    conn.commit()
+                    logger.info(f"✓ Project {self.project_id} status updated to '{status}' (PostgreSQL)")
+                finally:
+                    conn.close()
+            else:
+                # SQLite mode
+                conn = sqlite3.connect(DB_PATH)
+                conn.row_factory = sqlite3.Row
+                try:
+                    conn.execute(
+                        "UPDATE projects SET status = ? WHERE id = ?",
+                        (status, self.project_id)
+                    )
+                    conn.commit()
+                    logger.info(f"✓ Project {self.project_id} status updated to '{status}' (SQLite)")
+                finally:
+                    conn.close()
         except Exception as e:
             logger.error(f"✗ Failed to update project status: {e}")
 
     def get_project_domain(self) -> str:
         """Load project domain from database."""
         try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            try:
-                cursor = conn.execute(
-                    "SELECT domain FROM projects WHERE id = ?",
-                    (self.project_id,)
+            if USE_POSTGRES:
+                # PostgreSQL mode
+                conn = psycopg2.connect(
+                    host=DB_HOST,
+                    port=DB_PORT,
+                    database=DB_NAME,
+                    user=DB_USER,
+                    password=DB_PASSWORD
                 )
-                row = cursor.fetchone()
-                if row:
-                    domain = row['domain']
-                    logger.info(f"✓ Loaded project domain: {domain}")
-                    return domain
-                else:
-                    logger.warning(f"⚠️ Project {self.project_id} not found in database")
-                    return self.project_name  # Fall back to project name
-            finally:
-                conn.close()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT domain FROM projects WHERE id = %s",
+                        (self.project_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        domain = row[0]
+                        logger.info(f"✓ Loaded project domain: {domain}")
+                        return domain
+                    else:
+                        logger.warning(f"⚠️ Project {self.project_id} not found in database")
+                        return self.project_name  # Fall back to project name
+                finally:
+                    conn.close()
+            else:
+                # SQLite mode
+                conn = sqlite3.connect(DB_PATH)
+                conn.row_factory = sqlite3.Row
+                try:
+                    cursor = conn.execute(
+                        "SELECT domain FROM projects WHERE id = ?",
+                        (self.project_id,)
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        domain = row['domain']
+                        logger.info(f"✓ Loaded project domain: {domain}")
+                        return domain
+                    else:
+                        logger.warning(f"⚠️ Project {self.project_id} not found in database")
+                        return self.project_name  # Fall back to project name
+                finally:
+                    conn.close()
         except Exception as e:
             logger.error(f"✗ Failed to load project domain: {e}")
             return self.project_name  # Fall back to project name

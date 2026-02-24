@@ -9,7 +9,7 @@ import re
 import subprocess
 from datetime import datetime
 from typing import Optional
-from database import get_db
+from database_adapter import get_db
 
 BASE_PROJECTS_DIR = "/root/dreampilot/projects"
 

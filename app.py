@@ -75,7 +75,7 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     image: Optional[str] = None
-    created_at: datetime
+    created_at: str  # Changed from datetime to str for PostgreSQL compatibility
 
 class ProjectResponse(BaseModel):
     id: int
@@ -243,7 +243,11 @@ async def get_projects():
     selector = TemplateSelector()
 
     for project in projects:
-        project_dict = dict(project)
+        # Handle both dict (PostgreSQL) and tuple (SQLite) row types
+        if isinstance(project, dict):
+            project_dict = project
+        else:
+            project_dict = dict(project)
 
         # Ensure created_at is a string (handle both string and integer timestamps)
         if "created_at" in project_dict and not isinstance(project_dict["created_at"], str):
@@ -325,11 +329,16 @@ async def create_project(request: CreateProjectRequest):
     # Step 1: Get project_id first to use in folder naming
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name) VALUES (?, ?, ?, ?, '', ?, 'creating', NULL)",
+            "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name) VALUES (?, ?, ?, ?, '', ?, 'creating', NULL) RETURNING id",
             (user_id, request.name, request.domain, request.description, type_id)
         )
+        result = conn.fetchone()
+        # Handle both dict (PostgreSQL) and tuple (SQLite) row types
+        if isinstance(result, dict):
+            project_id = result.get('id')
+        else:
+            project_id = result[0] if result else None
         conn.commit()
-        project_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     # Step 2: Create project folder with Git initialization
     project_manager = ProjectFileManager()
@@ -454,7 +463,7 @@ async def create_project(request: CreateProjectRequest):
         claude_code_session_name=final_project["claude_code_session_name"],
         template_id=final_project["template_id"] if "template_id" in final_project else None,
         frontend=frontend_info,
-        created_at=final_project["created_at"]
+        created_at=str(final_project["created_at"]) if isinstance(final_project.get("created_at"), (datetime,)) else final_project.get("created_at")
     )
 
 @app.get("/project-types", response_model=list[ProjectTypeResponse])
@@ -1397,8 +1406,19 @@ async def get_sessions(project_id: int):
             "SELECT * FROM sessions WHERE project_id = ? AND archived = 0 ORDER BY created_at DESC",
             (project_id,)
         ).fetchall()
-    
-    return [SessionResponse(**dict(s)) for s in sessions]
+
+    # Convert datetime objects to strings for PostgreSQL compatibility
+    session_responses = []
+    for s in sessions:
+        session_dict = dict(s) if isinstance(s, dict) else dict(s)
+        # Convert datetime fields to strings
+        if "created_at" in session_dict and isinstance(session_dict.get("created_at"), (datetime,)):
+            session_dict["created_at"] = str(session_dict["created_at"])
+        if "last_used_at" in session_dict and isinstance(session_dict.get("last_used_at"), (datetime,)):
+            session_dict["last_used_at"] = str(session_dict["last_used_at"])
+        session_responses.append(SessionResponse(**session_dict))
+
+    return session_responses
 
 @app.post("/projects/{project_id}/sessions", response_model=SessionResponse, status_code=201)
 async def create_session(project_id: int, request: CreateSessionRequest):
@@ -1414,18 +1434,36 @@ async def create_session(project_id: int, request: CreateSessionRequest):
             (session_key,)
         ).fetchone()
 
-        return SessionResponse(
-            id=result[0],
-            project_id=result[1],
-            session_key=result[2],
-            label=result[3],
-            archived=result[4] or 0,
-            scope=result[5],
-            channel=result[6],
-            agent_id=result[7],
-            created_at=result[8],
-            last_used_at=result[9]
-        )
+        # Handle both dict (PostgreSQL) and tuple (SQLite) row types
+        if isinstance(result, dict):
+            # PostgreSQL: RealDictRow (already a dict)
+            session_data = result.copy()
+            # Convert datetime fields to strings
+            if "created_at" in session_data and isinstance(session_data.get("created_at"), (datetime,)):
+                session_data["created_at"] = str(session_data["created_at"])
+            if "last_used_at" in session_data and isinstance(session_data.get("last_used_at"), (datetime,)):
+                session_data["last_used_at"] = str(session_data["last_used_at"])
+        else:
+            # SQLite: Tuple-like access
+            session_data = {
+                "id": result[0],
+                "project_id": result[1],
+                "session_key": result[2],
+                "label": result[3],
+                "archived": result[4] or 0,
+                "scope": result[5],
+                "channel": result[6],
+                "agent_id": result[7],
+                "created_at": result[8],
+                "last_used_at": result[9]
+            }
+            # Convert datetime fields to strings if they're datetime objects
+            if isinstance(session_data.get("created_at"), (datetime,)):
+                session_data["created_at"] = str(session_data["created_at"])
+            if isinstance(session_data.get("last_used_at"), (datetime,)):
+                session_data["last_used_at"] = str(session_data["last_used_at"])
+
+        return SessionResponse(**session_data)
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: int):
@@ -1505,8 +1543,17 @@ async def get_session_messages(session_id: int):
             "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC",
             (session_id,)
         ).fetchall()
-    
-    return [MessageResponse(**dict(m)) for m in messages]
+
+    # Convert datetime objects to strings for PostgreSQL compatibility
+    message_responses = []
+    for m in messages:
+        message_dict = dict(m) if isinstance(m, dict) else dict(m)
+        # Convert created_at to string if it's a datetime object
+        if "created_at" in message_dict and isinstance(message_dict.get("created_at"), (datetime,)):
+            message_dict["created_at"] = str(message_dict["created_at"])
+        message_responses.append(MessageResponse(**message_dict))
+
+    return message_responses
 
 @app.post("/chat/stream")
 async def chat_stream_endpoint(request: ChatRequest):

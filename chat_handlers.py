@@ -168,7 +168,7 @@ async def generate_sse_stream_with_db_save(request, session_id, user_content):
         None (saves to database automatically)
     """
     # Import database here to avoid circular import
-    from database import get_db
+    from database_adapter import get_db
 
     assistant_content = ""
 

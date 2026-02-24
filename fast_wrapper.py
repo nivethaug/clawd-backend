@@ -13,7 +13,7 @@ import sys
 import json
 import subprocess
 import logging
-import sqlite3
+import os
 from pathlib import Path
 
 # Note: template_lookup_fix was removed - not needed
@@ -25,8 +25,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Database path
+# Database configuration
+USE_POSTGRES = os.getenv("USE_POSTGRES", "true").lower() == "true"
 DB_PATH = "/root/clawd-backend/clawdbot_adapter.db"
+
+# PostgreSQL imports
+if USE_POSTGRES:
+    import psycopg2
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_PORT = os.getenv("DB_PORT", "5432")
+    DB_NAME = os.getenv("DB_NAME", "dreampilot")
+    DB_USER = os.getenv("DB_USER", "admin")
+    DB_PASSWORD = os.getenv("DB_PASSWORD", "StrongAdminPass123")
 
 
 class FastWrapper:
@@ -45,17 +55,39 @@ class FastWrapper:
         """Update project status in database."""
         try:
             logger.info(f"Updating project {self.project_id} status to '{status}'")
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            try:
-                conn.execute(
-                    "UPDATE projects SET status = ? WHERE id = ?",
-                    (status, self.project_id)
+            
+            if USE_POSTGRES:
+                # PostgreSQL mode
+                conn = psycopg2.connect(
+                    host=DB_HOST,
+                    port=DB_PORT,
+                    database=DB_NAME,
+                    user=DB_USER,
+                    password=DB_PASSWORD
                 )
-                conn.commit()
-                logger.info(f"✓ Project {self.project_id} status updated to '{status}'")
-            finally:
-                conn.close()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE projects SET status = %s WHERE id = %s",
+                        (status, self.project_id)
+                    )
+                    conn.commit()
+                    logger.info(f"✓ Project {self.project_id} status updated to '{status}' (PostgreSQL)")
+                finally:
+                    conn.close()
+            else:
+                # SQLite mode
+                conn = sqlite3.connect(DB_PATH)
+                conn.row_factory = sqlite3.Row
+                try:
+                    conn.execute(
+                        "UPDATE projects SET status = ? WHERE id = ?",
+                        (status, self.project_id)
+                    )
+                    conn.commit()
+                    logger.info(f"✓ Project {self.project_id} status updated to '{status}' (SQLite)")
+                finally:
+                    conn.close()
         except Exception as e:
             logger.error(f"✗ Failed to update project status: {e}")
 

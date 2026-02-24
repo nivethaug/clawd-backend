@@ -8,7 +8,7 @@ import subprocess
 import logging
 from typing import Optional
 
-from database import get_db
+from database_adapter import get_db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
