@@ -510,6 +510,8 @@ That's all. Execute Phase {phase} now.
             return False
         except Exception as e:
             logger.error(f"❌ AI frontend refinement failed: {e}")
+            logger.error(f"❌ Exception type: {type(e).__name__}")
+            logger.error(f"❌ Exception details: {str(e)}", exc_info=True)
             self.update_status("failed")
             logger.info(f"✓ Project {self.project_id} status updated to 'failed'")
             return False
