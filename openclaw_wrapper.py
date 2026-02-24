@@ -415,69 +415,208 @@ That's all. Execute Phase {phase} now.
         self.completed_phases.append("Verification")
         return True
 
-    def phase_8_frontend_optimization(self) -> bool:
+    def phase_8_frontend_ai_refinement(self) -> bool:
         """
-        Phase 8: Frontend Optimization & Personalization
+        Phase 8: AI-Driven Frontend Refinement
 
-        - Clean cloned frontend repository
-        - Remove unnecessary pages/components
-        - Modify existing pages with project branding
-        - Add minimal new pages if required
-        - Ensure build succeeds
-        - Restart PM2 frontend service
+        - Use OpenClaw AI to intelligently refine frontend source code
+        - AI analyzes actual source code structure
+        - AI understands project intent from name + description
+        - AI removes irrelevant demo/sample content contextually
+        - AI modifies existing pages to match real project vision
+        - AI adjusts navigation based on implied features
+        - AI rewrites homepage hero section to match project
+        - AI ensures UI terminology reflects project domain
 
         ONLY applies to website projects (type_id = 1)
         """
-        logger.info("📋 Phase 8/8: Frontend Optimization & Personalization")
+        logger.info("📋 Phase 8/8: AI-Driven Frontend Refinement")
 
         try:
             # Check if this is a website project (type_id = 1)
-            # We need to check the database for type_id
             project_type_id = self._get_project_type_id()
 
             if project_type_id != 1:
-                logger.info("✓ Skipping frontend optimization (not a website project)")
+                logger.info("✓ Skipping AI frontend refinement (not a website project)")
                 logger.info(f"  Project type_id: {project_type_id}")
-                self.completed_phases.append("Frontend Optimization (Skipped)")
+                self.completed_phases.append("AI Frontend Refinement (Skipped)")
                 return True
 
-            # Import FrontendOptimizer
-            from frontend_optimizer import FrontendOptimizer
+            # Build AI refinement prompt
+            refinement_prompt = self._build_ai_refinement_prompt()
 
-            # Create optimizer instance
-            optimizer = FrontendOptimizer(
-                project_id=self.project_id,
-                project_path=self.project_path,
-                project_name=self.project_name,
-                description=self.description,
-                template_id=self.template_id or "generic"
+            logger.info(f"🤖 Triggering OpenClaw AI frontend refinement")
+            logger.info(f"  Frontend path: {self.frontend_path}")
+            logger.info(f"  Project name: {self.project_name}")
+            logger.info(f"  Template ID: {self.template_id}")
+
+            # Run OpenClaw AI refinement
+            # Working directory: /root/dreampilot/projects/website/{project-name}
+            # OpenClaw will modify files inside: frontend/
+            result = subprocess.run(
+                ["openclaw", "run", str(self.frontend_path), "--prompt", refinement_prompt],
+                capture_output=True,
+                text=True,
+                timeout=1800  # 30 minutes max for AI refinement
             )
 
-            # Run optimization
-            success = optimizer.run_optimization()
-
-            if success:
-                # Restart PM2 frontend service
-                service_name = f"{self.project_name.lower().replace(' ', '-')}-frontend"
-                if optimizer.restart_pm2_service(service_name):
-                    logger.info("✓ PM2 frontend service restarted")
-                else:
-                    logger.warning("⚠️ PM2 frontend service restart failed, continuing...")
-
-                self.completed_phases.append("Frontend Optimization")
-                logger.info("✓ Frontend optimization completed successfully")
-                return True
-            else:
-                logger.error("❌ Frontend optimization failed")
+            # Check result
+            if result.returncode != 0:
+                logger.error(f"❌ OpenClaw AI refinement failed with code: {result.returncode}")
+                logger.error(f"  Error output: {result.stderr[-1000:]}")
                 return False
 
-        except ImportError as e:
-            logger.warning(f"⚠️ FrontendOptimizer module not available: {e}")
-            logger.info("✓ Skipping frontend optimization (module not found)")
-            self.completed_phases.append("Frontend Optimization (Skipped)")
+            logger.info(f"✓ OpenClaw AI refinement completed")
+            logger.info(f"  Output: {result.stdout[-500:]}")
+
+            # Step 1: Verify build succeeds
+            logger.info(f"🔍 Verifying build after AI refinement...")
+            build_success = self._verify_frontend_build()
+
+            if not build_success:
+                logger.error(f"❌ Build failed after AI refinement")
+                return False
+
+            logger.info(f"✓ Build verification successful")
+
+            # Step 2: Restart PM2 frontend service
+            service_name = f"{self.project_name.lower().replace(' ', '-')}-frontend"
+            if self._restart_pm2_service(service_name):
+                logger.info("✓ PM2 frontend service restarted")
+            else:
+                logger.warning("⚠️ PM2 frontend service restart failed, continuing...")
+
+            self.completed_phases.append("AI Frontend Refinement")
+            logger.info("✓ AI-driven frontend refinement completed successfully")
             return True
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ OpenClaw AI refinement timed out after 30 minutes")
+            return False
         except Exception as e:
-            logger.error(f"❌ Frontend optimization failed: {e}")
+            logger.error(f"❌ AI frontend refinement failed: {e}")
+            return False
+
+    def _build_ai_refinement_prompt(self) -> str:
+        """Build AI refinement prompt for OpenClaw.
+
+        Returns:
+            Prompt string for OpenClaw AI execution
+        """
+        prompt = f"""You are refining a cloned frontend template into a real production-ready application.
+
+PROJECT INFORMATION:
+- Project Name: {self.project_name}
+- Project Description: {self.description}
+- Template ID: {self.template_id or 'generic'}
+
+YOUR TASK:
+
+1. Analyze the current frontend structure in the frontend/ directory.
+2. Understand the template's existing pages, components, and routing.
+3. Remove irrelevant demo/sample content carefully and contextually.
+4. Modify existing pages to match the real project intent based on project description.
+5. Adjust navigation menu based on actual features implied by project description.
+6. Rewrite the homepage hero section to match the project vision and branding.
+7. Ensure all UI terminology reflects the project domain (e.g., "crypto" vs "e-commerce" vs "CRM").
+8. Keep the build working (npm run build must succeed).
+9. Do NOT break routing - all existing routes must continue to work.
+10. Do NOT remove required core framework files (App.tsx, main.tsx, etc.).
+11. Keep the code clean, production-ready, and well-structured.
+12. Do NOT introduce placeholder or mock content unless required by the UI.
+13. Preserve the overall project structure - don't reorganize the entire codebase.
+
+IMPORTANT BEHAVIOR RULES:
+
+- Understand the project context from project_name and description before making changes.
+- Adapt pages intelligently based on what the project actually needs.
+- Rename components if required to reflect project domain (e.g., "TradingTable" vs "GenericTable").
+- Update routes logically if navigation changes.
+- Modify layout if needed to better suit the project's use case.
+- Inject meaningful, realistic content that matches the project vision.
+- Keep the project minimal but real - don't add unnecessary complexity.
+
+WHAT AI MUST NOT DO:
+
+- Do NOT over-generate pages or features not implied by the project.
+- Do NOT rewrite the entire application blindly - make targeted, intelligent changes.
+- Do NOT delete core framework files or break imports.
+- Do NOT break the build process.
+- Do NOT modify backend files (only modify frontend/ directory).
+- Do NOT modify infrastructure or deployment files.
+
+AFTER CHANGES:
+
+- Ensure npm run build passes.
+- Do not modify any files outside the frontend/ directory.
+- Keep the project structure intact.
+
+WORKING DIRECTORY: You are currently in the project root, which contains frontend/, backend/, database/, etc.
+ONLY modify files inside: frontend/
+
+Execute the refinement now and make this template production-ready for: {self.project_name}
+"""
+        return prompt
+
+    def _verify_frontend_build(self) -> bool:
+        """Verify that frontend build succeeds after AI refinement.
+
+        Returns:
+            True if build successful, False otherwise
+        """
+        try:
+            result = subprocess.run(
+                ["npm", "run", "build"],
+                cwd=self.frontend_path,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes max
+            )
+
+            if result.returncode == 0:
+                logger.info(f"✓ Frontend build successful")
+                return True
+            else:
+                logger.error(f"❌ Frontend build failed with code: {result.returncode}")
+                logger.error(f"  Error: {result.stderr[-1000:]}")
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ Frontend build timed out after 5 minutes")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Build verification failed: {e}")
+            return False
+
+    def _restart_pm2_service(self, service_name: str) -> bool:
+        """Restart PM2 frontend service after refinement.
+
+        Args:
+            service_name: PM2 service name (e.g., "myproject-frontend")
+
+        Returns:
+            True if restart successful, False otherwise
+        """
+        try:
+            logger.info(f"🔄 Restarting PM2 service: {service_name}")
+
+            result = subprocess.run(
+                ["pm2", "restart", service_name],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                logger.info(f"✓ PM2 service restarted: {service_name}")
+                return True
+            else:
+                logger.error(f"❌ Failed to restart PM2 service: {service_name}")
+                logger.error(f"  Error: {result.stderr}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ PM2 restart failed: {e}")
             return False
 
     def _get_project_type_id(self) -> int:
@@ -614,13 +753,13 @@ That's all. Execute Phase {phase} now.
                 logger.error("❌ Initialization failed at phase 7")
                 return
 
-            # Phase 8: Frontend Optimization & Personalization
-            logger.info(f"📋 Phase 8/{total_phases}: Frontend Optimization & Personalization")
-            if self.phase_8_frontend_optimization():
+            # Phase 8: AI-Driven Frontend Refinement
+            logger.info(f"📋 Phase 8/{total_phases}: AI-Driven Frontend Refinement")
+            if self.phase_8_frontend_ai_refinement():
                 phases_succeeded += 1
                 logger.info(f"✓ Phase 8 completed!")
             else:
-                self.failed_phases.append("Frontend Optimization")
+                self.failed_phases.append("AI Frontend Refinement")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 8")
                 return
