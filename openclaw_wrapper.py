@@ -459,10 +459,14 @@ That's all. Execute Phase {phase} now.
             # Working directory: /root/dreampilot/projects/website/{project-name}
             # OpenClaw will modify files inside: frontend/
             result = subprocess.run(
-                ["openclaw", "run", str(self.frontend_path), "--prompt", refinement_prompt],
+                ["openclaw", "agent",
+                 "--local",
+                 "--message", refinement_prompt,
+                 "--timeout", "1800"],
+                cwd=str(self.frontend_path),
                 capture_output=True,
                 text=True,
-                timeout=1800  # 30 minutes max for AI refinement
+                timeout=1860  # 31 minutes max (30 + 1 for buffer)
             )
 
             # Check result
