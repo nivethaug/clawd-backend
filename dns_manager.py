@@ -19,6 +19,9 @@ from pathlib import Path
 try:
     import requests
 except ImportError as e:
+    # Only exit if running as script (not being imported)
+    if __name__ != "__main__":
+        raise ImportError(f"Missing dependency: {e}")
     print(f"Error: Missing dependency: {e}")
     print("Run: pip install requests")
     exit(1)
