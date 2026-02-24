@@ -6,6 +6,7 @@ import re
 import logging
 import subprocess
 from datetime import datetime
+from pathlib import Path
 from typing import AsyncGenerator, Any, Optional, Dict
 from contextlib import contextmanager
 
@@ -731,7 +732,7 @@ def cleanup_ssl_certificates(frontend_domain: str, backend_domain: str) -> Dict[
 
 def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, Any]:
     """
-    Remove DNS A records using Hostinger DNS API.
+    Remove DNS A records using local DNS manager.
 
     Args:
         frontend_domain: Frontend domain name (e.g., "project")
@@ -743,40 +744,30 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
     logger.info(f"Cleaning up DNS records for {frontend_domain} and {backend_domain}")
 
     results = {
-        "frontend_removed": False,
-        "backend_removed": False,
+        "frontend_deleted": False,
+        "backend_deleted": False,
+        "skipped": False,
         "errors": []
     }
 
-    # Import hostinger-dns skill
-    skill_dir = "/usr/lib/node_modules/openclaw/skills/hostinger-dns"
-    venv_python = f"{skill_dir}/venv/bin/python"
-    dns_script = f"{skill_dir}/hostinger_dns.py"
-    base_domain = "dreambigwithai.com"
+    # Import local DNS manager
+    try:
+        import infrastructure_manager_dns as dns_mgr
+    except ImportError as e:
+        logger.warning(f"⚠️ DNS manager not available: {e}")
+        logger.warning(f"  Skipping DNS cleanup. Remove these A records manually in Hostinger hPanel:")
+        logger.warning(f"    - {frontend_domain}.{dns_mgr.BASE_DOMAIN}")
+        logger.warning(f"    - {backend_domain}.{dns_mgr.BASE_DOMAIN}")
+        results["skipped"] = True
+        return results
 
     # Remove frontend DNS record
     try:
-        result = subprocess.run(
-            [venv_python, dns_script, "delete_dns_record",
-             json.dumps({
-                 "domain": base_domain,
-                 "name": frontend_domain,
-                 "record_type": "A"
-             })],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode == 0:
-            results["frontend_removed"] = True
-            logger.info(f"Removed DNS record: {frontend_domain}.{base_domain}")
+        if dns_mgr.delete_a_record(frontend_domain):
+            results["frontend_deleted"] = True
+            logger.info(f"Removed DNS record: {frontend_domain}.{dns_mgr.BASE_DOMAIN}")
         else:
-            logger.warning(f"Failed to remove DNS record: {result.stderr}")
-    except subprocess.TimeoutExpired:
-        error_msg = "Timeout removing frontend DNS record"
-        results["errors"].append(error_msg)
-        logger.warning(error_msg)
+            results["errors"].append(f"Failed to remove frontend DNS record")
     except Exception as e:
         error_msg = f"Error removing frontend DNS: {e}"
         results["errors"].append(error_msg)
@@ -784,27 +775,11 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
 
     # Remove backend DNS record
     try:
-        result = subprocess.run(
-            [venv_python, dns_script, "delete_dns_record",
-             json.dumps({
-                 "domain": base_domain,
-                 "name": backend_domain,
-                 "record_type": "A"
-             })],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode == 0:
-            results["backend_removed"] = True
-            logger.info(f"Removed DNS record: {backend_domain}.{base_domain}")
+        if dns_mgr.delete_a_record(backend_domain):
+            results["backend_deleted"] = True
+            logger.info(f"Removed DNS record: {backend_domain}.{dns_mgr.BASE_DOMAIN}")
         else:
-            logger.warning(f"Failed to remove DNS record: {result.stderr}")
-    except subprocess.TimeoutExpired:
-        error_msg = "Timeout removing backend DNS record"
-        results["errors"].append(error_msg)
-        logger.warning(error_msg)
+            results["errors"].append(f"Failed to remove backend DNS record")
     except Exception as e:
         error_msg = f"Error removing backend DNS: {e}"
         results["errors"].append(error_msg)
