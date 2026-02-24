@@ -768,11 +768,10 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
     # Remove frontend DNS record
     try:
         result = subprocess.run(
-            [venv_python, dns_script, "delete_dns_record",
+            [venv_python, dns_script, "delete_a_record",
              json.dumps({
                  "domain": base_domain,
-                 "name": frontend_domain,
-                 "record_type": "A"
+                 "subdomain": frontend_domain
              })],
             capture_output=True,
             text=True,
@@ -796,11 +795,10 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
     # Remove backend DNS record
     try:
         result = subprocess.run(
-            [venv_python, dns_script, "delete_dns_record",
+            [venv_python, dns_script, "delete_a_record",
              json.dumps({
                  "domain": base_domain,
-                 "name": backend_domain,
-                 "record_type": "A"
+                 "subdomain": backend_domain
              })],
             capture_output=True,
             text=True,
