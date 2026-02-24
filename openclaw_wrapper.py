@@ -446,6 +446,10 @@ That's all. Execute Phase {phase} now.
             # Build AI refinement prompt
             refinement_prompt = self._build_ai_refinement_prompt()
 
+            # Update status to indicate AI refinement is in progress
+            self.update_status("ai_provisioning")
+            logger.info(f"🔄 Project {self.project_id} status updated to 'ai_provisioning'")
+
             logger.info(f"🤖 Triggering OpenClaw AI frontend refinement")
             logger.info(f"  Frontend path: {self.frontend_path}")
             logger.info(f"  Project name: {self.project_name}")
@@ -465,6 +469,8 @@ That's all. Execute Phase {phase} now.
             if result.returncode != 0:
                 logger.error(f"❌ OpenClaw AI refinement failed with code: {result.returncode}")
                 logger.error(f"  Error output: {result.stderr[-1000:]}")
+                self.update_status("failed")
+                logger.info(f"✓ Project {self.project_id} status updated to 'failed'")
                 return False
 
             logger.info(f"✓ OpenClaw AI refinement completed")
@@ -476,6 +482,8 @@ That's all. Execute Phase {phase} now.
 
             if not build_success:
                 logger.error(f"❌ Build failed after AI refinement")
+                self.update_status("failed")
+                logger.info(f"✓ Project {self.project_id} status updated to 'failed'")
                 return False
 
             logger.info(f"✓ Build verification successful")
@@ -493,9 +501,13 @@ That's all. Execute Phase {phase} now.
 
         except subprocess.TimeoutExpired:
             logger.error(f"❌ OpenClaw AI refinement timed out after 30 minutes")
+            self.update_status("failed")
+            logger.info(f"✓ Project {self.project_id} status updated to 'failed'")
             return False
         except Exception as e:
             logger.error(f"❌ AI frontend refinement failed: {e}")
+            self.update_status("failed")
+            logger.info(f"✓ Project {self.project_id} status updated to 'failed'")
             return False
 
     def _build_ai_refinement_prompt(self) -> str:
