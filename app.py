@@ -6,6 +6,7 @@ import re
 import logging
 import subprocess
 from datetime import datetime
+from pathlib import Path
 from typing import AsyncGenerator, Any, Optional, Dict
 from contextlib import contextmanager
 
@@ -745,6 +746,7 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
     results = {
         "frontend_removed": False,
         "backend_removed": False,
+        "skipped": False,
         "errors": []
     }
 
@@ -753,6 +755,15 @@ def cleanup_dns_records(frontend_domain: str, backend_domain: str) -> Dict[str, 
     venv_python = f"{skill_dir}/venv/bin/python"
     dns_script = f"{skill_dir}/hostinger_dns.py"
     base_domain = "dreambigwithai.com"
+
+    # Check if DNS skill is available
+    if not Path(skill_dir).exists() or not Path(dns_script).exists():
+        logger.warning(f"⚠️ DNS skill not found at {skill_dir}")
+        logger.warning(f"  Skipping DNS cleanup. Remove these A records manually in Hostinger hPanel:")
+        logger.warning(f"    - {frontend_domain}.{base_domain}")
+        logger.warning(f"    - {backend_domain}.{base_domain}")
+        results["skipped"] = True
+        return results
 
     # Remove frontend DNS record
     try:
