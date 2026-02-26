@@ -61,6 +61,7 @@ class OpenClawWrapper:
     def __init__(self, project_id: int, project_path: str, project_name: str, description: str = None, template_id: str = None):
         self.project_id = project_id
         self.project_path = Path(project_path)
+        self.frontend_path = self.project_path / "frontend"
         self.project_name = project_name
         self.description = description or ""
         self.template_id = template_id

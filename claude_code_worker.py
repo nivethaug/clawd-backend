@@ -79,8 +79,9 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             # Step 2: Run OpenClaw wrapper for phases 3-7 (infrastructure provisioning)
             logger.info(f"Executing: python3 openclaw_wrapper.py {project_id} {project_path} '{project_name}' (template_id: {template_id})")
 
-            # Build command args
-            cmd_args = ["python3", "/root/clawd-backend/openclaw_wrapper.py",
+            # Build command args - use backend venv Python for psycopg2 dependency
+            backend_python = "/root/clawd-backend/venv/bin/python3"
+            cmd_args = [backend_python, "/root/clawd-backend/openclaw_wrapper.py",
                        str(project_id), project_path, project_name, description or ""]
 
             # Add template_id if provided
