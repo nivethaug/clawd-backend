@@ -445,35 +445,36 @@ That's all. Execute Phase {phase} now.
             logger.info(f"  Project name: {self.project_name}")
             logger.info(f"  Template ID: {self.template_id}")
 
-            # Step 1: Run CrewAI Phase 8
-            logger.info("📝 Step 1: Running CrewAI Phase 8 execution...")
-            
-            # Check if phase8_crew.py exists
-            phase8_crew_path = Path("/root/clawd-backend/phase8_crew.py")
-            if not phase8_crew_path.exists():
-                logger.error(f"❌ phase8_crew.py not found at {phase8_crew_path}")
+            # Step 1: Run Phase 8 using OpenClaw sessions
+            logger.info("📝 Step 1: Running Phase 8 with OpenClaw agent sessions...")
+
+            # Check if phase8 script exists (prefer OpenClaw version)
+            phase8_script = Path("/root/clawd-backend/phase8_openclaw.py")
+            if not phase8_script.exists():
+                # Fallback to CrewAI version
+                phase8_script = Path("/root/clawd-backend/phase8_crew.py")
+                logger.warning(f"⚠️ Using CrewAI version (OpenClaw version not found)")
+            else:
+                logger.info(f"✓ Using OpenClaw version with file tools")
+
+            # Check if Python interpreter exists
+            python_interpreter = Path("/usr/bin/python3")
+            if not python_interpreter.exists():
+                logger.error(f"❌ Python interpreter not found at {python_interpreter}")
                 logger.info("⚠️ Falling back to skip mode...")
-                self.completed_phases.append("AI Frontend Refinement (Skipped - CrewAI Not Found)")
+                self.completed_phases.append("AI Frontend Refinement (Skipped - Python Not Found)")
                 return True
 
-            # Check if CrewAI environment exists
-            crew_env_python = Path("/root/crew-env/bin/python3")
-            if not crew_env_python.exists():
-                logger.error(f"❌ CrewAI environment not found at {crew_env_python}")
-                logger.info("⚠️ Falling back to skip mode...")
-                self.completed_phases.append("AI Frontend Refinement (Skipped - CrewAI Env Not Found)")
-                return True
-
-            # Run CrewAI Phase 8
+            # Run Phase 8
             try:
-                logger.info(f"  Executing: {crew_env_python} {phase8_crew_path}")
+                logger.info(f"  Executing: {python_interpreter} {phase8_script}")
                 logger.info(f"  Project: {self.project_name}")
                 logger.info(f"  Path: {self.project_path}")
-                
+
                 result = subprocess.run(
                     [
-                        str(crew_env_python),
-                        str(phase8_crew_path),
+                        str(python_interpreter),
+                        str(phase8_script),
                         self.project_name,
                         str(self.project_path),
                         self.description[:500] if self.description else "No description"
@@ -485,21 +486,21 @@ That's all. Execute Phase {phase} now.
                 )
 
                 if result.returncode != 0:
-                    logger.error(f"❌ CrewAI Phase 8 failed with code: {result.returncode}")
+                    logger.error(f"❌ Phase 8 failed with code: {result.returncode}")
                     logger.error(f"  Error output: {result.stderr[-1000:]}")
                     logger.info("⚠️ Marking as complete despite errors...")
                     self.completed_phases.append("AI Frontend Refinement (Completed with Errors)")
                 else:
-                    logger.info(f"✓ CrewAI Phase 8 completed successfully")
+                    logger.info(f"✅ Phase 8 completed successfully")
                     logger.info(f"  Output: {result.stdout[-500:]}")
-                    self.completed_phases.append("AI Frontend Refinement (CrewAI)")
+                    self.completed_phases.append("AI Frontend Refinement (OpenClaw Sessions)")
 
             except subprocess.TimeoutExpired:
-                logger.error(f"❌ CrewAI Phase 8 timed out after 60 minutes")
+                logger.error(f"❌ Phase 8 timed out after 60 minutes")
                 logger.info("⚠️ Marking as complete despite timeout...")
                 self.completed_phases.append("AI Frontend Refinement (Completed with Timeout)")
             except Exception as e:
-                logger.error(f"❌ CrewAI Phase 8 failed: {e}")
+                logger.error(f"❌ Phase 8 failed: {e}")
                 logger.error(f"  Exception: {type(e).__name__}: {str(e)}")
                 logger.info("⚠️ Falling back to skip mode...")
                 self.completed_phases.append("AI Frontend Refinement (Skipped - Exception)")
