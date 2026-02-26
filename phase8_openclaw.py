@@ -1,111 +1,70 @@
 #!/usr/bin/env python3
 """
-Phase 8: Frontend Refinement using OpenClaw Sessions
+Phase 8: Frontend Refinement using Direct File Operations
 
-Instead of CrewAI's write_file tool (which doesn't save files),
-we use OpenClaw CLI to spawn an agent session with file tools.
+Simple, reliable file operations to replace "Lovable" branding.
 """
 
 import os
 import subprocess
-import json
+import re
 import logging
 from pathlib import Path
-from time import time
+from time import time as _time
 from typing import List, Dict, Any
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
 
-def create_refinement_prompt(project_name: str, files: List[str]) -> str:
-    """Create OpenClaw prompt for frontend refinement."""
+def replace_in_file(file_path: Path, replacements: List[tuple[str, str]], project_name: str) -> bool:
+    """Replace patterns in a file.
     
-    files_list = "\n".join(f"  - {f}" for f in files)
+    Args:
+        file_path: Path to file
+        replacements: List of (pattern, replacement) tuples
+        project_name: Project name for logging
     
-    return f"""You are refining a cloned frontend template into a production-ready application.
-
-PROJECT INFORMATION:
-- Project Name: {project_name}
-- Working Directory: See files list below
-
-FILES TO MODIFY:
-{files_list}
-
-INSTRUCTIONS:
-1. Read each file using the read tool
-2. Replace all "Lovable" branding with "{project_name}"
-3. Replace "Lovable App" with "{project_name}" in HTML title
-4. Update meta tags and author information
-5. Keep all functionality intact
-6. Use minimal, focused changes
-
-For HTML files:
-- Update <title>Lovable App</title> to <title>{project_name}</title>
-- Update <meta name="author" content="Lovable" /> to {project_name}
-- Update <meta property="og:title" content="Lovable App" /> to {project_name}
-
-For TypeScript/TSX files:
-- Update app titles and headers
-- Replace any hardcoded "Lovable" text
-- Keep existing imports and component structure
-
-IMPORTANT:
-- Use the 'read' and 'write' tools (NOT write_file from CrewAI)
-- Files are in src/pages/ not src/features/
-- Work in the current directory
-- Check if file exists before attempting to modify
-
-Complete all file modifications. Output a summary of changes made."""
-
-
-def run_openclaw_agent(prompt: str, cwd: str) -> Dict[str, Any]:
-    """Run OpenClaw agent with file tools."""
-    
-    logger.info(f"🤖 Spawning OpenClaw agent session...")
-    logger.info(f"   Working directory: {cwd}")
+    Returns:
+        True if modified, False otherwise
+    """
+    logger.info(f"📝 Processing: {file_path}")
     
     try:
-        # Use OpenClaw CLI with local mode
-        # This gives access to read/write tools
-        cmd = [
-            "openclaw",
-            "agent",
-            "--local",
-            "--message", prompt,
-            "--thinking", "low",
-            "--timeout", "300"  # 5 minutes
-        ]
+        # Read file
+        content = file_path.read_text(encoding='utf-8')
+        original_content = content
         
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=360  # 6 minutes max
-        )
+        # Apply all replacements
+        for pattern, replacement in replacements:
+            if isinstance(pattern, str):
+                # String replacement
+                new_content = content.replace(pattern, replacement)
+                if new_content != content:
+                    content = new_content
+            else:
+                # Regex replacement
+                new_content = pattern.sub(replacement, content)
+                if new_content != content:
+                    content = new_content
         
-        return {
-            "success": result.returncode == 0,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "returncode": result.returncode
-        }
-        
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "error": "timeout"
-        }
+        # Write if changed
+        if content != original_content:
+            file_path.write_text(content, encoding='utf-8')
+            logger.info(f"✓ Modified {file_path}")
+            return True
+        else:
+            logger.info(f"⏭ Skipped (no changes needed)")
+            return False
+            
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"❌ Failed to modify {file_path}: {e}")
+        return False
 
 
 def run_npm_build(cwd: str) -> Dict[str, Any]:
@@ -140,6 +99,12 @@ def run_npm_build(cwd: str) -> Dict[str, Any]:
         return {
             "success": False,
             "error": "timeout"
+        }
+    except Exception as e:
+        logger.error(f"❌ Build failed with exception: {e}")
+        return {
+            "success": False,
+            "error": str(e)
         }
 
 
@@ -178,12 +143,12 @@ def git_commit(message: str, cwd: str) -> Dict[str, Any]:
         return {"success": False}
 
 
-def run_phase_8_openclaw(project_name: str, project_path: str, description: str) -> bool:
-    """Execute Phase 8 using OpenClaw agent sessions."""
+def run_phase_8_direct(project_name: str, project_path: str, description: str) -> bool:
+    """Execute Phase 8 using direct file operations."""
     
     frontend_path = Path(project_path) / "frontend"
     
-    logger.info(f"🚀 Starting Phase 8: OpenClaw Agent Frontend Refinement")
+    logger.info(f"🚀 Starting Phase 8: Direct File Operations")
     logger.info(f"   Project: {project_name}")
     logger.info(f"   Frontend path: {frontend_path}")
     
@@ -192,17 +157,36 @@ def run_phase_8_openclaw(project_name: str, project_path: str, description: str)
         {
             "name": "Core Branding",
             "files": [
-                "index.html",
-                "src/App.tsx"
+                ("index.html", [
+                    (r"<title>Lovable App</title>", f"<title>{project_name}</title>"),
+                    (r'<meta name="description" content="Lovable Generated Project" />',
+                     f'<meta name="description" content="{project_name} - Generated Project" />'),
+                    (r'<meta name="author" content="Lovable" />',
+                     f'<meta name="author" content="{project_name}" />'),
+                    (r'<meta property="og:title" content="Lovable App" />',
+                     f'<meta property="og:title" content="{project_name}" />'),
+                    (r'<meta property="og:description" content="Lovable Generated Project" />',
+                     f'<meta property="og:description" content="{project_name} - Generated Project" />'),
+                ]),
+                ("src/App.tsx", [
+                    (r"Lovable App", project_name),
+                    (r"Lovable", project_name),
+                ])
             ],
             "description": f"Replace 'Lovable' branding with '{project_name}' in core files"
         },
         {
             "name": "Page Branding",
             "files": [
-                "src/pages/Dashboard.tsx",
-                "src/pages/Account.tsx",
-                "src/pages/Settings.tsx"
+                ("src/pages/Dashboard.tsx", [
+                    (r"Lovable App", project_name),
+                ]),
+                ("src/pages/Account.tsx", [
+                    (r"Lovable App", project_name),
+                ]),
+                ("src/pages/Settings.tsx", [
+                    (r"Lovable App", project_name),
+                ])
             ],
             "description": f"Add '{project_name}' branding to page components"
         }
@@ -216,7 +200,7 @@ def run_phase_8_openclaw(project_name: str, project_path: str, description: str)
         "files_modified": []
     }
     
-    start_time = time.time()
+    start_time = _time.time()
     
     # Execute each batch
     for batch_num, batch in enumerate(batches, 1):
@@ -228,50 +212,44 @@ def run_phase_8_openclaw(project_name: str, project_path: str, description: str)
         logger.info(f"📦 Batch {batch_num}/{len(batches)}: {batch_name}")
         logger.info(f"{'='*60}")
         
-        # Check if files exist
-        missing_files = []
-        for file_path in batch_files:
-            full_path = frontend_path / file_path
-            if not full_path.exists():
-                missing_files.append(file_path)
-                logger.warning(f"⚠️ File not found: {file_path}")
+        files_modified_count = 0
         
-        if missing_files:
-            logger.error(f"❌ Skipping batch {batch_num}: {len(missing_files)} files not found")
-            summary["batches_failed"] += 1
+        # Process each file
+        for file_name, replacements in batch_files:
+            file_path = frontend_path / file_name
+            
+            if not file_path.exists():
+                logger.warning(f"⚠️ File not found: {file_name}")
+                continue
+            
+            # Replace in file
+            if replace_in_file(file_path, replacements, project_name):
+                files_modified_count += 1
+                summary["files_modified"].append(file_name)
+        
+        if files_modified_count == 0:
+            logger.info(f"ℹ️  No files needed modifications in batch {batch_num}")
+            summary["batches_executed"] += 1
             continue
         
-        # Create prompt for this batch
-        prompt = create_refinement_prompt(project_name, batch_files)
-        
-        # Run OpenClaw agent
-        logger.info(f"🤖 Running OpenClaw agent for {len(batch_files)} files...")
-        result = run_openclaw_agent(prompt, str(frontend_path))
-        
-        if result["success"]:
-            logger.info(f"✅ Batch {batch_num} completed")
+        # Verify build
+        build_result = run_npm_build(str(frontend_path))
+        if build_result["success"]:
+            logger.info(f"✅ Build passed after batch {batch_num}")
+            
+            # Commit changes
+            commit_msg = f"Phase 8: Batch {batch_num} - {batch_name}"
+            git_commit(commit_msg, str(frontend_path))
+            
             summary["batches_executed"] += 1
             summary["batches_succeeded"] += 1
-            summary["files_modified"].extend(batch_files)
-            
-            # Verify build
-            build_result = run_npm_build(str(frontend_path))
-            if build_result["success"]:
-                logger.info(f"✅ Build passed after batch {batch_num}")
-                
-                # Commit changes
-                commit_msg = f"Phase 8: Batch {batch_num} - {batch_name}"
-                git_commit(commit_msg, str(frontend_path))
-            else:
-                logger.error(f"❌ Build failed after batch {batch_num}")
-                summary["batches_failed"] += 1
         else:
-            logger.error(f"❌ Batch {batch_num} failed")
-            logger.error(f"   Error: {result.get('error', result.get('stderr', 'Unknown'))}")
+            logger.error(f"❌ Build failed after batch {batch_num}")
+            summary["batches_executed"] += 1
             summary["batches_failed"] += 1
     
     # Calculate total time
-    total_time = time.time() - start_time
+    total_time = _time.time() - start_time
     
     # Generate SUMMARY.md
     summary_md = f"""# Phase 8: Frontend Refinement Summary
@@ -302,12 +280,13 @@ Total {summary['batches_succeeded']} commits created, one per batch.
 3. Verify frontend accessible at live URL
 4. Test all modified functionality
 
-## OpenClaw Agent Version
+## Phase 8 Implementation
 
-Using OpenClaw CLI with file tools:
-- `read` tool: Read file content
-- `write` tool: Write new content
-- Local mode: Agent runs in project directory
+Using direct file operations with Python's built-in read/write:
+- Pattern-based replacements in files
+- Build verification after each batch
+- Git commits per batch
+- No external dependencies (reliable & fast)
 
 Generated: 2026-02-26
 """
@@ -344,7 +323,7 @@ if __name__ == "__main__":
     description = sys.argv[3] if len(sys.argv) > 3 else "Frontend refinement"
     
     try:
-        success = run_phase_8_openclaw(project_name, project_path, description)
+        success = run_phase_8_direct(project_name, project_path, description)
         sys.exit(0 if success else 1)
     except Exception as e:
         logger.error(f"❌ Phase 8 failed with exception: {e}")
