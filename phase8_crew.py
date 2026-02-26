@@ -326,6 +326,7 @@ def run_phase_8_crew(project_name: str, project_path: str, description: str) -> 
         expected_output="A detailed, batched implementation plan based on actual file structure",
         agent=planner_agent,
         tools=[read_file]
+    )
 
     # Generate PLAN.md with correct paths first
     plan_path = frontend_path / "PLAN.md"
@@ -424,7 +425,9 @@ This project uses the src/pages/ structure (not src/features/).
                 "files": [
                     "index.html",
                     "src/App.tsx"
-                ]
+                ],
+                "description": "Replace 'Lovable App' branding with '{project_name}' in index.html and App.tsx. Update title, meta tags, and app name.",
+                "focus": "Replace 'Lovable' references with project name in core files"
             },
             {
                 "name": "Page Branding",
@@ -432,7 +435,9 @@ This project uses the src/pages/ structure (not src/features/).
                     "src/pages/Dashboard.tsx",
                     "src/pages/Account.tsx",
                     "src/pages/Settings.tsx"
-                ]
+                ],
+                "description": "Add '{project_name}' branding to Dashboard, Account, and Settings pages. Update page titles and headings.",
+                "focus": "Add project-specific branding to page components"
             }
         ]
 
@@ -445,7 +450,9 @@ This project uses the src/pages/ structure (not src/features/).
                 "files": [
                     "index.html",
                     "src/App.tsx"
-                ]
+                ],
+                "description": "Replace 'Lovable App' branding with '{project_name}' in index.html and App.tsx. Update title, meta tags, and app name.",
+                "focus": "Replace 'Lovable' references with project name in core files"
             },
             {
                 "name": "Page Branding",
@@ -453,7 +460,9 @@ This project uses the src/pages/ structure (not src/features/).
                     "src/pages/Dashboard.tsx",
                     "src/pages/Account.tsx",
                     "src/pages/Settings.tsx"
-                ]
+                ],
+                "description": "Add '{project_name}' branding to Dashboard, Account, and Settings pages. Update page titles and headings.",
+                "focus": "Add project-specific branding to page components"
             }
         ]
     
