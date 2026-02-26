@@ -35,8 +35,20 @@ logger = logging.getLogger(__name__)
 
 # Environment
 CREW_ENV_VENV = "/root/crew-env/bin/activate"
-LLM_API_KEY = os.getenv("GROQ_API_KEY", "")
-LLM_MODEL = "groq/llama-3.3-70b-versatile"
+
+# Load ZAI configuration from OpenClaw
+import json
+openclaw_config_path = Path.home() / ".openclaw" / "openclaw.json"
+if openclaw_config_path.exists():
+    with open(openclaw_config_path, 'r') as f:
+        config = json.load(f)
+        LLM_API_KEY = config.get("env", {}).get("ZAI_API_KEY", "")
+        LLM_BASE_URL = config.get("env", {}).get("OPENAI_API_BASE_URL", "https://api.zai.ai/v1")
+else:
+    LLM_API_KEY = os.getenv("ZAI_API_KEY", "")
+    LLM_BASE_URL = os.getenv("OPENAI_API_BASE_URL", "https://api.zai.ai/v1")
+
+LLM_MODEL = "zai/glm-4.7"
 
 
 # ============================================================================
@@ -206,12 +218,18 @@ def git_commit(message: str, cwd: str = None) -> Dict[str, Any]:
 # ============================================================================
 
 # Initialize LLM
-llm = LLM(
-    model=LLM_MODEL,
-    api_key=LLM_API_KEY,
-    temperature=0.1,  # Low temperature for deterministic code generation
-    timeout=300  # 5 minutes per task
-)
+llm_params = {
+    "model": LLM_MODEL,
+    "api_key": LLM_API_KEY,
+    "temperature": 0.1,  # Low temperature for deterministic code generation
+    "timeout": 300  # 5 minutes per task
+}
+
+# Add base_url for zai models
+if "zai" in LLM_MODEL.lower():
+    llm_params["base_url"] = LLM_BASE_URL
+
+llm = LLM(**llm_params)
 
 # Planner Agent
 planner_agent = Agent(
