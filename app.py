@@ -1311,6 +1311,168 @@ async def get_project_status(project_id: int):
 
     return ProjectStatusResponse(status=project["status"])
 
+@app.get("/projects/{project_id}/ai-status", response_model=Dict[str, Any])
+async def get_ai_status(project_id: int):
+    """
+    Get AI refinement status for a project.
+
+    Returns detailed status of Claude Code AI refinement (Phase 8):
+    - Process running or not
+    - PID if running
+    - Elapsed time
+    - Recent file modifications
+    - Project path and frontend path
+
+    Args:
+        project_id: Project ID
+
+    Returns:
+        AI status details
+
+    Raises:
+        404: If project not found
+    """
+    import time
+
+    # Get project info
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, name, project_path, claude_code_session_name, status, created_at FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+
+    if not project:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project with id {project_id} not found"
+        )
+
+    project_path = Path(project["project_path"])
+    frontend_path = project_path / "frontend"
+
+    # Check for openclaw_wrapper process
+    claude_wrapper_pid = None
+    claude_process_info = None
+
+    # Find openclaw_wrapper.py process for this project
+    try:
+        result = subprocess.run(
+            ["ps", "aux"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        for line in result.stdout.split('\n'):
+            if f"openclaw_wrapper.py {project_id}" in line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    claude_wrapper_pid = int(parts[1])
+                    break
+    except Exception as e:
+        logger.warning(f"Failed to check openclaw_wrapper process: {e}")
+
+    # Check for Claude Code process
+    claude_pid = None
+    if claude_wrapper_pid:
+        try:
+            result = subprocess.run(
+                ["ps", "-p", str(claude_wrapper_pid), "-o", "ppid="],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            # Get parent PID of openclaw_wrapper
+            claude_ppid = result.stdout.strip()
+            if claude_ppid and claude_ppid.isdigit():
+                claude_pid = int(claude_ppid)
+
+        except Exception as e:
+            logger.warning(f"Failed to find Claude Code PID: {e}")
+
+    # Get elapsed time if processes running
+    elapsed_seconds = 0
+    elapsed_display = "0:00"
+
+    if claude_wrapper_pid:
+        try:
+            # Get start time
+            result = subprocess.run(
+                ["ps", "-p", str(claude_wrapper_pid), "-o", "etime="],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            elapsed_str = result.stdout.strip()
+            elapsed_display = elapsed_str
+        except Exception:
+            pass
+
+    # Check for recent file modifications in frontend (last 5 minutes)
+    recent_files = []
+    if frontend_path.exists():
+        try:
+            result = subprocess.run(
+                ["find", str(frontend_path), "-type", "f", "-name", "*.tsx", "-o", "-name", "*.ts",
+                 "-mmin", "-5"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.stdout:
+                recent_files = [
+                    Path(f).name for f in result.stdout.strip().split('\n') if f and f.strip()
+                ][:10]  # Limit to 10 files
+        except Exception as e:
+            logger.warning(f"Failed to check recent files: {e}")
+
+    # Build status response
+    ai_status = {
+        "project_id": project_id,
+        "project_name": project["name"],
+        "project_status": project["status"],
+        "ai_refinement_status": None,
+        "processes": {
+            "openclaw_wrapper": {
+                "running": claude_wrapper_pid is not None,
+                "pid": claude_wrapper_pid,
+                "elapsed": elapsed_display
+            },
+            "claude_code": {
+                "running": claude_pid is not None,
+                "pid": claude_pid
+            }
+        },
+        "paths": {
+            "project": str(project_path),
+            "frontend": str(frontend_path)
+        },
+        "recent_activity": {
+            "files_modified": recent_files,
+            "count": len(recent_files)
+        },
+        "phase_info": {
+            "phase": 8,
+            "phase_name": "AI-Driven Frontend Refinement",
+            "total_phases": 8,
+            "completed_phases": 7
+        }
+    }
+
+    # Determine overall AI refinement status
+    if project["status"] == "ai_provisioning":
+        ai_status["ai_refinement_status"] = "in_progress"
+    elif project["status"] == "ready":
+        ai_status["ai_refinement_status"] = "completed"
+    elif project["status"] == "failed":
+        ai_status["ai_refinement_status"] = "failed"
+    else:
+        ai_status["ai_refinement_status"] = "not_started"
+
+    return ai_status
+
 @app.get("/projects/{project_id}/claude-session")
 async def get_claude_session(project_id: int):
     """

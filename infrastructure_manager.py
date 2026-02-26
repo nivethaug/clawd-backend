@@ -208,19 +208,19 @@ class DatabaseProvisioner:
             logger.info(f"Creating database: {db_name}")
             logger.info(f"Creating user: {username}")
 
-            # Create database
-            self._execute_sql(f"CREATE DATABASE {db_name};")
+            # Create database (quoted to handle SQL keywords)
+            self._execute_sql(f'CREATE DATABASE "{db_name}";')
             logger.info(f"✓ Database created: {db_name}")
 
-            # Create user
+            # Create user (quoted to handle SQL keywords)
             self._execute_sql(
-                f"CREATE USER {username} WITH PASSWORD '{password}';"
+                f'CREATE USER "{username}" WITH PASSWORD \'{password}\';'
             )
             logger.info(f"✓ User created: {username}")
 
             # Grant privileges
             self._execute_sql(
-                f"GRANT ALL PRIVILEGES ON DATABASE {db_name} TO {username};"
+                f'GRANT ALL PRIVILEGES ON DATABASE "{db_name}" TO "{username}";'
             )
             logger.info(f"✓ Privileges granted to {username}")
 
@@ -251,12 +251,12 @@ class DatabaseProvisioner:
                 f"AND pid <> pg_backend_pid();"
             )
 
-            # Drop database
-            self._execute_sql(f"DROP DATABASE IF EXISTS {db_name};")
+            # Drop database (quoted to handle SQL keywords)
+            self._execute_sql(f'DROP DATABASE IF EXISTS "{db_name}";')
             logger.info(f"✓ Database dropped: {db_name}")
 
-            # Drop user
-            self._execute_sql(f"DROP USER IF EXISTS {username};")
+            # Drop user (quoted to handle SQL keywords)
+            self._execute_sql(f'DROP USER IF EXISTS "{username}";')
             logger.info(f"✓ User dropped: {username}")
 
         except Exception as e:
@@ -268,7 +268,7 @@ class DatabaseProvisioner:
             db_name = f"{self._sanitize_db_name(project_name)}_db"
 
             result = self._execute_sql(
-                f"SELECT pg_database_size('{db_name}') AS size;"
+                f'SELECT pg_database_size(\'{db_name}\') AS size;'
             )
 
             if result and len(result) > 0:
