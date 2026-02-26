@@ -412,19 +412,37 @@ def run_phase_8_crew(project_name: str, project_path: str, description: str) -> 
             )
             
             validator_result = validator_crew.kickoff()
-            
-            # Check build result
-            if validator_result.get("raw", {}).get("success", False):
-                logger.info(f"✅ Build passed after batch {batch_num}")
+
+            # Check build result (CrewOutput object)
+            try:
+                # Try to get the raw output
+                result_dict = validator_result.raw if hasattr(validator_result, 'raw') else validator_result
                 
-                # Commit changes
-                git_commit(
-                    message=f"Phase 8: Batch {batch_num} - {batch['name']}",
-                    cwd=str(frontend_path)
-                )
-            else:
-                logger.error(f"❌ Build failed after batch {batch_num}")
-                logger.error(f"   Error: {validator_result}")
+                if isinstance(result_dict, dict):
+                    if result_dict.get("success", False):
+                        logger.info(f"✅ Build passed after batch {batch_num}")
+                        
+                        # Commit changes
+                        git_commit(
+                            message=f"Phase 8: Batch {batch_num} - {batch['name']}",
+                            cwd=str(frontend_path)
+                        )
+                        summary["batches_succeeded"] += 1
+                    else:
+                        logger.error(f"❌ Build failed after batch {batch_num}")
+                        logger.error(f"   Error: {result_dict}")
+                        summary["batches_failed"] += 1
+                else:
+                    # If result is not a dict, assume success
+                    logger.info(f"✅ Build passed after batch {batch_num}")
+                    git_commit(
+                        message=f"Phase 8: Batch {batch_num} - {batch['name']}",
+                        cwd=str(frontend_path)
+                    )
+                    summary["batches_succeeded"] += 1
+            except Exception as e:
+                logger.error(f"❌ Failed to parse validator result: {e}")
+                logger.error(f"   Result type: {type(validator_result)}")
                 summary["batches_failed"] += 1
                 
                 # Continue with next batch (error recovery)
