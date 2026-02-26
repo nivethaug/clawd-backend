@@ -10,19 +10,18 @@ import subprocess
 import re
 import logging
 from pathlib import Path
-from time import time as _time
-from typing import List, Dict, Any
+import sys
+from typing import List, Dict, Tuple, Union
 
-# Configure logging
+# Configure logging (simple to avoid time module conflicts)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format='[%(levelname)s] %(message)s'
 )
 logger = logging.getLogger(__name__)
 
 
-def replace_in_file(file_path: Path, replacements: List[tuple[str, str]], project_name: str) -> bool:
+def replace_in_file(file_path: Path, replacements: List[Tuple[str, Union[str, re.Pattern]]], project_name: str) -> bool:
     """Replace patterns in a file.
     
     Args:
@@ -33,7 +32,7 @@ def replace_in_file(file_path: Path, replacements: List[tuple[str, str]], projec
     Returns:
         True if modified, False otherwise
     """
-    logger.info(f"📝 Processing: {file_path}")
+    logger.info(f"Processing: {file_path}")
     
     try:
         # Read file
@@ -56,21 +55,21 @@ def replace_in_file(file_path: Path, replacements: List[tuple[str, str]], projec
         # Write if changed
         if content != original_content:
             file_path.write_text(content, encoding='utf-8')
-            logger.info(f"✓ Modified {file_path}")
+            logger.info(f"Modified: {file_path}")
             return True
         else:
-            logger.info(f"⏭ Skipped (no changes needed)")
+            logger.info(f"Skipped (no changes needed): {file_path}")
             return False
             
     except Exception as e:
-        logger.error(f"❌ Failed to modify {file_path}: {e}")
+        logger.error(f"Failed to modify {file_path}: {e}")
         return False
 
 
 def run_npm_build(cwd: str) -> Dict[str, Any]:
     """Run npm build to verify changes."""
     
-    logger.info("🔨 Running `npm run build`")
+    logger.info("Running npm run build")
     
     try:
         result = subprocess.run(
@@ -82,14 +81,14 @@ def run_npm_build(cwd: str) -> Dict[str, Any]:
         )
         
         if result.returncode == 0:
-            logger.info("✅ Build succeeded!")
+            logger.info("Build succeeded!")
             return {
                 "success": True,
                 "stdout": result.stdout,
                 "stderr": result.stderr
             }
         else:
-            logger.error(f"❌ Build failed with code: {result.returncode}")
+            logger.error(f"Build failed with code: {result.returncode}")
             return {
                 "success": False,
                 "stdout": result.stdout,
@@ -101,7 +100,7 @@ def run_npm_build(cwd: str) -> Dict[str, Any]:
             "error": "timeout"
         }
     except Exception as e:
-        logger.error(f"❌ Build failed with exception: {e}")
+        logger.error(f"Build failed with exception: {e}")
         return {
             "success": False,
             "error": str(e)
@@ -111,7 +110,7 @@ def run_npm_build(cwd: str) -> Dict[str, Any]:
 def git_commit(message: str, cwd: str) -> Dict[str, Any]:
     """Commit changes with message."""
     
-    logger.info(f"🔀 Committing: {message[:50]}...")
+    logger.info(f"Committing: {message[:50]}...")
     
     try:
         # Stage all changes
@@ -132,14 +131,14 @@ def git_commit(message: str, cwd: str) -> Dict[str, Any]:
         )
         
         if result.returncode == 0:
-            logger.info(f"✅ Committed: {message[:50]}...")
+            logger.info(f"Committed: {message[:50]}...")
             return {"success": True}
         else:
-            logger.error(f"❌ Git commit failed")
+            logger.error("Git commit failed")
             return {"success": False, "stderr": result.stderr}
             
     except Exception as e:
-        logger.error(f"❌ Git commit error: {e}")
+        logger.error(f"Git commit error: {e}")
         return {"success": False}
 
 
@@ -148,9 +147,9 @@ def run_phase_8_direct(project_name: str, project_path: str, description: str) -
     
     frontend_path = Path(project_path) / "frontend"
     
-    logger.info(f"🚀 Starting Phase 8: Direct File Operations")
-    logger.info(f"   Project: {project_name}")
-    logger.info(f"   Frontend path: {frontend_path}")
+    logger.info(f"Starting Phase 8: Direct File Operations")
+    logger.info(f"  Project: {project_name}")
+    logger.info(f"  Frontend path: {frontend_path}")
     
     # Define batches
     batches = [
@@ -200,7 +199,8 @@ def run_phase_8_direct(project_name: str, project_path: str, description: str) -
         "files_modified": []
     }
     
-    start_time = _time.time()
+    import time
+    start_time = time.time()
     
     # Execute each batch
     for batch_num, batch in enumerate(batches, 1):
@@ -208,9 +208,10 @@ def run_phase_8_direct(project_name: str, project_path: str, description: str) -
         batch_files = batch["files"]
         batch_desc = batch["description"]
         
-        logger.info(f"\n{'='*60}")
-        logger.info(f"📦 Batch {batch_num}/{len(batches)}: {batch_name}")
-        logger.info(f"{'='*60}")
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(f"Batch {batch_num}/{len(batches)}: {batch_name}")
+        logger.info("=" * 60)
         
         files_modified_count = 0
         
@@ -219,7 +220,7 @@ def run_phase_8_direct(project_name: str, project_path: str, description: str) -
             file_path = frontend_path / file_name
             
             if not file_path.exists():
-                logger.warning(f"⚠️ File not found: {file_name}")
+                logger.warning(f"File not found: {file_name}")
                 continue
             
             # Replace in file
@@ -228,14 +229,14 @@ def run_phase_8_direct(project_name: str, project_path: str, description: str) -
                 summary["files_modified"].append(file_name)
         
         if files_modified_count == 0:
-            logger.info(f"ℹ️  No files needed modifications in batch {batch_num}")
+            logger.info(f"No files needed modifications in batch {batch_num}")
             summary["batches_executed"] += 1
             continue
         
         # Verify build
         build_result = run_npm_build(str(frontend_path))
         if build_result["success"]:
-            logger.info(f"✅ Build passed after batch {batch_num}")
+            logger.info(f"Build passed after batch {batch_num}")
             
             # Commit changes
             commit_msg = f"Phase 8: Batch {batch_num} - {batch_name}"
@@ -244,12 +245,12 @@ def run_phase_8_direct(project_name: str, project_path: str, description: str) -
             summary["batches_executed"] += 1
             summary["batches_succeeded"] += 1
         else:
-            logger.error(f"❌ Build failed after batch {batch_num}")
+            logger.error(f"Build failed after batch {batch_num}")
             summary["batches_executed"] += 1
             summary["batches_failed"] += 1
     
     # Calculate total time
-    total_time = _time.time() - start_time
+    total_time = time.time() - start_time
     
     # Generate SUMMARY.md
     summary_md = f"""# Phase 8: Frontend Refinement Summary
@@ -282,7 +283,7 @@ Total {summary['batches_succeeded']} commits created, one per batch.
 
 ## Phase 8 Implementation
 
-Using direct file operations with Python's built-in read/write:
+Using direct file operations with Python:
 - Pattern-based replacements in files
 - Build verification after each batch
 - Git commits per batch
@@ -295,25 +296,24 @@ Generated: 2026-02-26
     try:
         with open(summary_path, 'w') as f:
             f.write(summary_md)
-        logger.info(f"✅ SUMMARY.md created: {summary_path}")
+        logger.info(f"SUMMARY.md created: {summary_path}")
     except Exception as e:
-        logger.error(f"❌ Failed to create SUMMARY.md: {e}")
+        logger.error(f"Failed to create SUMMARY.md: {e}")
     
     # Print summary
-    logger.info(f"\n{'='*60}")
-    logger.info(f"✅ Phase 8 completed!")
-    logger.info(f"{'='*60}")
-    logger.info(f"   Total time: {total_time:.1f} minutes")
-    logger.info(f"   Batches: {summary['batches_succeeded']}/{len(batches)} succeeded")
-    logger.info(f"   Files: {len(summary['files_modified'])} modified")
-    logger.info(f"{'='*60}")
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("Phase 8 completed!")
+    logger.info("=" * 60)
+    logger.info(f"Total time: {total_time:.1f} minutes")
+    logger.info(f"Batches: {summary['batches_succeeded']}/{len(batches)} succeeded")
+    logger.info(f"Files: {len(summary['files_modified'])} modified")
+    logger.info("=" * 60)
     
     return summary['batches_succeeded'] > 0
 
 
 if __name__ == "__main__":
-    import sys
-    
     if len(sys.argv) < 3:
         print("Usage: python3 phase8_openclaw.py <project_name> <project_path> [description]")
         sys.exit(1)
@@ -326,7 +326,7 @@ if __name__ == "__main__":
         success = run_phase_8_direct(project_name, project_path, description)
         sys.exit(0 if success else 1)
     except Exception as e:
-        logger.error(f"❌ Phase 8 failed with exception: {e}")
+        logger.error(f"Phase 8 failed with exception: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
