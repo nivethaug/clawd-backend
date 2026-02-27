@@ -1010,22 +1010,6 @@ def update_app_routes(frontend_path: Path, route_updates: List[tuple]) -> bool:
     except Exception as e:
         logger.error(f"   Failed to update App.tsx: {e}")
         return False
-        content += "- All pages follow the same component-based architecture\n"
-        content += "- Components are imported from `src/features/` directories\n"
-        content += "- Pages handle state management and API calls\n"
-        content += "- Routes are registered in `src/App.tsx`\n"
-        content += "- Navigation uses React Router for client-side routing\n"
-        
-        pages_md_path.write_text(content, encoding='utf-8')
-        logger.info(f"✅ Created: {pages_md_path}")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Failed to create pages.md: {e}")
-        return False
-
-
-def run_npm_build(cwd: str) -> bool:
-    """Run npm build."""
     logger.info("🔨 Running npm run build")
     try:
         result = subprocess.run(

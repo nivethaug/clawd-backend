@@ -448,32 +448,25 @@ That's all. Execute Phase {phase} now.
             # Step 1: Run Phase 8 using OpenClaw sessions
             logger.info("📝 Step 1: Running Phase 8 with OpenClaw agent sessions...")
 
-            # Check if phase8 script exists (prefer OpenClaw version)
+            # Use OpenClaw session for Phase 8 (same as Phases 1-7)
             phase8_script = Path("/root/clawd-backend/phase8_openclaw.py")
             if not phase8_script.exists():
-                # Fallback to CrewAI version
-                phase8_script = Path("/root/clawd-backend/phase8_crew.py")
-                logger.warning(f"⚠️ Using CrewAI version (OpenClaw version not found)")
-            else:
-                logger.info(f"✓ Using OpenClaw version with file tools")
-
-            # Check if Python interpreter exists
-            python_interpreter = Path("/usr/bin/python3")
-            if not python_interpreter.exists():
-                logger.error(f"❌ Python interpreter not found at {python_interpreter}")
-                logger.info("⚠️ Falling back to skip mode...")
-                self.completed_phases.append("AI Frontend Refinement (Skipped - Python Not Found)")
+                logger.warning(f"⚠️ Phase 8 OpenClaw script not found, skipping...")
+                self.completed_phases.append("AI Frontend Refinement (Skipped - Script Not Found)")
                 return True
 
-            # Run Phase 8
+            logger.info("✓ Using OpenClaw session for AI frontend refinement")
+
+            # Run Phase 8 using OpenClaw sessions (spawns sub-agent)
             try:
-                logger.info(f"  Executing: {python_interpreter} {phase8_script}")
+                logger.info(f"  Executing: {phase8_script}")
                 logger.info(f"  Project: {self.project_name}")
                 logger.info(f"  Path: {self.project_path}")
 
+                # OpenClaw script spawns sub-agent session
                 result = subprocess.run(
                     [
-                        str(python_interpreter),
+                        "/usr/bin/python3",
                         str(phase8_script),
                         self.project_name,
                         str(self.project_path),
