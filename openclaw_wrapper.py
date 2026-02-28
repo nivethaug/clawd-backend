@@ -68,6 +68,60 @@ class OpenClawWrapper:
         self.completed_phases = []
         self.failed_phases = []
 
+        # Add template selection to __init__
+        self.template_repo = None
+        self.template_features = []
+
+        # Step 0: Select template if not provided
+        if not template_id:
+            self._select_template()
+
+    def _select_template(self) -> None:
+        """
+        Select best template using Groq LLM based on project description.
+        Stores template_id, template_repo, template_features.
+        """
+        try:
+            from template_selector import TemplateSelector
+
+            selector = TemplateSelector()
+            if not selector.is_available():
+                logger.warning("Template selector not available, using default template")
+                self.template_id = "saas"
+                self.template_repo = "https://github.com/shadcn/ui"
+                self.template_features = ["dashboard", "users", "settings"]
+                return
+
+            # Use async selection
+            import asyncio
+            result = asyncio.run(selector.select_template(
+                project_name=self.project_name,
+                project_description=self.description,
+                project_type="website"
+            ))
+
+            if result.get("success"):
+                template = result.get("template", {})
+                self.template_id = template.get("id", "saas")
+                self.template_repo = template.get("repo", "https://github.com/shadcn/ui")
+                self.template_features = template.get("features", [])
+                logger.info(f"✅ Template selected: {self.template_id}")
+                logger.info(f"   Repo: {self.template_repo}")
+                logger.info(f"   Features: {', '.join(self.template_features)}")
+            else:
+                logger.warning(f"Template selection failed: {result.get('error')}")
+                # Fallback to default
+                self.template_id = "saas"
+                self.template_repo = "https://github.com/shadcn/ui"
+                self.template_features = ["dashboard", "users", "settings"]
+
+        except Exception as e:
+            logger.error(f"Failed to select template: {e}")
+            # Fallback to default
+            self.template_id = "saas"
+            self.template_repo = "https://github.com/shadcn/ui"
+            self.template_features = ["dashboard", "users", "settings"]
+
     def update_status(self, status: str):
         """Update project status in database."""
         try:
@@ -470,7 +524,10 @@ That's all. Execute Phase {phase} now.
                         str(phase8_script),
                         self.project_name,
                         str(self.project_path),
-                        self.description[:500] if self.description else "No description"
+                        self.description[:500] if self.description else "No description",
+                        self.template_id or "saas",
+                        self.template_repo or "https://github.com/shadcn/ui",
+                        *(self.template_features or [])
                     ],
                     capture_output=True,
                     text=True,
