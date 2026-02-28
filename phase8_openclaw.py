@@ -1090,6 +1090,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import Navbar from '@/components/Navbar';
+import Footer from '@/components/Footer';
 import { AlertCircle } from 'lucide-react';
 
 interface FormErrors {
@@ -1263,6 +1265,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import Navbar from '@/components/Navbar';
+import Footer from '@/components/Footer';
 import { AlertCircle, Check, X } from 'lucide-react';
 
 interface FormErrors {
@@ -1506,6 +1510,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import Navbar from '@/components/Navbar';
+import Footer from '@/components/Footer';
 import { Calendar, MessageCircle, Share2, Heart, BarChart3, TrendingUp, ExternalLink, Edit3, Plus } from 'lucide-react';
 
 interface ScheduledPost {
@@ -1836,6 +1842,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import Navbar from '@/components/Navbar';
+import Footer from '@/components/Footer';
 import { Sun, Moon, ExternalLink } from 'lucide-react';
 
 export default function Settings() {
