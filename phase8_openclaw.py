@@ -2038,15 +2038,6 @@ def get_app_router_updates(project_type: str, pages: List[Dict[str, Any]]) -> Li
 
         # Special handling for social media projects: Dashboard as root route
         if project_type == "social_media":
-            logger.info("   Adding Dashboard as root route for social media project")
-            # Add route for "/" pointing to Dashboard
-            route_updates.insert(0, (
-                'import Dashboard from "@/pages/Dashboard";',
-                '          <Route path="/" element={<Dashboard />} />'
-            ))
-        
-        
-
 def create_pages_md(frontend_path: Path, pages, project_type: str) -> bool:
     """Create pages.md documenting page responsibilities. Accepts list of dicts OR list of page names (strings)."""
     try:
@@ -2394,6 +2385,15 @@ def run_phase_8_smart(project_name: str, project_path: str, description: str) ->
             create_file(page['content'], frontend_path / page['path'])
         
         # Update App.tsx routes
+        # Special handling for social media projects: Dashboard as root route (applied BEFORE route_updates)
+        if project_type == "social_media":
+            logger.info("   Adding Dashboard as root route for social media project")
+            # Insert at index 0 (before any existing routes)
+            route_updates.insert(0, (
+                'import Dashboard from "@/pages/Dashboard";',
+                '          <Route path="/" element={<Dashboard />} />'
+            ))
+        
         route_updates = get_app_router_updates(project_type, pages)
         pages_to_keep = [Path(p["path"]).stem for p in pages]
         removed_pages = []
