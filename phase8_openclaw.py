@@ -71,7 +71,9 @@ def analyze_project_type(description: str) -> str:
         return 'ecommerce'
     elif any(k in desc_lower for k in ['task', 'kanban', 'todo', 'project management', 'workflow']):
         return "task_management"
-    elif any(k in desc_lower for k in ['blog', 'content', 'article', 'post', 'publication']):
+    elif any(k in desc_lower for k in ['social', 'social media', 'socialmedia', 'social manager', 'socialmedia manager', 'instagram', 'twitter', 'facebook', 'linkedin', 'scheduler']):
+        return "social_media"
+    elif any(k in desc_lower for k in ['blog', 'content', 'article', 'publication']):
         return "blog"
     else:
         return "custom"
@@ -880,6 +882,1141 @@ export default function Blog() {
     }
 
 
+
+def get_social_media_files(project_name: str) -> Dict[str, Any]:
+    """Get social media manager files."""
+    return {
+        "components": [
+            {
+                "path": "src/components/Navbar.tsx",
+                "content": '''import React, { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Menu, X, LogIn, LogOut } from 'lucide-react';
+
+export default function Navbar() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    setIsOpen(false);
+  }, [location.pathname]);
+
+  const navLinks = [
+    { path: '/', label: 'Home' },
+    { path: '/dashboard', label: 'Dashboard', protected: true },
+    { path: '/settings', label: 'Settings', protected: true },
+  ];
+
+  return (
+    <nav className="border-b bg-background">
+      <div className="container mx-auto px-4">
+        <div className="flex items-center justify-between h-16">
+          <Link to="/" className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
+              <span className="text-primary-foreground font-bold text-sm">SM</span>
+            </div>
+            <span className="font-bold text-lg">SocialManager</span>
+          </Link>
+
+          <div className="hidden md:flex items-center space-x-6">
+            {navLinks.map((link) => {
+              if (link.protected && !isAuthenticated) return null;
+              return (
+                <Link
+                  key={link.path}
+                  to={link.path}
+                  className={`text-sm font-medium transition-colors hover:text-primary ${
+                    location.pathname === link.path ? 'text-primary' : 'text-muted-foreground'
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
+          </div>
+
+          <div className="hidden md:flex items-center space-x-2">
+            {isAuthenticated ? (
+              <Button variant="ghost" size="sm">
+                <LogOut className="w-4 h-4 mr-2" />
+                Logout
+              </Button>
+            ) : (
+              <>
+                <Link to="/login">
+                  <Button variant="ghost" size="sm">
+                    <LogIn className="w-4 h-4 mr-2" />
+                    Sign In
+                  </Button>
+                </Link>
+                <Link to="/signup">
+                  <Button size="sm">Sign Up</Button>
+                </Link>
+              </>
+            )}
+          </div>
+
+          <button
+            className="md:hidden"
+            onClick={() => setIsOpen(!isOpen)}
+            aria-label="Toggle menu"
+          >
+            {isOpen ? <X /> : <Menu />}
+          </button>
+        </div>
+
+        {isOpen && (
+          <div className="md:hidden py-4 space-y-2">
+            {navLinks.map((link) => {
+              if (link.protected && !isAuthenticated) return null;
+              return (
+                <Link
+                  key={link.path}
+                  to={link.path}
+                  className={`block px-4 py-2 text-sm font-medium ${
+                    location.pathname === link.path ? 'text-primary' : 'text-muted-foreground'
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
+            <div className="px-4 pt-4 space-y-2">
+              {isAuthenticated ? (
+                <Button variant="ghost" size="sm" className="w-full">
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </Button>
+              ) : (
+                <>
+                  <Link to="/login" className="block">
+                    <Button variant="ghost" size="sm" className="w-full">
+                      <LogIn className="w-4 h-4 mr-2" />
+                      Sign In
+                    </Button>
+                  </Link>
+                  <Link to="/signup" className="block">
+                    <Button size="sm" className="w-full">Sign Up</Button>
+                  </Link>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </nav>
+  );
+}
+'''
+            },
+            {
+                "path": "src/components/Footer.tsx",
+                "content": '''import React from 'react';
+import { Link } from 'react-router-dom';
+import { Facebook, Twitter, Instagram, Linkedin, Github } from 'lucide-react';
+
+export default function Footer() {
+  return (
+    <footer className="border-t bg-background">
+      <div className="container mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+          <div>
+            <h3 className="font-bold text-lg mb-4">SocialManager</h3>
+            <p className="text-sm text-muted-foreground">
+              The all-in-one platform for managing your social media presence across multiple platforms.
+            </p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold mb-4">Product</h4>
+            <ul className="space-y-2 text-sm">
+              <li><Link to="/features" className="text-muted-foreground hover:text-primary">Features</Link></li>
+              <li><Link to="/pricing" className="text-muted-foreground hover:text-primary">Pricing</Link></li>
+              <li><Link to="/integrations" className="text-muted-foreground hover:text-primary">Integrations</Link></li>
+              <li><Link to="/api" className="text-muted-foreground hover:text-primary">API</Link></li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-semibold mb-4">Company</h4>
+            <ul className="space-y-2 text-sm">
+              <li><Link to="/about" className="text-muted-foreground hover:text-primary">About</Link></li>
+              <li><Link to="/blog" className="text-muted-foreground hover:text-primary">Blog</Link></li>
+              <li><Link to="/careers" className="text-muted-foreground hover:text-primary">Careers</Link></li>
+              <li><Link to="/contact" className="text-muted-foreground hover:text-primary">Contact</Link></li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-semibold mb-4">Connect</h4>
+            <div className="flex space-x-4 mb-4">
+              <a href="#" className="text-muted-foreground hover:text-primary" aria-label="Facebook">
+                <Facebook className="w-5 h-5" />
+              </a>
+              <a href="#" className="text-muted-foreground hover:text-primary" aria-label="Twitter">
+                <Twitter className="w-5 h-5" />
+              </a>
+              <a href="#" className="text-muted-foreground hover:text-primary" aria-label="Instagram">
+                <Instagram className="w-5 h-5" />
+              </a>
+              <a href="#" className="text-muted-foreground hover:text-primary" aria-label="LinkedIn">
+                <Linkedin className="w-5 h-5" />
+              </a>
+              <a href="#" className="text-muted-foreground hover:text-primary" aria-label="GitHub">
+                <Github className="w-5 h-5" />
+              </a>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              © 2026 SocialManager. All rights reserved.
+            </p>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}
+'''
+            }
+        ],
+        "pages": [
+            {
+                "path": "src/pages/Login.tsx",
+                "content": """import React, { useState, FormEvent } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { AlertCircle } from 'lucide-react';
+
+interface FormErrors {
+  email?: string;
+  password?: string;
+  general?: string;
+}
+
+interface FormData {
+  email: string;
+  password: string;
+  remember: boolean;
+}
+
+export default function Login() {
+  const navigate = useNavigate();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [formData, setFormData] = useState<FormData>({
+    email: '',
+    password: '',
+    remember: false
+  });
+
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: FormErrors = {};
+
+    if (!formData.email) {
+      newErrors.email = 'Email is required';
+    } else if (!validateEmail(formData.email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+
+    if (!formData.password) {
+      newErrors.password = 'Password is required';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!validateForm()) {
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      navigate('/dashboard');
+    } catch (error) {
+      setErrors({ general: 'An error occurred. Please try again.' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleInputChange = (field: keyof FormData, value: string | boolean) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+
+    if (errors[field as keyof FormErrors]) {
+      setErrors(prev => ({ ...prev, [field]: undefined }));
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Navbar />
+      <main className="flex flex-1 items-center justify-center py-12">
+        <div className="container px-4">
+          <div className="mx-auto max-w-md">
+            <div className="mb-8 text-center">
+              <h1 className="mb-2 text-3xl font-bold tracking-tight">Welcome back</h1>
+              <p className="text-muted-foreground">Sign in to your account to continue</p>
+            </div>
+
+            <Card className="rounded-lg border bg-card p-8 shadow-sm">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {errors.general && (
+                  <div className="flex items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <span>{errors.general}</span>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={formData.email}
+                    onChange={(e) => handleInputChange("email", e.target.value)}
+                    className={errors.email ? "border-destructive" : ""}
+                    aria-invalid={!!errors.email}
+                  />
+                  {errors.email && (
+                    <p className="text-sm text-destructive">{errors.email}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Password</Label>
+                    <Link to="/forgot-password" className="text-sm text-primary hover:underline">
+                      Forgot password?
+                    </Link>
+                  </div>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={formData.password}
+                    onChange={(e) => handleInputChange("password", e.target.value)}
+                    className={errors.password ? "border-destructive" : ""}
+                    aria-invalid={!!errors.password}
+                  />
+                  {errors.password && (
+                    <p className="text-sm text-destructive">{errors.password}</p>
+                  )}
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="remember"
+                    checked={formData.remember}
+                    onCheckedChange={(checked) => handleInputChange("remember", checked as boolean)}
+                  />
+                  <Label htmlFor="remember" className="cursor-pointer text-sm font-normal">
+                    Remember me for 30 days
+                  </Label>
+                </div>
+
+                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting ? 'Signing in...' : 'Sign in'}
+                </Button>
+              </form>
+            </Card>
+
+            <p className="mt-8 text-center text-sm text-muted-foreground">
+              Don't have an account?{' '}
+              <Link to="/signup" className="text-primary font-medium hover:underline">
+                Sign up
+              </Link>
+            </p>
+          </div>
+        </div>
+      </main>
+      <Footer />
+    </div>
+  );
+}
+""",
+                "routes": ["/login"],
+                "description": "User authentication page with email/password login form, remember me option, and social login buttons. Redirects authenticated users to dashboard."
+            },
+            {
+                "path": "src/pages/Signup.tsx",
+                "content": """import React, { useState, FormEvent } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { AlertCircle, Check, X } from 'lucide-react';
+
+interface FormErrors {
+  name?: string;
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
+  agreeToTerms?: string;
+  general?: string;
+}
+
+interface FormData {
+  name: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  agreeToTerms: boolean;
+}
+
+export default function Signup() {
+  const navigate = useNavigate();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [formData, setFormData] = useState<FormData>({
+    name: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    agreeToTerms: false
+  });
+
+  const passwordStrength = useState(() => ({
+    score: 0,
+    feedback: [] as string[]
+  }))[0];
+
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: FormErrors = {};
+
+    if (!formData.name) {
+      newErrors.name = 'Full name is required';
+    }
+
+    if (!formData.email) {
+      newErrors.email = 'Email is required';
+    } else if (!validateEmail(formData.email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+
+    if (!formData.password) {
+      newErrors.password = 'Password is required';
+    } else if (formData.password.length < 6) {
+      newErrors.password = 'Password must be at least 6 characters';
+    }
+
+    if (!formData.confirmPassword) {
+      newErrors.confirmPassword = 'Please confirm your password';
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match';
+    }
+
+    if (!formData.agreeToTerms) {
+      newErrors.agreeToTerms = 'You must agree to the terms';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!validateForm()) {
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      navigate('/dashboard');
+    } catch (error) {
+      setErrors({ general: 'An error occurred. Please try again.' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleInputChange = (field: keyof FormData, value: string | boolean) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+
+    if (errors[field as keyof FormErrors]) {
+      setErrors(prev => ({ ...prev, [field]: undefined }));
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Navbar />
+      <main className="flex flex-1 items-center justify-center py-12">
+        <div className="container px-4">
+          <div className="mx-auto max-w-md">
+            <div className="mb-8 text-center">
+              <h1 className="mb-2 text-3xl font-bold tracking-tight">Create an account</h1>
+              <p className="text-muted-foreground">Start managing your social media today</p>
+            </div>
+
+            <Card className="rounded-lg border bg-card p-8 shadow-sm">
+              <form onSubmit={handleSubmit} className="space-y-5">
+                {errors.general && (
+                  <div className="flex items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <span>{errors.general}</span>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="name">Full Name</Label>
+                  <Input
+                    id="name"
+                    type="text"
+                    placeholder="John Doe"
+                    value={formData.name}
+                    onChange={(e) => handleInputChange("name", e.target.value)}
+                    className={errors.name ? "border-destructive" : ""}
+                    aria-invalid={!!errors.name}
+                  />
+                  {errors.name && (
+                    <p className="text-sm text-destructive">{errors.name}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={formData.email}
+                    onChange={(e) => handleInputChange("email", e.target.value)}
+                    className={errors.email ? "border-destructive" : ""}
+                    aria-invalid={!!errors.email}
+                  />
+                  {errors.email && (
+                    <p className="text-sm text-destructive">{errors.email}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={formData.password}
+                    onChange={(e) => handleInputChange("password", e.target.value)}
+                    className={errors.password ? "border-destructive" : ""}
+                    aria-invalid={!!errors.password}
+                  />
+                  {errors.password && (
+                    <p className="text-sm text-destructive">{errors.password}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    placeholder="••••••••"
+                    value={formData.confirmPassword}
+                    onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+                    className={errors.confirmPassword ? "border-destructive" : ""}
+                    aria-invalid={!!errors.confirmPassword}
+                  />
+                  {errors.confirmPassword && (
+                    <p className="text-sm text-destructive">{errors.confirmPassword}</p>
+                  )}
+                  {formData.confirmPassword && formData.password === formData.confirmPassword && (
+                    <div className="flex items-center gap-1 text-xs text-green-500">
+                      <Check className="h-3 w-3" />
+                      <span>Passwords match</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-start space-x-2">
+                  <Checkbox
+                    id="terms"
+                    checked={formData.agreeToTerms}
+                    onCheckedChange={(checked) => handleInputChange("agreeToTerms", checked as boolean)}
+                    className="mt-0.5"
+                  />
+                  <Label htmlFor="terms" className="cursor-pointer text-sm font-normal leading-normal">
+                    I agree to the{' '}
+                    <Link to="/terms" className="text-primary hover:underline">
+                      Terms of Service
+                    </Link>
+                    {' '}and{' '}
+                    <Link to="/privacy" className="text-primary hover:underline">
+                      Privacy Policy
+                    </Link>
+                  </Label>
+                </div>
+                {errors.agreeToTerms && (
+                  <p className="text-sm text-destructive">{errors.agreeToTerms}</p>
+                )}
+
+                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting ? 'Creating account...' : 'Create account'}
+                </Button>
+              </form>
+            </Card>
+
+            <p className="mt-8 text-center text-sm text-muted-foreground">
+              Already have an account?{' '}
+              <Link to="/login" className="text-primary font-medium hover:underline">
+                Sign in
+              </Link>
+            </p>
+          </div>
+        </div>
+      </main>
+      <Footer />
+    </div>
+  );
+}
+""",
+                "routes": ["/signup"],
+                "description": "User registration page with full name, email, password, confirm password, and terms agreement. Includes password strength indicator and form validation."
+            },
+            {
+                "path": "src/pages/Dashboard.tsx",
+                "content": """import React, { useState } from 'react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Calendar, MessageCircle, Share2, Heart, BarChart3, TrendingUp, ExternalLink, Edit3, Plus } from 'lucide-react';
+
+interface ScheduledPost {
+  id: string;
+  content: string;
+  platforms: string[];
+  scheduledDate: Date;
+  status: 'scheduled' | 'posted' | 'failed';
+}
+
+interface RecentPost {
+  id: string;
+  platform: string;
+  content: string;
+  postedAt: string;
+  likes: number;
+  comments: number;
+  shares: number;
+}
+
+interface Analytics {
+  totalFollowers: number;
+  followersChange: string;
+  totalEngagement: number;
+  engagementChange: string;
+  totalPosts: number;
+  postsChange: string;
+}
+
+const mockScheduledPosts: ScheduledPost[] = [
+  {
+    id: '1',
+    content: 'Excited to announce our new feature! Check it out and let us know what you think. #launch #innovation',
+    platforms: ['twitter', 'linkedin'],
+    scheduledDate: new Date('2026-03-01T10:00:00'),
+    status: 'scheduled'
+  },
+  {
+    id: '2',
+    content: 'Behind the scenes at our team hackathon! The innovation here is incredible. 🚀',
+    platforms: ['instagram', 'facebook'],
+    scheduledDate: new Date('2026-03-02T14:30:00'),
+    status: 'scheduled'
+  }
+];
+
+const mockRecentPosts: RecentPost[] = [
+  {
+    id: '1',
+    platform: 'twitter',
+    content: 'Just shipped a major update to our dashboard UI! Users are loving the new analytics view.',
+    postedAt: '2 hours ago',
+    likes: 142,
+    comments: 23,
+    shares: 18
+  },
+  {
+    id: '2',
+    platform: 'instagram',
+    content: 'Team building activity today! Great energy and collaboration across all departments.',
+    postedAt: '5 hours ago',
+    likes: 328,
+    comments: 45,
+    shares: 67
+  }
+];
+
+const mockAnalytics: Analytics = {
+  totalFollowers: 24567,
+  followersChange: '+12.5%',
+  totalEngagement: 8.4,
+  engagementChange: '+8.2%',
+  totalPosts: 156
+};
+
+export default function Dashboard() {
+  const [scheduledPosts] = useState<ScheduledPost[]>(mockScheduledPosts);
+  const [recentPosts] = useState<RecentPost[]>(mockRecentPosts);
+  const [analytics] = useState<Analytics>(mockAnalytics);
+
+  const getPlatformIcon = (platform: string) => {
+    const icons: { [key: string]: JSX.Element } = {
+      twitter: <span className="text-blue-500 font-bold">X</span>,
+      linkedin: <span className="text-blue-700 font-bold">in</span>,
+      instagram: <span className="text-pink-600 font-bold">IG</span>,
+      facebook: <span className="text-blue-600 font-bold">FB</span>
+    };
+    return icons[platform] || platform[0].toUpperCase();
+  };
+
+  const getPlatformColor = (platform: string) => {
+    const colors: { [key: string]: string } = {
+      twitter: 'border-blue-500 text-blue-500',
+      linkedin: 'border-blue-700 text-blue-700',
+      instagram: 'border-pink-600 text-pink-600',
+      facebook: 'border-blue-600 text-blue-600'
+    };
+    return colors[platform] || 'border-gray-400';
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Navbar />
+      <main className="flex-1 container mx-auto px-4 py-8">
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold mb-2">Dashboard</h1>
+          <p className="text-muted-foreground">Manage your social media presence</p>
+        </div>
+
+        <Tabs defaultValue="scheduler" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="scheduler">Post Scheduler</TabsTrigger>
+            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+            <TabsTrigger value="recent">Recent Posts</TabsTrigger>
+          </TabsList>
+
+          {/* Scheduler Tab */}
+          <TabsContent value="scheduler" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Scheduled Posts</CardTitle>
+                    <CardDescription>Posts waiting to be published</CardDescription>
+                  </div>
+                  <Button size="sm" variant="outline" className="gap-2">
+                    <Plus className="h-3 w-3" />
+                    New Post
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {scheduledPosts.map((post) => (
+                    <div
+                      key={post.id}
+                      className="flex items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+                    >
+                      <div className="flex gap-1">
+                        {post.platforms.map((platform) => (
+                          <div
+                            key={platform}
+                            className={`flex h-8 w-8 items-center justify-center rounded-full border ${getPlatformColor(platform)}`}
+                          >
+                            {getPlatformIcon(platform)}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex-1">
+                        <p className="mb-2 text-sm line-clamp-2">{post.content}</p>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            {post.scheduledDate.toLocaleDateString()} at{' '}
+                            {post.scheduledDate.toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                          <Badge
+                            variant={
+                              post.status === 'scheduled'
+                                ? 'default'
+                                : post.status === 'posted'
+                                ? 'secondary'
+                                : 'outline'
+                            }
+                          >
+                            {post.status}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="icon" variant="ghost" className="h-8 w-8">
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Analytics Tab */}
+          <TabsContent value="analytics" className="space-y-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <CardTitle className="text-sm font-medium">Total Followers</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {analytics.totalFollowers.toLocaleString()}
+                  </div>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-green-500">
+                    <TrendingUp className="h-3 w-3" />
+                    {analytics.followersChange} from last month
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <CardTitle className="text-sm font-medium">Avg. Engagement</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{analytics.totalEngagement}%</div>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-green-500">
+                    <TrendingUp className="h-3 w-3" />
+                    {analytics.engagementChange} from last month
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <CardTitle className="text-sm font-medium">Total Posts</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{analytics.totalPosts}</div>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-green-500">
+                    <TrendingUp className="h-3 w-3" />
+                    +15.3% from last month
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <CardTitle className="text-sm font-medium">Profile Visits</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">4,231</div>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-green-500">
+                    <TrendingUp className="h-3 w-3" />
+                    +18.2% from last month
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Engagement Overview</CardTitle>
+                <CardDescription>Your engagement rate over the last 30 days</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex h-64 items-center justify-center border-2 border-dashed rounded-lg">
+                  <div className="text-center">
+                    <BarChart3 className="mx-auto h-12 w-12 text-muted-foreground" />
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Chart visualization coming soon
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Recent Posts Tab */}
+          <TabsContent value="recent" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Recently Posted</CardTitle>
+                <CardDescription>Your most recent posts across all platforms</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {recentPosts.map((post) => (
+                    <div
+                      key={post.id}
+                      className="flex items-start gap-4 rounded-lg border p-4"
+                    >
+                      <div className={`flex h-10 w-10 items-center justify-center rounded-full border ${getPlatformColor(post.platform)}`}>
+                        {getPlatformIcon(post.platform)}
+                      </div>
+                      <div className="flex-1">
+                        <p className="mb-3 text-sm">{post.content}</p>
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Share2 className="h-3 w-3" />
+                            {post.postedAt}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Heart className="h-3 w-3" />
+                            {post.likes}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <MessageCircle className="h-3 w-3" />
+                            {post.comments}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Share2 className="h-3 w-3" />
+                            {post.shares}
+                          </span>
+                        </div>
+                      </div>
+                      <Button size="sm" variant="ghost" className="gap-1" asChild>
+                        <a href="#" target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="h-3 w-3" />
+                          View
+                        </a>
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </main>
+      <Footer />
+    </div>
+  );
+}
+""",
+                "routes": ["/dashboard"],
+                "description": "Main dashboard with tabbed interface showing post scheduler, analytics overview with metrics cards, and recent posts with engagement data."
+            },
+            {
+                "path": "src/pages/Settings.tsx",
+                "content": """import React, { useState } from 'react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
+import { Sun, Moon, ExternalLink } from 'lucide-react';
+
+export default function Settings() {
+  const [theme, setTheme] = useState('light');
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    bio: ''
+  });
+
+  const handleInputChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Navbar />
+      <main className="flex-1 container mx-auto px-4 py-8">
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold mb-2">Settings</h1>
+          <p className="text-muted-foreground">Manage your account and preferences</p>
+        </div>
+
+        <Tabs defaultValue="profile" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+            <TabsTrigger value="connections">Connections</TabsTrigger>
+            <TabsTrigger value="preferences">Preferences</TabsTrigger>
+          </TabsList>
+
+          {/* Profile Tab */}
+          <TabsContent value="profile" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Profile Information</CardTitle>
+                <CardDescription>Update your personal details</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Full Name</Label>
+                  <Input
+                    id="name"
+                    placeholder="John Doe"
+                    value={formData.name}
+                    onChange={(e) => handleInputChange('name', e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={formData.email}
+                    onChange={(e) => handleInputChange('email', e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bio">Bio</Label>
+                  <textarea
+                    id="bio"
+                    placeholder="Tell us about yourself"
+                    className="w-full min-h-[100px] rounded-md border bg-background px-3 py-2 text-sm"
+                    value={formData.bio}
+                    onChange={(e) => handleInputChange('bio', e.target.value)}
+                  />
+                </div>
+                <Button>Save Changes</Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Connections Tab */}
+          <TabsContent value="connections" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Connected Platforms</CardTitle>
+                <CardDescription>Manage your social media connections</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {['twitter', 'linkedin', 'instagram'].map((platform) => (
+                  <div key={platform} className="flex items-center justify-between p-4 border rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                        <span className="font-bold">{platform[0].toUpperCase()}</span>
+                      </div>
+                      <div>
+                        <h3 className="font-medium capitalize">{platform}</h3>
+                        <p className="text-sm text-muted-foreground">Not connected</p>
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" className="gap-2">
+                      <ExternalLink className="h-4 w-4" />
+                      Connect
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Preferences Tab */}
+          <TabsContent value="preferences" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Appearance</CardTitle>
+                <CardDescription>Customize how the application looks</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Theme</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Choose between light and dark mode
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="icon"
+                      variant={theme === 'light' ? 'default' : 'outline'}
+                      onClick={() => setTheme('light')}
+                    >
+                      <Sun className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant={theme === 'dark' ? 'default' : 'outline'}
+                      onClick={() => setTheme('dark')}
+                    >
+                      <Moon className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Notifications</CardTitle>
+                <CardDescription>Manage how you receive notifications</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Email Notifications</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Receive email updates about your account
+                    </p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Post Reminders</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Get notified before scheduled posts go live
+                    </p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </main>
+      <Footer />
+    </div>
+  );
+}
+""",
+                "routes": ["/settings"],
+                "description": "Account settings with profile editing, social media platform connections, appearance preferences (theme toggle), and notification settings."
+            }
+        ]
+    }
+
+
+
 def get_app_router_updates(project_type: str, pages: List[Dict[str, Any]]) -> List[tuple]:
     """Get App.tsx route updates."""
     route_updates = []
@@ -900,28 +2037,33 @@ def get_app_router_updates(project_type: str, pages: List[Dict[str, Any]]) -> Li
     return route_updates
 
 
-def create_pages_md(frontend_path: Path, pages: List[Dict[str, Any]], project_type: str) -> bool:
-    """Create pages.md documenting page responsibilities."""
+def create_pages_md(frontend_path: Path, pages, project_type: str) -> bool:
+    """Create pages.md documenting page responsibilities. Accepts list of dicts OR list of page names (strings)."""
     try:
         pages_md_path = frontend_path / "pages.md"
-        
+
         content = "# Pages Documentation\n\n"
         content += f"**Project Type:** {project_type}\n\n"
         content += "---\n\n"
-        
+
         for page in pages:
-            routes = page.get("routes", [])
-            # Safe route access with fallback
-            if not routes or not isinstance(routes, list) or len(routes) == 0:
-                route = "N/A"
+            # Handle both dict (with path/routes/description) and string (just page name)
+            if isinstance(page, dict):
+                page_name = Path(page['path']).stem
+                routes = page.get("routes", [])
+                route = routes[0] if routes and isinstance(routes, list) and len(routes) > 0 else "N/A"
+                page_file = page['path']
+                description = page.get("description", "No description")
             else:
-                route = routes[0]
-                
-            description = page.get("description", "No description")
-            
-            content += f"## {Path(page['path']).stem}\n\n"
+                # page is a string (page name)
+                page_name = page
+                route = f"/{page.lower().replace(' ', '-')}"
+                page_file = f"src/pages/{page}.tsx"
+                description = f"Page for {page} functionality"
+
+            content += f"## {page_name}\n\n"
             content += f"**Route:** `{route}`\n\n"
-            content += f"**File:** `{page['path']}`\n\n"
+            content += f"**File:** `{page_file}`\n\n"
             content += f"**Responsibility:** {description}\n\n"
             content += "---\n\n"
         
@@ -1004,23 +2146,11 @@ def update_app_routes(frontend_path: Path, route_updates: List[tuple]) -> bool:
             app_path.write_text(content, encoding='utf-8')
             logger.info("   App.tsx updated with routes")
             return True
-        
+
         logger.warning("   No changes to App.tsx")
         return False
     except Exception as e:
         logger.error(f"   Failed to update App.tsx: {e}")
-        return False
-    logger.info("🔨 Running npm run build")
-    try:
-        result = subprocess.run(
-            ["npm", "run", "build"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-        return result.returncode == 0
-    except:
         return False
 
 
@@ -1032,6 +2162,192 @@ def git_commit(message: str, cwd: str) -> bool:
         subprocess.run(["git", "commit", "-m", message], cwd=cwd, capture_output=True)
         return True
     except:
+        return False
+
+
+
+def run_npm_build(cwd: str) -> bool:
+    """Run npm build for frontend."""
+    logger.info("🔨 Running npm run build")
+    try:
+        result = subprocess.run(
+            ["npm", "run", "build"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        if result.returncode == 0:
+            logger.info("✅ Build passed")
+            return True
+        else:
+            logger.warning(f"⚠️ Build failed: {result.stderr}")
+            return False
+    except Exception as e:
+        logger.warning(f"⚠️ Build failed: {e}")
+        return False
+
+
+
+
+def get_existing_pages(frontend_path: Path) -> list:
+    """Get list of existing pages from src/pages."""
+    pages_dir = frontend_path / "src" / "pages"
+    if not pages_dir.exists():
+        return []
+    
+    return sorted([f.stem for f in pages_dir.glob("*.tsx") if f.stem != "NotFound"])
+
+
+def analyze_and_select_pages(frontend_path: Path, description: str, project_type: str) -> list:
+    """Select relevant template pages (max 3) using AI."""
+    logger.info("🤖 Step 3: AI selecting relevant pages...")
+    
+    existing_pages = get_existing_pages(frontend_path)
+    logger.info(f"   Found {len(existing_pages)} template pages: {existing_pages}")
+    
+    if not existing_pages:
+        return []
+    
+    # Try to use Groq API for smart selection
+    try:
+        import os
+        api_key = os.getenv("GROQ_API_KEY")
+        if api_key and api_key != "your_api_key":
+            import requests
+            
+            prompt = f"""You are selecting which pages to keep for a web application.
+
+Project:
+- Description: {description}
+- Type: {project_type}
+
+Available template pages:
+{chr(10).join(f"- {p}" for p in existing_pages)}
+
+TASK: Select the most relevant pages (MAXIMUM 3) for this specific project.
+- Remove pages that don't match the project's purpose
+- Keep pages that are essential to this type of application
+- Return as a simple comma-separated list of page names only
+
+Example response format:
+Dashboard,Account,Settings
+
+Respond with ONLY page names (no explanation, no numbering):"""
+
+            logger.info("   Using Groq API to select relevant pages...")
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "llama3-70b-8192",
+                    "messages": [
+                        {"role": "system", "content": "You select relevant web pages. Return ONLY comma-separated page names."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 100
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                selected_text = data["choices"][0]["message"]["content"].strip()
+                
+                # Parse page names from response
+                selected_pages = [p.strip() for p in selected_text.split(",") if p.strip()]
+                
+                # Filter to only pages that actually exist
+                valid_pages = [p for p in selected_pages if p in existing_pages]
+                
+                # Limit to 3 max
+                selected = valid_pages[:3]
+                
+                logger.info(f"   AI selected {len(selected)} relevant pages: {selected}")
+                return selected
+            else:
+                logger.warning(f"   Groq API error: {response.status_code}")
+                logger.info("   Falling back to first 3 pages...")
+                return existing_pages[:3]
+                
+    except Exception as e:
+        logger.warning(f"   AI selection failed: {e}")
+        logger.info("   Falling back to first 3 pages...")
+        return existing_pages[:3]
+
+
+def delete_unwanted_pages(frontend_path: Path, pages_to_keep: list) -> list:
+    """Delete unwanted pages from template."""
+    logger.info("🗑️ Step 5: Removing unwanted template pages...")
+    
+    pages_dir = frontend_path / "src" / "pages"
+    existing_pages = get_existing_pages(frontend_path)
+    
+    removed_pages = []
+    
+    if pages_dir.exists():
+        for page_name in existing_pages:
+            if page_name not in pages_to_keep:
+                page_file = pages_dir / f"{page_name}.tsx"
+                logger.info(f"   Removing: {page_file.name}")
+                try:
+                    page_file.unlink()
+                    removed_pages.append(f"src/pages/{page_name}.tsx")
+                except Exception as e:
+                    logger.warning(f"   Failed to remove {page_name}.tsx: {e}")
+    
+    logger.info(f"   Removed {len(removed_pages)} unwanted pages")
+    return removed_pages
+
+
+def update_app_routes(frontend_path: Path, pages_to_keep: list) -> bool:
+    """Update App.tsx routes to only show selected pages."""
+    logger.info("🛣️ Step 7: Updating App.tsx routes...")
+    
+    app_path = frontend_path / "src" / "App.tsx"
+    if not app_path.exists():
+        logger.warning("   App.tsx not found")
+        return False
+    
+    app_content = app_path.read_text(encoding='utf-8')
+    
+    # Build route import statements
+    route_imports = []
+    for page_name in pages_to_keep:
+        route_imports.append(f'import {page_name} from "@/pages/{page_name}";')
+    
+    # Build route elements
+    route_elements = []
+    for page_name in pages_to_keep:
+        route_path = page_name.lower().replace(" ", "-")
+        route_elements.append(f'          <Route path="/{route_path}" element={{<{page_name} />}} />')
+    
+    # Find and replace routes section
+    routes_start = "  <Routes>"
+    routes_end = "  </Routes>"
+    
+    if routes_start in app_content and routes_end in app_content:
+        import re
+        
+        # Find routes section
+        start_idx = app_content.find(routes_start)
+        end_idx = app_content.find(routes_end) + len(routes_end)
+        
+        # Build new routes block
+        new_routes_block = chr(10).join(route_imports) + chr(10) + chr(10) + routes_start + chr(10) + chr(10).join(route_elements) + chr(10) + routes_end
+        
+        # Replace routes section
+        new_app_content = app_content[:start_idx] + new_routes_block + app_content[end_idx:]
+        
+        app_path.write_text(new_app_content, encoding='utf-8')
+        logger.info(f"   Updated App.tsx with {len(pages_to_keep)} routes")
+        return True
+    else:
+        logger.warning("   Could not find Routes section in App.tsx")
         return False
 
 
@@ -1049,67 +2365,129 @@ def run_phase_8_smart(project_name: str, project_path: str, description: str) ->
     project_type = analyze_project_type(description)
     logger.info(f"   Project type: {project_type}")
     
-    # Step 2: Get files to create
-    logger.info("📝 Step 2: Getting files to create...")
-    file_getters = {
-        "ecommerce": get_ecommerce_files,
-        "task_management": get_task_management_files,
-        "blog": get_blog_files,
-        "custom": lambda x: {"components": [], "pages": []}
-    }
+    # Step 2: Handle different project types
+    logger.info("📝 Step 2: Handling project type...")
     
-    project_files = file_getters.get(project_type, lambda x: {"components": [], "pages": []})(project_name)
-    components = project_files["components"]
-    pages = project_files["pages"]
-    
-    logger.info(f"   Components: {len(components)}")
-    logger.info(f"   Pages: {len(pages)}")
-    
-    summary = {
-        "project": project_name,
-        "project_type": project_type,
-        "components_created": 0,
-        "pages_created": 0,
-        "files_modified": []
-    }
+    if project_type == 'social_media':
+        # Create social media pages from scratch
+        logger.info("   Creating social media pages...")
+        project_files = get_social_media_files(project_name)
+        components = project_files.get('components', [])
+        pages = project_files.get('pages', [])
+        
+        # Create components
+        for comp in components:
+            create_file(comp['content'], frontend_path / comp['path'])
+        
+        # Create pages
+        for page in pages:
+            create_file(page['content'], frontend_path / page['path'])
+        
+        # Update App.tsx routes
+        route_updates = get_app_router_updates(project_type, pages)
+        update_app_routes(frontend_path, route_updates)
+        
+        pages_to_keep = [Path(p['path']).stem for p in pages]
+        removed_pages = []
+        
+    elif project_type == 'ecommerce':
+        # Create e-commerce pages
+        logger.info("   Creating e-commerce pages...")
+        project_files = get_ecommerce_files(project_name)
+        components = project_files.get('components', [])
+        pages = project_files.get('pages', [])
+        
+        # Create components
+        for comp in components:
+            create_file(comp['content'], frontend_path / comp['path'])
+        
+        # Create pages
+        for page in pages:
+            create_file(page['content'], frontend_path / page['path'])
+        
+        # Update App.tsx routes
+        route_updates = get_app_router_updates(project_type, pages)
+        update_app_routes(frontend_path, route_updates)
+        
+        pages_to_keep = [Path(p['path']).stem for p in pages]
+        removed_pages = []
+        
+    elif project_type == 'task_management':
+        # Create task management pages
+        logger.info("   Creating task management pages...")
+        project_files = get_task_management_files()
+        components = project_files.get('components', [])
+        pages = project_files.get('pages', [])
+        
+        # Create components
+        for comp in components:
+            create_file(comp['content'], frontend_path / comp['path'])
+        
+        # Create pages
+        for page in pages:
+            create_file(page['content'], frontend_path / page['path'])
+        
+        # Update App.tsx routes
+        route_updates = get_app_router_updates(project_type, pages)
+        update_app_routes(frontend_path, route_updates)
+        
+        pages_to_keep = [Path(p['path']).stem for p in pages]
+        removed_pages = []
+        
+    elif project_type == 'blog':
+        # Create blog pages
+        logger.info("   Creating blog pages...")
+        project_files = get_blog_files()
+        components = project_files.get('components', [])
+        pages = project_files.get('pages', [])
+        
+        # Create components
+        for comp in components:
+            create_file(comp['content'], frontend_path / comp['path'])
+        
+        # Create pages
+        for page in pages:
+            create_file(page['content'], frontend_path / page['path'])
+        
+        # Update App.tsx routes
+        route_updates = get_app_router_updates(project_type, pages)
+        update_app_routes(frontend_path, route_updates)
+        
+        pages_to_keep = [Path(p['path']).stem for p in pages]
+        removed_pages = []
+        
+    else:
+        # Custom type - use AI selection from template
+        logger.info("   Custom project - using template pages...")
+        pages_to_keep = analyze_and_select_pages(frontend_path, description, project_type)
+        pages_to_keep = pages_to_keep[:3] if pages_to_keep else []
+        
+        logger.info(f"   Selected {len(pages_to_keep)} pages to keep: {pages_to_keep}")
+        
+        # Remove unwanted pages
+        removed_pages = delete_unwanted_pages(frontend_path, pages_to_keep)
+        
+        # Update App.tsx routes
+        update_app_routes(frontend_path, pages_to_keep)
+        
+        components = []
     
     import time
     start_time = time.time()
     
-    # Step 3: Create components
-    logger.info(f"🔨 Step 3: Creating {len(components)} components...")
-    for comp in components:
-        if create_file(comp["content"], frontend_path / comp["path"]):
-            summary["components_created"] += 1
-            summary["files_modified"].append(comp["path"])
-    
-    # Step 4: Create pages
-    logger.info(f"📄 Step 4: Creating {len(pages)} pages...")
-    for page in pages:
-        if create_file(page["content"], frontend_path / page["path"]):
-            summary["pages_created"] += 1
-            summary["files_modified"].append(page["path"])
-    
-    # Step 5: Update App.tsx with routes
-    logger.info("🛣️ Step 5: Updating App.tsx with routes...")
-    app_path = frontend_path / "src/App.tsx"
-    if app_path.exists() and pages:
-        # Get route updates
-        route_updates = get_app_router_updates(project_type, pages)
-        
-        if route_updates:
-            # Update App.tsx with new routes
-            if update_app_routes(frontend_path, route_updates):
-                summary["files_modified"].append("src/App.tsx")
-                logger.info("   Routes added to App.tsx")
-            else:
-                logger.warning("   Could not add routes to App.tsx")
-        else:
-            logger.info("   No routes to add")
-    
+    # Update summary
+    summary = {
+        "project": project_name,
+        "project_type": project_type,
+        "components_created": 0,
+        "pages_created": len(pages_to_keep),
+        "pages_removed": len(removed_pages),
+        "pages_kept": pages_to_keep,
+        "files_modified": removed_pages + ["src/App.tsx"]
+    }
     # Step 6: Create pages.md
     logger.info("📝 Step 6: Creating pages.md...")
-    create_pages_md(frontend_path, pages, project_type)
+    create_pages_md(frontend_path, pages_to_keep, project_type)
     summary["files_modified"].append("pages.md")
     
     # Step 7: Apply branding
