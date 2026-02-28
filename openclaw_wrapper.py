@@ -503,7 +503,8 @@ That's all. Execute Phase {phase} now.
             logger.info("📝 Step 1: Running Phase 8 with OpenClaw agent sessions...")
 
             # Use OpenClaw session for Phase 8 (same as Phases 1-7)
-            phase8_script = Path("/root/clawd-backend/phase8/executor.py")            if not phase8_script.exists():
+            phase8_script = Path("/root/clawd-backend/phase8_openclaw.py")
+            if not phase8_script.exists():
                 logger.warning(f"⚠️ Phase 8 OpenClaw script not found, skipping...")
                 self.completed_phases.append("AI Frontend Refinement (Skipped - Script Not Found)")
                 return True
