@@ -2385,7 +2385,8 @@ def run_phase_8_smart(project_name: str, project_path: str, description: str) ->
         
         # Update App.tsx routes
         route_updates = get_app_router_updates(project_type, pages)
-        update_app_routes(frontend_path, route_updates)
+        pages_to_keep = [Path(p["path"]).stem for p in pages]
+        removed_pages = []
         
         pages_to_keep = [Path(p['path']).stem for p in pages]
         removed_pages = []
