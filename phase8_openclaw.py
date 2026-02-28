@@ -2142,6 +2142,16 @@ def update_app_routes(frontend_path: Path, route_updates: List[tuple]) -> bool:
                 content = content[:routes_start] + "\n" + routes_text + "\n" + content[routes_start:]
                 logger.info(f"   Added {len(routes)} routes")
         
+        # Remove default Index root route if Dashboard is being set as root
+        if '<Route path="/" element={<Dashboard />' in content:
+            content = re.sub(
+                r'\s*<Route path="/" element=\{<Index />\}\s*/>\n?',
+                '',
+                content
+            )
+            if content != original_content:
+                logger.info("   Removed default Index root route")
+        
         if content != original_content:
             app_path.write_text(content, encoding='utf-8')
             logger.info("   App.tsx updated with routes")
@@ -2304,7 +2314,7 @@ def delete_unwanted_pages(frontend_path: Path, pages_to_keep: list) -> list:
     return removed_pages
 
 
-def update_app_routes(frontend_path: Path, pages_to_keep: list) -> bool:
+def update_app_routes_from_pages(frontend_path: Path, pages_to_keep: list) -> bool:
     """Update App.tsx routes to only show selected pages."""
     logger.info("🛣️ Step 7: Updating App.tsx routes...")
     
@@ -2388,17 +2398,15 @@ def run_phase_8_smart(project_name: str, project_path: str, description: str) ->
         if project_type == "social_media":
             logger.info("   Adding Dashboard as root route for social media project")
         
-        # Get route updates first
+        # Update App.tsx routes
         route_updates = get_app_router_updates(project_type, pages)
-        
-        # Insert at index 0 (before any existing routes)
         route_updates.insert(0, (
             'import Dashboard from "@/pages/Dashboard";',
             '          <Route path="/" element={<Dashboard />} />'
         ))
+        update_app_routes(frontend_path, route_updates)
         
         pages_to_keep = [Path(p["path"]).stem for p in pages]
-        removed_pages = []
         removed_pages = []
         
     elif project_type == 'ecommerce':
@@ -2479,7 +2487,7 @@ def run_phase_8_smart(project_name: str, project_path: str, description: str) ->
         removed_pages = delete_unwanted_pages(frontend_path, pages_to_keep)
         
         # Update App.tsx routes
-        update_app_routes(frontend_path, pages_to_keep)
+        update_app_routes_from_pages(frontend_path, pages_to_keep)
         
         components = []
     
