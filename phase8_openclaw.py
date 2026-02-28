@@ -2036,6 +2036,16 @@ def get_app_router_updates(project_type: str, pages: List[Dict[str, Any]]) -> Li
     
     return route_updates
 
+        # Special handling for social media projects: Dashboard as root route
+        if project_type == "social_media":
+            logger.info("   Adding Dashboard as root route for social media project")
+            # Add route for "/" pointing to Dashboard
+            route_updates.insert(0, (
+                'import Dashboard from "@/pages/Dashboard";',
+                '          <Route path="/" element={<Dashboard />} />'
+            ))
+        
+        
 
 def create_pages_md(frontend_path: Path, pages, project_type: str) -> bool:
     """Create pages.md documenting page responsibilities. Accepts list of dicts OR list of page names (strings)."""
