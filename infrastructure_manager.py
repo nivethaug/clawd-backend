@@ -17,6 +17,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
+import dns_manager  # Internal DNS management module
+from typing import Optional, Dict, List, Tuple
 
 # Configure logging
 logging.basicConfig(
@@ -495,7 +497,7 @@ class ServiceManager:
                 ecosystem = f"""{{
   "name": "{app_name}",
   "script": "npx",
-  "args": "serve dist -l {frontend_port}",
+  "args": "serve -s dist -l {frontend_port}",
   "cwd": "{project_path}/frontend",
   "interpreter": "none",
   "env": {{
@@ -1004,17 +1006,17 @@ class DeploymentVerifier:
 
 
 class DNSProvisioner:
-    """Provisions DNS A records using Hostinger DNS skill."""
+    """Provisions DNS A records using internal dns_manager module."""
 
     def __init__(self):
-        self.skill_dir = HOSTINGER_DNS_SKILL_DIR
-        self.skill_path = HOSTINGER_DNS_SKILL
         self.server_ip = SERVER_IP
 
-        # Check if DNS skill is available
-        self.dns_skill_available = Path(self.skill_dir).exists() and Path(self.skill_path).exists()
+        # Check if DNS API token is available
+        import os
+        self.api_token = os.getenv("HOSTINGER_API_TOKEN")
+        self.dns_skill_available = self.api_token and self.api_token != "your_token_here"
         if not self.dns_skill_available:
-            logger.warning(f"⚠️ DNS skill not found at {self.skill_dir}")
+            logger.warning(f"⚠️ HOSTINGER_API_TOKEN not set in environment")
             logger.warning(f"  DNS provisioning will be skipped. Configure DNS manually in Hostinger hPanel.")
 
     def check_subdomain_exists(self, subdomain: str, domain: str = None) -> Tuple[bool, Optional[str]]:
@@ -1031,47 +1033,13 @@ class DNSProvisioner:
             if not domain:
                 domain = BASE_DOMAIN
 
-            # Call Hostinger DNS skill
-            cmd = [
-                "/bin/bash", "-c",
-                f"source {self.skill_dir}/.env && "
-                f"{self.skill_dir}/venv/bin/python {self.skill_path} "
-                f"check_subdomain_existence "
-                f"'{{\"domain\": \"{domain}\", \"subdomain\": \"{subdomain}\"}}'"
-            ]
+            # Use internal dns_manager module
+            result = dns_manager.check_subdomain_exists(domain, subdomain)
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            if result.returncode == 0:
-                output = result.stdout.strip()
-                # Parse JSON output
-                try:
-                    import json
-                    data = json.loads(output)
-                    if data.get("success") and data.get("exists"):
-                        # Extract IP from value or current_ip field
-                        current_ip = data.get("value") or data.get("current_ip")
-                        return (True, current_ip)
-                    return (False, None)
-                except json.JSONDecodeError:
-                    # Fallback to string matching
-                    if "exists" in output.lower() or "found" in output.lower():
-                        import re
-                        ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', output)
-                        current_ip = ip_match.group(0) if ip_match else None
-                        return (True, current_ip)
-                    return (False, None)
-            else:
-                logger.error(f"DNS check failed:")
-                logger.error(f"  Return code: {result.returncode}")
-                logger.error(f"  Stdout: {result.stdout}")
-                logger.error(f"  Stderr: {result.stderr}")
-                return (False, None)
+            if result.get("success") and result.get("exists"):
+                current_ip = result.get("value") or result.get("current_ip")
+                return (True, current_ip)
+            return (False, None)
 
         except Exception as e:
             logger.error(f"Failed to check subdomain: {e}")
@@ -1085,7 +1053,7 @@ class DNSProvisioner:
             True if successful, False otherwise
         """
         if not self.dns_skill_available:
-            logger.warning(f"  Skipping DNS A record creation (DNS skill not available)")
+            logger.warning(f"  Skipping DNS A record creation (HOSTINGER_API_TOKEN not set)")
             logger.warning(f"  Manually create A record: {subdomain}.{BASE_DOMAIN} → {self.server_ip}")
             return False
 
@@ -1097,31 +1065,15 @@ class DNSProvisioner:
 
             logger.info(f"Creating A record: {subdomain}.{domain} → {ip}")
 
-            # Call Hostinger DNS skill
-            cmd = [
-                "/bin/bash", "-c",
-                f"source {self.skill_dir}/.env && "
-                f"{self.skill_dir}/venv/bin/python {self.skill_path} "
-                f"create_a_record "
-                f"'{{\"domain\": \"{domain}\", \"subdomain\": \"{subdomain}\", \"ip\": \"{ip}\", \"ttl\": {ttl}}}'"
-            ]
+            # Use internal dns_manager module
+            result = dns_manager.create_a_record(domain, subdomain, ip, ttl)
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            if result.returncode == 0:
+            if result.get("success"):
                 logger.info(f"✓ A record created: {subdomain}.{domain} → {ip}")
                 logger.info(f"  Note: DNS propagation takes 5-60 minutes")
                 return True
             else:
-                logger.error(f"Failed to create A record:")
-                logger.error(f"  Return code: {result.returncode}")
-                logger.error(f"  Stdout: {result.stdout}")
-                logger.error(f"  Stderr: {result.stderr}")
+                logger.error(f"Failed to create A record: {result.get("error")}")
                 return False
 
         except Exception as e:
