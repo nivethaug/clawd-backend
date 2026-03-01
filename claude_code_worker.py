@@ -55,7 +55,7 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
 
             # Build command args
             cmd_args = ["python3", "/root/clawd-backend/fast_wrapper.py",
-                       str(project_id), project_path, project_name, description or ""]
+                       str(project_id), project_path, project_name, description or "", template_id or ""]
 
             # Add template_id if provided
             if template_id:
@@ -82,7 +82,13 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             # Build command args - use backend venv Python for psycopg2 dependency
             backend_python = "/root/clawd-backend/venv/bin/python3"
             cmd_args = [backend_python, "/root/clawd-backend/openclaw_wrapper.py",
-                       str(project_id), project_path, project_name, description or ""]
+                       str(project_id), project_path, project_name, description or "",
+                       template_id or ""]
+            # Add template_id if provided
+            if template_id:
+                cmd_args.append(template_id)            # Add template_id if provided
+            if template_id:
+                cmd_args.append(template_id)
 
             # Add template_id if provided
             if template_id:
