@@ -577,6 +577,19 @@ That's all. Execute Phase {phase} now.
                 logger.warning("⚠️ PM2 frontend service restart failed, continuing...")
 
             logger.info("✓ Phase 8 completed!")
+
+            # Note about ACP Frontend Editor availability
+            logger.info("")
+            logger.info("💡 ACP Frontend Editor is now available for further refinement")
+            logger.info("   Use the API endpoint: POST /acp/frontend/apply")
+            logger.info("   - Validates paths (whitelist src/, forbid backend, forbid components/ui/)")
+            logger.info("   - Limits to 4 new files per execution")
+            logger.info("   - Creates snapshot before modifications")
+            logger.info("   - Runs npm install && npm run build after changes")
+            logger.info("   - Rolls back on validation or build failure")
+            logger.info("   - Logs all mutations")
+            logger.info("")
+
             return True
 
         except Exception as e:

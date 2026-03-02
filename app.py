@@ -25,6 +25,7 @@ from file_utils import FileUtils
 from completion_service import CompletionService
 from claude_code_worker import run_claude_code_background
 from template_selector import TemplateSelector
+from acp_frontend_editor import ACPFrontendEditor
 
 # ============================================================================
 # Logging
@@ -174,6 +175,40 @@ class CompletionResponse(BaseModel):
     success: bool
     message: Optional[dict] = None
     error: Optional[str] = None
+
+# ============================================================================
+# ACP Frontend Edit Models
+# ============================================================================
+
+class ACPFileChange(BaseModel):
+    action: str = Field(..., description="Action: 'write', 'modify', or 'remove'")
+    path: str = Field(..., description="File path relative to frontend/src")
+    content: Optional[str] = Field(None, description="File content (for write/modify)")
+
+class ACPApplyChangesRequest(BaseModel):
+    project_id: int = Field(..., description="Project ID")
+    changes: list[ACPFileChange] = Field(..., description="List of file changes")
+
+class ACPApplyChangesResponse(BaseModel):
+    success: bool
+    message: str
+    files_added: int = 0
+    files_modified: int = 0
+    files_removed: int = 0
+    build_output: Optional[str] = None
+    rollback: bool = False
+    errors: Optional[list[str]] = None
+
+class ACPMutationLogEntry(BaseModel):
+    execution_id: str
+    timestamp: str
+    files_added: list[str]
+    files_modified: list[str]
+    files_removed: list[str]
+    build_result: Optional[dict] = None
+    rollback_status: Optional[dict] = None
+    status: str
+    completed_at: Optional[str] = None
 
 # ============================================================================
 # Subdomain Validation
@@ -1923,6 +1958,101 @@ async def save_file_content(
         raise HTTPException(status_code=403, detail="Permission denied")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+
+# ============================================================================
+# ACP Frontend Edit Endpoints
+# ============================================================================
+
+@app.post("/acp/frontend/apply", response_model=ACPApplyChangesResponse)
+async def acp_apply_frontend_changes(request: ACPApplyChangesRequest):
+    """
+    Apply ACP (Claude Code) generated frontend changes with validation.
+
+    This endpoint implements the ACP Controlled Frontend Edit system:
+    - Validates all file paths (whitelist src/, forbid backend, forbid components/ui/)
+    - Limits to 4 new files per execution
+    - Creates snapshot before modifications
+    - Runs npm install && npm run build after changes
+    - Rolls back on validation or build failure
+    - Logs all mutations
+
+    Args:
+        request: Contains project_id and list of file changes
+
+    Returns:
+        Result of the operation with counts and status
+    """
+    try:
+        # Get project from database
+        with get_db() as conn:
+            project = conn.execute(
+                "SELECT * FROM projects WHERE id = ?",
+                (request.project_id,)
+            ).fetchone()
+
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+
+            # Handle both dict (PostgreSQL) and tuple (SQLite) row types
+            if isinstance(project, dict):
+                project_dict = project
+            else:
+                project_dict = dict(project)
+
+        # Get project path
+        project_path = project_dict.get("project_path")
+        project_name = project_dict.get("name", f"project_{request.project_id}")
+
+        if not project_path:
+            raise HTTPException(status_code=400, detail="Project has no file system path")
+
+        # Construct frontend/src path
+        frontend_src = os.path.join(project_path, "frontend", "src")
+
+        if not os.path.exists(frontend_src):
+            raise HTTPException(status_code=400, detail="Frontend src directory not found")
+
+        logger.info(f"[ACP] Applying changes to project {request.project_id} ({project_name})")
+        logger.info(f"[ACP] Frontend src: {frontend_src}")
+        logger.info(f"[ACP] Changes count: {len(request.changes)}")
+
+        # Initialize ACP editor
+        editor = ACPFrontendEditor(frontend_src, project_name)
+
+        # Generate execution ID
+        execution_id = f"acp_{uuid.uuid4().hex[:12]}"
+
+        # Apply changes
+        changes_data = []
+        for change in request.changes:
+            changes_data.append({
+                "action": change.action,
+                "path": change.path,
+                "content": change.content or ""
+            })
+
+        result = editor.apply_changes(changes_data, execution_id)
+
+        logger.info(f"[ACP] Result: success={result['success']}, files_added={result['files_added']}, files_modified={result['files_modified']}")
+
+        return ACPApplyChangesResponse(
+            success=result["success"],
+            message=result["message"],
+            files_added=result["files_added"],
+            files_modified=result["files_modified"],
+            files_removed=result["files_removed"],
+            build_output=result["build_output"][:2000] if result["build_output"] else None,
+            rollback=result["rollback"],
+            errors=result.get("errors")
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"[ACP] Error applying changes: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal ACP error: {str(e)}")
 
 
 @app.get("/health")
