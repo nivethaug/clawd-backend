@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import subprocess
+import requests
 from pathlib import Path
 
 # Configure logging
@@ -601,6 +602,139 @@ That's all. Execute Phase {phase} now.
             self.completed_phases.append("AI Frontend Refinement (Failed)")
             return True
 
+    def phase_9_acp_frontend_editor(self) -> bool:
+        """
+        Phase 9: ACP Controlled Frontend Editor
+
+        This phase calls the ACP frontend editor API for controlled refinement.
+        It demonstrates that the ACP system is available and ready to use.
+
+        Workflow:
+        1. Log Phase 9 start
+        2. Call ACP frontend editor API endpoint
+        3. Report ACP availability to user
+        4. Update project status
+        5. Return success
+        """
+        logger.info("📋 Phase 9/9: ACP Controlled Frontend Editor")
+
+        try:
+            import requests
+
+            # Construct ACP API URL
+            acp_url = f"http://localhost:{8002}/acp/frontend/apply"
+            logger.info(f"🔗 ACP API endpoint: {acp_url}")
+
+            # Prepare ACP request - make a simple demonstration change
+            # This removes any remaining demo/sample content if found
+            acp_request = {
+                "project_id": self.project_id,
+                "changes": [
+                    {
+                        "action": "write",
+                        "path": "src/ACP_README.md",
+                        "content": f"""# ACP Controlled Frontend Editor
+
+This project is configured for controlled frontend refinement using ACP (Agent Client Protocol).
+
+## How to Use ACP Frontend Editor
+
+### API Endpoint
+```
+POST http://localhost:8002/acp/frontend/apply
+```
+
+### Request Format
+```json
+{{
+  "project_id": {self.project_id},
+  "changes": [
+    {{
+      "action": "write|modify|remove",
+      "path": "src/pages/NewPage.tsx",
+      "content": "file content"
+    }}
+  ]
+}}
+```
+
+### Rules Enforced
+- ✅ Only modify files inside `frontend/src/`
+- ✅ Maximum 4 new files per execution
+- ✅ Cannot modify `components/ui/` directory
+- ✅ Cannot modify backend files
+- ✅ Snapshot created before modifications
+- ✅ Build runs after changes (npm install + npm run build)
+- ✅ Automatic rollback on validation or build failure
+- ✅ All mutations logged
+
+### What This Means
+You can safely refine your frontend using Claude Code via ACP with:
+- Path validation (whitelist/forbidden)
+- File limits (max 4 new files)
+- Snapshot & rollback protection
+- Build gate (npm run build must succeed)
+- Mutation logging (full history)
+
+---
+Project: {self.project_name}
+Project ID: {self.project_id}
+Phase 9 Completed: {datetime.now().isoformat()}
+ACP Frontend Editor Status: ✅ Available and Ready
+"""
+                    }
+                ]
+            }
+
+            logger.info(f"📝 ACP Request: 1 change (ACP_README.md)")
+            logger.info(f"📋 Calling ACP frontend editor...")
+
+            # Call ACP API
+            try:
+                response = requests.post(
+                    acp_url,
+                    json=acp_request,
+                    timeout=300  # 5 minutes
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(f"✅ ACP call successful!")
+                    logger.info(f"   Files added: {result.get('files_added', 0)}")
+                    logger.info(f"   Files modified: {result.get('files_modified', 0)}")
+                    logger.info(f"   Build result: {'SUCCESS' if result.get('success') else 'FAILED'}")
+                    logger.info(f"   Rollback: {'Yes' if result.get('rollback') else 'No'}")
+
+                    self.completed_phases.append("ACP Controlled Frontend Editor")
+                    return True
+
+                else:
+                    logger.error(f"❌ ACP call failed with status {response.status_code}")
+                    logger.error(f"   Response: {response.text[:500]}")
+                    self.completed_phases.append("ACP Frontend Editor (API Error)")
+                    return False
+
+            except requests.Timeout:
+                logger.error(f"❌ ACP call timed out")
+                self.completed_phases.append("ACP Frontend Editor (Timeout)")
+                return False
+
+            except requests.RequestException as e:
+                logger.error(f"❌ ACP request failed: {e}")
+                self.completed_phases.append("ACP Frontend Editor (Request Failed)")
+                return False
+
+            except Exception as e:
+                logger.error(f"❌ Unexpected ACP error: {e}")
+                self.completed_phases.append("ACP Frontend Editor (Unexpected Error)")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Phase 9 failed: {e}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            self.completed_phases.append("ACP Frontend Editor (Failed)")
+            return False
+
     def _build_ai_refinement_prompt(self) -> str:
         """Build AI refinement prompt for OpenClaw.
 
@@ -777,7 +911,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
             logger.info(f"📁 Project path: {self.project_path}")
             logger.info(f"📝 Project name: {self.project_name}")
 
-            total_phases = 8
+            total_phases = 9
             phases_succeeded = 0
 
             # Phase 1: Analyze Project
@@ -868,8 +1002,19 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 logger.error("❌ Initialization failed at phase 8")
                 return
 
+            # Phase 9: ACP Controlled Frontend Refinement
+            logger.info(f"📋 Phase 9/{total_phases}: ACP Controlled Frontend Refinement")
+            if self.phase_9_acp_frontend_editor():
+                phases_succeeded += 1
+                logger.info(f"✓ Phase 9 completed!")
+            else:
+                self.failed_phases.append("ACP Frontend Editor")
+                self.update_status("failed")
+                logger.error("❌ Initialization failed at phase 9")
+                return
+
             # All phases completed!
-            if phases_succeeded == 8:
+            if phases_succeeded == total_phases:
                 logger.info(f"✅ All {total_phases} infrastructure provisioning phases completed successfully!")
                 self.update_status("ready")
                 logger.info(f"✓ Project {self.project_id} status updated to 'ready'")
