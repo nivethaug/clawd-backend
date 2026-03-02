@@ -627,13 +627,9 @@ That's all. Execute Phase {phase} now.
 
             # Prepare ACP request - make a simple demonstration change
             # This removes any remaining demo/sample content if found
-            acp_request = {
-                "project_id": self.project_id,
-                "changes": [
-                    {
-                        "action": "write",
-                        "path": "src/ACP_README.md",
-                        "content": f"""# ACP Controlled Frontend Editor
+
+            # Build ACP_README content properly
+            acp_readme_content = f"""# ACP Controlled Frontend Editor
 
 This project is configured for controlled frontend refinement using ACP (Agent Client Protocol).
 
@@ -682,6 +678,14 @@ Project ID: {self.project_id}
 Phase 9 Completed: {datetime.now().isoformat()}
 ACP Frontend Editor Status: ✅ Available and Ready
 """
+
+            acp_request = {
+                "project_id": self.project_id,
+                "changes": [
+                    {
+                        "action": "write",
+                        "path": "src/ACP_README.md",
+                        "content": acp_readme_content
                     }
                 ]
             }
