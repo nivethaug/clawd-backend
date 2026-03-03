@@ -176,6 +176,10 @@ class CompletionResponse(BaseModel):
     error: Optional[str] = None
 
 # ============================================================================
+# ACP Frontend Edit Models
+# ============================================================================
+
+# ============================================================================
 # Subdomain Validation
 # ============================================================================
 
@@ -1923,8 +1927,6 @@ async def save_file_content(
         raise HTTPException(status_code=403, detail="Permission denied")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
-
-
 @app.get("/health")
 async def health_check():
     return {
