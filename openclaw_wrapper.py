@@ -620,7 +620,7 @@ That's all. Execute Phase {phase} now.
         4. Apply changes with ACP validation
         5. Report success
         """
-        logger.info("📋 Phase 9/9: ACP Controlled Frontend Editor (Integrated)")
+        logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor (Integrated)")
 
         try:
             # Import ACP Frontend Editor directly
@@ -902,7 +902,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
             logger.info(f"📁 Project path: {self.project_path}")
             logger.info(f"📝 Project name: {self.project_name}")
 
-            total_phases = 9
+            total_phases = 8
             phases_succeeded = 0
 
             # Phase 1: Analyze Project
@@ -984,7 +984,9 @@ Execute the refinement now and make this template production-ready for: {self.pr
 
             # Phase 8: AI-Driven Frontend Refinement
             logger.info(f"📋 Phase 8/{total_phases}: AI-Driven Frontend Refinement")
-            if self.phase_8_frontend_ai_refinement():
+            # if self.phase_8_frontend_ai_refinement():
+            # Phase 8 skipped per request - using only Phase 9
+            if True:
                 phases_succeeded += 1
                 logger.info(f"✓ Phase 8 completed!")
             else:
