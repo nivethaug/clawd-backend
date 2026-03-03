@@ -802,6 +802,79 @@ class ACPFrontendEditor:
             "rollback": False
         }
 
+    def generate_and_apply_changes(self, goal_description: str, execution_id: str) -> Dict[str, Any]:
+        """
+        Full flow: Ask Claude for changes → validate → apply → build → log/rollback
+
+        Args:
+            goal_description: Natural language description of changes
+            execution_id: Unique ID for tracking
+
+        Returns:
+            Dict with success status, message, files changed, build output, rollback status
+        """
+        logger.info(f"Starting ACP edit for goal: {goal_description}")
+
+        # Build instruction for Claude
+        instruction = f"""You are a senior React + Vite + TypeScript developer. You are editing ONLY the frontend/src/ directory of a project.
+
+STRICT RULES:
+- ONLY touch files inside src/
+- You MAY remove unused template files from src/
+- You MAY add AT MOST {MAX_NEW_FILES} new files inside src/
+- NEVER touch: package.json, vite.config.*, node_modules, .env, backend code
+- NEVER change folder structure, routing, or existing UI controls
+
+Return ONLY a valid JSON array — no other text, no explanations:
+[
+  {{
+    "action": "write" | "modify" | "remove",
+    "path": "relative/path/from/src e.g. components/NewButton.tsx",
+    "content": "full file content as string (empty string for remove)"
+  }}
+]
+
+Goal / task description:
+{goal_description}
+"""
+
+        # Call acpx (your working binary path)
+        acpx_bin = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/.bin/acpx"
+        cmd = [acpx_bin, "claude", "exec", instruction]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                check=True,
+                cwd="/root"
+            )
+            output = result.stdout.strip()
+
+            # Extract JSON patch (robust version)
+            match = re.search(r'\[\s*\{.*\}\s*\]', output, re.DOTALL)
+            if not match:
+                raise ValueError("No JSON patch found in output")
+
+            patch_str = match.group(0)
+            patch_str = re.sub(r'^```json\s*|\s*```$', '', patch_str.strip(), flags=re.MULTILINE | re.IGNORECASE)
+
+            changes = json.loads(patch_str)
+            if not isinstance(changes, list):
+                raise ValueError("Patch must be a list")
+
+        except Exception as e:
+            logger.error(f"Claude/acpx failed: {e}")
+            return {
+                "success": False,
+                "message": f"Failed to generate changes: {e}"
+            }
+
+        # Now apply the received changes
+        return self.apply_changes(changes, execution_id)
+
     def get_mutation_log(self) -> List[Dict[str, Any]]:
         """
         Get the mutation log for this frontend.
