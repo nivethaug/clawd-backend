@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 import requests
+from datetime import datetime
 from pathlib import Path
 
 # Configure logging
@@ -606,138 +607,124 @@ That's all. Execute Phase {phase} now.
         """
         Phase 9: ACP Controlled Frontend Editor
 
-        This phase calls the ACP frontend editor API for controlled refinement.
-        It demonstrates that the ACP system is available and ready to use.
+        This phase integrates ACP (Agent Client Protocol) as the final phase in project creation.
+        ACP provides safe, validated frontend editing with path validation, file limits,
+        snapshot/rollback, and build gates.
+
+        This is now an internal step - no separate API endpoint required.
 
         Workflow:
         1. Log Phase 9 start
-        2. Call ACP frontend editor API endpoint
-        3. Report ACP availability to user
-        4. Update project status
-        5. Return success
+        2. Initialize ACP Frontend Editor directly (no HTTP call)
+        3. Create ACP_README.md with documentation
+        4. Apply changes with ACP validation
+        5. Report success
         """
-        logger.info("📋 Phase 9/9: ACP Controlled Frontend Editor")
+        logger.info("📋 Phase 9/9: ACP Controlled Frontend Editor (Integrated)")
 
         try:
-            import requests
+            # Import ACP Frontend Editor directly
+            from acp_frontend_editor import ACPFrontendEditor
 
-            # Construct ACP API URL
-            acp_url = f"http://localhost:{8002}/acp/frontend/apply"
-            logger.info(f"🔗 ACP API endpoint: {acp_url}")
+            # Construct frontend/src path
+            frontend_src = str(self.frontend_path / "src")
 
-            # Prepare ACP request - make a simple demonstration change
-            # This removes any remaining demo/sample content if found
+            logger.info(f"📁 Frontend src path: {frontend_src}")
 
-            # Build ACP_README content properly
+            if not os.path.exists(frontend_src):
+                logger.warning("⚠️ Frontend src directory not found, skipping Phase 9")
+                self.completed_phases.append("ACP Frontend Editor (Skipped - No Frontend)")
+                return True
+
+            # Initialize ACP editor directly
+            editor = ACPFrontendEditor(frontend_src, self.project_name)
+            logger.info("✓ ACP Frontend Editor initialized")
+
+            # Generate execution ID
+            import uuid
+            execution_id = f"acp_{uuid.uuid4().hex[:12]}"
+            logger.info(f"🔑 Execution ID: {execution_id}")
+
+            # Build ACP_README content
+            from datetime import datetime
             acp_readme_content = f"""# ACP Controlled Frontend Editor
 
 This project is configured for controlled frontend refinement using ACP (Agent Client Protocol).
 
-## How to Use ACP Frontend Editor
+## About ACP
 
-### API Endpoint
-```
-POST http://localhost:8002/acp/frontend/apply
-```
+ACP is integrated directly into the DreamPilot project creation workflow (Phase 9).
+It provides safe, validated frontend editing with the following protections:
 
-### Request Format
-```json
-{{
-  "project_id": {self.project_id},
-  "changes": [
-    {{
-      "action": "write|modify|remove",
-      "path": "src/pages/NewPage.tsx",
-      "content": "file content"
-    }}
-  ]
-}}
-```
+### Safety Features
+- ✅ Path validation (whitelist `frontend/src/` only)
+- ✅ Forbidden paths (backend, components/ui/ protected)
+- ✅ File limit (max 4 new files per execution)
+- ✅ Snapshot system (backup before modifications)
+- ✅ Automatic rollback (restore on validation or build failure)
+- ✅ Build gate (npm run build must succeed)
+- ✅ Mutation logging (full history tracked)
 
-### Rules Enforced
-- ✅ Only modify files inside `frontend/src/`
-- ✅ Maximum 4 new files per execution
-- ✅ Cannot modify `components/ui/` directory
-- ✅ Cannot modify backend files
-- ✅ Snapshot created before modifications
-- ✅ Build runs after changes (npm install + npm run build)
-- ✅ Automatic rollback on validation or build failure
-- ✅ All mutations logged
+### Project Status
+- **Project Name:** {self.project_name}
+- **Project ID:** {self.project_id}
+- **Phase 9 Completed:** {datetime.now().isoformat()}
+- **ACP Frontend Editor:** ✅ Integrated and Ready
 
-### What This Means
-You can safely refine your frontend using Claude Code via ACP with:
-- Path validation (whitelist/forbidden)
-- File limits (max 4 new files)
-- Snapshot & rollback protection
-- Build gate (npm run build must succeed)
-- Mutation logging (full history)
+### Technical Details
+-ACP runs as Phase 9 of the infrastructure provisioning workflow
+- Uses direct module import (no HTTP API required)
+- Validates all paths before applying any changes
+- Creates snapshots automatically before modifications
+- Runs `npm install` and `npm run build` after changes
+- Automatically rolls back on validation or build failure
+- Logs all mutations in `.acp_mutation_log.json`
 
 ---
-Project: {self.project_name}
-Project ID: {self.project_id}
-Phase 9 Completed: {datetime.now().isoformat()}
-ACP Frontend Editor Status: ✅ Available and Ready
+Phase 9 is complete! ACP is integrated as the final step of project creation.
 """
 
-            acp_request = {
-                "project_id": self.project_id,
-                "changes": [
-                    {
-                        "action": "write",
-                        "path": "src/ACP_README.md",
-                        "content": acp_readme_content
-                    }
-                ]
-            }
+            # Prepare changes to apply
+            # Note: Paths are relative to frontend/src, not including "src/" prefix
+            changes = [
+                {
+                    "action": "write",
+                    "path": "ACP_README.md",
+                    "content": acp_readme_content
+                }
+            ]
 
-            logger.info(f"📝 ACP Request: 1 change (ACP_README.md)")
-            logger.info(f"📋 Calling ACP frontend editor...")
+            logger.info(f"📝 Applying {len(changes)} change(s) via ACP...")
+            logger.info(f"   Change 1: path='{changes[0]['path']}'")
 
-            # Call ACP API
-            try:
-                response = requests.post(
-                    acp_url,
-                    json=acp_request,
-                    timeout=300  # 5 minutes
-                )
+            # Apply changes directly using ACPFrontendEditor
+            result = editor.apply_changes(changes, execution_id)
 
-                if response.status_code == 200:
-                    result = response.json()
-                    logger.info(f"✅ ACP call successful!")
-                    logger.info(f"   Files added: {result.get('files_added', 0)}")
-                    logger.info(f"   Files modified: {result.get('files_modified', 0)}")
-                    logger.info(f"   Build result: {'SUCCESS' if result.get('success') else 'FAILED'}")
-                    logger.info(f"   Rollback: {'Yes' if result.get('rollback') else 'No'}")
+            if result["success"]:
+                logger.info(f"✅ ACP Phase 9 completed successfully!")
+                logger.info(f"   Files added: {result.get('files_added', 0)}")
+                logger.info(f"   Files modified: {result.get('files_modified', 0)}")
+                logger.info(f"   Files removed: {result.get('files_removed', 0)}")
+                logger.info(f"   Rollback: {'No' if not result.get('rollback') else 'Yes'}")
 
-                    self.completed_phases.append("ACP Controlled Frontend Editor")
-                    return True
+                self.completed_phases.append("ACP Controlled Frontend Editor (Integrated)")
+                return True
 
-                else:
-                    logger.error(f"❌ ACP call failed with status {response.status_code}")
-                    logger.error(f"   Response: {response.text[:500]}")
-                    self.completed_phases.append("ACP Frontend Editor (API Error)")
-                    return False
-
-            except requests.Timeout:
-                logger.error(f"❌ ACP call timed out")
-                self.completed_phases.append("ACP Frontend Editor (Timeout)")
-                return False
-
-            except requests.RequestException as e:
-                logger.error(f"❌ ACP request failed: {e}")
-                self.completed_phases.append("ACP Frontend Editor (Request Failed)")
-                return False
-
-            except Exception as e:
-                logger.error(f"❌ Unexpected ACP error: {e}")
-                self.completed_phases.append("ACP Frontend Editor (Unexpected Error)")
+            else:
+                logger.error(f"❌ ACP Phase 9 failed: {result.get('message', 'Unknown error')}")
+                if result.get('build_output'):
+                    logger.error(f"   Build output (last 500 chars): {result['build_output'][-500:]}")
+                self.completed_phases.append("ACP Frontend Editor (Failed)")
                 return False
 
         except Exception as e:
             logger.error(f"❌ Phase 9 failed: {e}")
             logger.error(f"   Exception type: {type(e).__name__}")
-            self.completed_phases.append("ACP Frontend Editor (Failed)")
-            return False
+            logger.error(f"   Exception details: {str(e)}", exc_info=True)
+            # Return True to allow project to complete despite Phase 9 errors
+            logger.warning("⚠️ Allowing project to complete despite Phase 9 errors")
+            self.completed_phases.append("ACP Frontend Editor (Completed with Errors)")
+            return True
 
     def _build_ai_refinement_prompt(self) -> str:
         """Build AI refinement prompt for OpenClaw.

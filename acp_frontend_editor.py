@@ -75,8 +75,14 @@ class ACPPathValidator:
         Returns:
             Tuple of (is_allowed, reason)
         """
-        # Normalize path
-        path = Path(file_path).resolve()
+        # Normalize path - resolve relative paths to frontend_src_path
+        path = Path(file_path)
+        if not path.is_absolute():
+            # Relative path: resolve it relative to frontend_src_path
+            path = (self.frontend_src_path / file_path).resolve()
+        else:
+            # Absolute path: normalize it
+            path = path.resolve()
 
         # Check 1: Forbidden backend path
         try:
@@ -126,7 +132,9 @@ class ACPPathValidator:
         """
         errors = []
         for file_path in file_paths:
+            logger.info(f"[ACP] Validating path: '{file_path}'")
             allowed, reason = self.is_path_allowed(file_path)
+            logger.info(f"[ACP]   Result: allowed={allowed}, reason='{reason}'")
             if not allowed:
                 errors.append(reason)
 
@@ -393,7 +401,12 @@ class ACPFileOperations:
         if not allowed:
             return False, reason
 
-        path = Path(file_path).resolve()
+        # Resolve path the same way as is_path_allowed (relative paths resolve to frontend_src_path)
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = (self.validator.frontend_src_path / file_path).resolve()
+        else:
+            path = path.resolve()
 
         # Check file limit for new files
         if not path.exists():
@@ -432,7 +445,12 @@ class ACPFileOperations:
         if not allowed:
             return False, reason
 
-        path = Path(file_path).resolve()
+        # Resolve path the same way as is_path_allowed (relative paths resolve to frontend_src_path)
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = (self.validator.frontend_src_path / file_path).resolve()
+        else:
+            path = path.resolve()
 
         # Check if file exists
         if not path.exists():
