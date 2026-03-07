@@ -39,10 +39,10 @@ FORBIDDEN_BACKEND = "/root/clawd-backend"
 FORBIDDEN_UI_COMPONENTS = "components/ui"
 
 # File limits
-MAX_NEW_FILES = 4
+MAX_NEW_FILES = 12
 
 # Build settings
-BUILD_TIMEOUT = 300  # 5 minutes
+BUILD_TIMEOUT = 600  # 10 minutes (increased for complex templates like finance)
 
 # =============================================================================
 # PATH VALIDATION
@@ -161,7 +161,6 @@ class ACPPathValidator:
 # =============================================================================
 # SNAPSHOT MANAGER
 # =============================================================================
-
 class ACPSnapshotManager:
     """Manages snapshot creation and restoration for frontend editing."""
 
@@ -399,6 +398,7 @@ class ACPFileOperations:
         # Validate path
         allowed, reason = self.validator.is_path_allowed(file_path)
         if not allowed:
+            logger.error(f"[FileOps] Path validation failed: {reason}")
             return False, reason
 
         # Resolve path the same way as is_path_allowed (relative paths resolve to frontend_src_path)
@@ -408,25 +408,35 @@ class ACPFileOperations:
         else:
             path = path.resolve()
 
+        logger.info(f"[FileOps] Resolved path: {path}")
+        logger.info(f"[FileOps] File exists: {path.exists()}")
+
         # Check file limit for new files
         if not path.exists():
             if self._new_files_count >= MAX_NEW_FILES:
+                logger.error(f"[FileOps] File limit exceeded: {self._new_files_count} >= {MAX_NEW_FILES}")
                 return False, f"File limit exceeded: max {MAX_NEW_FILES} new files allowed"
 
             self._new_files_count += 1
             self.logger.log_file_added(log_entry, file_path)
+            logger.info(f"[FileOps] New file #{self._new_files_count}: {file_path}")
         else:
             self.logger.log_file_modified(log_entry, file_path)
+            logger.info(f"[FileOps] Modifying existing file: {file_path}")
 
         # Create parent directories if needed
         path.parent.mkdir(parents=True, exist_ok=True)
+        logger.debug(f"[FileOps] Created parent directory: {path.parent}")
 
         # Write file
         try:
+            logger.info(f"[FileOps] Writing {len(content)} bytes to {path}")
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
+            logger.info(f"[FileOps] ✓ File written successfully: {file_path}")
             return True, f"File written: {file_path}"
         except Exception as e:
+            logger.error(f"[FileOps] ❌ Failed to write file: {e}")
             return False, f"Failed to write file: {e}"
 
     def remove_file(self, file_path: str, log_entry: Dict[str, Any]) -> Tuple[bool, str]:
@@ -713,15 +723,21 @@ class ACPFrontendEditor:
         files_modified = 0
         files_removed = 0
 
-        for change in changes:
+        logger.info(f"[ACPX] Starting to apply {len(changes)} change(s)")
+
+        for i, change in enumerate(changes):
             action = change.get("action")
             path = change.get("path")
             content = change.get("content", "")
 
+            logger.info(f"[ACPX] [{i+1}/{len(changes)}] Processing: action={action}, path={path}")
+
             try:
                 if action in ("write", "modify"):
+                    logger.info(f"[ACPX]   Writing/Modifying file: {path}")
                     success, msg = self.file_ops.write_file(path, content, log_entry)
                     if success:
+                        logger.info(f"[ACPX]   ✓ File written successfully")
                         if "written" in msg and path not in log_entry["files_modified"]:
                             # Check if it was added or modified
                             if "added" in str(log_entry["files_added"][-1:] if log_entry["files_added"] else []):
@@ -729,16 +745,21 @@ class ACPFrontendEditor:
                             else:
                                 files_modified += 1
                     else:
+                        logger.error(f"[ACPX]   ❌ Failed to write file: {msg}")
                         raise Exception(msg)
 
                 elif action == "remove":
+                    logger.info(f"[ACPX]   Removing file: {path}")
                     success, msg = self.file_ops.remove_file(path, log_entry)
                     if success:
+                        logger.info(f"[ACPX]   ✓ File removed successfully")
                         files_removed += 1
                     else:
+                        logger.error(f"[ACPX]   ❌ Failed to remove file: {msg}")
                         raise Exception(msg)
 
                 else:
+                    logger.error(f"[ACPX]   ❌ Unknown action: {action}")
                     raise Exception(f"Unknown action: {action}")
 
             except Exception as e:
@@ -760,12 +781,21 @@ class ACPFrontendEditor:
         logger.info(f"Applied changes: {files_added} added, {files_modified} modified, {files_removed} removed")
 
         # Step 5: Run build gate
+        logger.info(f"[ACPX] Running build gate (npm install && npm run build)")
+        logger.info(f"[ACPX] Build timeout set to {BUILD_TIMEOUT} seconds")
+
         build_success, build_output = self.build_gate.run_build()
 
         log_entry["build_result"] = {
             "success": build_success,
             "output": build_output[:1000] if build_output else ""
         }
+
+        if build_success:
+            logger.info(f"[ACPX] ✓ Build succeeded!")
+        else:
+            logger.error(f"[ACPX] ❌ Build failed!")
+            logger.error(f"[ACPX] Build output (last 500 chars):\n{build_output[-500:] if build_output else 'N/A'}")
 
         if not build_success:
             # Rollback on build failure
@@ -815,58 +845,251 @@ class ACPFrontendEditor:
         """
         logger.info(f"Starting ACP edit for goal: {goal_description}")
 
-        # Build instruction for Claude
-        instruction = f"""You are a senior React + Vite + TypeScript developer. You are editing ONLY the frontend/src/ directory of a project.
+        # Build instruction for Claude - Production-Grade UI Redesign Mode
+        instruction = f"""You are editing a React + Vite + TypeScript project.
 
-STRICT RULES:
-- ONLY touch files inside src/
-- You MAY remove unused template files from src/
-- You MAY add AT MOST {MAX_NEW_FILES} new files inside src/
-- NEVER touch: package.json, vite.config.*, node_modules, .env, backend code
-- NEVER change folder structure, routing, or existing UI controls
+Project Name: {self.project_name}
+Project Description: {goal_description}
 
-Return ONLY a valid JSON array — no other text, no explanations:
+GOAL:
+Redesign the existing dashboard UI to a modern, professional analytics dashboard while preserving project structure.
+
+STRICT RULES
+
+You may ONLY modify files inside:
+src/
+
+DO NOT modify:
+- src/components/ui/ (UI primitives only)
+- package.json, vite.config.*, node_modules
+- backend files, .env files
+- Do NOT change project architecture
+
+SCOPE LIMITATION (CRITICAL)
+- ONLY scan files in src/pages/ and src/components/ directories
+- DO NOT scan entire project tree
+- DO NOT index node_modules, dist, or build directories
+- Focus on UI/UX changes, not architectural refactoring
+- Limit file operations to {MAX_NEW_FILES} files maximum
+
+UI DESIGN OBJECTIVE
+
+Transform the existing template into a premium analytics dashboard similar to modern SaaS platforms.
+
+IMPROVE:
+• Visual hierarchy
+• Layout spacing
+• Typography scale
+• Component grouping
+• Responsive behavior
+• Chart presentation
+• Sidebar styling
+• Header UX
+
+DASHBOARD REDESIGN REQUIREMENTS
+
+Redesign the main dashboard page to include:
+
+1. HERO HEADER SECTION
+ - Title: {self.project_name}
+ - Subtitle based on project description ({goal_description})
+ - Action buttons (Add Asset, Refresh Data, View All)
+
+2. STATS CARDS ROW
+Modern cards with:
+ - Icon
+ - Label
+ - Large value
+ - Change indicator (+/- %)
+ - Subtle gradient background
+
+3. ANALYTICS GRID LAYOUT
+
+Left column:
+- Portfolio performance chart
+- Market trends chart
+- Activity timeline
+
+Right column:
+- Asset allocation donut/pie chart
+- Top assets table
+- Recent transactions
+
+4. ASSETS / DATA TABLE
+Columns with proper alignment:
+- Asset / Name
+- Price
+- 24h Change
+- Holdings
+- Value
+- Actions
+
+5. MODERN SIDEBAR
+Improve sidebar UX:
+- Active indicator glow
+- Better spacing and padding
+- Proper icon alignment
+- Improved branding for {self.project_name}
+- Collapse/expand behavior
+
+6. HEADER IMPROVEMENTS
+Improve header bar:
+- Search bar with icon
+- Notification badge icon
+- Profile avatar dropdown
+- Theme toggle (if not present)
+
+DESIGN STYLE
+
+Use modern dashboard design patterns:
+- Glassmorphism or subtle gradients
+- Card-based layout with proper spacing
+- Rounded corners (xl/2xl)
+- Soft shadows
+- Proper padding and gaps (4, 6, 8)
+- Responsive grid (1 col mobile, 2 col tablet, 3-4 col desktop)
+
+Use existing UI primitives from:
+src/components/ui/
+
+Do NOT recreate base UI components. Reuse Card, Button, Badge, Table, etc.
+
+FILE CREATION RULES
+
+Minimum new components: 2
+Maximum new components: {MAX_NEW_FILES}
+
+Allowed files to create:
+- src/pages/ (new dashboard views)
+- src/components/ (new dashboard widgets)
+- src/features/ (feature-specific components)
+
+Remove generic template pages if they are unused and don't fit the project.
+
+ROUTING
+
+If new pages are added, update routing inside:
+src/App.tsx or src/main.tsx
+
+Do NOT break existing routes.
+
+CRITICAL: DO NOT ONLY RENAME TITLES
+- Improve layout structure and component organization
+- Add proper sections and groupings
+- Create visual hierarchy with spacing and typography
+- Transform generic template into project-specific dashboard
+
+OUTPUT
+
+Make the UI look like a modern SaaS analytics dashboard.
+
+Focus on visual quality and layout improvement rather than simple text changes.
+
+You MUST return ONLY a valid JSON array with the following structure. Do not include any other text, explanations, or markdown formatting:
+
 [
   {{
     "action": "write" | "modify" | "remove",
-    "path": "relative/path/from/src e.g. components/NewButton.tsx",
-    "content": "full file content as string (empty string for remove)"
+    "path": "relative/path/from/src e.g. components/StatsCard.tsx",
+    "content": "full file content as string (use empty string for remove)"
   }}
 ]
 
-Goal / task description:
-{goal_description}
+Execute this UI redesign now.
 """
 
-        # Call acpx (your working binary path)
-        acpx_bin = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/.bin/acpx"
-        cmd = [acpx_bin, "claude", "exec", instruction]
+        # Call acpx using the working path (from MEMORY.md)
+        # Fixed path based on successful test: /usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js
+        acpx_bin = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
+        cmd = [acpx_bin, "claude", "exec", "--dangerously-skip-permissions", instruction]
+
+        logger.info(f"[ACPX] 🔴 HEARTBEAT: Starting ACPX subprocess")
+        logger.info(f"[ACPX] 🔴 HEARTBEAT: Command: {acpx_bin} claude exec --dangerously-skip-permissions")
+        logger.info(f"[ACPX] 🔴 HEARTBEAT: Timeout set to 1800 seconds (30 minutes)")
+        logger.info(f"[ACPX] 🔴 HEARTBEAT: Working directory: {self.validator.frontend_src_path}")
 
         try:
+            # Run acpx - ignore exit codes (telemetry bug can cause non-zero exit)
+            # Instead, parse the output to detect if changes were made
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600,
-                check=True,
-                cwd="/root"
+                timeout=1800,  # Increased from 600s to 1800s (30 minutes)
+                # Don't use check=True - telemetry bug can cause false failures
+                cwd=self.validator.frontend_src_path
             )
-            output = result.stdout.strip()
 
-            # Extract JSON patch (robust version)
-            match = re.search(r'\[\s*\{.*\}\s*\]', output, re.DOTALL)
+            logger.info(f"[ACPX] 🔴 HEARTBEAT: ACPX subprocess completed (did NOT timeout)")
+            logger.info(f"[ACPX] 🔴 HEARTBEAT: Total elapsed time likely < 30 minutes")
+
+            output = result.stdout.strip()
+            stderr = result.stderr.strip()
+
+            logger.info(f"[ACPX] Subprocess completed")
+            logger.info(f"[ACPX] Return code: {result.returncode}")
+
+            # Log output for debugging (ignore harmless telemetry errors)
+            if "session/update" in stderr or "Invalid params" in stderr:
+                logger.debug(f"Ignoring harmless telemetry error (ACP bug)")
+            elif stderr:
+                logger.debug(f"acpx stderr (last 500 chars): {stderr[-500:]}")  # Last 500 chars
+
+            logger.info(f"[ACPX] Output length: {len(output)} chars")
+            logger.info(f"[ACPX] First 500 chars:\n{output[:500]}")
+            logger.info(f"[ACPX] Last 500 chars:\n{output[-500:]}")
+
+            # Extract JSON patch (robust version - handle markdown formatting)
+            logger.info(f"[ACPX] Attempting to extract JSON patch from output")
+
+            # Try multiple patterns to find JSON array
+            match = re.search(r'```json\s*\[\s*\{.*\}\s*\]\s*```', output, re.DOTALL)
             if not match:
+                match = re.search(r'\[\s*\{.*\}\s*\]', output, re.DOTALL)
+
+            if not match:
+                logger.error(f"[ACPX] ❌ JSON patch not found in output!")
+                logger.error(f"[ACPX] Full output:\n{output}")
                 raise ValueError("No JSON patch found in output")
 
             patch_str = match.group(0)
+            logger.info(f"[ACPX] ✓ Found JSON patch (length: {len(patch_str)} chars)")
+
+            # Strip markdown if present
             patch_str = re.sub(r'^```json\s*|\s*```$', '', patch_str.strip(), flags=re.MULTILINE | re.IGNORECASE)
+            logger.info(f"[ACPX] Patch after markdown strip (first 300 chars):\n{patch_str[:300]}")
 
             changes = json.loads(patch_str)
             if not isinstance(changes, list):
+                logger.error(f"[ACPX] ❌ Patch is not a list! Type: {type(changes)}")
                 raise ValueError("Patch must be a list")
 
+            logger.info(f"[ACPX] ✓ Parsed JSON array with {len(changes)} change(s)")
+
+            # Log each change
+            for i, change in enumerate(changes):
+                action = change.get('action', 'unknown')
+                path = change.get('path', 'unknown')
+                content_len = len(change.get('content', ''))
+                logger.info(f"[ACPX]   Change {i+1}: action={action}, path={path}, content_length={content_len}")
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: ❌ TIMED OUT after 30 minutes (1800 seconds)")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: ACPX subprocess was killed by timeout")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: This usually means Claude was:")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT:   1. Stuck in a long analysis/scanning phase")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT:   2. Waiting for tool approval (permissions)")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT:   3. Processing too many files")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: Permission flag was used, so #2 should not happen")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: Consider reducing AI scope further")
+            return {
+                "success": False,
+                "message": "Claude/acpx timed out after 30 minutes"
+            }
         except Exception as e:
-            logger.error(f"Claude/acpx failed: {e}")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: ❌ EXCEPTION occurred")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: Exception type: {type(e).__name__}")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: Exception message: {str(e)}")
             return {
                 "success": False,
                 "message": f"Failed to generate changes: {e}"

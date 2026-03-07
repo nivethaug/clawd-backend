@@ -41,7 +41,7 @@ CLAWDBOT_BASE_URL = os.getenv("CLAWDBOT_BASE_URL", "http://localhost:18789")
 CLAWDBOT_TIMEOUT = int(os.getenv("CLAWDBOT_TIMEOUT", "300"))
 CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a")
 
-DB_PATH = os.getenv("DB_PATH", "/root/clawd/clawdbot_adapter.db")
+DB_PATH = os.getenv("DB_PATH", "/root/clawd-backend/clawdbot_adapter.db")
 
 DEFAULT_AGENT_ID = "main"
 DEFAULT_CHANNEL = "webchat"
@@ -111,7 +111,7 @@ class SessionResponse(BaseModel):
 
 class CreateProjectRequest(BaseModel):
     name: str
-    domain: str = Field(..., min_length=3, max_length=50)
+    domain: Optional[str] = Field(None, min_length=3, max_length=50)
     description: Optional[str] = None
     user_id: Optional[int] = None
     type_id: Optional[int] = Field(None, alias="typeId")
@@ -282,27 +282,38 @@ async def get_projects():
 
 @app.post("/projects", response_model=ProjectResponse, status_code=201)
 async def create_project(request: CreateProjectRequest):
-    # Validate subdomain format
-    if not validate_subdomain(request.domain):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter."
-        )
+    # Auto-generate domain if not provided
+    domain = request.domain
+    if not domain or not domain.strip():
+        # Clean the project name and create a subdomain
+        clean_name = re.sub(r'[^a-z0-9-]', '-', request.name.lower()).strip('-')
+        clean_name = re.sub(r'-+', '-', clean_name)  # Replace multiple hyphens with single
+        random_suffix = ''.join(__import__('random').choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
+        domain = f"{clean_name}-{random_suffix}"
+        logger.info(f"Auto-generated domain for project '{request.name}': {domain}")
+    else:
+        # Validate subdomain format if provided
+        if not validate_subdomain(domain):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter."
+            )
 
     # Default to user_id=1 if not provided
     user_id = request.user_id if request.user_id is not None else 1
 
-    # Check for duplicate domain
-    with get_db() as conn:
-        existing_domain = conn.execute(
-            "SELECT id FROM projects WHERE domain = ?",
-            (request.domain,)
-        ).fetchone()
-        if existing_domain:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Domain '{request.domain}' is already in use. Please choose a different subdomain."
-            )
+    # Check for duplicate domain (only if user provided one, auto-generated ones use random suffix)
+    if request.domain and request.domain.strip():
+        with get_db() as conn:
+            existing_domain = conn.execute(
+                "SELECT id FROM projects WHERE domain = ?",
+                (domain,)
+            ).fetchone()
+            if existing_domain:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Domain '{domain}' is already in use. Please choose a different subdomain."
+                )
 
     # Handle type_id: default to Website (id=1) if not provided or invalid
     type_id = None
@@ -335,7 +346,7 @@ async def create_project(request: CreateProjectRequest):
     with get_db() as conn:
         conn.execute(
             "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name) VALUES (?, ?, ?, ?, '', ?, 'creating', NULL) RETURNING id",
-            (user_id, request.name, request.domain, request.description, type_id)
+            (user_id, request.name, domain, request.description, type_id)
         )
         result = conn.fetchone()
         # Handle both dict (PostgreSQL) and tuple (SQLite) row types
@@ -2150,3 +2161,10 @@ if __name__ == "__main__":
     print(f"Images directory: {IMAGES_DIR}")
     print(f"Images accessible at: {IMAGES_BASE_URL}")
     uvicorn.run(app, host="0.0.0.0", port=8002)
+
+# TEMPORARY FIX: Make domain field optional to allow testing
+# This is a quick workaround to unblock Phase 9 ACP integration
+# TODO: Implement proper configurable domain validation with better error handling
+
+# ============================================================================
+

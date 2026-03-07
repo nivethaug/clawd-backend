@@ -1,0 +1,16 @@
+{
+  "apps": [
+    {
+      "name": "clawd-backend",
+      "script": "/root/clawd-backend/start-backend.sh",
+      "instances": 1,
+      "exec_mode": "fork",
+      "env": {
+        "DB_PATH": "/root/clawd-backend/clawdbot_adapter.db"
+      },
+      "error_file": "/root/clawd-backend/logs/error.log",
+      "out_file": "/root/clawd-backend/logs/out.log",
+      "log_date_format": "YYYY-MM-DD HH:mm:ss"
+    }
+  ]
+}
