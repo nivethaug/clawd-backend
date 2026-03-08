@@ -616,10 +616,8 @@ class ACPFrontendEditorV2:
         required_pages_list = list(set(required_pages))
         required_components_list = list(set(required_components))
         
-        required_pages_str = "
-".join([f"- src/pages/{page}.tsx" for page in required_pages_list])
-        required_components_str = "
-".join([f"- src/components/{comp}.tsx" for comp in required_components_list])
+        required_pages_str = "\n".join([f"- src/pages/{page}.tsx" for page in required_pages_list])
+        required_components_str = "\n".join([f"- src/components/{comp}.tsx" for comp in required_components_list])
 
         return f"""You are editing a React + Vite + TypeScript SaaS application.
 
