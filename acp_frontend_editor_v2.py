@@ -38,8 +38,8 @@ ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 FORBIDDEN_BACKEND = "/root/clawd-backend"
 FORBIDDEN_UI_COMPONENTS = "components/ui"
 
-# File limits
-MAX_NEW_FILES = 12
+# File limits - Increased for reliable multi-page execution
+MAX_NEW_FILES = 50  # Allow enough pages without early termination
 
 # Build settings
 BUILD_TIMEOUT = 1800  # 30 minutes
@@ -450,7 +450,7 @@ class ACPFrontendEditorV2:
         hashes_before = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
         logger.info(f"[ACPX-V2]   Found {len(hashes_before)} files before ACPX")
 
-        # Step 3: Build ACPX prompt (no JSON requirement)
+        # Step 3: Build ACPX prompt (no JSON requirement) with completion tracking
         logger.info(f"[ACPX-V2] Step 3: Building ACPX prompt...")
         prompt = self._build_acpx_prompt(goal_description)
 
@@ -581,7 +581,7 @@ class ACPFrontendEditorV2:
 
     def _build_acpx_prompt(self, goal_description: str) -> str:
         """
-        Build ACPX prompt (no JSON requirement) with scope limiting.
+        Build ACPX prompt (no JSON requirement) with systematic execution forcing.
 
         Args:
             goal_description: Goal for changes
@@ -623,8 +623,6 @@ DO NOT scan:
 - build
 - .git
 
-File limit: Maximum {MAX_NEW_FILES} new files
-
 PROJECT REQUIREMENTS
 
 Based on the project description:
@@ -642,6 +640,25 @@ TECHNICAL REQUIREMENTS
 - Follow existing code patterns and style
 - Write clean, production-ready code
 - Do not introduce placeholder content unless required
+
+WORKING METHODOLOGY
+
+You must work systematically through ALL required features.
+
+1. Read the project description carefully
+2. Plan your approach
+3. Execute step by step
+4. DO NOT STOP until ALL features are implemented
+5. After completing a feature, move to the next feature
+6. Continue until the entire task is complete
+
+EXECUTION RULES
+
+1. Work through pages ONE AT A TIME
+2. Complete each page before moving to the next page
+3. Do not skip any page
+4. After finishing all pages, run npm run build
+5. Do not stop early - continue until all required pages are created
 
 IMPLEMENTATION
 
