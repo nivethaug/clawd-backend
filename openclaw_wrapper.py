@@ -924,38 +924,6 @@ Only create or modify files necessary for this page.
 
             logger.info(f"[Phase 9]   📊 Total AI Duration: {ai_duration:.2f}s")
             logger.info(f"[Phase 9] ✓ ACPX V2 completed")
-                logger.info(f"[Phase 9]   Success: {result.get('success')}")
-                logger.info(f"[Phase 9]   Message: {result.get('message', 'N/A')}")
-                logger.info(f"[Phase 9]   Files added: {result.get('files_added', 0)}")
-                logger.info(f"[Phase 9]   Files modified: {result.get('files_modified', 0)}")
-                logger.info(f"[Phase 9]   Files removed: {result.get('files_removed', 0)}")
-                logger.info(f"[Phase 9]   Rollback: {result.get('rollback', False)}")
-                logger.info(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s")
-            except Exception as e:
-                ai_duration = time.time() - ai_start_time
-                logger.error(f"[Phase 9] ❌ Exception during ACPX V2 execution")
-                logger.error(f"[Phase 9]   Exception type: {type(e).__name__}")
-                logger.error(f"[Phase 9]   Exception message: {str(e)}")
-                logger.error(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s (exception)")
-                logger.error(f"[Phase 9]   Traceback:", exc_info=True)
-                # Don't raise - instead set result to error state and continue
-                result = {
-                    "success": False,
-                    "message": f"ACPX V2 failed: {str(e)}",
-                    "files_added": 0,
-                    "files_modified": 0,
-                    "files_removed": 0,
-                    "rollback": False
-                }
-
-            # Add result logging (now safe since result is always defined)
-
-            if not result["success"]:
-                logger.error(f"❌ ACP customization failed: {result.get('message', 'Unknown error')}")
-                if result.get('build_output'):
-                    logger.error(f"   Build output (last 500 chars): {result['build_output'][-500:]}")
-                # Still continue to create ACP_README.md even if customization fails
-                logger.warning("⚠️ Continuing to create ACP_README.md despite customization failure")
 
             # STEP 2: Create ACP_README.md documentation (WITHOUT build gate)
             logger.info("📝 Step 2: Creating ACP_README.md documentation")
