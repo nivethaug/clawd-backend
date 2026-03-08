@@ -831,6 +831,20 @@ Only create or modify files necessary for this page.
                     step_results.append(f"✗ {page} exception: {str(e)}")
                     logger.error(f"[Phase 9] Step {page_num} ✗ Exception creating {page}: {e}")
             
+            # STEP 2.5: Update router and navigation (NEW - Lovable/Bolt architecture)
+            logger.info("🔧 Step 2.5: Updating router and navigation for new pages")
+            router_nav_result = self._update_router_and_navigation(pages_succeeded)
+            
+            if router_nav_result["router_updated"]:
+                step_results.append(f"✓ Router updated: {router_nav_result['routes_added']} routes added")
+                logger.info(f"[Phase 9-Step2.5] ✓ Router updated: {router_nav_result['routes_added']} routes")
+            if router_nav_result["navigation_updated"]:
+                step_results.append(f"✓ Navigation updated: {router_nav_result['nav_items_added']} items added")
+                logger.info(f"[Phase 9-Step2.5] ✓ Navigation updated: {router_nav_result['nav_items_added']} items")
+            
+            if router_nav_result["errors"]:
+                logger.warning(f"[Phase 9-Step2.5] ⚠️ Router/Nav errors: {router_nav_result['errors']}")
+            
             # STEP 3: Build project after all pages created
             logger.info(f"🏗 Step 3: Building project after creating {len(pages_succeeded)}/{len(required_pages)} pages")
             
@@ -1450,3 +1464,206 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    def _update_router_and_navigation(self, pages: List[str]) -> Dict:
+        """
+        Update React Router (App.tsx) and sidebar navigation (AppLayout.tsx)
+        to register newly created pages.
+
+        This is Step 2.5 in Phase 9 - after page creation, before build.
+        """
+        import re
+        
+        app_tsx_path = self.frontend_path / "src" / "App.tsx"
+        app_layout_path = self.frontend_path / "src" / "app" / "layouts" / "AppLayout.tsx"
+        
+        results = {
+            "router_updated": False,
+            "navigation_updated": False,
+            "imports_added": 0,
+            "routes_added": 0,
+            "nav_items_added": 0,
+            "errors": []
+        }
+        
+        # Route mappings with icons from lucide-react
+        route_mappings = {
+            "documents": {"path": "/documents", "icon": "FileText"},
+            "templates": {"path": "/templates", "icon": "Copy"},
+            "editor": {"path": "/editor", "icon": "FileEdit"},
+            "signing": {"path": "/signing", "icon": "PenTool"},
+            "analytics": {"path": "/analytics", "icon": "BarChart3"},
+            "tasks": {"path": "/tasks", "icon": "KanbanBoard"},
+        }
+        
+        try:
+            # Update App.tsx - Add imports and routes
+            logger.info("🔧 Updating React Router (App.tsx)...")
+            
+            if app_tsx_path.exists():
+                app_tsx_content = app_tsx_path.read_text()
+                
+                # Add imports for new pages
+                imports_to_add = []
+                for page in pages:
+                    page_lower = page.lower()
+                    if page_lower in route_mappings:
+                        import_line = f"import {page} from '@/pages/{page}';"
+                        # Check if import already exists
+                        if import_line not in app_tsx_content:
+                            imports_to_add.append(import_line)
+                
+                # Find last import line and insert new imports
+                import_pattern = r"(import .+ from ['\"]\./pages/[^'\"]+['\"])"
+                last_import_match = None
+                for match in re.finditer(import_pattern, app_tsx_content):
+                    last_import_match = match
+                
+                if last_import_match and imports_to_add:
+                    insert_pos = last_import_match.end()
+                    new_imports = "\n" + "\n".join(imports_to_add)
+                    app_tsx_content = (
+                        app_tsx_content[:insert_pos] + 
+                        new_imports + 
+                        app_tsx_content[insert_pos:]
+                    )
+                    results["imports_added"] = len(imports_to_add)
+                    logger.info(f"[Phase 9-Router] Added {len(imports_to_add)} imports")
+                
+                # Add routes for new pages
+                routes_to_add = []
+                for page in pages:
+                    page_lower = page.lower()
+                    if page_lower in route_mappings:
+                        route_path = route_mappings[page_lower]["path"]
+                        route_line = f'          <Route path="{route_path}" element={{{page}}} />'
+                        # Check if route already exists
+                        if route_line not in app_tsx_content:
+                            routes_to_add.append(route_line)
+                
+                if routes_to_add:
+                    # Find position before NotFound route
+                    notfound_pattern = r'(\s+<Route path="\*" element={<NotFound} />)'
+                    notfound_match = re.search(notfound_pattern, app_tsx_content)
+                    
+                    if notfound_match:
+                        insert_pos = notfound_match.start()
+                        new_routes = "\n" + "\n".join(routes_to_add)
+                        app_tsx_content = (
+                            app_tsx_content[:insert_pos] + 
+                            new_routes + 
+                            app_tsx_content[insert_pos:]
+                        )
+                        results["routes_added"] = len(routes_to_add)
+                        results["router_updated"] = True
+                        logger.info(f"[Phase 9-Router] Added {len(routes_to_add)} routes")
+                
+                # Write back if changes made
+                if results["imports_added"] > 0 or results["routes_added"] > 0:
+                    app_tsx_path.write_text(app_tsx_content)
+                    logger.info(f"[Phase 9-Router] ✓ App.tsx updated")
+                else:
+                    logger.warning("[Phase 9-Router] No router changes needed (already up to date)")
+                
+            else:
+                logger.error(f"[Phase 9-Router] App.tsx not found: {app_tsx_path}")
+                results["errors"].append("App.tsx not found")
+                
+        except Exception as e:
+            logger.error(f"[Phase 9-Router] Exception updating App.tsx: {e}")
+            results["errors"].append(f"App.tsx error: {str(e)}")
+        
+        try:
+            # Update AppLayout.tsx - Add navigation items
+            logger.info("🔧 Updating sidebar navigation (AppLayout.tsx)...")
+            
+            if app_layout_path.exists():
+                app_layout_content = app_layout_path.read_text()
+                
+                # Add icon imports
+                icon_imports_needed = set()
+                for page in pages:
+                    page_lower = page.lower()
+                    if page_lower in route_mappings:
+                        icon_imports_needed.add(route_mappings[page_lower]["icon"])
+                
+                # Check which icons already imported
+                icon_import_pattern = r'(\w+),?\s*from [\'\"]lucide-react[\'\"]'
+                existing_icons = set()
+                for match in re.finditer(icon_import_pattern, app_layout_content):
+                    existing_icons.add(match.group(1))
+                
+                icons_to_add = icon_imports_needed - existing_icons
+                
+                # Add icon imports
+                if icons_to_add:
+                    lucide_import_pattern = r'from [\'\"]lucide-react[\'\"]'
+                    lucide_match = re.search(lucide_import_pattern, app_layout_content)
+                    
+                    if lucide_match:
+                        insert_pos = lucide_match.start()
+                        new_icons = ', '.join(sorted(icons_to_add))
+                        # Add before the existing lucide-react import
+                        app_layout_content = (
+                            app_layout_content[:insert_pos] +
+                            f"{new_icons}, " +
+                            app_layout_content[insert_pos:]
+                        )
+                        logger.info(f"[Phase 9-Nav] Added {len(icons_to_add)} icon imports")
+                
+                # Add navigation items to mainNavItems
+                nav_items_to_add = []
+                for page in pages:
+                    page_lower = page.lower()
+                    if page_lower in route_mappings:
+                        nav_item = {
+                            "name": page,
+                            "href": route_mappings[page_lower]["path"],
+                            "icon": route_mappings[page_lower]["icon"]
+                        }
+                        
+                        # Check if nav item already exists
+                        nav_pattern = f'\\{{\\s*name:\\s*[\'"]{page}[\'"]'
+                        if not re.search(nav_pattern, app_layout_content):
+                            nav_items_to_add.append(nav_item)
+                
+                if nav_items_to_add:
+                    # Find mainNavItems array
+                    mainnav_pattern = r'const mainNavItems = \[([\s\S]*?)\];'
+                    mainnav_match = re.search(mainnav_pattern, app_layout_content)
+                    
+                    if mainnav_match:
+                        # Build new nav items code
+                        new_nav_items_code = ",\n".join([
+                            f"  {{ name: '{item['name']}', href: '{item['href']}', icon: {item['icon']} }}"
+                            for item in nav_items_to_add
+                        ])
+                        
+                        # Insert before closing bracket
+                        insert_pos = mainnav_match.end() - 1
+                        app_layout_content = (
+                            app_layout_content[:insert_pos] +
+                            ",\n" + new_nav_items_code +
+                            app_layout_content[insert_pos:]
+                        )
+                        
+                        results["nav_items_added"] = len(nav_items_to_add)
+                        results["navigation_updated"] = True
+                        logger.info(f"[Phase 9-Nav] Added {len(nav_items_to_add)} navigation items")
+                
+                # Write back if changes made
+                if icons_to_add or nav_items_to_add:
+                    app_layout_path.write_text(app_layout_content)
+                    logger.info(f"[Phase 9-Nav] ✓ AppLayout.tsx updated")
+                else:
+                    logger.warning("[Phase 9-Nav] No navigation changes needed (already up to date)")
+                
+            else:
+                logger.error(f"[Phase 9-Nav] AppLayout.tsx not found: {app_layout_path}")
+                results["errors"].append("AppLayout.tsx not found")
+                
+        except Exception as e:
+            logger.error(f"[Phase 9-Nav] Exception updating AppLayout.tsx: {e}")
+            results["errors"].append(f"AppLayout.tsx error: {str(e)}")
+        
+        return results
