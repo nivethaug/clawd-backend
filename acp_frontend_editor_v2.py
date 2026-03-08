@@ -534,7 +534,9 @@ class ACPFrontendEditorV2:
         # Step 8: Validate paths
         logger.info(f"[ACPX-V2] Step 8: Validating paths...")
         for file_path in files_added + files_removed:
-            rel_path = str(file_path.relative_to(self.frontend_src_path))
+            # Convert string to Path object before calling relative_to
+            path_obj = Path(file_path)
+            rel_path = str(path_obj.relative_to(self.frontend_src_path))
             allowed, reason = self.validator.is_path_allowed(rel_path)
             if not allowed:
                 logger.error(f"[ACPX-V2] ❌ Path validation failed: {reason}")
