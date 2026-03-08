@@ -581,7 +581,7 @@ class ACPFrontendEditorV2:
 
     def _build_acpx_prompt(self, goal_description: str) -> str:
         """
-        Build ACPX prompt (no JSON requirement) with systematic execution forcing.
+        Build ACPX prompt with explicit required artifacts and completion checklist.
 
         Args:
             goal_description: Goal for changes
@@ -589,7 +589,39 @@ class ACPFrontendEditorV2:
         Returns:
             Prompt string for ACPX
         """
-        return f"""You are editing a React + Vite + TypeScript project.
+        # Extract required pages from goal description (simple keyword matching)
+        required_pages = []
+        required_components = []
+
+        # Common page patterns
+        desc_lower = goal_description.lower()
+        if any(word in desc_lower for word in ['dashboard', 'overview']):
+            required_pages.append('Dashboard')
+        if any(word in desc_lower for word in ['document', 'docflow', 'panda', 'agreement', 'contract']):
+            required_pages.extend(['Documents', 'DocumentEditor', 'Templates', 'Signing'])
+        if any(word in desc_lower for word in ['analytics', 'reports', 'metrics']):
+            required_pages.append('Analytics')
+        if any(word in desc_lower for word in ['contact', 'crm', 'customer', 'lead']):
+            required_pages.append('Contacts')
+        if any(word in desc_lower for word in ['task', 'todo', 'project', 'kanban']):
+            required_pages.append('Tasks')
+        if any(word in desc_lower for word in ['setting', 'config', 'preference']):
+            required_pages.append('Settings')
+        if any(word in desc_lower for word in ['post', 'article', 'blog']):
+            required_pages.append('Posts')
+        if any(word in desc_lower for word in ['create', 'write', 'compose']):
+            required_pages.append('Create')
+
+        # Build required artifacts list
+        required_pages_list = list(set(required_pages))
+        required_components_list = list(set(required_components))
+        
+        required_pages_str = "
+".join([f"- src/pages/{page}.tsx" for page in required_pages_list])
+        required_components_str = "
+".join([f"- src/components/{comp}.tsx" for comp in required_components_list])
+
+        return f"""You are editing a React + Vite + TypeScript SaaS application.
 
 Project Name: {self.project_name}
 Project Description: {goal_description}
@@ -623,15 +655,43 @@ DO NOT scan:
 - build
 - .git
 
-PROJECT REQUIREMENTS
+REQUIRED PAGES (ALL MUST EXIST)
 
-Based on the project description:
+{required_pages_str}
 
-1. Create or modify pages in src/pages/ for all required features
-2. Create or modify components in src/components/ for reusable elements
-3. Update routing in src/App.tsx if new pages are added
-4. Update sidebar/navigation to reflect new pages
-5. Ensure responsive design for mobile and desktop
+REQUIRED COMPONENTS (IF APPLICABLE)
+
+{required_components_str}
+
+COMPLETION CHECKLIST
+
+✓ All required pages created in src/pages/
+✓ All required components created in src/components/
+✓ Routing updated in src/App.tsx
+✓ Navigation/sidebar updated
+✓ Responsive design implemented
+✓ Code is production-ready
+✓ npm run build succeeds
+
+WORKING METHODOLOGY
+
+You must work systematically through ALL required pages.
+
+1. Read the project description carefully
+2. Plan your approach
+3. Execute step by step
+4. DO NOT STOP until ALL required pages are created
+5. After completing a page, move to the next page
+6. Continue until the entire checklist is complete
+
+EXECUTION RULES
+
+1. Work through pages ONE AT A TIME
+2. Complete each page fully before moving to the next
+3. Do not skip any required page
+4. Do not stop early - continue until checklist is 100% complete
+5. After finishing all pages, run npm run build
+6. Only mark task complete when ALL checklist items are done
 
 TECHNICAL REQUIREMENTS
 
@@ -641,28 +701,9 @@ TECHNICAL REQUIREMENTS
 - Write clean, production-ready code
 - Do not introduce placeholder content unless required
 
-WORKING METHODOLOGY
-
-You must work systematically through ALL required features.
-
-1. Read the project description carefully
-2. Plan your approach
-3. Execute step by step
-4. DO NOT STOP until ALL features are implemented
-5. After completing a feature, move to the next feature
-6. Continue until the entire task is complete
-
-EXECUTION RULES
-
-1. Work through pages ONE AT A TIME
-2. Complete each page before moving to the next page
-3. Do not skip any page
-4. After finishing all pages, run npm run build
-5. Do not stop early - continue until all required pages are created
-
 IMPLEMENTATION
 
-Make your changes directly to the files.
+Make your changes directly to files.
 
 Do NOT request JSON output or any specific format.
 
