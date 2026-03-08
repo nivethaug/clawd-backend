@@ -22,6 +22,7 @@ import subprocess
 import requests
 from datetime import datetime
 from pathlib import Path
+from typing import List, Dict, Optional
 
 # DIAGNOSTIC: Track which file is actually loaded
 print(f"OPENCLAW_WRAPPER_LOADED: {__file__}")
@@ -705,8 +706,8 @@ That's all. Execute Phase {phase} now.
 
         try:
 
-            # Import ACP Frontend Editor directly
-            from acp_frontend_editor import ACPFrontendEditor
+            # Import ACP Frontend Editor V2 (reliable filesystem diffing)
+            from acp_frontend_editor_v2 import ACPFrontendEditor
 
             # Construct frontend/src path (ACPFrontendEditor expects full path to src/)
             frontend_src_path = str(self.frontend_path / "src")
@@ -716,6 +717,9 @@ That's all. Execute Phase {phase} now.
 
 
             if not os.path.exists(frontend_src_path):
+
+                logger.error(f"❌ Frontend src path does not exist: {frontend_src_path}")
+                raise Exception(f"Frontend src path does not exist: {frontend_src_path}")
                 logger.warning("⚠️ Frontend src directory not found - Phase 9 will fail")
                 self.completed_phases.append("ACP Frontend Editor (Failed - No Frontend)")
                 return False  # Don't skip - let it fail with clear error
@@ -811,8 +815,8 @@ Only create or modify files necessary for this page.
                 logger.info(f"[Phase 9] Step {page_num}/{len(required_pages)}: Creating {page} page...")
                 
                 try:
-                    # Run ACPX for this single page
-                    from acp_frontend_editor import ACPFrontendEditor
+                    # Run ACPX V2 for this single page
+                    from acp_frontend_editor_v2 import ACPFrontendEditor
                     
                     editor = ACPFrontendEditor(frontend_src_path, self.project_name)
                     page_result = editor.apply_changes_via_acpx(step_prompt, execution_id)
