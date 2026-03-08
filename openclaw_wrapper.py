@@ -704,101 +704,94 @@ That's all. Execute Phase {phase} now.
         logger.info("🚀 PHASE 9 START: ACP Controlled Frontend Editor")
         logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor (Integrated)")
 
+        # Import ACP Frontend Editor V2 (reliable filesystem diffing)
+        from acp_frontend_editor_v2 import ACPFrontendEditorV2
+
+        # Construct frontend/src path (ACPFrontendEditorV2 expects full path to src/)
+        frontend_src_path = str(self.frontend_path / "src")
+
+        logger.info(f"📁 Frontend path: {self.frontend_path}")
+        logger.info(f"📁 Frontend src path: {frontend_src_path}")
+
+        if not os.path.exists(frontend_src_path):
+            logger.error(f"❌ Frontend src path does not exist: {frontend_src_path}")
+            logger.warning("⚠️ Frontend src directory not found - Phase 9 will fail")
+            self.completed_phases.append("ACP Frontend Editor (Failed - No Frontend)")
+            return False  # Don't skip - let it fail with clear error
+
+        # Initialize ACP editor with frontend/src path
+        # ACPFrontendEditor expects full path to src/ directory
+        logger.debug(f"[Phase 9] Preparing frontend_src_path: {frontend_src_path}")
+        logger.debug(f"[Phase 9] Type: {type(frontend_src_path)}")
+
+        # Force str conversion early
+        frontend_src_path = str(frontend_src_path).rstrip("/")
+
+        if not os.path.exists(frontend_src_path):
+            logger.debug(f"[Phase 9] ❌ Frontend src path does NOT exist: {frontend_src_path}")
+            logger.warning("⚠️ Frontend src directory not found - Phase 9 will fail")
+            self.completed_phases.append("ACP Frontend Editor (Failed - No Frontend)")
+            return False
+
+        # STEP 0: Run Frontend Optimizer (Rule-Based Branding) - GUARDED
+        logger.info("🔧 Step 0: Running Frontend Optimizer (rule-based branding)")
+        logger.info(f"[Phase 9-Step0] Project: {self.project_name}")
+        logger.info(f"[Phase 9-Step0] Description: {self.description[:100]}...")
         try:
+            from frontend_optimizer import FrontendOptimizer
 
-            # Import ACP Frontend Editor V2 (reliable filesystem diffing)
-            from acp_frontend_editor_v2 import ACPFrontendEditorV2
+            optimizer = FrontendOptimizer(
+                str(self.frontend_path),
+                self.project_name,
+                self.description
+            )
+            optimizer_result = optimizer.run()
 
-            # Construct frontend/src path (ACPFrontendEditorV2 expects full path to src/)
-            frontend_src_path = str(self.frontend_path / "src")
-
-            logger.info(f"📁 Frontend path: {self.frontend_path}")
-            logger.info(f"📁 Frontend src path: {frontend_src_path}")
-
-
-            if not os.path.exists(frontend_src_path):
-
-                logger.error(f"❌ Frontend src path does not exist: {frontend_src_path}")
-                raise Exception(f"Frontend src path does not exist: {frontend_src_path}")
-                logger.warning("⚠️ Frontend src directory not found - Phase 9 will fail")
-                self.completed_phases.append("ACP Frontend Editor (Failed - No Frontend)")
-                return False  # Don't skip - let it fail with clear error
-
-            
-            # Initialize ACP editor with frontend/src path
-            # ACPFrontendEditor expects full path to src/ directory
-            
-            logger.debug(f"[Phase 9] Preparing frontend_src_path: {frontend_src_path}")
-            logger.debug(f"[Phase 9] Type: {type(frontend_src_path)}")
-            
-            # Force str conversion early
-            frontend_src_path = str(frontend_src_path).rstrip("/")
-            
-            
-            if not os.path.exists(frontend_src_path):
-                logger.debug(f"[Phase 9] ❌ Frontend src path does NOT exist: {frontend_src_path}")
-                raise RuntimeError(f"Frontend src directory not found: {frontend_src_path}")
-
-
-            # STEP 0: Run Frontend Optimizer (Rule-Based Branding) - NEW
-            logger.info("🔧 Step 0: Running Frontend Optimizer (rule-based branding)")
-            logger.info(f"[Phase 9-Step0] Project: {self.project_name}")
-            logger.info(f"[Phase 9-Step0] Description: {self.description[:100]}...")
-            try:
-                from frontend_optimizer import FrontendOptimizer
-
-                optimizer = FrontendOptimizer(
-                    str(self.frontend_path),
-                    self.project_name,
-                    self.description
-                )
-                optimizer_result = optimizer.run()
-
-                if optimizer_result["success"]:
-                    logger.info(f"[Phase 9-Step0] ✓ Frontend Optimizer completed successfully")
-                    logger.info(f"[Phase 9-Step0]   Files modified: {optimizer_result.get('files_modified', 0)}")
-                    for change in optimizer_result.get("changes", []):
-                        logger.debug(f"[Phase 9-Step0]   Modified: {change}")
-                else:
-                    logger.warning(f"[Phase 9-Step0] ⚠️ Frontend Optimizer failed")
-                    logger.warning(f"[Phase 9-Step0]   Error: {optimizer_result.get('error', 'Unknown')}")
-                    logger.warning("[Phase 9-Step0]   Continuing with ACPX step...")
-
-            except Exception as e:
-                logger.warning(f"[Phase 9-Step0] ⚠️ Frontend Optimizer exception")
-                logger.warning(f"[Phase 9-Step0]   Exception: {type(e).__name__}: {str(e)}")
+            if optimizer_result["success"]:
+                logger.info(f"[Phase 9-Step0] ✓ Frontend Optimizer completed successfully")
+                logger.info(f"[Phase 9-Step0]   Files modified: {optimizer_result.get('files_modified', 0)}")
+                for change in optimizer_result.get("changes", []):
+                    logger.debug(f"[Phase 9-Step0]   Modified: {change}")
+            else:
+                logger.warning(f"[Phase 9-Step0] ⚠️ Frontend Optimizer failed")
+                logger.warning(f"[Phase 9-Step0]   Error: {optimizer_result.get('error', 'Unknown')}")
                 logger.warning("[Phase 9-Step0]   Continuing with ACPX step...")
 
-            # Initialize ACP Frontend Editor V2
-            editor = ACPFrontendEditorV2(frontend_src_path, self.project_name)
-            logger.info("✓ ACP Frontend Editor V2 initialized")
+        except Exception as e:
+            logger.warning(f"[Phase 9-Step0] ⚠️ Frontend Optimizer exception")
+            logger.warning(f"[Phase 9-Step0]   Exception: {type(e).__name__}: {str(e)}")
+            logger.warning("[Phase 9-Step0]   Continuing with ACPX step...")
 
-            # Generate execution ID
-            import uuid
-            execution_id = f"acp_{uuid.uuid4().hex[:12]}"
-            logger.info(f"🔑 Execution ID: {execution_id}")
+        # Initialize ACP Frontend Editor V2
+        editor = ACPFrontendEditorV2(frontend_src_path, self.project_name)
+        logger.info("✓ ACP Frontend Editor V2 initialized")
 
-            # Build goal description for acpx customizations
-            goal_description = self._build_acp_goal_description()
-            logger.info(f"🎯 ACP Goal: {goal_description[:100]}...")
+        # Generate execution ID
+        import uuid
+        execution_id = f"acp_{uuid.uuid4().hex[:12]}"
+        logger.info(f"🔑 Execution ID: {execution_id}")
 
-            # STEP 1: Extract required pages from description
-            logger.info("🔍 Step 1: Extracting required pages from description")
-            
-            required_pages = self._extract_required_pages()
-            logger.info(f"[Phase 9] Required pages: {', '.join(required_pages)}")
-            
-            # STEP 2: Execute each page as separate AI call (step-by-step execution)
-            logger.info("🚀 Step 2: Executing pages step-by-step (Lovable/Bolt architecture)")
-            
-            step_results = []
-            pages_succeeded = []
-            pages_failed = []
-            
-            for idx, page in enumerate(required_pages, start=1):
-                page_num = idx + 1
-                step_name = f"Create {page} page"
-                step_prompt = f"""
+        # Build goal description for acpx customizations
+        goal_description = self._build_acp_goal_description()
+        logger.info(f"🎯 ACP Goal: {goal_description[:100]}...")
+
+        # STEP 1: Extract required pages from description (NO TRY NEEDED - simple extraction)
+        logger.info("🔍 Step 1: Extracting required pages from description")
+
+        required_pages = self._extract_required_pages()
+        logger.info(f"[Phase 9] Required pages: {', '.join(required_pages)}")
+
+        # STEP 2: Execute each page as separate AI call (step-by-step execution) - GUARDED PER PAGE
+        logger.info("🚀 Step 2: Executing pages step-by-step (Lovable/Bolt architecture)")
+
+        step_results = []
+        pages_succeeded = []
+        pages_failed = []
+
+        for idx, page in enumerate(required_pages, start=1):
+            page_num = idx + 1
+            step_name = f"Create {page} page"
+            step_prompt = f"""
 Create the {page} page for this React + Vite + TypeScript application.
 
 PROJECT: {self.project_name}
@@ -813,111 +806,73 @@ PAGE SPECIFICS:
 Do NOT modify unrelated files.
 Only create or modify files necessary for this page.
 """
-                logger.info(f"[Phase 9] Step {page_num}/{len(required_pages)}: Creating {page} page...")
-                
-                try:
-                    # Run ACPX V2 for this single page
-                    from acp_frontend_editor_v2 import ACPFrontendEditorV2
+            logger.info(f"[Phase 9] Step {page_num}/{len(required_pages)}: Creating {page} page...")
 
-                    editor = ACPFrontendEditorV2(frontend_src_path, self.project_name)
-                    page_result = editor.apply_changes_via_acpx(step_prompt, execution_id)
-                    
-                    if page_result.get("success"):
-                        pages_succeeded.append(page)
-                        step_results.append(f"✓ {page} created")
-                        logger.info(f"[Phase 9] Step {page_num} ✓: {page} page created successfully")
-                    else:
-                        pages_failed.append(page)
-                        step_results.append(f"✗ {page} failed: {page_result.get('message', 'Unknown error')}")
-                        logger.error(f"[Phase 9] Step {page_num} ✗: {page} page failed")
-                
-                except Exception as e:
-                    pages_failed.append(page)
-                    step_results.append(f"✗ {page} exception: {str(e)}")
-                    logger.error(f"[Phase 9] Step {page_num} ✗ Exception creating {page}: {e}")
-            
-            # STEP 2.5: Update router and navigation (NEW - Lovable/Bolt architecture)
-            logger.info("🔧 Step 2.5: Updating router and navigation for new pages")
-            router_nav_result = self._update_router_and_navigation(pages_succeeded)
-            
-            if router_nav_result["router_updated"]:
-                step_results.append(f"✓ Router updated: {router_nav_result['routes_added']} routes added")
-                logger.info(f"[Phase 9-Step2.5] ✓ Router updated: {router_nav_result['routes_added']} routes")
-            if router_nav_result["navigation_updated"]:
-                step_results.append(f"✓ Navigation updated: {router_nav_result['nav_items_added']} items added")
-                logger.info(f"[Phase 9-Step2.5] ✓ Navigation updated: {router_nav_result['nav_items_added']} items")
-            
-            if router_nav_result["errors"]:
-                logger.warning(f"[Phase 9-Step2.5] ⚠️ Router/Nav errors: {router_nav_result['errors']}")
-            
-            # STEP 3: Build project after all pages created
-            logger.info(f"🏗 Step 3: Building project after creating {len(pages_succeeded)}/{len(required_pages)} pages")
-            
-            # Track AI execution metrics
-            import time
-            ai_start_time = time.time()
-
-            result = None
             try:
-                if len(pages_failed) > 0:
-                    # Some pages failed
-                    result = {
-                        "success": False,
-                        "message": f"{len(pages_failed)} page(s) failed: {', '.join(pages_failed)}",
-                        "files_added": len(pages_succeeded),
-                        "files_modified": 0,
-                        "files_removed": 0,
-                        "rollback": False,
-                        "steps": step_results,
-                        "pages_succeeded": pages_succeeded,
-                        "pages_failed": pages_failed
-                    }
-                    logger.error(f"[Phase 9] ❌ Failed: {result['message']}")
+                # Run ACPX V2 for this single page
+                from acp_frontend_editor_v2 import ACPFrontendEditorV2
+
+                editor = ACPFrontendEditorV2(frontend_src_path, self.project_name)
+                page_result = editor.apply_changes_via_acpx(step_prompt, execution_id)
+
+                if page_result.get("success"):
+                    pages_succeeded.append(page)
+                    step_results.append(f"✓ {page} created")
+                    logger.info(f"[Phase 9] Step {page_num} ✓: {page} page created successfully")
                 else:
-                    # All pages succeeded - run build
-                    logger.info(f"[Phase 9] Running build gate for {len(pages_succeeded)} pages...")
-                    
-                    # Build the project
-                    from acp_frontend_editor_v2 import ACPBuildGate
-                    build_gate = ACPBuildGate(str(self.frontend_path))
-                    build_success, build_output = build_gate.run_build()
-                    
-                    ai_duration = time.time() - ai_start_time
-                    
-                    if build_success:
-                        result = {
-                            "success": True,
-                            "message": f"Created {len(pages_succeeded)} page(s) successfully and build succeeded",
-                            "files_added": len(pages_succeeded),
-                            "files_modified": 0,
-                            "files_removed": 0,
-                            "rollback": False,
-                            "steps": step_results,
-                            "pages_succeeded": pages_succeeded,
-                            "pages_failed": pages_failed,
-                            "build_output": build_output
-                        }
-                        logger.info(f"[Phase 9] ✓ Build succeeded")
-                    else:
-                        result = {
-                            "success": False,
-                            "message": f"Pages created but build failed",
-                            "files_added": len(pages_succeeded),
-                            "files_modified": 0,
-                            "files_removed": 0,
-                            "rollback": False,
-                            "steps": step_results,
-                            "pages_succeeded": pages_succeeded,
-                            "pages_failed": pages_failed,
-                            "build_output": build_output
-                        }
-                        logger.error(f"[Phase 9] ❌ Build failed: {build_output[-500:]}")
-            
+                    pages_failed.append(page)
+                    step_results.append(f"✗ {page} failed: {page_result.get('message', 'Unknown error')}")
+                    logger.error(f"[Phase 9] Step {page_num} ✗: {page} page failed")
+
             except Exception as e:
+                pages_failed.append(page)
+                step_results.append(f"✗ {page} exception: {str(e)}")
+                logger.error(f"[Phase 9] Step {page_num} ✗ Exception creating {page}: {e}")
+
+        # STEP 2.5: Update router and navigation (NEW - Lovable/Bolt architecture) - GUARDED
+        logger.info("🔧 Step 2.5: Updating router and navigation for new pages")
+        router_nav_result = None
+        try:
+            if pages_succeeded:
+                # Normalize page names (remove .tsx extension)
+                normalized_pages = [p.replace(".tsx", "") for p in pages_succeeded]
+                router_nav_result = self._update_router_and_navigation(normalized_pages)
+
+                if router_nav_result.get("router_updated"):
+                    step_results.append(f"✓ Router updated: {router_nav_result.get('routes_added', 0)} routes added")
+                    logger.info(f"[Phase 9-Step2.5] ✓ Router updated: {router_nav_result.get('routes_added', 0)} routes")
+                if router_nav_result.get("navigation_updated"):
+                    step_results.append(f"✓ Navigation updated: {router_nav_result.get('nav_items_added', 0)} items added")
+                    logger.info(f"[Phase 9-Step2.5] ✓ Navigation updated: {router_nav_result.get('nav_items_added', 0)} items")
+
+                if router_nav_result.get("errors"):
+                    logger.warning(f"[Phase 9-Step2.5] ⚠️ Router/Nav errors: {router_nav_result['errors']}")
+        except Exception as e:
+            logger.error(f"[Phase 9-Step2.5] ❌ Router/Navigation update failed: {e}")
+            # Create empty router_nav_result to avoid KeyError later
+            router_nav_result = {
+                "router_updated": False,
+                "navigation_updated": False,
+                "routes_added": 0,
+                "nav_items_added": 0,
+                "errors": [str(e)]
+            }
+
+        # STEP 3: Build project after all pages created - GUARDED
+        logger.info(f"🏗 Step 3: Building project after creating {len(pages_succeeded)}/{len(required_pages)} pages")
+
+        # Track AI execution metrics
+        import time
+        ai_start_time = time.time()
+
+        result = None
+        try:
+            if len(pages_failed) > 0:
+                # Some pages failed - no build
                 result = {
                     "success": False,
-                    "message": f"Exception during step-by-step execution: {str(e)}",
-                    "files_added": 0,
+                    "message": f"{len(pages_failed)} page(s) failed: {', '.join(pages_failed)}",
+                    "files_added": len(pages_succeeded),
                     "files_modified": 0,
                     "files_removed": 0,
                     "rollback": False,
@@ -925,62 +880,115 @@ Only create or modify files necessary for this page.
                     "pages_succeeded": pages_succeeded,
                     "pages_failed": pages_failed
                 }
-                logger.error(f"[Phase 9] ❌ Exception: {e}")
-
-            logger.info(f"[Phase 9]   📊 Total AI Duration: {ai_duration:.2f}s")
-            logger.info(f"[Phase 9] ✓ ACPX V2 completed")
-
-            # STEP 2: Create ACP_README.md documentation (WITHOUT build gate)
-            logger.info("📝 Step 2: Creating ACP_README.md documentation")
-            from datetime import datetime
-
-            # Build summary based on result (V2 doesn't have mutation log)
-            if result.get('success'):
-                files_added = result.get('files_added', 0)
-                files_modified = result.get('files_modified', 0)
-                files_removed = result.get('files_removed', 0)
-                build_status = '✅' if not result.get('build_output') else 'N/A'
+                logger.error(f"[Phase 9] ❌ Failed: {result['message']}")
             else:
-                files_added = 0
-                files_modified = 0
-                files_removed = 0
-                build_status = '❌'
+                # All pages succeeded - run build
+                logger.info(f"[Phase 9] Running build gate for {len(pages_succeeded)} pages...")
 
-            # Build file list for display
-            files_list = []
-            if files_added > 0:
-                files_list.append(f"**{files_added} new files**")
-            if files_modified > 0:
-                files_list.append(f"**{files_modified} modified files**")
-            if files_removed > 0:
-                files_list.append(f"**{files_removed} removed files**")
+                # Build the project
+                from acp_frontend_editor_v2 import ACPBuildGate
+                build_gate = ACPBuildGate(str(self.frontend_path))
+                build_success, build_output = build_gate.run_build()
 
-            files_changed_summary = f"""
+                ai_duration = time.time() - ai_start_time
+
+                if build_success:
+                    result = {
+                        "success": True,
+                        "message": f"Created {len(pages_succeeded)} page(s) successfully and build succeeded",
+                        "files_added": len(pages_succeeded),
+                        "files_modified": 0,
+                        "files_removed": 0,
+                        "rollback": False,
+                        "steps": step_results,
+                        "pages_succeeded": pages_succeeded,
+                        "pages_failed": pages_failed,
+                        "build_output": build_output
+                    }
+                    logger.info(f"[Phase 9] ✓ Build succeeded")
+                else:
+                    result = {
+                        "success": False,
+                        "message": f"Pages created but build failed",
+                        "files_added": len(pages_succeeded),
+                        "files_modified": 0,
+                        "files_removed": 0,
+                        "rollback": False,
+                        "steps": step_results,
+                        "pages_succeeded": pages_succeeded,
+                        "pages_failed": pages_failed,
+                        "build_output": build_output
+                    }
+                    logger.error(f"[Phase 9] ❌ Build failed: {build_output[-500:]}")
+
+        except Exception as e:
+            result = {
+                "success": False,
+                "message": f"Exception during step-by-step execution: {str(e)}",
+                "files_added": 0,
+                "files_modified": 0,
+                "files_removed": 0,
+                "rollback": False,
+                "steps": step_results,
+                "pages_succeeded": pages_succeeded,
+                "pages_failed": pages_failed
+            }
+            logger.error(f"[Phase 9] ❌ Exception: {e}")
+
+        logger.info(f"[Phase 9]   📊 Total AI Duration: {ai_duration:.2f}s")
+        logger.info(f"[Phase 9] ✓ ACPX V2 completed")
+
+        # STEP 4: Create ACP_README.md documentation (WITHOUT build gate) - GUARDED
+        logger.info("📝 Step 4: Creating ACP_README.md documentation")
+        from datetime import datetime
+
+        # Build summary based on result (V2 doesn't have mutation log)
+        if result.get('success'):
+            files_added = result.get('files_added', 0)
+            files_modified = result.get('files_modified', 0)
+            files_removed = result.get('files_removed', 0)
+            build_status = '✅' if not result.get('build_output') else 'N/A'
+        else:
+            files_added = 0
+            files_modified = 0
+            files_removed = 0
+            build_status = '❌'
+
+        # Build file list for display
+        files_list = []
+        if files_added > 0:
+            files_list.append(f"**{files_added} new files**")
+        if files_modified > 0:
+            files_list.append(f"**{files_modified} modified files**")
+        if files_removed > 0:
+            files_list.append(f"**{files_removed} removed files**")
+
+        files_changed_summary = f"""
 ### Changes Applied
 - {', '.join(files_list) if files_list else 'No changes detected'}
 - **Build Status:** {build_status}
 """
 
-            # STEP 3: ALWAYS run build gate (even if no changes detected)
-            # This catches cases where AI modified imports/routing without creating new files
-            logger.info("🔨 Step 3: Running verification build (always)")
-            verification_build_success = False
-            verification_build_output = ""
+        # STEP 5: ALWAYS run verification build gate (even if no changes detected)
+        # This catches cases where AI modified imports/routing without creating new files - GUARDED
+        logger.info("🔨 Step 5: Running verification build (always)")
+        verification_build_success = False
+        verification_build_output = ""
 
-            try:
-                from acp_frontend_editor_v2 import ACPBuildGate
-                build_gate = ACPBuildGate(str(self.frontend_path))
-                verification_build_success, verification_build_output = build_gate.run_build()
+        try:
+            from acp_frontend_editor_v2 import ACPBuildGate
+            build_gate = ACPBuildGate(str(self.frontend_path))
+            verification_build_success, verification_build_output = build_gate.run_build()
 
-                if verification_build_success:
-                    logger.info(f"[Phase 9]   ✓ Verification build succeeded")
-                else:
-                    logger.warning(f"[Phase 9]   ⚠️ Verification build failed (but project may still be functional)")
-            except Exception as e:
-                logger.error(f"[Phase 9]   ❌ Verification build exception: {e}")
-                verification_build_output = str(e)
+            if verification_build_success:
+                logger.info(f"[Phase 9]   ✓ Verification build succeeded")
+            else:
+                logger.warning(f"[Phase 9]   ⚠️ Verification build failed (but project may still be functional)")
+        except Exception as e:
+            logger.error(f"[Phase 9]   ❌ Verification build exception: {e}")
+            verification_build_output = str(e)
 
-            acp_readme_content = f"""# ACP Controlled Frontend Editor
+        acp_readme_content = f"""# ACP Controlled Frontend Editor
 
 This project is configured for controlled frontend refinement using ACP (Agent Client Protocol).
 
@@ -1022,89 +1030,81 @@ It provides safe, validated frontend editing with the following protections:
 Phase 9 is complete! ACP is integrated as the final step of project creation.
 """
 
-            # Apply ACP_README.md DIRECTLY (no build gate needed for documentation)
-            # This avoids " "package.json not found" error for README-only changes
-            readme_path = Path(frontend_src_path) / "ACP_README.md"
+        # Apply ACP_README.md DIRECTLY (no build gate needed for documentation) - GUARDED
+        # This avoids " "package.json not found" error for README-only changes
+        readme_path = Path(frontend_src_path) / "ACP_README.md"
 
-            try:
-                with open(readme_path, 'w', encoding='utf-8') as f:
-                    f.write(acp_readme_content)
-                logger.info(f"✓ ACP_README.md created at {readme_path}")
+        try:
+            with open(readme_path, 'w', encoding='utf-8') as f:
+                f.write(acp_readme_content)
+            logger.info(f"✓ ACP_README.md created at {readme_path}")
 
-                readme_result = {
-                    "success": True,
-                    "files_added": 1,
-                    "files_modified": 0,
-                    "files_removed": 0
-                }
-                logger.info(f"[Phase 9-Step2] ✓ ACP_README.md result: {readme_result}")
+            readme_result = {
+                "success": True,
+                "files_added": 1,
+                "files_modified": 0,
+                "files_removed": 0
+            }
+            logger.info(f"[Phase 9-Step4] ✓ ACP_README.md result: {readme_result}")
 
-            except Exception as e:
-                logger.error(f"❌ Failed to create ACP_README.md: {e}")
-                readme_result = {
-                    "success": False,
-                    "files_added": 0,
-                    "files_modified": 0,
-                    "files_removed": 0
-                }
+        except Exception as e:
+            logger.error(f"❌ Failed to create ACP_README.md: {e}")
+            readme_result = {
+                "success": False,
+                "files_added": 0,
+                "files_modified": 0,
+                "files_removed": 0
+            }
 
-            # Report final status
-            # Build information section
-            build_info = f"""
+        # Report final status
+        # Build information section
+        build_info = f"""
 
 ### Build Information
 - **Primary Build:** {'✅ Success' if result.get('success') and not result.get('build_output') else '❌ Failed or N/A'}
 - **Verification Build:** {'✅ Success' if verification_build_success else '❌ Failed'}
 """
 
-            if result["success"] and readme_result["success"]:
-                logger.info(f"✅ ACP Phase 9 completed successfully!")
-                logger.info(f"   ACPX Changes: Files added={result.get('files_added', 0)}, modified={result.get('files_modified', 0)}, removed={result.get('files_removed', 0)}")
-                logger.info(f"   Documentation: ACP_README.md created")
-                logger.info(f"   Primary Build: {'✅ Success' if not result.get('build_output') else 'N/A'}")
-                logger.info(f"   Verification Build: {'✅ Success' if verification_build_success else '❌ Failed'}")
-                logger.info(f"   Rollback: {'No' if not result.get('rollback') else 'Yes'}")
+        if result["success"] and readme_result["success"]:
+            logger.info(f"✅ ACP Phase 9 completed successfully!")
+            logger.info(f"   ACPX Changes: Files added={result.get('files_added', 0)}, modified={result.get('files_modified', 0)}, removed={result.get('files_removed', 0)}")
+            logger.info(f"   Documentation: ACP_README.md created")
+            logger.info(f"   Primary Build: {'✅ Success' if not result.get('build_output') else 'N/A'}")
+            logger.info(f"   Verification Build: {'✅ Success' if verification_build_success else '❌ Failed'}")
+            logger.info(f"   Rollback: {'No' if not result.get('rollback') else 'Yes'}")
 
-                self.completed_phases.append("ACP Controlled Frontend Editor (Integrated)")
-                return True
-
-            elif result["success"]:
-                # acpx customization succeeded but README creation failed
-                # This is not fatal - project is ready
-                logger.info(f"✅ ACP Phase 9 partial success: Customization worked, README creation failed")
-                logger.info(f"   Customization: Files added={result.get('files_added', 0)}, modified={result.get('files_modified', 0)}")
-                logger.info(f"   Documentation: ACP_README.md failed to create")
-                logger.info(f"   Primary Build: {'✅ Success' if not result.get('build_output') else 'N/A'}")
-                logger.info(f"   Verification Build: {'✅ Success' if verification_build_success else '❌ Failed'}")
-                logger.info(f"   Build note: acpx build gate may have failed, but infrastructure build succeeded")
-                logger.warning("⚠️ Project marked as 'ready' despite README failure - frontend is functional")
-
-                self.completed_phases.append("ACP Frontend Editor (Partial - README Failed)")
-                return True
-
-            elif readme_result["success"]:
-                # acpx customization failed but README creation succeeded
-                # This means code changes were rolled back, but docs exist
-                logger.info(f"⚠️ ACP Phase 9 partial: Customization failed, README created")
-                logger.info(f"   Documentation: ACP_README.md created")
-                logger.warning("⚠️ Project marked as 'ready' but acpx changes were rolled back")
-
-                self.completed_phases.append("ACP Frontend Editor (Partial - Changes Failed)")
-                return True
-
-            else:
-                # Both failed - this is a real failure
-                logger.error(f"❌ ACP Phase 9 failed: Customization failed")
-                self.completed_phases.append("ACP Frontend Editor (Failed)")
-                return False
-
-        except Exception as e:
-            logger.error(f"❌ Phase 9 failed: {e}")
-            logger.error(f"   Exception type: {type(e).__name__}")
-            logger.error(f"   Exception details: {str(e)}", exc_info=True)
-            # Return True to allow project to complete despite Phase 9 errors
-            logger.warning("⚠️ Allowing project to complete despite Phase 9 errors")
+            self.completed_phases.append("ACP Controlled Frontend Editor (Integrated)")
             return True
+
+        elif result["success"]:
+            # acpx customization succeeded but README creation failed
+            # This is not fatal - project is ready
+            logger.info(f"✅ ACP Phase 9 partial success: Customization worked, README creation failed")
+            logger.info(f"   Customization: Files added={result.get('files_added', 0)}, modified={result.get('files_modified', 0)}")
+            logger.info(f"   Documentation: ACP_README.md failed to create")
+            logger.info(f"   Primary Build: {'✅ Success' if not result.get('build_output') else 'N/A'}")
+            logger.info(f"   Verification Build: {'✅ Success' if verification_build_success else '❌ Failed'}")
+            logger.info(f"   Build note: acpx build gate may have failed, but infrastructure build succeeded")
+            logger.warning("⚠️ Project marked as 'ready' despite README failure - frontend is functional")
+
+            self.completed_phases.append("ACP Frontend Editor (Partial - README Failed)")
+            return True
+
+        elif readme_result["success"]:
+            # acpx customization failed but README creation succeeded
+            # This means code changes were rolled back, but docs exist
+            logger.info(f"⚠️ ACP Phase 9 partial: Customization failed, README created")
+            logger.info(f"   Documentation: ACP_README.md created")
+            logger.warning("⚠️ Project marked as 'ready' but acpx changes were rolled back")
+
+            self.completed_phases.append("ACP Frontend Editor (Partial - Changes Failed)")
+            return True
+
+        else:
+            # Both failed - this is a real failure
+            logger.error(f"❌ ACP Phase 9 failed: Customization failed")
+            self.completed_phases.append("ACP Frontend Editor (Failed)")
+            return False
     def _build_ai_refinement_prompt(self) -> str:
         """Build AI refinement prompt for OpenClaw.
 
