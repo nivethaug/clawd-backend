@@ -672,7 +672,6 @@ That's all. Execute Phase {phase} now.
         logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor (Integrated)")
 
         try:
-            print("!!! PHASE9 UNIQUE MARKER v2 - FUNCTION ENTRY")  # UNIQUE MARKER
 
             # Import ACP Frontend Editor directly
             from acp_frontend_editor import ACPFrontendEditor
@@ -683,16 +682,12 @@ That's all. Execute Phase {phase} now.
             logger.info(f"📁 Frontend path: {self.frontend_path}")
             logger.info(f"📁 Frontend src path: {frontend_src_path}")
 
-            print(f"!!! PHASE 9: PATH CHECK BEFORE")
-            print(f"!!! PHASE 9:   frontend_src_path = {frontend_src_path!r}")
 
             if not os.path.exists(frontend_src_path):
-                print(f"!!! PHASE 9: ❌ PATH DOES NOT EXIST!")
                 logger.warning("⚠️ Frontend src directory not found - Phase 9 will fail")
                 self.completed_phases.append("ACP Frontend Editor (Failed - No Frontend)")
                 return False  # Don't skip - let it fail with clear error
 
-            print(f"!!! PHASE 9: PATH EXISTS CHECK PASSED - proceeding...")
             
             # Initialize ACP editor with frontend/src path
             # ACPFrontendEditor expects full path to src/ directory
@@ -703,15 +698,11 @@ That's all. Execute Phase {phase} now.
             # Force str conversion early
             frontend_src_path = str(frontend_src_path).rstrip("/")
             
-            print(f"!!! PHASE 9: After str conversion: {frontend_src_path!r}")
-            print(f"!!! PHASE 9: Check exists: {os.path.exists(frontend_src_path)}")
             
             if not os.path.exists(frontend_src_path):
-                print(f"!!! PHASE 9: ❌ Frontend src path does NOT exist: {frontend_src_path}")
                 logger.debug(f"[Phase 9] ❌ Frontend src path does NOT exist: {frontend_src_path}")
                 raise RuntimeError(f"Frontend src directory not found: {frontend_src_path}")
 
-            print(f"!!! PHASE 9: ✓ Frontend src path exists, proceeding...")
 
             # STEP 0: Run Frontend Optimizer (Rule-Based Branding) - NEW
             logger.info("🔧 Step 0: Running Frontend Optimizer (rule-based branding)")
@@ -743,7 +734,6 @@ That's all. Execute Phase {phase} now.
                 logger.warning("[Phase 9-Step0]   Continuing with ACPX step...")
 
             editor = ACPFrontendEditor(frontend_src_path, self.project_name)
-            print(f"!!! PHASE 9: ✓ ACPFrontendEditor created!")
             logger.info("✓ ACP Frontend Editor initialized")
 
             # Generate execution ID
@@ -802,13 +792,6 @@ That's all. Execute Phase {phase} now.
                 }
 
             # Add result logging (now safe since result is always defined)
-            print(f"!!! PHASE 9: generate_and_apply_changes() returned")
-            print(f"!!! PHASE 9:   result = {result!r}")
-            print(f"!!! PHASE 9:   success = {result.get('success', 'N/A')}")
-            print(f"!!! PHASE 9:   message = {result.get('message', 'N/A')!r}")
-            print(f"!!! PHASE 9:   files_added = {result.get('files_added', 'N/A')}")
-            print(f"!!! PHASE 9:   files_modified = {result.get('files_modified', 'N/A')}")
-            print(f"!!! PHASE 9:   files_removed = {result.get('files_removed', 'N/A')}")
 
             if not result["success"]:
                 logger.error(f"❌ ACP customization failed: {result.get('message', 'Unknown error')}")
@@ -1262,7 +1245,6 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 return
 
             # Phase 9: ACP Controlled Frontend Refinement
-            print(f"!!! PHASE 9: BEFORE CALLING - project_id={self.project_id}, project_name={self.project_name}")
             logger.info(f"📋 Phase 9/{total_phases}: ACP Controlled Frontend Refinement")
             if self.phase_9_acp_frontend_editor():
                 phases_succeeded += 1
