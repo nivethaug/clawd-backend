@@ -333,6 +333,37 @@ That's all. Execute Phase {phase} now.
         return True
 
 
+
+    def _extract_required_pages(self) -> list:
+        """Extract required pages from project description.
+        
+        Returns:
+            List of page names to create.
+        """
+        desc_lower = self.description.lower() if self.description else ""
+        required_pages = []
+        
+        # Detect pages based on keywords
+        if any(word in desc_lower for word in ['dashboard', 'overview']):
+            required_pages.append('Dashboard')
+        if any(word in desc_lower for word in ['document', 'docflow', 'panda', 'agreement', 'contract']):
+            required_pages.extend(['Documents', 'DocumentEditor', 'Templates', 'Signing'])
+        if any(word in desc_lower for word in ['analytics', 'reports', 'metrics']):
+            required_pages.append('Analytics')
+        if any(word in desc_lower for word in ['contact', 'crm', 'customer', 'lead']):
+            required_pages.append('Contacts')
+        if any(word in desc_lower for word in ['task', 'todo', 'project', 'kanban']):
+            required_pages.append('Tasks')
+        if any(word in desc_lower for word in ['setting', 'config', 'preference']):
+            required_pages.append('Settings')
+        if any(word in desc_lower for word in ['post', 'article', 'blog']):
+            required_pages.append('Posts')
+        if any(word in desc_lower for word in ['create', 'write', 'compose']):
+            required_pages.append('Create')
+        
+        # Deduplicate and return
+        return list(set(required_pages))
+
     def _build_acp_goal_description(self) -> str:
         """
         Build goal description for acpx frontend customization.
@@ -669,6 +700,7 @@ That's all. Execute Phase {phase} now.
         4. Create ACP_README.md with documentation
         5. Report success
         """
+        logger.info("🚀 PHASE 9 START: ACP Controlled Frontend Editor")
         logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor (Integrated)")
 
         try:
@@ -745,24 +777,138 @@ That's all. Execute Phase {phase} now.
             goal_description = self._build_acp_goal_description()
             logger.info(f"🎯 ACP Goal: {goal_description[:100]}...")
 
-            # STEP 1: Generate and apply customizations via acpx (v2 - filesystem diff)
-            logger.info("🤖 Step 1: Generating and applying frontend customizations via acpx (Filesystem Diff Architecture)")
-            logger.info(f"[Phase 9] Execution ID: {execution_id}")
-            logger.info(f"[Phase 9] Goal description: {goal_description[:200]}...")
+            # STEP 1: Extract required pages from description
+            logger.info("🔍 Step 1: Extracting required pages from description")
+            
+            required_pages = self._extract_required_pages()
+            logger.info(f"[Phase 9] Required pages: {', '.join(required_pages)}")
+            
+            # STEP 2: Execute each page as separate AI call (step-by-step execution)
+            logger.info("🚀 Step 2: Executing pages step-by-step (Lovable/Bolt architecture)")
+            
+            step_results = []
+            pages_succeeded = []
+            pages_failed = []
+            
+            for idx, page in enumerate(required_pages, start=1):
+                page_num = idx + 1
+                step_name = f"Create {page} page"
+                step_prompt = f"""
+Create the {page} page for this React + Vite + TypeScript application.
 
+PROJECT: {self.project_name}
+DESCRIPTION: {self.description}
+
+PAGE SPECIFICS:
+- File: src/pages/{page}.tsx
+- Follow existing layout and UI component patterns
+- Use appropriate UI components from src/components/ui/
+- Make it production-ready
+
+Do NOT modify unrelated files.
+Only create or modify files necessary for this page.
+"""
+                logger.info(f"[Phase 9] Step {page_num}/{len(required_pages)}: Creating {page} page...")
+                
+                try:
+                    # Run ACPX for this single page
+                    from acp_frontend_editor import ACPFrontendEditor
+                    
+                    editor = ACPFrontendEditor(frontend_src_path, self.project_name)
+                    page_result = editor.apply_changes_via_acpx(step_prompt, execution_id)
+                    
+                    if page_result.get("success"):
+                        pages_succeeded.append(page)
+                        step_results.append(f"✓ {page} created")
+                        logger.info(f"[Phase 9] Step {page_num} ✓: {page} page created successfully")
+                    else:
+                        pages_failed.append(page)
+                        step_results.append(f"✗ {page} failed: {page_result.get('message', 'Unknown error')}")
+                        logger.error(f"[Phase 9] Step {page_num} ✗: {page} page failed")
+                
+                except Exception as e:
+                    pages_failed.append(page)
+                    step_results.append(f"✗ {page} exception: {str(e)}")
+                    logger.error(f"[Phase 9] Step {page_num} ✗ Exception creating {page}: {e}")
+            
+            # STEP 3: Build project after all pages created
+            logger.info(f"🏗 Step 3: Building project after creating {len(pages_succeeded)}/{len(required_pages)} pages")
+            
             # Track AI execution metrics
             import time
             ai_start_time = time.time()
 
-            # Initialize result to None (will be set in try block)
             result = None
-
             try:
-                # Use V2 editor with filesystem diffing
-                from acp_frontend_editor_v2 import ACPFrontendEditorV2
-
-                editor_v2 = ACPFrontendEditorV2(frontend_src_path, self.project_name)
-                result = editor_v2.apply_changes_via_acpx(goal_description, execution_id)
+                if len(pages_failed) > 0:
+                    # Some pages failed
+                    result = {
+                        "success": False,
+                        "message": f"{len(pages_failed)} page(s) failed: {', '.join(pages_failed)}",
+                        "files_added": len(pages_succeeded),
+                        "files_modified": 0,
+                        "files_removed": 0,
+                        "rollback": False,
+                        "steps": step_results,
+                        "pages_succeeded": pages_succeeded,
+                        "pages_failed": pages_failed
+                    }
+                    logger.error(f"[Phase 9] ❌ Failed: {result['message']}")
+                else:
+                    # All pages succeeded - run build
+                    logger.info(f"[Phase 9] Running build gate for {len(pages_succeeded)} pages...")
+                    
+                    # Build the project
+                    from acp_frontend_editor_v2 import ACPBuildGate
+                    build_gate = ACPBuildGate(str(self.frontend_path))
+                    build_success, build_output = build_gate.run_build()
+                    
+                    ai_duration = time.time() - ai_start_time
+                    
+                    if build_success:
+                        result = {
+                            "success": True,
+                            "message": f"Created {len(pages_succeeded)} page(s) successfully and build succeeded",
+                            "files_added": len(pages_succeeded),
+                            "files_modified": 0,
+                            "files_removed": 0,
+                            "rollback": False,
+                            "steps": step_results,
+                            "pages_succeeded": pages_succeeded,
+                            "pages_failed": pages_failed,
+                            "build_output": build_output
+                        }
+                        logger.info(f"[Phase 9] ✓ Build succeeded")
+                    else:
+                        result = {
+                            "success": False,
+                            "message": f"Pages created but build failed",
+                            "files_added": len(pages_succeeded),
+                            "files_modified": 0,
+                            "files_removed": 0,
+                            "rollback": False,
+                            "steps": step_results,
+                            "pages_succeeded": pages_succeeded,
+                            "pages_failed": pages_failed,
+                            "build_output": build_output
+                        }
+                        logger.error(f"[Phase 9] ❌ Build failed: {build_output[-500:]}")
+            
+            except Exception as e:
+                result = {
+                    "success": False,
+                    "message": f"Exception during step-by-step execution: {str(e)}",
+                    "files_added": 0,
+                    "files_modified": 0,
+                    "files_removed": 0,
+                    "rollback": False,
+                    "steps": step_results,
+                    "pages_succeeded": pages_succeeded,
+                    "pages_failed": pages_failed
+                }
+                logger.error(f"[Phase 9] ❌ Exception: {e}")
+            
+            logger.info(f"[Phase 9]   📊 Total AI Duration: {ai_duration:.2f}s")
 
                 ai_duration = time.time() - ai_start_time
 
