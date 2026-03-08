@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 USE_POSTGRES = os.getenv("USE_POSTGRES", "true").lower() == "true"
 DB_PATH = "/root/clawd-backend/clawdbot_adapter.db"
 
+# Template configuration
+EMPTY_TEMPLATE_MODE = os.getenv("EMPTY_TEMPLATE_MODE", "false").lower() == "true"
+BLANK_TEMPLATE_PATH = "/root/clawd-backend/templates/blank-template"
+
 # PostgreSQL imports
 if USE_POSTGRES:
     import psycopg2
@@ -91,18 +95,28 @@ class FastWrapper:
         except Exception as e:
             logger.error(f"✗ Failed to update project status: {e}")
 
-    def git_clone(self, repo_url: str, target_dir: str = "frontend", timeout: int = 600) -> bool:
-        """Run git clone directly."""
+    def git_clone(self, repo_url: str = None, target_dir: str = "frontend", timeout: int = 600) -> bool:
+        """Run git clone directly or copy local blank template."""
         try:
-            logger.info(f"🚀 Running git clone: {repo_url} → {target_dir}")
+            target_path = self.project_path / target_dir
 
             # Check if target directory already exists
-            target_path = self.project_path / target_dir
             if target_path.exists():
                 logger.warning(f"⚠️ Target directory '{target_dir}' already exists, skipping clone")
                 return True
 
-            # Run git clone
+            # Check if blank template mode is enabled
+            if EMPTY_TEMPLATE_MODE:
+                logger.info(f"🚀 EMPTY_TEMPLATE_MODE is enabled - copying blank template...")
+                return self._copy_blank_template(target_dir)
+
+            # Run git clone (original behavior)
+            if not repo_url:
+                logger.error("❌ No repository URL provided for git clone")
+                return False
+
+            logger.info(f"🚀 Running git clone: {repo_url} → {target_dir}")
+
             result = subprocess.run(
                 ["git", "clone", "--depth", "1", repo_url, target_dir],
                 cwd=self.project_path,
@@ -134,6 +148,50 @@ class FastWrapper:
             return False
         except Exception as e:
             logger.error(f"❌ Git clone error: {e}")
+            return False
+
+    def _copy_blank_template(self, target_dir: str) -> bool:
+        """Copy blank template directory to project."""
+        try:
+            logger.info(f"📁 Copying blank template from {BLANK_TEMPLATE_PATH}...")
+
+            source_path = Path(BLANK_TEMPLATE_PATH)
+            target_path = self.project_path / target_dir
+
+            if not source_path.exists():
+                logger.error(f"❌ Blank template not found at {BLANK_TEMPLATE_PATH}")
+                return False
+
+            # Use subprocess to copy directory (faster and more reliable)
+            result = subprocess.run(
+                ["cp", "-r", str(source_path), str(target_path)],
+                cwd=self.project_path,
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+
+            if result.returncode == 0:
+                logger.info(f"✅ Blank template copied successfully")
+                logger.info(f"✓ Template copied to {target_dir}")
+
+                # Verify copy
+                if target_path.exists():
+                    logger.info(f"✓ Target directory verified: {target_dir}")
+                    return True
+                else:
+                    logger.error(f"❌ Target directory not created: {target_dir}")
+                    return False
+            else:
+                logger.error(f"❌ Failed to copy blank template with code: {result.returncode}")
+                logger.error(f"Error output: {result.stderr}")
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ Template copy timed out after 300 seconds")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Template copy error: {e}")
             return False
 
     def create_backend(self) -> bool:
@@ -341,58 +399,74 @@ SECRET_KEY=your-secret-key-here-generate-new-one-in-production
             # Task 2: Clone repository
             logger.info(f"📋 Task 2/{total_tasks}: Clone repository")
 
-            # Get template repository URL
-            template_registry_path = Path("/root/dreampilot/website/frontend/template-registry.json")
-            repo_url = None
+            # Check if blank template mode is enabled
+            if EMPTY_TEMPLATE_MODE:
+                logger.info(f"🎯 EMPTY_TEMPLATE_MODE is enabled - using blank template")
+                logger.info(f"📁 Blank template path: {BLANK_TEMPLATE_PATH}")
 
-            if self.template_id:
-                logger.info(f"Looking up template ID: {self.template_id}")
-
-                try:
-                    with open(template_registry_path, 'r') as f:
-                        registry = json.load(f)
-                        logger.info(f"Registry loaded successfully, {len(registry.get('templates', []))} templates available")
-                except Exception as e:
-                    logger.error(f"Failed to read template registry: {e}")
-                    return None
-
-                # Search for template
-                if registry:
-                    templates = registry.get('templates', [])
-                    logger.info(f"Searching through templates for ID: '{self.template_id}'")
-                    
-                    for i, template in enumerate(templates):
-                        template_id_check = template.get('id')
-                        logger.info(f"  Template {i}: ID='{template_id_check}' (comparing to '{self.template_id}')")
-                        
-                        if template_id_check == self.template_id:
-                            repo_url = template.get('repo')
-                            logger.info(f"✓ MATCH FOUND! Template ID '{self.template_id}' matches at index {i}")
-                            logger.info(f"✓ Repository URL: {repo_url}")
-                            logger.info(f"✓ Template Category: {template.get('category')}")
-                            break
-                    else:
-                        logger.error("No templates found in registry (registry is None)")
-
-            if not repo_url:
-                logger.error(f"❌ Could not find repository URL for template ID: {self.template_id}")
-                logger.error(f"❌ Template registry path: {template_registry_path}")
-                logger.error(f"❌ Template ID provided: '{self.template_id}'")
-                self.failed_tasks.append("Clone repository")
-                self.update_status("failed")
-                logger.error("❌ Initialization failed at task 2")
-                return
-
-            # Clone repository directly with subprocess (much faster than Claude Code)
-            if self.git_clone(repo_url, "frontend", timeout=1800):
-                self.completed_tasks.append("Clone repository")
-                tasks_succeeded += 1
-                logger.info(f"✓ Task 2 completed!")
+                # Clone (copy) blank template directly
+                if self.git_clone(target_dir="frontend", timeout=1800):
+                    self.completed_tasks.append("Clone repository")
+                    tasks_succeeded += 1
+                    logger.info(f"✓ Task 2 completed! (blank template)")
+                else:
+                    self.failed_tasks.append("Clone repository")
+                    self.update_status("failed")
+                    logger.error("❌ Initialization failed at task 2")
+                    return
             else:
-                self.failed_tasks.append("Clone repository")
-                self.update_status("failed")
-                logger.error("❌ Initialization failed at task 2")
-                return
+                # Get template repository URL (original behavior)
+                template_registry_path = Path("/root/dreampilot/website/frontend/template-registry.json")
+                repo_url = None
+
+                if self.template_id:
+                    logger.info(f"Looking up template ID: {self.template_id}")
+
+                    try:
+                        with open(template_registry_path, 'r') as f:
+                            registry = json.load(f)
+                            logger.info(f"Registry loaded successfully, {len(registry.get('templates', []))} templates available")
+                    except Exception as e:
+                        logger.error(f"Failed to read template registry: {e}")
+                        return None
+
+                    # Search for template
+                    if registry:
+                        templates = registry.get('templates', [])
+                        logger.info(f"Searching through templates for ID: '{self.template_id}'")
+
+                        for i, template in enumerate(templates):
+                            template_id_check = template.get('id')
+                            logger.info(f"  Template {i}: ID='{template_id_check}' (comparing to '{self.template_id}')")
+
+                            if template_id_check == self.template_id:
+                                repo_url = template.get('repo')
+                                logger.info(f"✓ MATCH FOUND! Template ID '{self.template_id}' matches at index {i}")
+                                logger.info(f"✓ Repository URL: {repo_url}")
+                                logger.info(f"✓ Template Category: {template.get('category')}")
+                                break
+                        else:
+                            logger.error("No templates found in registry (registry is None)")
+
+                if not repo_url:
+                    logger.error(f"❌ Could not find repository URL for template ID: {self.template_id}")
+                    logger.error(f"❌ Template registry path: {template_registry_path}")
+                    logger.error(f"❌ Template ID provided: '{self.template_id}'")
+                    self.failed_tasks.append("Clone repository")
+                    self.update_status("failed")
+                    logger.error("❌ Initialization failed at task 2")
+                    return
+
+                # Clone repository directly with subprocess (much faster than Claude Code)
+                if self.git_clone(repo_url, "frontend", timeout=1800):
+                    self.completed_tasks.append("Clone repository")
+                    tasks_succeeded += 1
+                    logger.info(f"✓ Task 2 completed!")
+                else:
+                    self.failed_tasks.append("Clone repository")
+                    self.update_status("failed")
+                    logger.error("❌ Initialization failed at task 2")
+                    return
 
             # Task 3: Create FastAPI backend
             logger.info(f"📋 Task 3/{total_tasks}: Create FastAPI backend")
