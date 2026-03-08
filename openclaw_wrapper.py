@@ -921,12 +921,9 @@ Only create or modify files necessary for this page.
                     "pages_failed": pages_failed
                 }
                 logger.error(f"[Phase 9] ❌ Exception: {e}")
-            
+
             logger.info(f"[Phase 9]   📊 Total AI Duration: {ai_duration:.2f}s")
-
-                ai_duration = time.time() - ai_start_time
-
-                logger.info(f"[Phase 9] ✓ ACPX V2 completed")
+            logger.info(f"[Phase 9] ✓ ACPX V2 completed")
                 logger.info(f"[Phase 9]   Success: {result.get('success')}")
                 logger.info(f"[Phase 9]   Message: {result.get('message', 'N/A')}")
                 logger.info(f"[Phase 9]   Files added: {result.get('files_added', 0)}")

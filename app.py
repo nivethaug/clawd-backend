@@ -382,7 +382,14 @@ async def create_project(request: CreateProjectRequest):
 
     # Step 4: Select template (if not provided)
     selected_template_id = request.template_id
-    if type_id == 1 and not selected_template_id:
+
+    # Check if EMPTY_TEMPLATE_MODE is enabled
+    empty_template_mode = os.getenv("EMPTY_TEMPLATE_MODE", "false").lower() == "true"
+
+    if empty_template_mode:
+        logger.info("EMPTY_TEMPLATE_MODE is enabled - using blank template")
+        selected_template_id = "blank"
+    elif type_id == 1 and not selected_template_id:
         # Auto-select template for website projects using Groq
         try:
             selector = TemplateSelector()
