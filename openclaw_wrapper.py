@@ -22,6 +22,7 @@ import subprocess
 import requests
 from datetime import datetime
 from pathlib import Path
+from typing import List, Dict, Optional
 
 # DIAGNOSTIC: Track which file is actually loaded
 print(f"OPENCLAW_WRAPPER_LOADED: {__file__}")
@@ -705,10 +706,10 @@ That's all. Execute Phase {phase} now.
 
         try:
 
-            # Import ACP Frontend Editor directly
-            from acp_frontend_editor import ACPFrontendEditor
+            # Import ACP Frontend Editor V2 (reliable filesystem diffing)
+            from acp_frontend_editor_v2 import ACPFrontendEditorV2
 
-            # Construct frontend/src path (ACPFrontendEditor expects full path to src/)
+            # Construct frontend/src path (ACPFrontendEditorV2 expects full path to src/)
             frontend_src_path = str(self.frontend_path / "src")
 
             logger.info(f"📁 Frontend path: {self.frontend_path}")
@@ -716,6 +717,9 @@ That's all. Execute Phase {phase} now.
 
 
             if not os.path.exists(frontend_src_path):
+
+                logger.error(f"❌ Frontend src path does not exist: {frontend_src_path}")
+                raise Exception(f"Frontend src path does not exist: {frontend_src_path}")
                 logger.warning("⚠️ Frontend src directory not found - Phase 9 will fail")
                 self.completed_phases.append("ACP Frontend Editor (Failed - No Frontend)")
                 return False  # Don't skip - let it fail with clear error
@@ -811,10 +815,10 @@ Only create or modify files necessary for this page.
                 logger.info(f"[Phase 9] Step {page_num}/{len(required_pages)}: Creating {page} page...")
                 
                 try:
-                    # Run ACPX for this single page
-                    from acp_frontend_editor import ACPFrontendEditor
-                    
-                    editor = ACPFrontendEditor(frontend_src_path, self.project_name)
+                    # Run ACPX V2 for this single page
+                    from acp_frontend_editor_v2 import ACPFrontendEditorV2
+
+                    editor = ACPFrontendEditorV2(frontend_src_path, self.project_name)
                     page_result = editor.apply_changes_via_acpx(step_prompt, execution_id)
                     
                     if page_result.get("success"):
@@ -924,38 +928,6 @@ Only create or modify files necessary for this page.
 
             logger.info(f"[Phase 9]   📊 Total AI Duration: {ai_duration:.2f}s")
             logger.info(f"[Phase 9] ✓ ACPX V2 completed")
-                logger.info(f"[Phase 9]   Success: {result.get('success')}")
-                logger.info(f"[Phase 9]   Message: {result.get('message', 'N/A')}")
-                logger.info(f"[Phase 9]   Files added: {result.get('files_added', 0)}")
-                logger.info(f"[Phase 9]   Files modified: {result.get('files_modified', 0)}")
-                logger.info(f"[Phase 9]   Files removed: {result.get('files_removed', 0)}")
-                logger.info(f"[Phase 9]   Rollback: {result.get('rollback', False)}")
-                logger.info(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s")
-            except Exception as e:
-                ai_duration = time.time() - ai_start_time
-                logger.error(f"[Phase 9] ❌ Exception during ACPX V2 execution")
-                logger.error(f"[Phase 9]   Exception type: {type(e).__name__}")
-                logger.error(f"[Phase 9]   Exception message: {str(e)}")
-                logger.error(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s (exception)")
-                logger.error(f"[Phase 9]   Traceback:", exc_info=True)
-                # Don't raise - instead set result to error state and continue
-                result = {
-                    "success": False,
-                    "message": f"ACPX V2 failed: {str(e)}",
-                    "files_added": 0,
-                    "files_modified": 0,
-                    "files_removed": 0,
-                    "rollback": False
-                }
-
-            # Add result logging (now safe since result is always defined)
-
-            if not result["success"]:
-                logger.error(f"❌ ACP customization failed: {result.get('message', 'Unknown error')}")
-                if result.get('build_output'):
-                    logger.error(f"   Build output (last 500 chars): {result['build_output'][-500:]}")
-                # Still continue to create ACP_README.md even if customization fails
-                logger.warning("⚠️ Continuing to create ACP_README.md despite customization failure")
 
             # STEP 2: Create ACP_README.md documentation (WITHOUT build gate)
             logger.info("📝 Step 2: Creating ACP_README.md documentation")
@@ -1462,7 +1434,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-    def _update_router_and_navigation(self, pages: List[str]) -> Dict:
+    def _update_router_and_navigation(self, pages: list) -> Dict:
         """
         Update React Router (App.tsx) and sidebar navigation (AppLayout.tsx)
         to register newly created pages.
