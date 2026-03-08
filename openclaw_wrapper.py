@@ -707,9 +707,9 @@ That's all. Execute Phase {phase} now.
         try:
 
             # Import ACP Frontend Editor V2 (reliable filesystem diffing)
-            from acp_frontend_editor_v2 import ACPFrontendEditor
+            from acp_frontend_editor_v2 import ACPFrontendEditorV2
 
-            # Construct frontend/src path (ACPFrontendEditor expects full path to src/)
+            # Construct frontend/src path (ACPFrontendEditorV2 expects full path to src/)
             frontend_src_path = str(self.frontend_path / "src")
 
             logger.info(f"📁 Frontend path: {self.frontend_path}")
