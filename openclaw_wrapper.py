@@ -1434,7 +1434,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-    def _update_router_and_navigation(self, pages: List[str]) -> Dict:
+    def _update_router_and_navigation(self, pages: list) -> Dict:
         """
         Update React Router (App.tsx) and sidebar navigation (AppLayout.tsx)
         to register newly created pages.
