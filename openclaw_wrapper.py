@@ -22,7 +22,6 @@ import subprocess
 import requests
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
 
 # DIAGNOSTIC: Track which file is actually loaded
 print(f"OPENCLAW_WRAPPER_LOADED: {__file__}")
@@ -333,37 +332,6 @@ That's all. Execute Phase {phase} now.
         self.completed_phases.append("Analyze Project")
         return True
 
-
-
-    def _extract_required_pages(self) -> list:
-        """Extract required pages from project description.
-        
-        Returns:
-            List of page names to create.
-        """
-        desc_lower = self.description.lower() if self.description else ""
-        required_pages = []
-        
-        # Detect pages based on keywords
-        if any(word in desc_lower for word in ['dashboard', 'overview']):
-            required_pages.append('Dashboard')
-        if any(word in desc_lower for word in ['document', 'docflow', 'panda', 'agreement', 'contract']):
-            required_pages.extend(['Documents', 'DocumentEditor', 'Templates', 'Signing'])
-        if any(word in desc_lower for word in ['analytics', 'reports', 'metrics']):
-            required_pages.append('Analytics')
-        if any(word in desc_lower for word in ['contact', 'crm', 'customer', 'lead']):
-            required_pages.append('Contacts')
-        if any(word in desc_lower for word in ['task', 'todo', 'project', 'kanban']):
-            required_pages.append('Tasks')
-        if any(word in desc_lower for word in ['setting', 'config', 'preference']):
-            required_pages.append('Settings')
-        if any(word in desc_lower for word in ['post', 'article', 'blog']):
-            required_pages.append('Posts')
-        if any(word in desc_lower for word in ['create', 'write', 'compose']):
-            required_pages.append('Create')
-        
-        # Deduplicate and return
-        return list(set(required_pages))
 
     def _build_acp_goal_description(self) -> str:
         """
@@ -701,15 +669,14 @@ That's all. Execute Phase {phase} now.
         4. Create ACP_README.md with documentation
         5. Report success
         """
-        logger.info("🚀 PHASE 9 START: ACP Controlled Frontend Editor")
         logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor (Integrated)")
 
         try:
 
-            # Import ACP Frontend Editor V2 (reliable filesystem diffing)
-            from acp_frontend_editor_v2 import ACPFrontendEditorV2
+            # Import ACP Frontend Editor directly
+            from acp_frontend_editor import ACPFrontendEditor
 
-            # Construct frontend/src path (ACPFrontendEditorV2 expects full path to src/)
+            # Construct frontend/src path (ACPFrontendEditor expects full path to src/)
             frontend_src_path = str(self.frontend_path / "src")
 
             logger.info(f"📁 Frontend path: {self.frontend_path}")
@@ -717,9 +684,6 @@ That's all. Execute Phase {phase} now.
 
 
             if not os.path.exists(frontend_src_path):
-
-                logger.error(f"❌ Frontend src path does not exist: {frontend_src_path}")
-                raise Exception(f"Frontend src path does not exist: {frontend_src_path}")
                 logger.warning("⚠️ Frontend src directory not found - Phase 9 will fail")
                 self.completed_phases.append("ACP Frontend Editor (Failed - No Frontend)")
                 return False  # Don't skip - let it fail with clear error
@@ -781,153 +745,67 @@ That's all. Execute Phase {phase} now.
             goal_description = self._build_acp_goal_description()
             logger.info(f"🎯 ACP Goal: {goal_description[:100]}...")
 
-            # STEP 1: Extract required pages from description
-            logger.info("🔍 Step 1: Extracting required pages from description")
-            
-            required_pages = self._extract_required_pages()
-            logger.info(f"[Phase 9] Required pages: {', '.join(required_pages)}")
-            
-            # STEP 2: Execute each page as separate AI call (step-by-step execution)
-            logger.info("🚀 Step 2: Executing pages step-by-step (Lovable/Bolt architecture)")
-            
-            step_results = []
-            pages_succeeded = []
-            pages_failed = []
-            
-            for idx, page in enumerate(required_pages, start=1):
-                page_num = idx + 1
-                step_name = f"Create {page} page"
-                step_prompt = f"""
-Create the {page} page for this React + Vite + TypeScript application.
+            # STEP 1: Generate and apply customizations via acpx (v2 - filesystem diff)
+            logger.info("🤖 Step 1: Generating and applying frontend customizations via acpx (Filesystem Diff Architecture)")
+            logger.info(f"[Phase 9] Execution ID: {execution_id}")
+            logger.info(f"[Phase 9] Goal description: {goal_description[:200]}...")
 
-PROJECT: {self.project_name}
-DESCRIPTION: {self.description}
-
-PAGE SPECIFICS:
-- File: src/pages/{page}.tsx
-- Follow existing layout and UI component patterns
-- Use appropriate UI components from src/components/ui/
-- Make it production-ready
-
-Do NOT modify unrelated files.
-Only create or modify files necessary for this page.
-"""
-                logger.info(f"[Phase 9] Step {page_num}/{len(required_pages)}: Creating {page} page...")
-                
-                try:
-                    # Run ACPX V2 for this single page
-                    from acp_frontend_editor_v2 import ACPFrontendEditor
-                    
-                    editor = ACPFrontendEditor(frontend_src_path, self.project_name)
-                    page_result = editor.apply_changes_via_acpx(step_prompt, execution_id)
-                    
-                    if page_result.get("success"):
-                        pages_succeeded.append(page)
-                        step_results.append(f"✓ {page} created")
-                        logger.info(f"[Phase 9] Step {page_num} ✓: {page} page created successfully")
-                    else:
-                        pages_failed.append(page)
-                        step_results.append(f"✗ {page} failed: {page_result.get('message', 'Unknown error')}")
-                        logger.error(f"[Phase 9] Step {page_num} ✗: {page} page failed")
-                
-                except Exception as e:
-                    pages_failed.append(page)
-                    step_results.append(f"✗ {page} exception: {str(e)}")
-                    logger.error(f"[Phase 9] Step {page_num} ✗ Exception creating {page}: {e}")
-            
-            # STEP 2.5: Update router and navigation (NEW - Lovable/Bolt architecture)
-            logger.info("🔧 Step 2.5: Updating router and navigation for new pages")
-            router_nav_result = self._update_router_and_navigation(pages_succeeded)
-            
-            if router_nav_result["router_updated"]:
-                step_results.append(f"✓ Router updated: {router_nav_result['routes_added']} routes added")
-                logger.info(f"[Phase 9-Step2.5] ✓ Router updated: {router_nav_result['routes_added']} routes")
-            if router_nav_result["navigation_updated"]:
-                step_results.append(f"✓ Navigation updated: {router_nav_result['nav_items_added']} items added")
-                logger.info(f"[Phase 9-Step2.5] ✓ Navigation updated: {router_nav_result['nav_items_added']} items")
-            
-            if router_nav_result["errors"]:
-                logger.warning(f"[Phase 9-Step2.5] ⚠️ Router/Nav errors: {router_nav_result['errors']}")
-            
-            # STEP 3: Build project after all pages created
-            logger.info(f"🏗 Step 3: Building project after creating {len(pages_succeeded)}/{len(required_pages)} pages")
-            
             # Track AI execution metrics
             import time
             ai_start_time = time.time()
 
+            # Initialize result to None (will be set in try block)
             result = None
+
             try:
-                if len(pages_failed) > 0:
-                    # Some pages failed
-                    result = {
-                        "success": False,
-                        "message": f"{len(pages_failed)} page(s) failed: {', '.join(pages_failed)}",
-                        "files_added": len(pages_succeeded),
-                        "files_modified": 0,
-                        "files_removed": 0,
-                        "rollback": False,
-                        "steps": step_results,
-                        "pages_succeeded": pages_succeeded,
-                        "pages_failed": pages_failed
-                    }
-                    logger.error(f"[Phase 9] ❌ Failed: {result['message']}")
-                else:
-                    # All pages succeeded - run build
-                    logger.info(f"[Phase 9] Running build gate for {len(pages_succeeded)} pages...")
-                    
-                    # Build the project
-                    from acp_frontend_editor_v2 import ACPBuildGate
-                    build_gate = ACPBuildGate(str(self.frontend_path))
-                    build_success, build_output = build_gate.run_build()
-                    
-                    ai_duration = time.time() - ai_start_time
-                    
-                    if build_success:
-                        result = {
-                            "success": True,
-                            "message": f"Created {len(pages_succeeded)} page(s) successfully and build succeeded",
-                            "files_added": len(pages_succeeded),
-                            "files_modified": 0,
-                            "files_removed": 0,
-                            "rollback": False,
-                            "steps": step_results,
-                            "pages_succeeded": pages_succeeded,
-                            "pages_failed": pages_failed,
-                            "build_output": build_output
-                        }
-                        logger.info(f"[Phase 9] ✓ Build succeeded")
-                    else:
-                        result = {
-                            "success": False,
-                            "message": f"Pages created but build failed",
-                            "files_added": len(pages_succeeded),
-                            "files_modified": 0,
-                            "files_removed": 0,
-                            "rollback": False,
-                            "steps": step_results,
-                            "pages_succeeded": pages_succeeded,
-                            "pages_failed": pages_failed,
-                            "build_output": build_output
-                        }
-                        logger.error(f"[Phase 9] ❌ Build failed: {build_output[-500:]}")
-            
+                # Use V2 editor with filesystem diffing
+                from acp_frontend_editor_v2 import ACPFrontendEditorV2
+
+                editor_v2 = ACPFrontendEditorV2(frontend_src_path, self.project_name)
+                result = editor_v2.apply_changes_via_acpx(goal_description, execution_id)
+
+                ai_duration = time.time() - ai_start_time
+
+                logger.info(f"[Phase 9] ✓ ACPX V2 completed")
+                logger.info(f"[Phase 9]   Success: {result.get('success')}")
+                logger.info(f"[Phase 9]   Message: {result.get('message', 'N/A')}")
+                logger.info(f"[Phase 9]   Files added: {result.get('files_added', 0)}")
+                logger.info(f"[Phase 9]   Files modified: {result.get('files_modified', 0)}")
+                logger.info(f"[Phase 9]   Files removed: {result.get('files_removed', 0)}")
+                logger.info(f"[Phase 9]   Rollback: {result.get('rollback', False)}")
+                logger.info(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s")
+
+                # Log pages created (if any page files were added)
+                files_added = result.get('files_added', [])
+                pages_created = [f for f in files_added if f.endswith('.tsx') and 'pages/' in f]
+                if pages_created:
+                    page_names = [Path(p).stem for p in pages_created]
+                    logger.info(f"📄 Pages created: {', '.join(page_names)}")
             except Exception as e:
+                ai_duration = time.time() - ai_start_time
+                logger.error(f"[Phase 9] ❌ Exception during ACPX V2 execution")
+                logger.error(f"[Phase 9]   Exception type: {type(e).__name__}")
+                logger.error(f"[Phase 9]   Exception message: {str(e)}")
+                logger.error(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s (exception)")
+                logger.error(f"[Phase 9]   Traceback:", exc_info=True)
+                # Don't raise - instead set result to error state and continue
                 result = {
                     "success": False,
-                    "message": f"Exception during step-by-step execution: {str(e)}",
+                    "message": f"ACPX V2 failed: {str(e)}",
                     "files_added": 0,
                     "files_modified": 0,
                     "files_removed": 0,
-                    "rollback": False,
-                    "steps": step_results,
-                    "pages_succeeded": pages_succeeded,
-                    "pages_failed": pages_failed
+                    "rollback": False
                 }
-                logger.error(f"[Phase 9] ❌ Exception: {e}")
 
-            logger.info(f"[Phase 9]   📊 Total AI Duration: {ai_duration:.2f}s")
-            logger.info(f"[Phase 9] ✓ ACPX V2 completed")
+            # Add result logging (now safe since result is always defined)
+
+            if not result["success"]:
+                logger.error(f"❌ ACP customization failed: {result.get('message', 'Unknown error')}")
+                if result.get('build_output'):
+                    logger.error(f"   Build output (last 500 chars): {result['build_output'][-500:]}")
+                # Still continue to create ACP_README.md even if customization fails
+                logger.warning("⚠️ Continuing to create ACP_README.md despite customization failure")
 
             # STEP 2: Create ACP_README.md documentation (WITHOUT build gate)
             logger.info("📝 Step 2: Creating ACP_README.md documentation")
@@ -962,6 +840,8 @@ Only create or modify files necessary for this page.
 
             # STEP 3: ALWAYS run build gate (even if no changes detected)
             # This catches cases where AI modified imports/routing without creating new files
+            logger.info("🧭 Router update: Skipped (not available in this version)")
+            logger.info("📚 Navigation update: Skipped (not available in this version)")
             logger.info("🔨 Step 3: Running verification build (always)")
             verification_build_success = False
             verification_build_output = ""
@@ -1276,18 +1156,19 @@ Execute the refinement now and make this template production-ready for: {self.pr
     def run_all_phases(self):
         """Execute all 7 phases in order."""
         try:
-            logger.info(f"🚀 Starting OpenClaw infrastructure provisioning for project {self.project_id}")
+            logger.info("🚀 Project pipeline started")
+            logger.info(f"📋 Project: {self.project_name}")
             logger.info(f"📁 Project path: {self.project_path}")
-            logger.info(f"📝 Project name: {self.project_name}")
+            logger.info(f"🆔 Project ID: {self.project_id}")
 
             total_phases = 9
             phases_succeeded = 0
 
             # Phase 1: Analyze Project
-            logger.info(f"📋 Phase 1/{total_phases}: Analyze Project")
+            logger.info(f"📦 Phase 1/{total_phases}: Analyze Project")
             if self.phase_1_analyze_project():
                 phases_succeeded += 1
-                logger.info(f"✓ Phase 1 completed!")
+                logger.info("✅ Phase 1 completed successfully")
             else:
                 self.failed_phases.append("Analyze Project")
                 self.update_status("failed")
@@ -1295,10 +1176,10 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 return
 
             # Phase 2: Template Setup
-            logger.info(f"📋 Phase 2/{total_phases}: Template Setup")
+            logger.info(f"📦 Phase 2/{total_phases}: Template Setup")
             if self.phase_2_template_setup():
                 phases_succeeded += 1
-                logger.info(f"✓ Phase 2 completed!")
+                logger.info("✅ Phase 2 completed successfully")
             else:
                 self.failed_phases.append("Template Setup")
                 self.update_status("failed")
@@ -1374,10 +1255,10 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 return
 
             # Phase 9: ACP Controlled Frontend Refinement
-            logger.info(f"📋 Phase 9/{total_phases}: ACP Controlled Frontend Refinement")
+            logger.info(f"🤖 Phase 9/{total_phases}: ACP Controlled Frontend Refinement")
             if self.phase_9_acp_frontend_editor():
                 phases_succeeded += 1
-                logger.info(f"✓ Phase 9 completed!")
+                logger.info("✅ Phase 9 completed successfully")
             else:
                 self.failed_phases.append("ACP Frontend Editor")
                 self.update_status("failed")
@@ -1387,6 +1268,15 @@ Execute the refinement now and make this template production-ready for: {self.pr
             # All phases completed!
             if phases_succeeded == total_phases:
                 logger.info(f"✅ All {total_phases} infrastructure provisioning phases completed successfully!")
+
+                # Get domain for final logging
+                domain = self.get_project_domain()
+
+                # Log final deployment URLs
+                logger.info(f"🌍 Live project URL: http://{domain}")
+                logger.info(f"📡 API endpoint: http://{domain}/api")
+                logger.info("🎉 Deployment completed successfully")
+
                 self.update_status("ready")
                 logger.info(f"✓ Project {self.project_id} status updated to 'ready'")
                 logger.info(f"📊 Completed phases: {', '.join(self.completed_phases)}")
@@ -1433,206 +1323,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    def _update_router_and_navigation(self, pages: list) -> Dict:
-        """
-        Update React Router (App.tsx) and sidebar navigation (AppLayout.tsx)
-        to register newly created pages.
-
-        This is Step 2.5 in Phase 9 - after page creation, before build.
-        """
-        import re
-        
-        app_tsx_path = self.frontend_path / "src" / "App.tsx"
-        app_layout_path = self.frontend_path / "src" / "app" / "layouts" / "AppLayout.tsx"
-        
-        results = {
-            "router_updated": False,
-            "navigation_updated": False,
-            "imports_added": 0,
-            "routes_added": 0,
-            "nav_items_added": 0,
-            "errors": []
-        }
-        
-        # Route mappings with icons from lucide-react
-        route_mappings = {
-            "documents": {"path": "/documents", "icon": "FileText"},
-            "templates": {"path": "/templates", "icon": "Copy"},
-            "editor": {"path": "/editor", "icon": "FileEdit"},
-            "signing": {"path": "/signing", "icon": "PenTool"},
-            "analytics": {"path": "/analytics", "icon": "BarChart3"},
-            "tasks": {"path": "/tasks", "icon": "KanbanBoard"},
-        }
-        
-        try:
-            # Update App.tsx - Add imports and routes
-            logger.info("🔧 Updating React Router (App.tsx)...")
-            
-            if app_tsx_path.exists():
-                app_tsx_content = app_tsx_path.read_text()
-                
-                # Add imports for new pages
-                imports_to_add = []
-                for page in pages:
-                    page_lower = page.lower()
-                    if page_lower in route_mappings:
-                        import_line = f"import {page} from '@/pages/{page}';"
-                        # Check if import already exists
-                        if import_line not in app_tsx_content:
-                            imports_to_add.append(import_line)
-                
-                # Find last import line and insert new imports
-                import_pattern = r"(import .+ from ['\"]\./pages/[^'\"]+['\"])"
-                last_import_match = None
-                for match in re.finditer(import_pattern, app_tsx_content):
-                    last_import_match = match
-                
-                if last_import_match and imports_to_add:
-                    insert_pos = last_import_match.end()
-                    new_imports = "\n" + "\n".join(imports_to_add)
-                    app_tsx_content = (
-                        app_tsx_content[:insert_pos] + 
-                        new_imports + 
-                        app_tsx_content[insert_pos:]
-                    )
-                    results["imports_added"] = len(imports_to_add)
-                    logger.info(f"[Phase 9-Router] Added {len(imports_to_add)} imports")
-                
-                # Add routes for new pages
-                routes_to_add = []
-                for page in pages:
-                    page_lower = page.lower()
-                    if page_lower in route_mappings:
-                        route_path = route_mappings[page_lower]["path"]
-                        route_line = f'          <Route path="{route_path}" element={{{page}}} />'
-                        # Check if route already exists
-                        if route_line not in app_tsx_content:
-                            routes_to_add.append(route_line)
-                
-                if routes_to_add:
-                    # Find position before NotFound route
-                    notfound_pattern = r'(\s+<Route path="\*" element={<NotFound} />)'
-                    notfound_match = re.search(notfound_pattern, app_tsx_content)
-                    
-                    if notfound_match:
-                        insert_pos = notfound_match.start()
-                        new_routes = "\n" + "\n".join(routes_to_add)
-                        app_tsx_content = (
-                            app_tsx_content[:insert_pos] + 
-                            new_routes + 
-                            app_tsx_content[insert_pos:]
-                        )
-                        results["routes_added"] = len(routes_to_add)
-                        results["router_updated"] = True
-                        logger.info(f"[Phase 9-Router] Added {len(routes_to_add)} routes")
-                
-                # Write back if changes made
-                if results["imports_added"] > 0 or results["routes_added"] > 0:
-                    app_tsx_path.write_text(app_tsx_content)
-                    logger.info(f"[Phase 9-Router] ✓ App.tsx updated")
-                else:
-                    logger.warning("[Phase 9-Router] No router changes needed (already up to date)")
-                
-            else:
-                logger.error(f"[Phase 9-Router] App.tsx not found: {app_tsx_path}")
-                results["errors"].append("App.tsx not found")
-                
-        except Exception as e:
-            logger.error(f"[Phase 9-Router] Exception updating App.tsx: {e}")
-            results["errors"].append(f"App.tsx error: {str(e)}")
-        
-        try:
-            # Update AppLayout.tsx - Add navigation items
-            logger.info("🔧 Updating sidebar navigation (AppLayout.tsx)...")
-            
-            if app_layout_path.exists():
-                app_layout_content = app_layout_path.read_text()
-                
-                # Add icon imports
-                icon_imports_needed = set()
-                for page in pages:
-                    page_lower = page.lower()
-                    if page_lower in route_mappings:
-                        icon_imports_needed.add(route_mappings[page_lower]["icon"])
-                
-                # Check which icons already imported
-                icon_import_pattern = r'(\w+),?\s*from [\'\"]lucide-react[\'\"]'
-                existing_icons = set()
-                for match in re.finditer(icon_import_pattern, app_layout_content):
-                    existing_icons.add(match.group(1))
-                
-                icons_to_add = icon_imports_needed - existing_icons
-                
-                # Add icon imports
-                if icons_to_add:
-                    lucide_import_pattern = r'from [\'\"]lucide-react[\'\"]'
-                    lucide_match = re.search(lucide_import_pattern, app_layout_content)
-                    
-                    if lucide_match:
-                        insert_pos = lucide_match.start()
-                        new_icons = ', '.join(sorted(icons_to_add))
-                        # Add before the existing lucide-react import
-                        app_layout_content = (
-                            app_layout_content[:insert_pos] +
-                            f"{new_icons}, " +
-                            app_layout_content[insert_pos:]
-                        )
-                        logger.info(f"[Phase 9-Nav] Added {len(icons_to_add)} icon imports")
-                
-                # Add navigation items to mainNavItems
-                nav_items_to_add = []
-                for page in pages:
-                    page_lower = page.lower()
-                    if page_lower in route_mappings:
-                        nav_item = {
-                            "name": page,
-                            "href": route_mappings[page_lower]["path"],
-                            "icon": route_mappings[page_lower]["icon"]
-                        }
-                        
-                        # Check if nav item already exists
-                        nav_pattern = f'\\{{\\s*name:\\s*[\'"]{page}[\'"]'
-                        if not re.search(nav_pattern, app_layout_content):
-                            nav_items_to_add.append(nav_item)
-                
-                if nav_items_to_add:
-                    # Find mainNavItems array
-                    mainnav_pattern = r'const mainNavItems = \[([\s\S]*?)\];'
-                    mainnav_match = re.search(mainnav_pattern, app_layout_content)
-                    
-                    if mainnav_match:
-                        # Build new nav items code
-                        new_nav_items_code = ",\n".join([
-                            f"  {{ name: '{item['name']}', href: '{item['href']}', icon: {item['icon']} }}"
-                            for item in nav_items_to_add
-                        ])
-                        
-                        # Insert before closing bracket
-                        insert_pos = mainnav_match.end() - 1
-                        app_layout_content = (
-                            app_layout_content[:insert_pos] +
-                            ",\n" + new_nav_items_code +
-                            app_layout_content[insert_pos:]
-                        )
-                        
-                        results["nav_items_added"] = len(nav_items_to_add)
-                        results["navigation_updated"] = True
-                        logger.info(f"[Phase 9-Nav] Added {len(nav_items_to_add)} navigation items")
-                
-                # Write back if changes made
-                if icons_to_add or nav_items_to_add:
-                    app_layout_path.write_text(app_layout_content)
-                    logger.info(f"[Phase 9-Nav] ✓ AppLayout.tsx updated")
-                else:
-                    logger.warning("[Phase 9-Nav] No navigation changes needed (already up to date)")
-                
-            else:
-                logger.error(f"[Phase 9-Nav] AppLayout.tsx not found: {app_layout_path}")
-                results["errors"].append("AppLayout.tsx not found")
-                
-        except Exception as e:
-            logger.error(f"[Phase 9-Nav] Exception updating AppLayout.tsx: {e}")
-            results["errors"].append(f"AppLayout.tsx error: {str(e)}")
-        
-        return results
