@@ -831,12 +831,17 @@ Only create or modify files necessary for this page.
 
         # STEP 2.5: Update router and navigation (NEW - Lovable/Bolt architecture) - GUARDED
         logger.info("🔧 Step 2.5: Updating router and navigation for new pages")
+        logger.info(f"[Phase 9-Step2.5] pages_succeeded: {pages_succeeded}")
+        logger.info(f"[Phase 9-Step2.5] pages_failed: {pages_failed}")
         router_nav_result = None
         try:
             if pages_succeeded:
+                logger.info(f"[Phase 9-Step2.5] ✓ Entering router/nav update with {len(pages_succeeded)} pages")
                 # Normalize page names (remove .tsx extension)
                 normalized_pages = [p.replace(".tsx", "") for p in pages_succeeded]
                 router_nav_result = self._update_router_and_navigation(normalized_pages)
+            else:
+                logger.warning(f"[Phase 9-Step2.5] ⚠️ Skipping router/nav update - no pages succeeded")
 
                 if router_nav_result.get("router_updated"):
                     step_results.append(f"✓ Router updated: {router_nav_result.get('routes_added', 0)} routes added")
@@ -1443,6 +1448,7 @@ if __name__ == "__main__":
         This is Step 2.5 in Phase 9 - after page creation, before build.
         """
         import re
+        logger.info(f"[Phase 9-Router] 🎯 _update_router_and_navigation called with pages: {pages}")
         
         app_tsx_path = self.frontend_path / "src" / "App.tsx"
         app_layout_path = self.frontend_path / "src" / "app" / "layouts" / "AppLayout.tsx"
