@@ -495,6 +495,7 @@ class ServiceManager:
                 
                 # Create PM2 ecosystem config for project-specific frontend using serve package
                 ecosystem = f"""{{
+                # Note: -s flag enables SPA routing (fixes 404s on page refresh)
   "name": "{app_name}",
   "script": "npx",
   "args": "serve -s dist -l {frontend_port}",
