@@ -447,17 +447,26 @@ class ServiceManager:
             
             # Check if project has its own frontend directory
             project_frontend_path = project_path / "frontend"
-            
-            if project_frontend_path.exists() and (project_frontend_path / "index.html").exists():
+
+            # Check for built frontend (dist/index.html) or source index.html
+            has_dist_frontend = project_frontend_path.exists() and (project_frontend_path / "dist" / "index.html").exists()
+            has_source_frontend = project_frontend_path.exists() and (project_frontend_path / "index.html").exists()
+
+            if has_dist_frontend or has_source_frontend:
                 # Use project-specific frontend
                 logger.info(f"Using project-specific frontend: {project_frontend_path}")
                 frontend_dist_path = project_frontend_path
-                
-                # Build the Vite app for production serving with correct MIME types
-                package_json = frontend_dist_path / "package.json"
+
+                # Check if frontend is already built (blank templates)
                 dist_dir = frontend_dist_path / "dist"
-                
-                if package_json.exists():
+                package_json = frontend_dist_path / "package.json"
+
+                if dist_dir.exists() and (dist_dir / "index.html").exists():
+                    # Frontend already built (blank template)
+                    logger.info(f"✓ Frontend already built (blank template)")
+                    frontend_dist_path = dist_dir
+                elif package_json.exists():
+                    # Build the Vite app for production serving with correct MIME types
                     logger.info(f"Building frontend for production (correct MIME types)...")
                     try:
                         # Install dependencies
@@ -468,12 +477,12 @@ class ServiceManager:
                             timeout=300,
                             cwd=str(frontend_dist_path)
                         )
-                        
+
                         if install_result.returncode != 0:
                             logger.warning(f"npm install warnings: {install_result.stderr}")
                         else:
                             logger.info(f"✓ npm install completed")
-                        
+
                         # Build the app
                         build_result = subprocess.run(
                             ["npm", "run", "build"],
@@ -482,7 +491,7 @@ class ServiceManager:
                             timeout=300,
                             cwd=str(frontend_dist_path)
                         )
-                        
+
                         if build_result.returncode != 0:
                             logger.error(f"Frontend build failed: {build_result.stderr}")
                             raise Exception(f"Frontend build failed: {build_result.stderr}")
@@ -492,6 +501,9 @@ class ServiceManager:
                     except subprocess.TimeoutExpired:
                         logger.error("Frontend build timed out")
                         raise Exception("Frontend build timed out")
+                else:
+                    logger.error(f"❌ No built frontend (dist/) and no package.json to build")
+                    raise Exception(f"Cannot serve frontend: no dist/ directory and no package.json")
                 
                 # Create PM2 ecosystem config for project-specific frontend using serve package
                 ecosystem = f"""{{

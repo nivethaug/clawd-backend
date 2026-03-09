@@ -462,15 +462,6 @@ SECRET_KEY=your-secret-key-here-generate-new-one-in-production
                     self.completed_tasks.append("Clone repository")
                     tasks_succeeded += 1
                     logger.info(f"✓ Task 2 completed!")
-                    
-                    # Start frontend service immediately after template clone
-                    logger.info("🚀 Starting frontend service...")
-                    self.service_manager.start_frontend_service(
-                        self.service_name,
-                        self.project_path / "frontend"
-                    )
-                    logger.info(f"✓ Frontend service started: {self.service_name}")
-                    
                 else:
                     self.failed_tasks.append("Clone repository")
                     self.update_status("failed")

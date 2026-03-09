@@ -1184,7 +1184,46 @@ Execute the refinement now and make this template production-ready for: {self.pr
         except Exception as e:
             logger.error(f"❌ Build verification failed: {e}")
             return False
+    def _get_project_type_id(self) -> int:
+        """Load project type_id from database.
+
+        Returns:
+            Project type_id (1 = website, other = simple project)
+        """
+        try:
+            if USE_POSTGRES:
+                # PostgreSQL mode
+                conn = psycopg2.connect(
+                    host=DB_HOST,
+                    port=DB_PORT,
+                    database=DB_NAME,
+                    user=DB_USER,
+                    password=DB_PASSWORD
+                )
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT type_id FROM projects WHERE id = %s",
+                        (self.project_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
                         return row['type_id']
+                    return None
+                finally:
+                    conn.close()
+            else:
+                # SQLite mode
+                conn = sqlite3.connect(DB_PATH)
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT type_id FROM projects WHERE id = ?",
+                        (self.project_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return row[0]
                     return None
                 finally:
                     conn.close()
@@ -1297,13 +1336,49 @@ Execute the refinement now and make this template production-ready for: {self.pr
             if self.phase_9_acp_frontend_editor():
                 phases_succeeded += 1
                 logger.info(f"✓ Phase 9 completed!")
-                
-                # Restart frontend service to load updated build
-                logger.info("🔄 Restarting frontend service after Phase 9 build...")
-                if self._restart_pm2_service(service_name):
-                    logger.info(f"✓ Frontend service restarted: {service_name}")
-                else:
-                    logger.warning(f"⚠️ Frontend service restart failed: {service_name}")
+
+                # Restart or start frontend service to load updated build
+                frontend_service_name = f"{self.project_slug}-frontend"
+
+                # Read port from project.json
+                project_json_path = self.project_path / "project.json"
+                frontend_port = 4173  # default fallback
+                if project_json_path.exists():
+                    try:
+                        import json
+                        with open(project_json_path, 'r') as f:
+                            project_data = json.load(f)
+                            frontend_port = project_data.get('ports', {}).get('frontend', 4173)
+                        logger.info(f"✓ Frontend port from project.json: {frontend_port}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to read project.json, using default port 4173: {e}")
+
+                logger.info(f"🔄 Restarting frontend service after Phase 9 build: {frontend_service_name} (port {frontend_port})")
+                try:
+                    subprocess.run(
+                        ["pm2", "restart", frontend_service_name],
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    logger.info(f"✓ Frontend service restarted: {frontend_service_name}")
+                except subprocess.CalledProcessError:
+                    logger.warning(f"⚠️ Frontend service not running, starting new one: {frontend_service_name}")
+                    try:
+                        subprocess.run(
+                            [
+                                "pm2", "serve", "dist", str(frontend_port),
+                                "--name", frontend_service_name
+                            ],
+                            cwd=self.frontend_path,
+                            check=True,
+                            capture_output=True,
+                            text=True
+                        )
+                        logger.info(f"✓ Frontend service started: {frontend_service_name} (port {frontend_port})")
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"❌ Failed to start frontend service: {e}")
+                        logger.error(f"  Error output: {e.stderr}")
             else:
                 self.failed_phases.append("ACP Frontend Editor")
                 self.update_status("failed")
@@ -1535,8 +1610,8 @@ if __name__ == "__main__":
                 nav_items_to_add = []
                 for page in pages:
                     page_lower = page.lower()
-                    # Get icon for this page (default to FileText if not found)
-                    icon_name = icon_mappings.get(page_lower, "FileText")
+                    # Get icon for this page (fallback to Circle if not found)
+                    icon_name = icon_mappings.get(page_lower, "Circle")
                     nav_href = f"/{page_lower}"
                     
                     nav_item = {
@@ -1550,6 +1625,8 @@ if __name__ == "__main__":
                     if not re.search(nav_pattern, app_layout_content):
                         nav_items_to_add.append(nav_item)
                         logger.debug(f"[Phase 9-Nav] Will add nav item: {page} → {nav_href}")
+                    else:
+                        logger.debug(f"[Phase 9-Nav] Nav item already exists: {page}")
                 
                 if nav_items_to_add:
                     logger.info(f"[Phase 9-Nav] Nav items to add: {len(nav_items_to_add)}")
