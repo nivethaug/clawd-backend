@@ -589,31 +589,77 @@ class ACPFrontendEditorV2:
         Returns:
             Prompt string for ACPX
         """
-        # Extract required pages from goal description (simple keyword matching)
+        # Extract required pages from goal description (improved planner)
         required_pages = []
         required_components = []
 
-        # Common page patterns
+        # Page keyword mappings for improved detection
+        PAGE_KEYWORDS = {
+            "Dashboard": ["dashboard", "overview"],
+            "Documents": ["document", "docflow", "panda", "agreement", "contract"],
+            "Templates": ["template"],
+            "DocumentEditor": ["document editor", "doc editor", "editor"],
+            "Signing": ["sign", "signature", "esign", "electronically sign"],
+            "Analytics": ["analytics", "metrics", "reports", "statistics"],
+            "Contacts": ["contacts", "crm", "customer", "customers", "lead", "leads"],
+            "Team": ["team", "members", "users", "staff"],
+            "Billing": ["billing", "subscription", "payments", "invoice", "pricing"],
+            "Notifications": ["notifications", "alerts", "messages", "notification"],
+            "Tasks": ["task", "todo", "project", "kanban"],
+            "Settings": ["setting", "settings", "config", "preference", "preferences"],
+            "Posts": ["post", "posts", "article", "articles", "blog"],
+            "Create": ["create", "write", "compose"]
+        }
+
         desc_lower = goal_description.lower()
-        if any(word in desc_lower for word in ['dashboard', 'overview']):
-            required_pages.append('Dashboard')
-        if any(word in desc_lower for word in ['document', 'docflow', 'panda', 'agreement', 'contract']):
-            required_pages.extend(['Documents', 'DocumentEditor', 'Templates', 'Signing'])
-        if any(word in desc_lower for word in ['analytics', 'reports', 'metrics']):
-            required_pages.append('Analytics')
-        if any(word in desc_lower for word in ['contact', 'crm', 'customer', 'lead']):
-            required_pages.append('Contacts')
-        if any(word in desc_lower for word in ['task', 'todo', 'project', 'kanban']):
-            required_pages.append('Tasks')
-        if any(word in desc_lower for word in ['setting', 'config', 'preference']):
-            required_pages.append('Settings')
-        if any(word in desc_lower for word in ['post', 'article', 'blog']):
-            required_pages.append('Posts')
-        if any(word in desc_lower for word in ['create', 'write', 'compose']):
-            required_pages.append('Create')
+
+        # Step 1: Extract explicit page lists (highest priority)
+        # Matches patterns like: "pages: Dashboard, Documents, Templates"
+        # Or: "with 10 pages: Dashboard, Documents, Templates..."
+        import re
+        explicit_list_pattern = r'pages?:\s*(.+)'
+        explicit_match = re.search(explicit_list_pattern, goal_description, re.IGNORECASE)
+
+        if explicit_match:
+            pages_str = explicit_match.group(1)
+            # Normalize and split by comma
+            explicit_pages = [p.strip() for p in pages_str.split(',')]
+
+            # Normalize page names: "Document Editor" → "DocumentEditor"
+            for page in explicit_pages:
+                # Remove leading/trailing whitespace and special chars
+                normalized = re.sub(r'\s+', '', page.strip().title())
+                # Skip empty strings or strings with only special chars
+                if normalized and len(normalized) > 0 and any(c.isalpha() for c in normalized):
+                    required_pages.append(normalized)
+                    logger.info(f"[Planner] Explicit page detected: {page} → {normalized}")
+
+            logger.info(f"[Planner] Explicit page list detected: {len(required_pages)} pages")
+
+        # Step 2: Keyword matching (if explicit list not found or incomplete)
+        desc_lower = goal_description.lower()
+        for page_name, keywords in PAGE_KEYWORDS.items():
+            if page_name not in required_pages:  # Skip if already in explicit list
+                if any(keyword in desc_lower for keyword in keywords):
+                    required_pages.append(page_name)
+
+        # Step 3: SaaS default fallback (if less than 3 pages detected)
+        if len(required_pages) < 3:
+            logger.info(f"[Planner] Fewer than 3 pages detected ({len(required_pages)}), adding SaaS defaults")
+            saas_defaults = ["Dashboard", "Analytics", "Contacts", "Settings"]
+            for default_page in saas_defaults:
+                if default_page not in required_pages:
+                    required_pages.append(default_page)
+
+        # Step 4: Remove duplicates while preserving order
+        required_pages = list(dict.fromkeys(required_pages))
+
+        # Planner logging
+        logger.info(f"[Planner] Description: {goal_description}")
+        logger.info(f"[Planner] Detected pages: {required_pages}")
 
         # Build required artifacts list
-        required_pages_list = list(set(required_pages))
+        required_pages_list = required_pages
         required_components_list = list(set(required_components))
         
         required_pages_str = "\n".join([f"- src/pages/{page}.tsx" for page in required_pages_list])
