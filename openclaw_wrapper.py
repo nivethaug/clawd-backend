@@ -1456,14 +1456,23 @@ if __name__ == "__main__":
             "errors": []
         }
         
-        # Route mappings with icons from lucide-react
-        route_mappings = {
-            "documents": {"path": "/documents", "icon": "FileText"},
-            "templates": {"path": "/templates", "icon": "Copy"},
-            "editor": {"path": "/editor", "icon": "FileEdit"},
-            "signing": {"path": "/signing", "icon": "PenTool"},
-            "analytics": {"path": "/analytics", "icon": "BarChart3"},
-            "tasks": {"path": "/tasks", "icon": "KanbanBoard"},
+        # Icon mappings for common pages from lucide-react
+        icon_mappings = {
+            "dashboard": "LayoutDashboard",
+            "analytics": "BarChart3",
+            "contacts": "Users",
+            "tasks": "CheckSquare",
+            "settings": "Settings",
+            "documents": "FileText",
+            "templates": "Copy",
+            "editor": "FileEdit",
+            "signing": "PenTool",
+            "create": "PlusCircle",
+            "profile": "User",
+            "reports": "BarChart",
+            "integrations": "Plug",
+            "notifications": "Bell",
+            "help": "HelpCircle",
         }
         
         try:
@@ -1476,12 +1485,11 @@ if __name__ == "__main__":
                 # Add imports for new pages
                 imports_to_add = []
                 for page in pages:
-                    page_lower = page.lower()
-                    if page_lower in route_mappings:
-                        import_line = f"import {page} from '@/pages/{page}';"
-                        # Check if import already exists
-                        if import_line not in app_tsx_content:
-                            imports_to_add.append(import_line)
+                    # Add import for ALL pages
+                    import_line = f"import {page} from './pages/{page}';"
+                    # Check if import already exists (try both @/pages and ./pages)
+                    if import_line not in app_tsx_content and f"import {page} from '@/pages/{page}'" not in app_tsx_content:
+                        imports_to_add.append(import_line)
                 
                 # Find last import line and insert new imports
                 import_pattern = r"(import .+ from ['\"]\./pages/[^'\"]+['\"])"
@@ -1504,29 +1512,36 @@ if __name__ == "__main__":
                 routes_to_add = []
                 for page in pages:
                     page_lower = page.lower()
-                    if page_lower in route_mappings:
-                        route_path = route_mappings[page_lower]["path"]
-                        route_line = f'          <Route path="{route_path}" element={{{page}}} />'
-                        # Check if route already exists
-                        if route_line not in app_tsx_content:
-                            routes_to_add.append(route_line)
+                    # Generate routes for ALL pages, not just those in route_mappings
+                    route_path = f"/{page_lower}"
+                    route_line = f'          <Route path="{route_path}" element={{{page}}} />'
+                    # Check if route already exists
+                    if f'path="{route_path}"' not in app_tsx_content:
+                        routes_to_add.append((page, route_path, route_line))
                 
                 if routes_to_add:
-                    # Find position before NotFound route
-                    notfound_pattern = r'(\s+<Route path="\*" element={<NotFound} />)'
-                    notfound_match = re.search(notfound_pattern, app_tsx_content)
+                    # Find </Routes> tag and insert before it
+                    routes_end_pattern = '</Routes>'
+                    routes_end_pos = app_tsx_content.find(routes_end_pattern)
                     
-                    if notfound_match:
-                        insert_pos = notfound_match.start()
-                        new_routes = "\n" + "\n".join(routes_to_add)
+                    if routes_end_pos != -1:
+                        # Generate route block
+                        route_block = ""
+                        for page, route_path, route_line in routes_to_add:
+                            route_block += route_line + "\n"
+                        
+                        # Insert before </Routes>
                         app_tsx_content = (
-                            app_tsx_content[:insert_pos] + 
-                            new_routes + 
-                            app_tsx_content[insert_pos:]
+                            app_tsx_content[:routes_end_pos] +
+                            route_block +
+                            app_tsx_content[routes_end_pos:]
                         )
                         results["routes_added"] = len(routes_to_add)
                         results["router_updated"] = True
-                        logger.info(f"[Phase 9-Router] Added {len(routes_to_add)} routes")
+                        logger.info(f"[Phase 9-Router] Added {len(routes_to_add)} routes: {[r[0] for r in routes_to_add]}")
+                    else:
+                        logger.error("[Phase 9-Router] Could not find </Routes> tag in App.tsx")
+                        results["errors"].append("Could not find </Routes> tag")
                 
                 # Write back if changes made
                 if results["imports_added"] > 0 or results["routes_added"] > 0:
@@ -1554,8 +1569,8 @@ if __name__ == "__main__":
                 icon_imports_needed = set()
                 for page in pages:
                     page_lower = page.lower()
-                    if page_lower in route_mappings:
-                        icon_imports_needed.add(route_mappings[page_lower]["icon"])
+                    if page_lower in icon_mappings:
+                        icon_imports_needed.add(icon_mappings[page_lower])
                 
                 # Check which icons already imported
                 icon_import_pattern = r'(\w+),?\s*from [\'\"]lucide-react[\'\"]'
@@ -1585,17 +1600,20 @@ if __name__ == "__main__":
                 nav_items_to_add = []
                 for page in pages:
                     page_lower = page.lower()
-                    if page_lower in route_mappings:
-                        nav_item = {
-                            "name": page,
-                            "href": route_mappings[page_lower]["path"],
-                            "icon": route_mappings[page_lower]["icon"]
-                        }
-                        
-                        # Check if nav item already exists
-                        nav_pattern = f'\\{{\\s*name:\\s*[\'"]{page}[\'"]'
-                        if not re.search(nav_pattern, app_layout_content):
-                            nav_items_to_add.append(nav_item)
+                    # Get icon for this page (default to FileText if not found)
+                    icon_name = icon_mappings.get(page_lower, "FileText")
+                    nav_href = f"/{page_lower}"
+                    
+                    nav_item = {
+                        "name": page,
+                        "href": nav_href,
+                        "icon": icon_name
+                    }
+                    
+                    # Check if nav item already exists
+                    nav_pattern = f'\\{{\\s*name:\\s*[\'"]{page}[\'"]'
+                    if not re.search(nav_pattern, app_layout_content):
+                        nav_items_to_add.append(nav_item)
                 
                 if nav_items_to_add:
                     # Find mainNavItems array
