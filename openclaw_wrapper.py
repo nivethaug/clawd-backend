@@ -1478,6 +1478,7 @@ if __name__ == "__main__":
         try:
             # Update App.tsx - Add imports and routes
             logger.info("🔧 Updating React Router (App.tsx)...")
+            logger.info(f"[Phase 9-Router] Processing pages: {pages}")
             
             if app_tsx_path.exists():
                 app_tsx_content = app_tsx_path.read_text()
@@ -1486,13 +1487,17 @@ if __name__ == "__main__":
                 imports_to_add = []
                 for page in pages:
                     # Add import for ALL pages
-                    import_line = f"import {page} from './pages/{page}';"
-                    # Check if import already exists (try both @/pages and ./pages)
-                    if import_line not in app_tsx_content and f"import {page} from '@/pages/{page}'" not in app_tsx_content:
-                        imports_to_add.append(import_line)
+                    import_line_single = f"import {page} from './pages/{page}';"
+                    import_line_double = f'import {page} from "./pages/{page}";'
+                    # Check if import already exists (try both single and double quotes)
+                    if (import_line_single not in app_tsx_content and
+                        import_line_double not in app_tsx_content and
+                        f"import {page} from '@/pages/{page}'" not in app_tsx_content):
+                        # Use double quotes (standard format)
+                        imports_to_add.append(import_line_double)
                 
                 # Find last import line and insert new imports
-                import_pattern = r"(import .+ from ['\"]\./pages/[^'\"]+['\"])"
+                import_pattern = r'(import .+ from ["\']./pages/[^"\']+["\'])'
                 last_import_match = None
                 for match in re.finditer(import_pattern, app_tsx_content):
                     last_import_match = match
@@ -1518,6 +1523,9 @@ if __name__ == "__main__":
                     # Check if route already exists
                     if f'path="{route_path}"' not in app_tsx_content:
                         routes_to_add.append((page, route_path, route_line))
+                        logger.debug(f"[Phase 9-Router] Will add route: {page} → {route_path}")
+                    else:
+                        logger.debug(f"[Phase 9-Router] Route already exists: {route_path}")
                 
                 if routes_to_add:
                     # Find </Routes> tag and insert before it
