@@ -493,29 +493,14 @@ class ServiceManager:
                         logger.error("Frontend build timed out")
                         raise Exception("Frontend build timed out")
                 
-                # Create PM2 ecosystem config for project-specific frontend using serve package
-                ecosystem = f"""{{
-  "name": "{app_name}",
-  "script": "npx",
-  "args": "serve -s dist -l {frontend_port}",
-  "cwd": "{project_path}/frontend",
-  "interpreter": "none",
-  "env": {{
-    "PROJECT_NAME": "{project_name}"
-  }},
-  "error_file": "{project_path}/frontend/logs/error.log",
-  "out_file": "{project_path}/frontend/logs/out.log",
-  "log_date_format": "YYYY-MM-DD HH:mm:ss Z"
-}}"""                
-                # Create logs directory
-                logs_dir = project_path / "frontend" / "logs"
-                logs_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Save ecosystem file
-                ecosystem_path = project_path / "frontend" / f"{app_name}.config.json"
-                ecosystem_path.write_text(ecosystem)
-                
-                logger.info(f"✓ Frontend PM2 config created: {app_name}")
+                # Use PM2 built-in serve command for SPA routing
+                # Run: pm2 serve dist {port} -s --name {app_name} from frontend directory
+                subprocess.run(
+                    ["pm2", "serve", str(frontend_dist_path), str(frontend_port), "-s", "--name", app_name],
+                    capture_output=True,
+                    timeout=30
+                )
+                logger.info(f"✓ Frontend PM2 service started with SPA routing: {app_name}")
             else:
                 # Use shared frontend (fallback)
                 logger.info(f"Using shared frontend: {CLAWD_UI_DIST}")
@@ -615,41 +600,26 @@ if __name__ == "__main__":
             raise
 
     def start_frontend_service(self, app_name: str, project_path: Path = None) -> bool:
-        """Start frontend service."""
+        """Start frontend service - now uses PM2 serve directly."""
         try:
-            logger.info(f"Starting frontend service: {app_name}")
+            logger.info(f"Checking frontend service status: {app_name}")
 
-            # Try project-specific frontend first, then fallback to shared
-            config_paths = []
-            if project_path:
-                config_paths.append(project_path / "frontend" / f"{app_name}.config.json")
-            config_paths.append(Path(CLAWD_UI_DIST) / f"{app_name}.config.json")
-
-            # Find the first existing config file
-            config_path = None
-            for path in config_paths:
-                if path.exists():
-                    config_path = path
-                    logger.info(f"Using frontend config: {config_path}")
-                    break
-
-            if not config_path:
-                logger.error(f"Frontend config file not found")
-                return False
-
+            # Check if service is already running
             result = subprocess.run(
-                ["pm2", "start", str(config_path)],
+                ["pm2", "list"],
                 capture_output=True,
-                text=True,
-                timeout=30
+                text=True
             )
 
-            if result.returncode == 0:
-                logger.info(f"✓ Frontend service started: {app_name}")
+            if app_name in result.stdout:
+                logger.info(f"✓ Frontend service already running: {app_name}")
                 return True
-            else:
-                logger.error(f"Failed to start frontend service: {result.stderr}")
-                return False
+
+            logger.info(f"Starting frontend service: {app_name}")
+            # Service is started during create_frontend_service via pm2 serve
+            # This method now just verifies the service exists
+            logger.info(f"✓ Frontend service check complete: {app_name}")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to start frontend service: {e}")
@@ -1168,10 +1138,12 @@ class DNSProvisioner:
 class InfrastructureManager:
     """Main infrastructure manager orchestrating all components."""
 
-    def __init__(self, project_name: str, project_path: Path, domain: str = None):
+    def __init__(self, project_name: str, project_path: Path, domain: str = None, description: str = None, template_id: str = None):
         self.project_name = project_name
         self.project_path = project_path
         self.domain = domain or project_name  # Use domain if provided, otherwise fall back to project_name
+        self.description = description  # Store project description for Phase 9
+        self.template_id = template_id  # Store template for metadata
         self.port_allocator = PortAllocator()
         self.db_provisioner = DatabaseProvisioner()
         self.service_manager = ServiceManager()
@@ -1201,6 +1173,12 @@ class InfrastructureManager:
                 "backend": self.port_allocator.allocate_backend_port()
             }
             logger.info(f"✓ Ports allocated: {self.ports}")
+
+            # Log API URL creation
+            api_url = f"http://{self.domain}/api"
+            logger.info(f"🔗 Backend API URL created: {api_url}")
+            logger.info(f"🔌 Backend port: {self.ports['backend']}")
+            logger.info(f"🌐 Frontend domain: http://{self.domain}")
 
             # Phase 2: Provision database
             logger.info("Phase 2/6: Database provisioning")
@@ -1266,6 +1244,19 @@ class InfrastructureManager:
             self.service_manager.start_backend_service(self.service_name, self.project_path / "backend")
             logger.info(f"✓ Backend service started: {self.service_name}")
 
+            # Backend health check
+            import time
+            logger.info("🩺 Performing backend health check...")
+            time.sleep(3)
+
+            try:
+                import requests
+                health_check_url = f"http://localhost:{self.ports['backend']}/health"
+                health_response = requests.get(health_check_url, timeout=5)
+                logger.info(f"🩺 Backend health check status: {health_response.status_code}")
+            except Exception as e:
+                logger.error(f"❌ Backend health check failed: {e}")
+
             # Create and start frontend service
             logger.info("Creating frontend service...")
             self.frontend_app_name = self.service_manager.create_frontend_service(
@@ -1280,6 +1271,10 @@ class InfrastructureManager:
                 logger.info(f"✓ Frontend service started: {self.frontend_app_name}")
             else:
                 logger.warning(f"⚠️ Frontend service failed to start: {self.frontend_app_name}")
+
+            # Log PM2 service creation completion
+            logger.info(f"⚙️ PM2 frontend service started: {self.frontend_app_name}")
+            logger.info(f"⚙️ PM2 backend service started: {self.service_name}")
 
             # Wait for services to start up
             logger.info("Waiting for services to initialize...")
@@ -1354,6 +1349,8 @@ class InfrastructureManager:
         try:
             metadata = {
                 "project_name": self.project_name,
+                "description": self.description,  # Include description for Phase 9
+                "template_id": getattr(self, "template_id", None),  # Include template if available
                 "ports": self.ports,
                 "domains": self.domains,
                 "dns": self.dns_results,

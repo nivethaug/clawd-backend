@@ -61,11 +61,17 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             if template_id:
                 cmd_args.append(template_id)
 
+            # Pass environment variables for EMPTY_TEMPLATE_MODE
+            import os
+            env = os.environ.copy()
+            env["EMPTY_TEMPLATE_MODE"] = os.getenv("EMPTY_TEMPLATE_MODE", "false")
+
             result = subprocess.run(
                 cmd_args,
                 capture_output=True,
                 text=True,
-                timeout=3600  # 60 minutes total
+                timeout=3600,  # 60 minutes total
+                env=env  # Pass environment variables
             )
 
             if result.returncode != 0:
@@ -84,15 +90,6 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             cmd_args = [backend_python, "/root/clawd-backend/openclaw_wrapper.py",
                        str(project_id), project_path, project_name, description or "",
                        template_id or ""]
-            # Add template_id if provided
-            if template_id:
-                cmd_args.append(template_id)            # Add template_id if provided
-            if template_id:
-                cmd_args.append(template_id)
-
-            # Add template_id if provided
-            if template_id:
-                cmd_args.append(template_id)
 
             result = subprocess.run(
                 cmd_args,
