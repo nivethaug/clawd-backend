@@ -1575,6 +1575,7 @@ if __name__ == "__main__":
         try:
             # Update AppLayout.tsx - Add navigation items
             logger.info("🔧 Updating sidebar navigation (AppLayout.tsx)...")
+            logger.info(f"[Phase 9-Nav] Processing {len(pages)} pages for navigation: {pages}")
             
             if app_layout_path.exists():
                 app_layout_content = app_layout_path.read_text()
@@ -1624,15 +1625,23 @@ if __name__ == "__main__":
                         "icon": icon_name
                     }
                     
-                    # Check if nav item already exists
-                    nav_pattern = f'\\{{\\s*name:\\s*[\'"]{page}[\'"]'
+                    # Check if nav item already exists (simpler pattern)
+                    nav_pattern = r"name:\s*['\"]" + re.escape(page) + r"['\"]"
                     if not re.search(nav_pattern, app_layout_content):
                         nav_items_to_add.append(nav_item)
+                        logger.debug(f"[Phase 9-Nav] Will add nav item: {page} → {nav_href}")
                 
                 if nav_items_to_add:
+                    logger.info(f"[Phase 9-Nav] Nav items to add: {len(nav_items_to_add)}")
                     # Find mainNavItems array
                     mainnav_pattern = r'const mainNavItems = \[([\s\S]*?)\];'
                     mainnav_match = re.search(mainnav_pattern, app_layout_content)
+                    
+                    if not mainnav_match:
+                        logger.error(f"[Phase 9-Nav] Could not find mainNavItems array")
+                        logger.error(f"[Phase 9-Nav] AppLayout content: {app_layout_content[:500]}")
+                    else:
+                        logger.info(f"[Phase 9-Nav] Found mainNavItems array")
                     
                     if mainnav_match:
                         # Build new nav items code
