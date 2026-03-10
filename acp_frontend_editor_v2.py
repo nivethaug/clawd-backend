@@ -416,6 +416,9 @@ class ACPFrontendEditorV2:
         self.snapshot_manager = ACPSnapshotManager(str(self.frontend_path))
         self.build_gate = ACPBuildGate(str(self.frontend_path))
 
+        # Phase 9: Guardrails - Store allowed pages whitelist
+        self.allowed_pages: Set[str] = set()
+
     def apply_changes_via_acpx(
         self,
         goal_description: str,
@@ -565,6 +568,13 @@ class ACPFrontendEditorV2:
 
         logger.info(f"[ACPX-V2] ✓ Build succeeded!")
 
+        # Step 9.5: Validate and remove unauthorized pages (Phase 9 Guardrails)
+        logger.info(f"[ACPX-V2] Step 9.5: Validating pages against guardrails...")
+        unauthorized_removed = self._enforce_page_guardrails()
+
+        if unauthorized_removed > 0:
+            logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
+
         # Step 10: Success - cleanup snapshot
         logger.info(f"[ACPX-V2] Step 10: Cleanup snapshot...")
         self.snapshot_manager.cleanup_snapshot()
@@ -654,6 +664,10 @@ class ACPFrontendEditorV2:
         # Step 4: Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
 
+        # Phase 9: Store allowed pages whitelist for guardrails
+        self.allowed_pages = set(required_pages)
+        logger.info(f"[Phase9] Allowed pages: {required_pages}")
+
         # Planner logging
         logger.info(f"[Planner] Description: {goal_description}")
         logger.info(f"[Planner] Detected pages: {required_pages}")
@@ -661,9 +675,12 @@ class ACPFrontendEditorV2:
         # Build required artifacts list
         required_pages_list = required_pages
         required_components_list = list(set(required_components))
-        
+
         required_pages_str = "\n".join([f"- src/pages/{page}.tsx" for page in required_pages_list])
         required_components_str = "\n".join([f"- src/components/{comp}.tsx" for comp in required_components_list])
+
+        # Phase 9: Build page templates section
+        page_templates_section = self._build_page_templates_section(required_pages, goal_description)
 
         return f"""You are editing a React + Vite + TypeScript SaaS application.
 
@@ -674,16 +691,35 @@ YOUR TASK
 
 Transform the existing template into a production-ready application based on the project description above.
 
-STRICT RULES
+PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
 
-You may ONLY modify files inside:
-src/
+⚠️  CRITICAL: EXACT PAGE CREATION REQUIRED ⚠️
 
-DO NOT modify:
-- src/components/ui/ (UI primitives only)
-- package.json, vite.config.*, node_modules
-- backend files, .env files
-- Do NOT change project architecture
+1. ONLY create the pages listed below:
+{required_pages_str}
+
+2. File names must match EXACTLY:
+   - Use this pattern: src/pages/{{PageName}}.tsx
+   - Examples: src/pages/Dashboard.tsx, src/pages/Contacts.tsx, src/pages/Settings.tsx
+   - DO NOT add "Page" suffix: ✗ DashboardPage.tsx → ✓ Dashboard.tsx
+   - DO NOT add "Overview" suffix: ✗ AnalyticsOverview.tsx → ✓ Analytics.tsx
+   - DO NOT use variations: ✗ ReportsPage.tsx → ✓ Reports.tsx
+
+3. ABSOLUTELY FORBIDDEN:
+   - DO NOT create any additional pages beyond the list
+   - DO NOT create variations like: Account.tsx, Activity.tsx, Users.tsx, Team.tsx, Billing.tsx
+   - DO NOT rename pages - use exact names from REQUIRED PAGES list
+   - DO NOT generate default SaaS pages when explicit pages are provided
+
+4. FINAL VERIFICATION CHECKLIST:
+   Before marking task complete, verify:
+   - [ ] ONLY pages from REQUIRED PAGES list exist in src/pages/
+   - [ ] NO unauthorized pages were created
+   - [ ] All required pages are complete
+   - [ ] File names match exactly with REQUIRED PAGES list
+
+PAGE TEMPLATES
+{page_templates_section}
 
 SCOPE LIMITATION (CRITICAL - Reduces AI scanning time)
 
@@ -699,17 +735,15 @@ DO NOT scan:
 - build
 - .git
 
-REQUIRED PAGES (ALL MUST EXIST)
-
-{required_pages_str}
-
-REQUIRED COMPONENTS (IF APPLICABLE)
-
-{required_components_str}
+DO NOT modify:
+- src/components/ui/ (UI primitives only)
+- package.json, vite.config.*, node_modules
+- backend files, .env files
+- Do NOT change project architecture
 
 COMPLETION CHECKLIST
 
-✓ All required pages created in src/pages/
+✓ All required pages created in src/pages/ (EXACT file names)
 ✓ All required components created in src/components/
 ✓ Routing updated in src/App.tsx
 ✓ Navigation/sidebar updated
@@ -721,21 +755,23 @@ WORKING METHODOLOGY
 
 You must work systematically through ALL required pages.
 
-1. Read the project description carefully
+1. Read the project description and page templates carefully
 2. Plan your approach
-3. Execute step by step
+3. Execute step by step following page templates
 4. DO NOT STOP until ALL required pages are created
 5. After completing a page, move to the next page
 6. Continue until the entire checklist is complete
+7. Run npm run build after all pages are created
 
 EXECUTION RULES
 
-1. Work through pages ONE AT A TIME
+1. Work through pages ONE AT A TIME using page templates
 2. Complete each page fully before moving to the next
-3. Do not skip any required page
-4. Do not stop early - continue until checklist is 100% complete
-5. After finishing all pages, run npm run build
+3. Use EXACT page names from REQUIRED PAGES list
+4. Do not skip any required page
+5. Do not stop early - continue until checklist is 100% complete
 6. Only mark task complete when ALL checklist items are done
+7. Use page templates as guidance but adapt to existing code structure
 
 TECHNICAL REQUIREMENTS
 
@@ -744,6 +780,7 @@ TECHNICAL REQUIREMENTS
 - Follow existing code patterns and style
 - Write clean, production-ready code
 - Do not introduce placeholder content unless required
+- Follow page template specifications for professional UI
 
 IMPLEMENTATION
 
@@ -753,3 +790,69 @@ Do NOT request JSON output or any specific format.
 
 Just implement the changes using your available tools.
 """
+
+    def _build_page_templates_section(self, required_pages: List[str], goal_description: str) -> str:
+        """
+        Build page templates section for ACPX prompt.
+
+        Args:
+            required_pages: List of required page names
+            goal_description: Project goal description
+
+        Returns:
+            Page templates section for prompt
+        """
+        template_sections = []
+
+        for page_name in required_pages:
+            template_content = get_page_template_for_prompt(page_name, goal_description)
+            template_sections.append(template_content)
+
+        return "\n".join(template_sections)
+
+    def _enforce_page_guardrails(self) -> int:
+        """
+        Enforce page guardrails by removing unauthorized pages.
+
+        Scans src/pages/ and removes any pages not in the allowed_pages whitelist.
+
+        Returns:
+            Number of unauthorized pages removed
+        """
+        pages_dir = self.frontend_src_path / "pages"
+
+        if not pages_dir.exists():
+            logger.warning(f"[Guardrail] Pages directory not found: {pages_dir}")
+            return 0
+
+        # Always allowed pages (system pages)
+        always_allowed = {"NotFound", "Welcome", "_app", "_layout", "index"}
+
+        unauthorized_removed = 0
+
+        for page_file in pages_dir.glob("*.tsx"):
+            # Extract page name (remove .tsx extension)
+            page_name = page_file.stem
+
+            # Skip always-allowed pages
+            if page_name in always_allowed:
+                continue
+
+            # Check if page is in allowed whitelist
+            if page_name not in self.allowed_pages:
+                logger.warning(f"[Guardrail] Removing unauthorized page: {page_name}")
+                try:
+                    page_file.unlink()
+                    unauthorized_removed += 1
+                except Exception as e:
+                    logger.error(f"[Guardrail] Failed to remove {page_name}: {e}")
+
+        if unauthorized_removed > 0:
+            logger.info(f"[Guardrail] Removed {unauthorized_removed} unauthorized page(s)")
+            logger.info(f"[Guardrail] Remaining allowed pages: {sorted(self.allowed_pages)}")
+        else:
+            logger.info(f"[Guardrail] ✓ All pages are authorized")
+
+        logger.info(f"[Phase9] Final validated pages: {sorted(self.allowed_pages)}")
+
+        return unauthorized_removed
