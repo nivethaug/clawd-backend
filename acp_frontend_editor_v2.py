@@ -828,7 +828,7 @@ Just implement the changes using your available tools.
             return 0
 
         # Always allowed pages (system pages)
-        always_allowed = {"NotFound", "Welcome", "_app", "_layout", "index"}
+        always_allowed = {"NotFound", "Welcome", "_app", "_layout", "index", "Error", "Loading"}
 
         unauthorized_removed = 0
 
