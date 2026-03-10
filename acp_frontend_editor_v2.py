@@ -684,6 +684,9 @@ class ACPFrontendEditorV2:
         # Phase 9: Build page templates section
         page_templates_section = self._build_page_templates_section(required_pages, goal_description)
 
+        # Phase 4: Build page specs section (NEW)
+        page_specs_section = self._build_page_specs_section(required_pages)
+
         return f"""You are editing a React + Vite + TypeScript SaaS application.
 
 Project Name: {self.project_name}
@@ -723,6 +726,9 @@ PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
 PAGE TEMPLATES
 {page_templates_section}
 
+PAGE SPECIFICATIONS (Phase 4 - Enhanced UI Quality)
+{page_specs_section}
+
 SCOPE LIMITATION (CRITICAL - Reduces AI scanning time)
 
 ONLY modify files in these directories:
@@ -757,9 +763,9 @@ WORKING METHODOLOGY
 
 You must work systematically through ALL required pages.
 
-1. Read the project description and page templates carefully
-2. Plan your approach
-3. Execute step by step following page templates
+1. Read the project description, page templates, and page specifications carefully
+2. Plan your approach using BOTH templates and specs as guidance
+3. Execute step by step following page templates and specifications
 4. DO NOT STOP until ALL required pages are created
 5. After completing a page, move to the next page
 6. Continue until the entire checklist is complete
@@ -782,7 +788,8 @@ TECHNICAL REQUIREMENTS
 - Follow existing code patterns and style
 - Write clean, production-ready code
 - Do not introduce placeholder content unless required
-- Follow page template specifications for professional UI
+- Follow page templates AND page specifications for professional UI
+- Ensure all UI elements from page specs are implemented
 
 IMPLEMENTATION
 
@@ -811,6 +818,27 @@ Just implement the changes using your available tools.
             template_sections.append(template_content)
 
         return "\n".join(template_sections)
+
+    def _build_page_specs_section(self, required_pages: List[str]) -> str:
+        """
+        Build page specifications section for ACPX prompt (Phase 4).
+
+        Args:
+            required_pages: List of required page names
+
+        Returns:
+            Page specs section for prompt
+        """
+        try:
+            from page_specs import format_page_spec_list
+            specs = format_page_spec_list(required_pages)
+            specs_section = "\n".join(specs)
+            logger.info(f"[Phase4] Page specs built for {len(required_pages)} pages")
+            return specs_section
+        except Exception as e:
+            logger.error(f"[Phase4] Error loading page specs: {e}")
+            # Fallback: return empty section
+            return "\n## Page Specifications\n\nNote: Page specs not available, using page templates only.\n"
 
     def _enforce_page_guardrails(self) -> int:
         """
