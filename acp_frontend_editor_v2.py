@@ -623,14 +623,12 @@ Rules:
 5. Do NOT include explanations or extra text
 
 Response format (JSON ONLY):
-{{
-  "pages": ["Dashboard", "Contacts", "Analytics", "Settings", "Documents"]
-}}
+{{"pages": ["Dashboard", "Contacts", "Analytics", "Settings", "Documents"]}}
 
-Example outputs:
-- For CRM: [Dashboard, Contacts, Deals, Reports, Tasks, Settings]
-- For document management: [Dashboard, Documents, Templates, Editor, Analytics, Settings]
-- For analytics dashboard: [Dashboard, Reports, Analytics, Settings]
+EXAMPLES:
+CRM app → {{"pages": ["Dashboard", "Contacts", "Deals", "Reports", "Tasks", "Settings"]}}
+Document management → {{"pages": ["Dashboard", "Documents", "Templates", "Editor", "Analytics", "Settings"]}}
+Analytics dashboard → {{"pages": ["Dashboard", "Reports", "Analytics", "Settings"]}}
 
 Provide ONLY the JSON list, nothing else."""
 
@@ -673,11 +671,31 @@ Provide ONLY the JSON list, nothing else."""
                         # Try to extract just the JSON part
                         if '[' in json_str:
                             json_str = json_str[json_str.find('['):]
-                        inferred_data = json.loads(json_str)
-                        pages = inferred_data.get("pages", [])
-                        logger.info(f"[Planner] AI inference successful: {len(pages)} pages")
+                        
+                        # Parse JSON - handle both object and array
+                        try:
+                            inferred_data = json.loads(json_str)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"[Planner] JSON parse error: {e}")
+                            logger.error(f"[Planner] JSON string was: {json_str[:500]}")
+                            raise
+                        
+                        # Extract pages from response (handle both object and array)
+                        pages = []
+                        if isinstance(inferred_data, dict):
+                            # Object format: {"pages": [...]}
+                            pages = inferred_data.get("pages", [])
+                            logger.info(f"[Planner] AI inference successful (object format): {len(pages)} pages")
+                        elif isinstance(inferred_data, list):
+                            # Array format: [...]
+                            pages = inferred_data
+                            logger.info(f"[Planner] AI inference successful (array format): {len(pages)} pages")
+                        else:
+                            logger.warning(f"[Planner] Unexpected JSON type: {type(inferred_data)}")
+                        
                         logger.info(f"[Planner] Inferred: {pages}")
                         return pages
+
                     except json.JSONDecodeError as e:
                         logger.warning(f"[Planner] AI inference JSON parse error with pattern: {pattern}, {e}")
                         continue
@@ -771,7 +789,8 @@ Provide ONLY the JSON list, nothing else."""
 
         # Step 2: AI Page Inference (if no explicit pages found) - NEW
         if not explicit_match:
-            logger.info(f"[Planner] No explicit pages detected, using AI page inference")
+            logger.info("[Planner] Triggering AI page inference")
+            logger.info(f"[Planner] Description for inference: {goal_description[:200]}...")
             inferred_pages = self._ai_infer_pages(goal_description)
             required_pages.extend(inferred_pages)
             logger.info(f"[Planner] AI inferred pages: {inferred_pages}")
