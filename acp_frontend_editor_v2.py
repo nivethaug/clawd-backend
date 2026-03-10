@@ -423,7 +423,9 @@ class ACPFrontendEditorV2:
         self.allowed_pages: Set[str] = set()
 
         # Phase 5: Page Manifest - Initialize manifest manager
-        self.manifest_manager = PageManifest(str(self.frontend_path))
+        # Pass project root path (parent of frontend), not frontend path
+        # to avoid path doubling in PageManifest which appends frontend/src/
+        self.manifest_manager = PageManifest(str(self.frontend_path.parent))
 
     def apply_changes_via_acpx(
         self,
@@ -448,13 +450,16 @@ class ACPFrontendEditorV2:
         logger.info(f"[ACPX-V2] Step 1: Creating filesystem snapshot...")
         snapshot_success, snapshot_msg = self.snapshot_manager.create_snapshot()
         if not snapshot_success:
-            return {
+            result = {
                 "success": False,
                 "message": f"Snapshot creation failed: {snapshot_msg}",
                 "rollback": False
             }
+            print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
+            return result
 
         # Step 2: Generate page manifest from planner (Phase 5 - NEW)
+        print("🔴 ACPX-V2-STEP2: Generating manifest")
         logger.info(f"[ACPX-V2] Step 2: Generating page manifest (Phase 5)...")
         required_pages = self._extract_required_pages_from_prompt(goal_description)
         logger.info(f"[ACPX-V2]   Planner detected pages: {required_pages}")
@@ -462,31 +467,41 @@ class ACPFrontendEditorV2:
         # Write manifest to project directory
         manifest_success = self.manifest_manager.write_manifest(required_pages)
         if not manifest_success:
-            return {
+            result = {
                 "success": False,
                 "message": "Failed to write page manifest",
                 "rollback": False
             }
+            print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
+            return result
         
         # Update allowed_pages with manifest pages (source of truth)
         self.allowed_pages = set(required_pages)
         logger.info(f"[ACPX-V2]   Manifest pages set as allowed: {required_pages}")
+        print("🔴 ACPX-V2-STEP2-DONE: Manifest generated")
 
         # Step 3: Scaffold pages from manifest (Phase 5 - NEW)
+        print("🔴 ACPX-V2-STEP3: Scaffolding pages")
         logger.info(f"[ACPX-V2] Step 3: Scaffolding pages from manifest...")
         scaffold_success = self.manifest_manager.scaffold_pages(required_pages, create_placeholder=True)
         if not scaffold_success:
             logger.warning(f"[ACPX-V2]   Some pages failed to scaffold, but continuing...")
-        
+        print("🔴 ACPX-V2-STEP3-DONE: Pages scaffolded")
+
         # Step 4: Capture filesystem state BEFORE ACPX
+        print("🔴 ACPX-V2-STEP4: Capturing filesystem state before ACPX")
         logger.info(f"[ACPX-V2] Step 4: Capturing filesystem state before ACPX...")
         hashes_before = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
         logger.info(f"[ACPX-V2]   Found {len(hashes_before)} files before ACPX")
+        print("🔴 ACPX-V2-STEP4-DONE: Filesystem state captured")
         # Step 5: Build ACPX prompt using manifest pages
+        print("🔴 ACPX-V2-STEP5-PROMPT: Building ACPX prompt")
         logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
         prompt = self._build_acpx_prompt(goal_description)
+        print(f"🔴 ACPX-V2-STEP5-PROMPT-DONE: Prompt built, length={len(prompt)}")
 
         # Step 6: Run ACPX
+        print("🔴 ACPX-V2-STEP5: Running ACPX CLI")
         logger.info(f"[ACPX-V2] Step 4: Running ACPX...")
         logger.info(f"[ACPX-V2]   Acpx path: /usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js")
         logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
@@ -508,16 +523,19 @@ class ACPFrontendEditorV2:
             logger.info(f"[ACPX-V2]   Return code: {result.returncode}")
             logger.info(f"[ACPX-V2]   Stdout length: {len(result.stdout)} chars")
             logger.info(f"[ACPX-V2]   Stderr length: {len(result.stderr)} chars")
+            print("🔴 ACPX-V2-STEP5-DONE: ACPX CLI completed")
 
         except subprocess.TimeoutExpired:
             logger.error(f"[ACPX-V2] 🔴 HEARTBEAT: ❌ TIMED OUT after {BUILD_TIMEOUT} seconds")
             self.snapshot_manager.restore_snapshot()
             self.snapshot_manager.cleanup_snapshot()
-            return {
+            result = {
                 "success": False,
                 "message": f"ACPX timed out after {BUILD_TIMEOUT} seconds",
                 "rollback": True
             }
+            print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
+            return result
 
         # Step 5: Capture filesystem state AFTER ACPX
         logger.info(f"[ACPX-V2] Step 5: Capturing filesystem state after ACPX...")
@@ -556,11 +574,13 @@ class ACPFrontendEditorV2:
             logger.error(f"[ACPX-V2] ❌ File limit exceeded: {len(files_added)} > {MAX_NEW_FILES}")
             self.snapshot_manager.restore_snapshot()
             self.snapshot_manager.cleanup_snapshot()
-            return {
+            result = {
                 "success": False,
                 "message": f"File limit exceeded: {len(files_added)} new files, max {MAX_NEW_FILES} allowed",
                 "rollback": True
             }
+            print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
+            return result
         logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{MAX_NEW_FILES})")
 
         # Step 8: Validate paths
@@ -572,11 +592,13 @@ class ACPFrontendEditorV2:
                 logger.error(f"[ACPX-V2] ❌ Path validation failed: {reason}")
                 self.snapshot_manager.restore_snapshot()
                 self.snapshot_manager.cleanup_snapshot()
-                return {
+                result = {
                     "success": False,
                     "message": f"Path validation failed: {reason}",
                     "rollback": True
                 }
+                print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
+                return result
         logger.info(f"[ACPX-V2]   ✓ All paths valid")
 
         # Step 9: Enforce page guardrails (BEFORE build to prevent routing issues)
@@ -597,20 +619,23 @@ class ACPFrontendEditorV2:
             logger.error(f"[ACPX-V2]   Build output (last 500 chars):\n{build_output[-500:]}")
             self.snapshot_manager.restore_snapshot()
             self.snapshot_manager.cleanup_snapshot()
-            return {
+            result = {
                 "success": False,
                 "message": "Build failed",
                 "build_output": build_output,
                 "rollback": True
             }
+            print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
+            return result
 
         logger.info(f"[ACPX-V2] ✓ Build succeeded!")
+        print("🔴 ACPX-V2-STEP8-DONE: Build gate passed")
 
         # Step 11: Success - cleanup snapshot
         logger.info(f"[ACPX-V2] Step 10: Cleanup snapshot...")
         self.snapshot_manager.cleanup_snapshot()
 
-        return {
+        result = {
             "success": True,
             "message": "ACPX changes applied successfully",
             "files_added": len(files_added),
@@ -619,6 +644,8 @@ class ACPFrontendEditorV2:
             "build_output": build_output,
             "rollback": False
         }
+        print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added')}, Modified={result.get('files_modified')}")
+        return result
 
     def _ai_infer_pages(self, goal_description: str) -> List[str]:
         """
@@ -759,19 +786,21 @@ Provide ONLY the JSON list, nothing else."""
             logger.error(f"[Planner] AI inference error: {type(e).__name__}: {e}")
             return []
 
-    def _build_acpx_prompt(self, goal_description: str) -> str:
+    def _extract_required_pages_from_prompt(self, goal_description: str) -> List[str]:
         """
-        Build ACPX prompt with explicit required artifacts and completion checklist.
+        Extract required pages from goal description using improved planner logic.
+
+        Detection priority: manifest → explicit → AI inference → keywords → SaaS defaults
 
         Args:
             goal_description: Goal for changes
 
         Returns:
-            Prompt string for ACPX
+            List of required page names
         """
-        # Extract required pages from goal description (improved planner)
+        logger.info("[Planner] Extracting required pages from prompt...")
+
         required_pages = []
-        required_components = []
 
         # Page keyword mappings for improved detection
         PAGE_KEYWORDS = {
@@ -826,7 +855,7 @@ Provide ONLY the JSON list, nothing else."""
 
             logger.info(f"[Planner] Explicit page list detected: {len(required_pages)} pages")
 
-        # Step 2: AI Page Inference (if no explicit pages found) - NEW
+        # Step 3: AI Page Inference (if no explicit pages found) - NEW
         if not explicit_match:
             logger.info("[Planner] Triggering AI page inference")
             logger.info(f"[Planner] Description for inference: {goal_description[:200]}...")
@@ -834,14 +863,14 @@ Provide ONLY the JSON list, nothing else."""
             required_pages.extend(inferred_pages)
             logger.info(f"[Planner] AI inferred pages: {inferred_pages}")
 
-        # Step 3: Keyword matching (if explicit list not found or incomplete)
+        # Step 4: Keyword matching (if explicit list not found or incomplete)
         desc_lower = goal_description.lower()
         for page_name, keywords in PAGE_KEYWORDS.items():
             if page_name not in required_pages:  # Skip if already in explicit list
                 if any(keyword in desc_lower for keyword in keywords):
                     required_pages.append(page_name)
 
-        # Step 3: SaaS default fallback (if less than 3 pages detected)
+        # Step 5: SaaS default fallback (if less than 3 pages detected)
         if len(required_pages) < 3:
             logger.info(f"[Planner] Fewer than 3 pages detected ({len(required_pages)}), adding SaaS defaults")
             saas_defaults = ["Dashboard", "Analytics", "Contacts", "Settings"]
@@ -849,7 +878,7 @@ Provide ONLY the JSON list, nothing else."""
                 if default_page not in required_pages:
                     required_pages.append(default_page)
 
-        # Step 4: Remove duplicates while preserving order
+        # Step 6: Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
 
         # Phase 9: Store allowed pages whitelist for guardrails
@@ -859,6 +888,22 @@ Provide ONLY the JSON list, nothing else."""
         # Planner logging
         logger.info(f"[Planner] Description: {goal_description}")
         logger.info(f"[Planner] Detected pages: {required_pages}")
+
+        return required_pages
+
+    def _build_acpx_prompt(self, goal_description: str) -> str:
+        """
+        Build ACPX prompt with explicit required artifacts and completion checklist.
+
+        Args:
+            goal_description: Goal for changes
+
+        Returns:
+            Prompt string for ACPX
+        """
+        # Extract required pages from goal description
+        required_pages = self._extract_required_pages_from_prompt(goal_description)
+        required_components = []
 
         # Build required artifacts list
         required_pages_list = required_pages

@@ -102,7 +102,8 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             if result.returncode == 0:
                 # Success (wrapper updates status internally)
                 logger.info(f"Claude Code wrapper completed successfully for project {project_id}")
-                logger.info(f"Output: {result.stdout[-500:]}")  # Log last 500 chars
+                logger.info(f"Output (last 2000 chars):\n{result.stdout[-2000:]}")
+                logger.info(f"Full stdout length: {len(result.stdout)} characters")
             else:
                 # Failure
                 logger.error(f"Claude Code wrapper failed for project {project_id}")

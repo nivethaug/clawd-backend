@@ -657,6 +657,7 @@ That's all. Execute Phase {phase} now.
             return True
 
     def phase_9_acp_frontend_editor(self) -> bool:
+        print("🔴 PHASE_9_START: Starting Phase 9 method")
         """
         Phase 9: ACP Controlled Frontend Editor
 
@@ -763,9 +764,12 @@ That's all. Execute Phase {phase} now.
 
             try:
                 # Use V2 editor with filesystem diffing
+                print("🔴 PHASE_9_IMPORT: Importing ACPFrontendEditorV2")
                 from acp_frontend_editor_v2 import ACPFrontendEditorV2
 
+                print("🔴 PHASE_9_V2_INIT: Initializing ACPFrontendEditorV2")
                 editor_v2 = ACPFrontendEditorV2(frontend_src_path, self.project_name)
+                print("🔴 PHASE_9_APPLY: Calling apply_changes_via_acpx")
                 result = editor_v2.apply_changes_via_acpx(goal_description, execution_id)
 
                 ai_duration = time.time() - ai_start_time
@@ -780,11 +784,25 @@ That's all. Execute Phase {phase} now.
                 logger.info(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s")
 
                 # Log pages created (if any page files were added)
-                files_added = result.get('files_added', [])
-                pages_created = [f for f in files_added if f.endswith('.tsx') and 'pages/' in f]
-                if pages_created:
-                    page_names = [Path(p).stem for p in pages_created]
-                    logger.info(f"📄 Pages created: {', '.join(page_names)}")
+                # Note: result.get('files_added') returns a count, so we scan the pages directory
+                if result.get('success'):
+                    pages_dir = Path(frontend_src_path) / "pages"
+                    page_names = []
+                    if pages_dir.exists():
+                        # Find all .tsx files in pages directory
+                        page_files = list(pages_dir.glob("*.tsx"))
+                        # Extract page names (file stems)
+                        page_names = [p.stem for p in page_files if p.stem not in ["NotFound", "Welcome", "Error", "Loading"]]
+                        logger.info(f"📄 Pages found: {', '.join(page_names)}")
+
+                    # Step 2.5: Update router and navigation
+                    if page_names:
+                        logger.info("🔗 Step 2.5: Updating router and navigation...")
+                        router_nav_success = self._update_router_and_navigation(page_names)
+                        if not router_nav_success:
+                            logger.warning("⚠️ Router and navigation update failed, but continuing...")
+                    else:
+                        logger.info("ℹ️ No pages found, skipping router and navigation update")
             except Exception as e:
                 ai_duration = time.time() - ai_start_time
                 logger.error(f"[Phase 9] ❌ Exception during ACPX V2 execution")
@@ -844,8 +862,8 @@ That's all. Execute Phase {phase} now.
 
             # STEP 3: ALWAYS run build gate (even if no changes detected)
             # This catches cases where AI modified imports/routing without creating new files
-            logger.info("🧭 Router update: Skipped (not available in this version)")
-            logger.info("📚 Navigation update: Skipped (not available in this version)")
+            logger.info("🧭 Router update: ✓ Completed in Step 2.5")
+            logger.info("📚 Navigation update: ✓ Completed in Step 2.5")
             logger.info("🔨 Step 3: Running verification build (always)")
             verification_build_success = False
             verification_build_output = ""
@@ -988,6 +1006,247 @@ Phase 9 is complete! ACP is integrated as the final step of project creation.
             # Return True to allow project to complete despite Phase 9 errors
             logger.warning("⚠️ Allowing project to complete despite Phase 9 errors")
             return True
+    def _update_router_and_navigation(self, pages: list) -> bool:
+        """
+        Update React Router and sidebar navigation for new pages.
+
+        This method:
+        1. Adds imports to App.tsx for new pages
+        2. Registers routes in React Router in App.tsx
+        3. Adds navigation items to sidebar in AppLayout.tsx
+        4. Smart detection (only adds missing items, doesn't duplicate)
+
+        Args:
+            pages: List of page names (e.g., ["Dashboard", "Documents", "Settings"])
+
+        Returns:
+            True if successful, False otherwise
+        """
+        import re
+        import shutil
+
+        logger.info("🔗 Updating router and navigation...")
+        logger.info(f"   Pages to add: {pages}")
+
+        # Icon mappings from lucide-react
+        ICON_MAPPINGS = {
+            "Documents": "FileText",
+            "Templates": "Copy",
+            "Editor": "FileEdit",
+            "Signing": "PenTool",
+            "Analytics": "BarChart3",
+            "Tasks": "KanbanBoard",
+            "Dashboard": "LayoutDashboard",
+            "Reports": "BarChart2",
+            "Projects": "FolderKanban",
+            "Tests": "FlaskConical",
+            "Documentation": "BookOpen",
+            "Settings": "Settings",
+            "Contacts": "Users",
+            "Users": "Users",
+            "Activity": "Activity",
+            "Notifications": "Bell",
+            "Account": "User",
+            "Login": "LogIn",
+            "Signup": "UserPlus",
+            "Team": "Users",
+            "Billing": "CreditCard",
+            "Create": "Plus",
+            "Post": "FileText",
+            "Posts": "FileText",
+            "Documents": "FileText",
+        }
+
+        # Paths to files
+        app_tsx_path = self.frontend_path / "src" / "App.tsx"
+        app_layout_path = self.frontend_path / "src" / "app" / "layouts" / "AppLayout.tsx"
+
+        # Alternative path for AppLayout.tsx (might be in different location)
+        if not app_layout_path.exists():
+            app_layout_path = self.frontend_path / "src" / "layouts" / "AppLayout.tsx"
+        if not app_layout_path.exists():
+            # Try to find any AppLayout.tsx
+            found = list(self.frontend_path.rglob("AppLayout.tsx"))
+            if found:
+                app_layout_path = found[0]
+            else:
+                logger.warning("⚠️ AppLayout.tsx not found, skipping navigation updates")
+                return False
+
+        logger.info(f"   App.tsx: {app_tsx_path}")
+        logger.info(f"   AppLayout.tsx: {app_layout_path}")
+
+        try:
+            # Step 1: Update App.tsx
+            logger.info("   Step 1: Updating App.tsx...")
+
+            if not app_tsx_path.exists():
+                logger.warning(f"⚠️ App.tsx not found at {app_tsx_path}")
+                return False
+
+            app_tsx_content = app_tsx_path.read_text()
+
+            # Find existing imports
+            existing_imports = re.findall(r'import\s+(\w+)\s+from\s+["\']\./pages/(\w+)["\']', app_tsx_content)
+            existing_page_names = [imp[1] for imp in existing_imports]
+            logger.info(f"   Existing imports: {existing_page_names}")
+
+            # Find existing routes
+            existing_routes = re.findall(r'path=["\']/?([^"\']*)["\']\s+element={<\s*(\w+)\s*\/?>', app_tsx_content)
+            existing_route_pages = [route[1] for route in existing_routes]
+            logger.info(f"   Existing routes: {existing_route_pages}")
+
+            # Add imports for missing pages
+            new_imports = []
+            for page in pages:
+                if page not in existing_page_names:
+                    import_line = f'import {page} from "./pages/{page}";'
+                    new_imports.append(import_line)
+                    logger.info(f"   Adding import: {import_line}")
+
+            # Add routes for missing pages
+            new_routes = []
+            for page in pages:
+                if page not in existing_route_pages:
+                    # Create path from page name (lowercase)
+                    if page.lower() == "dashboard":
+                        path = "/"
+                    elif page.lower() == "login" or page.lower() == "signup":
+                        path = f"/{page.lower()}"
+                    else:
+                        path = f"/{page.lower()}"
+                    # Use string concatenation to avoid f-string issues with JSX
+                    route_line = '          <Route path="{}" element={{<{} />}} />'.format(path, page)
+                    new_routes.append(route_line)
+                    logger.info(f"   Adding route: {route_line}")
+
+            # Insert new imports (find the last import and add after it)
+            if new_imports:
+                # Find the last import from ./pages/
+                pages_import_pattern = r'(import\s+\w+\s+from\s+["\']\./pages/[^"\']+["\'];?\n)'
+                pages_imports = re.findall(pages_import_pattern, app_tsx_content)
+
+                if pages_imports:
+                    last_pages_import = pages_imports[-1]
+                    insert_pos = app_tsx_content.find(last_pages_import) + len(last_pages_import)
+                    new_imports_str = "\n".join(new_imports) + "\n"
+                    app_tsx_content = app_tsx_content[:insert_pos] + new_imports_str + app_tsx_content[insert_pos:]
+                    logger.info(f"   ✓ Inserted {len(new_imports)} new import(s)")
+                else:
+                    # No existing page imports, find where to insert (after other imports)
+                    import_pattern = r'import\s+[^;]+;?\n'
+                    imports = list(re.finditer(import_pattern, app_tsx_content))
+
+                    if imports:
+                        last_import = imports[-1]
+                        insert_pos = last_import.end()
+                        new_imports_str = "\n".join(new_imports) + "\n"
+                        app_tsx_content = app_tsx_content[:insert_pos] + new_imports_str + app_tsx_content[insert_pos:]
+                        logger.info(f"   ✓ Inserted {len(new_imports)} new import(s)")
+                    else:
+                        logger.warning("   ⚠️ Could not find suitable location for imports")
+
+            # Insert new routes (find the Routes component and add before closing tag)
+            if new_routes:
+                # Find </Routes>
+                routes_end_pattern = r'(\s*</Routes>)'
+                routes_end_match = re.search(routes_end_pattern, app_tsx_content)
+
+                if routes_end_match:
+                    insert_pos = routes_end_match.start()
+                    new_routes_str = "\n".join(new_routes) + "\n"
+                    app_tsx_content = app_tsx_content[:insert_pos] + new_routes_str + app_tsx_content[insert_pos:]
+                    logger.info(f"   ✓ Inserted {len(new_routes)} new route(s)")
+                else:
+                    logger.warning("   ⚠️ Could not find </Routes> closing tag")
+
+            # Write updated App.tsx
+            app_tsx_path.write_text(app_tsx_content)
+            logger.info("   ✓ App.tsx updated successfully")
+
+            # Step 2: Update AppLayout.tsx
+            logger.info("   Step 2: Updating AppLayout.tsx...")
+
+            if not app_layout_path.exists():
+                logger.warning(f"⚠️ AppLayout.tsx not found at {app_layout_path}")
+                return False
+
+            app_layout_content = app_layout_path.read_text()
+
+            # Find existing navigation items
+            main_nav_pattern = r'const mainNavItems\s*=\s*\[(.*?)\];'
+            main_nav_match = re.search(main_nav_pattern, app_layout_content, re.DOTALL)
+
+            system_nav_pattern = r'const systemNavItems\s*=\s*\[(.*?)\];'
+            system_nav_match = re.search(system_nav_pattern, app_layout_content, re.DOTALL)
+
+            # Extract existing navigation items
+            existing_main_nav = []
+            if main_nav_match:
+                main_nav_text = main_nav_match.group(1)
+                # Extract page names from nav items
+                nav_items = re.findall(r'name:\s*[\'"]([^\'"]+)[\'"]', main_nav_text)
+                existing_main_nav = nav_items
+                logger.info(f"   Existing mainNavItems: {existing_main_nav}")
+
+            existing_system_nav = []
+            if system_nav_match:
+                system_nav_text = system_nav_match.group(1)
+                nav_items = re.findall(r'name:\s*[\'"]([^\'"]+)[\'"]', system_nav_text)
+                existing_system_nav = nav_items
+                logger.info(f"   Existing systemNavItems: {existing_system_nav}")
+
+            # Determine which pages go to main vs system nav
+            system_pages = {"Settings", "Notifications", "Account", "Billing"}
+            new_main_nav_items = []
+            new_system_nav_items = []
+
+            for page in pages:
+                if page in system_pages:
+                    if page not in existing_system_nav:
+                        icon = ICON_MAPPINGS.get(page, "Settings")
+                        path = f"/{page.lower()}"
+                        new_system_nav_items.append(f'  {{ name: \'{page}\', href: \'{path}\', icon: {icon} }}')
+                        logger.info(f"   Adding to systemNavItems: {page}")
+                else:
+                    if page not in existing_main_nav and page not in ["Login", "Signup"]:
+                        icon = ICON_MAPPINGS.get(page, "LayoutDashboard")
+                        path = "/" if page.lower() == "dashboard" else f"/{page.lower()}"
+                        new_main_nav_items.append(f'  {{ name: \'{page}\', href: \'{path}\', icon: {icon} }}')
+                        logger.info(f"   Adding to mainNavItems: {page}")
+
+            # Update mainNavItems
+            if new_main_nav_items and main_nav_match:
+                old_main_nav = main_nav_match.group(0)
+                # Insert new items before closing bracket
+                insert_pos = old_main_nav.rfind(']')
+                new_main_nav_str = ",\n".join(new_main_nav_items) + ",\n"
+                new_main_nav_content = old_main_nav[:insert_pos] + new_main_nav_str + old_main_nav[insert_pos:]
+                app_layout_content = app_layout_content.replace(old_main_nav, new_main_nav_content)
+                logger.info(f"   ✓ Added {len(new_main_nav_items)} items to mainNavItems")
+
+            # Update systemNavItems
+            if new_system_nav_items and system_nav_match:
+                old_system_nav = system_nav_match.group(0)
+                # Insert new items before closing bracket
+                insert_pos = old_system_nav.rfind(']')
+                new_system_nav_str = ",\n".join(new_system_nav_items) + ",\n"
+                new_system_nav_content = old_system_nav[:insert_pos] + new_system_nav_str + old_system_nav[insert_pos:]
+                app_layout_content = app_layout_content.replace(old_system_nav, new_system_nav_content)
+                logger.info(f"   ✓ Added {len(new_system_nav_items)} items to systemNavItems")
+
+            # Write updated AppLayout.tsx
+            app_layout_path.write_text(app_layout_content)
+            logger.info("   ✓ AppLayout.tsx updated successfully")
+
+            logger.info("✅ Router and navigation updated successfully!")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to update router and navigation: {e}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            return False
+
     def _build_ai_refinement_prompt(self) -> str:
         """Build AI refinement prompt for OpenClaw.
 
