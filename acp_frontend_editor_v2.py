@@ -479,14 +479,12 @@ class ACPFrontendEditorV2:
             logger.warning(f"[ACPX-V2]   Some pages failed to scaffold, but continuing...")
         
         # Step 4: Capture filesystem state BEFORE ACPX
-        logger.info(f"[ACPX-V2] Step 2: Capturing filesystem state before ACPX...")
+        logger.info(f"[ACPX-V2] Step 4: Capturing filesystem state before ACPX...")
         hashes_before = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
         logger.info(f"[ACPX-V2]   Found {len(hashes_before)} files before ACPX")
-
-        # Step 4: Capture filesystem state BEFORE ACPX
         # Step 5: Build ACPX prompt using manifest pages
         logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
-        prompt = self._build_acpx_prompt(goal_description, required_pages)
+        prompt = self._build_acpx_prompt(goal_description)
 
         # Step 6: Run ACPX
         logger.info(f"[ACPX-V2] Step 4: Running ACPX...")
@@ -795,7 +793,17 @@ Provide ONLY the JSON list, nothing else."""
 
         desc_lower = goal_description.lower()
 
-        # Step 1: Extract explicit page lists (highest priority)
+        # Step 1: Try to load page manifest (Phase 5 - NEW)
+        manifest_pages = None
+        if hasattr(self, 'manifest_manager') and self.manifest_manager:
+            manifest_pages = self.manifest_manager.get_required_pages()
+            if manifest_pages:
+                logger.info(f"[Planner] Using manifest pages: {manifest_pages}")
+                required_pages.extend(manifest_pages)
+            else:
+                logger.info("[Planner] No manifest found, will use inference or keywords")
+
+        # Step 2: Extract explicit page lists (highest priority)
         # Matches patterns like: "pages: Dashboard, Documents, Templates"
         # Or: "with 10 pages: Dashboard, Documents, Templates..."
         import re
