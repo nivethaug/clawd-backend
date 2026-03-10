@@ -21,6 +21,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Set
 
+# Page manifest system
+from page_manifest import PageManifest, create_page_manifest, scaffold_pages
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -419,6 +422,9 @@ class ACPFrontendEditorV2:
         # Phase 9: Guardrails - Store allowed pages whitelist
         self.allowed_pages: Set[str] = set()
 
+        # Phase 5: Page Manifest - Initialize manifest manager
+        self.manifest_manager = PageManifest(str(self.frontend_path))
+
     def apply_changes_via_acpx(
         self,
         goal_description: str,
@@ -448,16 +454,41 @@ class ACPFrontendEditorV2:
                 "rollback": False
             }
 
-        # Step 2: Capture filesystem state BEFORE ACPX
+        # Step 2: Generate page manifest from planner (Phase 5 - NEW)
+        logger.info(f"[ACPX-V2] Step 2: Generating page manifest (Phase 5)...")
+        required_pages = self._extract_required_pages_from_prompt(goal_description)
+        logger.info(f"[ACPX-V2]   Planner detected pages: {required_pages}")
+        
+        # Write manifest to project directory
+        manifest_success = self.manifest_manager.write_manifest(required_pages)
+        if not manifest_success:
+            return {
+                "success": False,
+                "message": "Failed to write page manifest",
+                "rollback": False
+            }
+        
+        # Update allowed_pages with manifest pages (source of truth)
+        self.allowed_pages = set(required_pages)
+        logger.info(f"[ACPX-V2]   Manifest pages set as allowed: {required_pages}")
+
+        # Step 3: Scaffold pages from manifest (Phase 5 - NEW)
+        logger.info(f"[ACPX-V2] Step 3: Scaffolding pages from manifest...")
+        scaffold_success = self.manifest_manager.scaffold_pages(required_pages, create_placeholder=True)
+        if not scaffold_success:
+            logger.warning(f"[ACPX-V2]   Some pages failed to scaffold, but continuing...")
+        
+        # Step 4: Capture filesystem state BEFORE ACPX
         logger.info(f"[ACPX-V2] Step 2: Capturing filesystem state before ACPX...")
         hashes_before = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
         logger.info(f"[ACPX-V2]   Found {len(hashes_before)} files before ACPX")
 
-        # Step 3: Build ACPX prompt (no JSON requirement) with completion tracking
-        logger.info(f"[ACPX-V2] Step 3: Building ACPX prompt...")
-        prompt = self._build_acpx_prompt(goal_description)
+        # Step 4: Capture filesystem state BEFORE ACPX
+        # Step 5: Build ACPX prompt using manifest pages
+        logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
+        prompt = self._build_acpx_prompt(goal_description, required_pages)
 
-        # Step 4: Run ACPX
+        # Step 6: Run ACPX
         logger.info(f"[ACPX-V2] Step 4: Running ACPX...")
         logger.info(f"[ACPX-V2]   Acpx path: /usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js")
         logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
