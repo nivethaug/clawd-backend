@@ -550,8 +550,17 @@ class ACPFrontendEditorV2:
                 }
         logger.info(f"[ACPX-V2]   ✓ All paths valid")
 
-        # Step 9: Run build gate
-        logger.info(f"[ACPX-V2] Step 9: Running build gate (npm install && npm run build)...")
+        # Step 9: Enforce page guardrails (BEFORE build to prevent routing issues)
+        logger.info(f"[ACPX-V2] Step 9: Enforcing page guardrails (BEFORE build)...")
+        unauthorized_removed = self._enforce_page_guardrails()
+
+        if unauthorized_removed > 0:
+            logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
+        else:
+            logger.info(f"[ACPX-V2]   ✓ All pages authorized")
+
+        # Step 10: Run build gate (AFTER guardrails to prevent build errors)
+        logger.info(f"[ACPX-V2] Step 10: Running build gate (npm install && npm run build)...")
         build_success, build_output = self.build_gate.run_build()
 
         if not build_success:
@@ -568,14 +577,7 @@ class ACPFrontendEditorV2:
 
         logger.info(f"[ACPX-V2] ✓ Build succeeded!")
 
-        # Step 9.5: Validate and remove unauthorized pages (Phase 9 Guardrails)
-        logger.info(f"[ACPX-V2] Step 9.5: Validating pages against guardrails...")
-        unauthorized_removed = self._enforce_page_guardrails()
-
-        if unauthorized_removed > 0:
-            logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
-
-        # Step 10: Success - cleanup snapshot
+        # Step 11: Success - cleanup snapshot
         logger.info(f"[ACPX-V2] Step 10: Cleanup snapshot...")
         self.snapshot_manager.cleanup_snapshot()
 
