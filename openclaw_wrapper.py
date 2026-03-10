@@ -337,15 +337,19 @@ That's all. Execute Phase {phase} now.
         """
         Build goal description for acpx frontend customization.
 
+        IMPORTANT: The raw project description (self.description) is passed first
+        so that the Phase 9 planner can detect explicit page lists and keywords.
+
         Returns:
             Natural language description of what acpx should customize
         """
         description_parts = [
+            f"{self.description}",
+            f"",
             f"Customize this React application for production use.",
             f"",
             f"PROJECT DETAILS:",
             f"- Name: {self.project_name}",
-            f"- Description: {self.description}",
             f"- Template: {self.template_id}",
             f"",
             f"CUSTOMIZATION TASKS:",
@@ -1306,8 +1310,11 @@ def main():
     project_id = int(sys.argv[1])
     project_path = sys.argv[2]
     project_name = sys.argv[3]
-    description = sys.argv[4] if len(sys.argv) > 4 else None
-    template_id = sys.argv[5] if len(sys.argv) > 5 else None
+
+    # Description can span multiple arguments (argv[4:-1])
+    # Template_id is always the last argument (argv[-1])
+    description = " ".join(sys.argv[4:-1]) if len(sys.argv) > 4 else None
+    template_id = sys.argv[-1] if len(sys.argv) > 4 else None
 
     # Create and run wrapper
     wrapper = OpenClawWrapper(
