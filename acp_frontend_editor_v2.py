@@ -591,6 +591,127 @@ class ACPFrontendEditorV2:
             "rollback": False
         }
 
+    def _ai_infer_pages(self, goal_description: str) -> List[str]:
+        """
+        Use AI to infer reasonable page structure from product description.
+
+        Args:
+            goal_description: Product description text
+
+        Returns:
+            List of inferred page names
+        """
+        import json
+        import subprocess
+
+        logger.info(f"[Planner] Running AI page inference for: {goal_description[:100]}...")
+
+        # Build inference prompt
+        inference_prompt = f"""You are planning the page structure for a SaaS application.
+
+Product description:
+{goal_description}
+
+Your task:
+Return a list of 5-10 pages that would be appropriate for this application.
+
+Rules:
+1. Consider the product type (CRM, analytics, document management, etc.)
+2. Think about standard SaaS pages (Dashboard, Settings, etc.)
+3. Be specific with page names (not generic like "MainPage")
+4. Return ONLY a JSON list of page names
+5. Do NOT include explanations or extra text
+
+Response format (JSON ONLY):
+{{
+  "pages": ["Dashboard", "Contacts", "Analytics", "Settings", "Documents"]
+}}
+
+Example outputs:
+- For CRM: [Dashboard, Contacts, Deals, Reports, Tasks, Settings]
+- For document management: [Dashboard, Documents, Templates, Editor, Analytics, Settings]
+- For analytics dashboard: [Dashboard, Reports, Analytics, Settings]
+
+Provide ONLY the JSON list, nothing else."""
+
+        try:
+            # Call LLM for page inference
+            llm_cmd = [
+                "node",
+                "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js",
+                "claude",
+                "exec",
+                inference_prompt
+            ]
+
+            result = subprocess.run(
+                llm_cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd="/tmp"
+            )
+
+            # Parse LLM response
+            response_text = result.stdout.strip()
+
+            # Extract JSON from response - More flexible parsing
+            import re
+            # Try multiple JSON patterns
+            json_patterns = [
+                r'\[\s*{[^}]+\}\s*\]',  # [ { "pages": [...] } ]
+                r'{\s*"pages"\s*:\s*\[.*?\]',  # {"pages": [...]}
+                r'pages"\s*:\s*\[',  # pages": [ (simplified)
+            ]
+
+            inferred_pages = []
+            for pattern in json_patterns:
+                match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
+                if match:
+                    try:
+                        json_str = match.group(0)
+                        # Try to extract just the JSON part
+                        if '[' in json_str:
+                            json_str = json_str[json_str.find('['):]
+                        inferred_data = json.loads(json_str)
+                        pages = inferred_data.get("pages", [])
+                        logger.info(f"[Planner] AI inference successful: {len(pages)} pages")
+                        logger.info(f"[Planner] Inferred: {pages}")
+                        return pages
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[Planner] AI inference JSON parse error with pattern: {pattern}, {e}")
+                        continue
+
+            # If all patterns fail, try to find list-like structures
+            if not inferred_pages:
+                # Look for comma-separated lists of page names
+                list_match = re.search(r'(?:Dashboard|Documents|Templates|Editor|Signing|Contacts|Analytics|Settings|Reports|Tasks|Team|Billing|Notifications|Posts|Create)[,\s]*(?:Dashboard|Documents|Templates|Editor|Signing|Contacts|Analytics|Settings|Reports|Tasks|Team|Billing|Notifications|Posts|Create)', response_text, re.IGNORECASE)
+                if list_match:
+                    # Extract unique page names
+                    found_pages = list(set([p.strip() for p in list_match.group(0).split(',') if p.strip()]))
+                    inferred_pages = found_pages
+                    logger.info(f"[Planner] AI inference successful (list pattern): {len(inferred_pages)} pages")
+                    logger.info(f"[Planner] Inferred: {inferred_pages}")
+                    return inferred_pages
+
+            # Final fallback
+            if not inferred_pages:
+                logger.warning(f"[Planner] AI inference: No valid JSON/list found in response, using keywords")
+            else:
+                logger.info(f"[Planner] Final AI inference result: {inferred_pages}")
+
+            return inferred_pages if inferred_pages else []
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"[Planner] AI inference timeout after 60s")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"[Planner] AI inference JSON decode error: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"[Planner] AI inference error: {type(e).__name__}: {e}")
+            return []
+
     def _build_acpx_prompt(self, goal_description: str) -> str:
         """
         Build ACPX prompt with explicit required artifacts and completion checklist.
@@ -648,7 +769,14 @@ class ACPFrontendEditorV2:
 
             logger.info(f"[Planner] Explicit page list detected: {len(required_pages)} pages")
 
-        # Step 2: Keyword matching (if explicit list not found or incomplete)
+        # Step 2: AI Page Inference (if no explicit pages found) - NEW
+        if not explicit_match:
+            logger.info(f"[Planner] No explicit pages detected, using AI page inference")
+            inferred_pages = self._ai_infer_pages(goal_description)
+            required_pages.extend(inferred_pages)
+            logger.info(f"[Planner] AI inferred pages: {inferred_pages}")
+
+        # Step 3: Keyword matching (if explicit list not found or incomplete)
         desc_lower = goal_description.lower()
         for page_name, keywords in PAGE_KEYWORDS.items():
             if page_name not in required_pages:  # Skip if already in explicit list
