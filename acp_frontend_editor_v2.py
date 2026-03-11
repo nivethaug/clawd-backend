@@ -624,29 +624,24 @@ class ACPFrontendEditorV2:
                 logger.info(f"[ACPX-V2] Step 4: Running ACPX...")
                 
                 # Build command: acpx --cwd <dir> --format quiet claude exec "<prompt>"
+                # Ensure all args are strings to avoid TypeError with PosixPath
                 cmd = [
                     "acpx",
-                    "--cwd", self.frontend_src_path,
+                    "--cwd", str(self.frontend_src_path),
                     "--format", "quiet",
                     "claude",
                     "exec",
-                    prompt
+                    str(prompt)
                 ]
                 
                 logger.info(f"[ACPX-V2]   Command: acpx --cwd {self.frontend_src_path} --format quiet claude exec <prompt>")
                 logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
                 logger.info(f"[ACPX-V2]   Timeout: {BUILD_TIMEOUT} seconds")
 
-                # Log execution details
-                print("[ACPX] cwd:", self.frontend_src_path)
+                # Robust debug logging
+                print("ACPX CMD:", " ".join(cmd[:6]) + " <prompt>")
+                print("[ACPX] cwd:", str(self.frontend_src_path))
                 print("[ACPX] running: acpx --format quiet claude exec")
-                print("ACPX CMD:", " ".join(cmd[:6]) + " <prompt>")  # Don't log full prompt
-
-                # Before subprocess
-                print("🔴 ACPX-V2-SUBPROCESS-PRE: About to call subprocess.run()")
-                print("🔴 ACPX-V2-SUBPROCESS-PRE: Command: acpx")
-                print(f"🔴 ACPX-V2-SUBPROCESS-PRE: Timeout: {BUILD_TIMEOUT}s")
-                print(f"🔴 ACPX-V2-SUBPROCESS-PRE: Working dir: {self.frontend_src_path}")
 
                 result = subprocess.run(
                     cmd,
@@ -655,28 +650,19 @@ class ACPFrontendEditorV2:
                     timeout=BUILD_TIMEOUT
                 )
 
-                # After subprocess returns
+                # Robust debug logging after execution
                 print("ACPX RETURN CODE:", result.returncode)
                 print("ACPX STDOUT:", result.stdout)
                 print("ACPX STDERR:", result.stderr)
-                print(f"🔴 ACPX-V2-SUBPROCESS-POST: Return code: {result.returncode}")
-                print(f"🔴 ACPX-V2-SUBPROCESS-POST: Stdout length: {len(result.stdout)}")
-                print(f"🔴 ACPX-V2-SUBPROCESS-POST: Stderr length: {len(result.stderr)}")
+                
+                # Fail fast if ACPX fails
+                if result.returncode != 0:
+                    raise RuntimeError(f"ACPX execution failed: {result.stderr}")
 
-                # Check for timeout (return code -15 = SIGTERM)
-                if result.returncode == -15:
-                    print("🔴 ACPX-V2-SUBPROCESS-TIMEOUT: Process timed out and was SIGTERM'd")
-
-                logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: ACPX subprocess completed (no timeout)")
+                logger.info(f"[ACPX-V2] ACPX subprocess completed successfully")
                 logger.info(f"[ACPX-V2]   Return code: {result.returncode}")
                 logger.info(f"[ACPX-V2]   Stdout length: {len(result.stdout)} chars")
                 logger.info(f"[ACPX-V2]   Stderr length: {len(result.stderr)} chars")
-
-                # Log first 500 chars of stdout for debugging
-                if result.stdout:
-                    print(f"🔴 ACPX-V2-SUBPROCESS-STDOUT-FIRST-500: {result.stdout[:500]}")
-                if result.stderr:
-                    print(f"🔴 ACPX-V2-SUBPROCESS-STDERR-FIRST-500: {result.stderr[:500]}")
 
                 print("🔴 ACPX-V2-STEP5-DONE: ACPX CLI completed")
 
@@ -941,18 +927,20 @@ Provide ONLY the JSON list, nothing else."""
 
         try:
             # Call LLM for page inference using ACPX CLI
+            # Ensure all args are strings to avoid TypeError
             cmd = [
                 "acpx",
                 "--cwd", "/tmp",
                 "--format", "quiet",
                 "claude",
                 "exec",
-                inference_prompt
+                str(inference_prompt)
             ]
             
+            # Robust debug logging
+            print("ACPX CMD:", " ".join(cmd[:6]) + " <prompt>")
             print("[ACPX] cwd: /tmp")
             print("[ACPX] running: acpx --format quiet claude exec (page inference)")
-            print("ACPX CMD:", " ".join(cmd[:6]) + " <prompt>")
 
             result = subprocess.run(
                 cmd,
@@ -961,9 +949,14 @@ Provide ONLY the JSON list, nothing else."""
                 timeout=60
             )
             
+            # Robust debug logging after execution
             print("ACPX RETURN CODE:", result.returncode)
             print("ACPX STDOUT:", result.stdout)
             print("ACPX STDERR:", result.stderr)
+            
+            # Fail fast if ACPX fails
+            if result.returncode != 0:
+                raise RuntimeError(f"ACPX page inference failed: {result.stderr}")
 
             # Parse LLM response
             response_text = result.stdout.strip()
