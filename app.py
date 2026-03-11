@@ -939,6 +939,97 @@ def cleanup_project_directory(project_path: str) -> Dict[str, Any]:
     return results
 
 
+# ============================================================================
+# DYNAMIC BACKEND PORT ALLOCATION
+# ============================================================================
+
+def check_port_availability(port: int) -> bool:
+    """
+    Check if a port is available for binding.
+
+    Args:
+        port: Port number to check
+
+    Returns:
+        True if port is available, False if in use
+    """
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('0.0.0.0', port))
+            return True
+    except OSError as e:
+        if e.errno == 98:  # Address already in use
+            return False
+        raise
+
+
+def get_next_backend_port() -> int:
+    """
+    Get next available backend port from database.
+
+    Scans ports 8010-9000 to find an unused port.
+
+    Returns:
+        Available port number
+
+    Raises:
+        Exception if no available ports in range
+    """
+    # Get used ports from database
+    with get_db() as conn:
+        used_ports_result = conn.execute(
+            "SELECT backend_port FROM projects WHERE backend_port IS NOT NULL"
+        ).fetchall()
+        used_ports = set(row[0] for row in used_ports_result)
+
+    logger.info(f"[Port Allocation] Currently used ports: {sorted(used_ports)}")
+
+    # Find next available port in range 8010-9000
+    for port in range(8010, 9000):
+        # Skip if port is in use by other projects
+        if port in used_ports:
+            continue
+
+        # Check if port is actually available at system level
+        if not check_port_availability(port):
+            logger.warning(f"[Port Allocation] Port {port} in use by system, skipping")
+            continue
+
+        logger.info(f"[Port Allocation] Found available port: {port}")
+        return port
+
+    raise Exception("No available ports in range 8010-9000")
+
+
+def allocate_backend_port(project_id: int) -> int:
+    """
+    Allocate a backend port for a project and save to database.
+
+    Args:
+        project_id: Project ID
+
+    Returns:
+        Allocated port number
+
+    Raises:
+        Exception if port allocation fails
+    """
+    port = get_next_backend_port()
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE projects SET backend_port = ? WHERE id = ?",
+            (port, project_id)
+        )
+        conn.commit()
+
+    logger.info(f"[Port Allocation] Allocated port {port} for project {project_id}")
+    return port
+
+
+
 def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     """
     Full infrastructure cleanup for a project.
@@ -2167,7 +2258,15 @@ if __name__ == "__main__":
     print(f"Starting Clawdbot Adapter API...")
     print(f"Images directory: {IMAGES_DIR}")
     print(f"Images accessible at: {IMAGES_BASE_URL}")
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+
+    # Dynamic port allocation
+    try:
+        port = get_next_backend_port()
+        print(f"Allocated backend port: {port}")
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except Exception as e:
+        logger.error(f"Failed to allocate backend port: {e}")
+        raise
 
 # TEMPORARY FIX: Make domain field optional to allow testing
 # This is a quick workaround to unblock Phase 9 ACP integration

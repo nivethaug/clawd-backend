@@ -259,6 +259,11 @@ def init_schema():
                 logger.info("✓ Renamed column to claude_code_session_name")
             _run_migration(rename_claude_code_session_name)
 
+            def migrate_backend_port():
+                cur.execute("ALTER TABLE projects ADD COLUMN backend_port INTEGER")
+                logger.info("✓ Added backend_port column for dynamic port allocation")
+            _run_migration(migrate_backend_port)
+
             # Sessions table
             cur.execute("""CREATE TABLE IF NOT EXISTS sessions (
                 id SERIAL PRIMARY KEY,

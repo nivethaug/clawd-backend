@@ -925,7 +925,7 @@ Phase 9 is complete! ACP is integrated as the final step of project creation.
 
             # Apply ACP_README.md DIRECTLY (no build gate needed for documentation)
             # This avoids " "package.json not found" error for README-only changes
-            readme_path = Path(frontend_src_path) / "ACP_README.md"
+            readme_path = Path(frontend_src_path).parent / "ACP_README.md"
 
             try:
                 with open(readme_path, 'w', encoding='utf-8') as f:
