@@ -366,12 +366,13 @@ class DeploymentVerifier:
         except Exception as e:
             return False, f"PM2 check failed: {e}", {"error": str(e)}
     
-    def verify_all(self, include_pm2: bool = True) -> Dict[str, Any]:
+    def verify_all(self, include_pm2: bool = True, include_dns: bool = False) -> Dict[str, Any]:
         """
         Run all verification checks.
         
         Args:
             include_pm2: Whether to check PM2 service status
+            include_dns: Whether to check DNS resolution (default: False - wildcard DNS used)
             
         Returns:
             Dict with overall results and individual check results
@@ -381,13 +382,18 @@ class DeploymentVerifier:
         self.results = []
         start_time = time.time()
         
-        # Define checks to run
+        # Define checks to run (DNS check skipped by default - wildcard DNS in use)
         checks = [
             ("build_output", self.check_build_output),
             ("nginx_config", self.check_nginx_config),
-            ("domain_resolution", self.check_domain_resolution),
-            ("http_response", self.check_http_response),
         ]
+        
+        # DNS check is optional - skip by default since *.dreambigwithai.com wildcard exists
+        if include_dns:
+            checks.append(("domain_resolution", self.check_domain_resolution))
+        
+        # HTTP response check (via localhost to avoid DNS dependency)
+        checks.append(("http_response", self.check_http_response))
         
         if include_pm2:
             checks.append(("pm2_service", self.check_pm2_service))

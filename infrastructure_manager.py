@@ -706,7 +706,7 @@ class NginxConfigurator:
             backend_domain = f"{domain}-api.{BASE_DOMAIN}"
 
             if enable_ssl:
-                # Generate HTTPS configuration with SSL
+                # Generate HTTPS configuration with SSL and SPA routing
                 config = f"""# Frontend: {frontend_domain}
 server {{
     listen 80;
@@ -721,8 +721,17 @@ server {{
     ssl_certificate /etc/letsencrypt/live/{frontend_domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{frontend_domain}/privkey.pem;
 
+    root /root/dreampilot/projects/website/{domain}/frontend/dist;
+    index index.html;
+
+    # SPA routing - serve index.html for all routes
     location / {{
-        proxy_pass http://127.0.0.1:{frontend_port};
+        try_files $uri $uri/ /index.html;
+    }}
+
+    # API proxy
+    location /api {{
+        proxy_pass http://127.0.0.1:{backend_port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -762,14 +771,23 @@ server {{
 }}
 """
             else:
-                # Generate HTTP-only configuration
+                # Generate HTTP-only configuration with SPA routing
                 config = f"""# Frontend: {frontend_domain}
 server {{
     listen 80;
     server_name {frontend_domain};
 
+    root /root/dreampilot/projects/website/{domain}/frontend/dist;
+    index index.html;
+
+    # SPA routing - serve index.html for all routes
     location / {{
-        proxy_pass http://127.0.0.1:{frontend_port};
+        try_files $uri $uri/ /index.html;
+    }}
+
+    # API proxy
+    location /api {{
+        proxy_pass http://127.0.0.1:{backend_port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1163,6 +1181,19 @@ class InfrastructureManager:
         """
         Provision all infrastructure for project.
 
+        Pipeline order:
+        1. Port allocation
+        2. Database provisioning
+        3. Backend environment configuration
+        4. Service configuration
+        5. Build frontend
+        6. Nginx configuration (with SPA routing)
+        7. Start frontend service (PM2 serve)
+        8. Health check
+        9. Mark project READY
+
+        Note: DNS provisioning is SKIPPED - wildcard DNS (*.dreambigwithai.com) is pre-configured.
+
         Returns:
             True if successful, False otherwise
         """
@@ -1170,7 +1201,7 @@ class InfrastructureManager:
             logger.info(f"🚀 Starting infrastructure provisioning for {self.project_name}")
 
             # Phase 1: Allocate ports
-            logger.info("Phase 1/6: Port allocation")
+            logger.info("Phase 1/8: Port allocation")
             self.ports = {
                 "frontend": self.port_allocator.allocate_frontend_port(),
                 "backend": self.port_allocator.allocate_backend_port()
@@ -1178,23 +1209,23 @@ class InfrastructureManager:
             logger.info(f"✓ Ports allocated: {self.ports}")
 
             # Log API URL creation
-            api_url = f"http://{self.domain}/api"
-            logger.info(f"🔗 Backend API URL created: {api_url}")
+            api_url = f"http://{self.domain}.dreambigwithai.com/api"
+            logger.info(f"🔗 Backend API URL: {api_url}")
             logger.info(f"🔌 Backend port: {self.ports['backend']}")
-            logger.info(f"🌐 Frontend domain: http://{self.domain}")
+            logger.info(f"🌐 Frontend domain: http://{self.domain}.dreambigwithai.com")
 
             # Phase 2: Provision database
-            logger.info("Phase 2/6: Database provisioning")
+            logger.info("Phase 2/8: Database provisioning")
             self.database_info = self.db_provisioner.create_database_and_user(self.project_name)
             logger.info(f"✓ Database created: {self.database_info['database_name']}")
 
             # Phase 3: Configure backend environment
-            logger.info("Phase 3/6: Backend environment configuration")
+            logger.info("Phase 3/8: Backend environment configuration")
             self._configure_backend_env()
             logger.info("✓ Backend environment configured")
 
             # Phase 4: Create service config
-            logger.info("Phase 4/6: Service configuration")
+            logger.info("Phase 4/8: Service configuration")
             self.service_name = self.service_manager.create_backend_service(
                 self.project_name,
                 self.ports["backend"],
@@ -1202,8 +1233,27 @@ class InfrastructureManager:
             )
             logger.info(f"✓ Service configured: {self.service_name}")
 
-            # Phase 5: Nginx configuration
-            logger.info("Phase 5/8: Nginx configuration")
+            # Phase 5: Build frontend
+            logger.info("Phase 5/8: Building frontend")
+            frontend_path = self.project_path / "frontend"
+            if frontend_path.exists():
+                build_result = subprocess.run(
+                    ["npm", "run", "build"],
+                    cwd=str(frontend_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+                if build_result.returncode == 0:
+                    logger.info("DEPLOY: Build complete")
+                    logger.info("✓ Frontend build successful")
+                else:
+                    logger.warning(f"⚠️ Frontend build had issues: {build_result.stderr[:200]}")
+            else:
+                logger.warning("⚠️ Frontend path not found, skipping build")
+
+            # Phase 6: Nginx configuration (with SPA routing)
+            logger.info("Phase 6/8: Nginx configuration")
             frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
                 self.domain,
                 self.ports["frontend"],
@@ -1215,93 +1265,120 @@ class InfrastructureManager:
             }
             self.nginx_configurator.install_config(self.domain, config)
             self.nginx_configurator.reload_nginx()
-            logger.info(f"✓ Nginx configured: {self.domains}")
+            logger.info(f"✓ Nginx configured with SPA routing: {self.domains}")
 
-            # Phase 6: SSL certificate provisioning
-            logger.info("Phase 6/8: SSL certificate provisioning")
-            if self.nginx_configurator.generate_ssl_certificates(self.domain):
-                logger.info("✓ SSL certificates generated successfully")
-
-                # Regenerate nginx config with SSL
-                frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
-                    self.domain,
-                    self.ports["frontend"],
-                    self.ports["backend"],
-                    enable_ssl=True
-                )
-                self.nginx_configurator.install_config(self.domain, config)
-                self.nginx_configurator.reload_nginx()
-                logger.info("✓ Nginx reconfigured with SSL")
-            else:
-                logger.warning("⚠️ SSL certificate generation failed, continuing with HTTP-only")
-            
-            # Phase 7: DNS provisioning
-            logger.info("Phase 7/8: DNS provisioning")
-            self.dns_results = self.dns_provisioner.provision_project_dns(self.domain, self.project_name)
-            logger.info(f"✓ DNS provisioned: {self.domains}")
-
-            # Phase 8: Service startup
-            logger.info("Phase 8/8: Service startup")
+            # Phase 7: Start services (PM2)
+            logger.info("Phase 7/8: Service startup")
+            logger.info("DEPLOY: Starting frontend service")
 
             # Start backend service
             self.service_manager.start_backend_service(self.service_name, self.project_path / "backend")
             logger.info(f"✓ Backend service started: {self.service_name}")
 
-            # Backend health check
-            import time
-            logger.info("🩺 Performing backend health check...")
-            time.sleep(3)
-
-            try:
-                import requests
-                health_check_url = f"http://localhost:{self.ports['backend']}/health"
-                health_response = requests.get(health_check_url, timeout=5)
-                logger.info(f"🩺 Backend health check status: {health_response.status_code}")
-            except Exception as e:
-                logger.error(f"❌ Backend health check failed: {e}")
-
-            # Create and start frontend service
-            logger.info("Creating frontend service...")
-            self.frontend_app_name = self.service_manager.create_frontend_service(
-                self.project_name,
-                self.ports["frontend"],
-                self.project_path
-            )
-
-            logger.info(f"✓ Frontend service configured: {self.frontend_app_name}")
-
-            if self.service_manager.start_frontend_service(self.frontend_app_name, self.project_path):
-                logger.info(f"✓ Frontend service started: {self.frontend_app_name}")
+            # Start frontend service using PM2 serve for static files
+            dist_path = self.project_path / "frontend" / "dist"
+            if dist_path.exists():
+                frontend_service_name = f"project-{self.project_name}-frontend"
+                
+                # Stop existing service if any
+                subprocess.run(["pm2", "delete", frontend_service_name], capture_output=True)
+                
+                # Start PM2 serve for SPA
+                pm2_cmd = [
+                    "pm2", "serve",
+                    str(dist_path),
+                    str(self.ports["frontend"]),
+                    "--name", frontend_service_name,
+                    "--spa"
+                ]
+                pm2_result = subprocess.run(pm2_cmd, capture_output=True, text=True)
+                
+                if pm2_result.returncode == 0:
+                    logger.info("DEPLOY: PM2 service started")
+                    logger.info(f"✓ Frontend PM2 service started: {frontend_service_name}")
+                    self.frontend_app_name = frontend_service_name
+                else:
+                    logger.warning(f"⚠️ PM2 serve failed: {pm2_result.stderr[:200]}")
+                    # Fallback: create and start using service manager
+                    self.frontend_app_name = self.service_manager.create_frontend_service(
+                        self.project_name,
+                        self.ports["frontend"],
+                        self.project_path
+                    )
+                    self.service_manager.start_frontend_service(self.frontend_app_name, self.project_path)
             else:
-                logger.warning(f"⚠️ Frontend service failed to start: {self.frontend_app_name}")
+                logger.warning("⚠️ Frontend dist not found, creating service anyway")
+                self.frontend_app_name = self.service_manager.create_frontend_service(
+                    self.project_name,
+                    self.ports["frontend"],
+                    self.project_path
+                )
+                self.service_manager.start_frontend_service(self.frontend_app_name, self.project_path)
 
-            # Log PM2 service creation completion
-            logger.info(f"⚙️ PM2 frontend service started: {self.frontend_app_name}")
-            logger.info(f"⚙️ PM2 backend service started: {self.service_name}")
+            logger.info(f"⚙️ PM2 frontend service: {self.frontend_app_name}")
+            logger.info(f"⚙️ PM2 backend service: {self.service_name}")
 
-            # Wait for services to start up
+            # Save PM2 configuration
+            subprocess.run(["pm2", "save"], capture_output=True)
+
+            # Phase 8: Health check
+            logger.info("Phase 8/8: Health check")
+            
+            # Wait for services to start
             logger.info("Waiting for services to initialize...")
             import time
-            time.sleep(10)
+            time.sleep(5)
 
-            # Verification with enhanced verifier
-            logger.info("🔍 Running enhanced deployment verification...")
+            # Health check via localhost (no DNS dependency)
+            health_check_url = f"http://localhost:{self.ports['frontend']}"
+            health_passed = False
+            
+            for attempt in range(1, 4):
+                try:
+                    logger.info(f"🩺 Health check attempt {attempt}/3: {health_check_url}")
+                    health_response = requests.get(health_check_url, timeout=10)
+                    
+                    if health_response.status_code == 200:
+                        logger.info("DEPLOY: Health check passed")
+                        logger.info(f"✅ Health check passed: HTTP {health_response.status_code}")
+                        health_passed = True
+                        break
+                    else:
+                        logger.warning(f"⚠️ Health check returned: HTTP {health_response.status_code}")
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Health check attempt {attempt} failed: {e}")
+                
+                if attempt < 3:
+                    # Restart PM2 service and retry
+                    logger.info("Restarting frontend service...")
+                    subprocess.run(["pm2", "restart", self.frontend_app_name], capture_output=True)
+                    time.sleep(5)
+
+            if not health_passed:
+                logger.error("❌ Health check failed after 3 attempts")
+                self._rollback()
+                return False
+
+            # Verification with enhanced verifier (DNS check disabled)
+            logger.info("🔍 Running deployment verification...")
             
             enhanced_verifier = EnhancedDeploymentVerifier(
                 project_path=str(self.project_path),
                 domain=self.domain,
                 frontend_port=self.ports["frontend"],
                 backend_port=self.ports["backend"],
-                max_retries=3,
-                retry_delay=5.0
+                max_retries=2,
+                retry_delay=3.0
             )
             
-            verification = enhanced_verifier.verify_all(include_pm2=True)
+            # Skip DNS check - wildcard DNS is pre-configured
+            verification = enhanced_verifier.verify_all(include_pm2=True, include_dns=False)
             
-            # Log detailed verification report
             logger.info(format_verification_report(verification))
 
             if verification["success"]:
+                logger.info("DEPLOY: Project READY")
                 logger.info("✅ All infrastructure provisioned and verified successfully!")
                 self._save_metadata()
                 return True
@@ -1312,7 +1389,6 @@ class InfrastructureManager:
                 if "build_output" in verification["failed_checks"]:
                     logger.warning("⚠️ Build output check failed, attempting rebuild...")
                     
-                    # Run npm build
                     try:
                         build_result = subprocess.run(
                             ["npm", "run", "build"],
@@ -1324,9 +1400,10 @@ class InfrastructureManager:
                         
                         if build_result.returncode == 0:
                             logger.info("✅ Rebuild succeeded, re-running verification...")
-                            verification = enhanced_verifier.verify_all(include_pm2=True)
+                            verification = enhanced_verifier.verify_all(include_pm2=True, include_dns=False)
                             
                             if verification["success"]:
+                                logger.info("DEPLOY: Project READY")
                                 logger.info("✅ Deployment verified after rebuild!")
                                 self._save_metadata()
                                 return True
