@@ -91,35 +91,64 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             logger.info(f"Fast wrapper completed successfully for project {project_id}")
 
             # Step 2: Run OpenClaw wrapper for phases 3-7 (infrastructure provisioning)
-            logger.info(f"Executing: python3 openclaw_wrapper.py {project_id} {project_path} '{project_name}' (template_id: {template_id})")
-
             # Build command args - use current Python interpreter and dynamic paths
             openclaw_wrapper_path = str(BACKEND_DIR / "openclaw_wrapper.py")
             cmd_args = [python_exe, openclaw_wrapper_path,
                        str(project_id), project_path, project_name, description or "",
                        template_id or ""]
 
-            result = subprocess.run(
-                cmd_args,
-                capture_output=True,
-                text=True,
-                timeout=3600  # 60 minutes total (10 min per task)
-            )
+            # Robust logging before execution
+            print("=" * 60)
+            print("WORKER: launching wrapper:", " ".join(cmd_args))
+            print("WORKER: project_id:", project_id)
+            print("WORKER: project_path:", project_path)
+            print("WORKER: project_name:", project_name)
+            print("=" * 60)
+            logger.info(f"Executing: {' '.join(cmd_args)}")
 
-            # Check result
-            if result.returncode == 0:
+            try:
+                result = subprocess.run(
+                    cmd_args,
+                    capture_output=True,
+                    text=True,
+                    timeout=900  # 15 minutes max
+                )
+
+                # Robust logging after execution
+                print("=" * 60)
+                print("WRAPPER STDOUT:", result.stdout)
+                print("WRAPPER STDERR:", result.stderr)
+                print("WRAPPER RETURN CODE:", result.returncode)
+                print("=" * 60)
+
+                if result.returncode != 0:
+                    raise RuntimeError(f"Wrapper failed with code {result.returncode}: {result.stderr}")
+
                 # Success (wrapper updates status internally)
                 logger.info(f"Claude Code wrapper completed successfully for project {project_id}")
                 logger.info(f"Output (last 2000 chars):\n{result.stdout[-2000:]}")
                 logger.info(f"Full stdout length: {len(result.stdout)} characters")
-            else:
-                # Failure
-                logger.error(f"Claude Code wrapper failed for project {project_id}")
-                logger.error(f"Return code: {result.returncode}")
-                logger.error(f"Error output: {result.stderr}")
+
+            except subprocess.TimeoutExpired:
+                print("WRAPPER ERROR: execution timeout")
+                logger.error(f"Claude Code wrapper timeout for project {project_id}")
+                raise
+
+            except Exception as e:
+                print("WRAPPER ERROR:", str(e))
+                import traceback
+                traceback.print_exc()
+                logger.error(f"Claude Code wrapper error for project {project_id}: {e}")
+                raise
+
+            except subprocess.TimeoutExpired:
+                # Timeout
+                print("=" * 60)
+                print("WRAPPER ERROR: execution timeout after 60 minutes")
+                print("=" * 60)
+                logger.error(f"Claude Code wrapper timeout for project {project_id}")
 
                 # Update project status to 'failed' in NEW DB session
-                # (wrapper should handle this, but we double-check)
                 try:
                     with get_db() as conn:
                         conn.execute(
@@ -127,29 +156,18 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
                             (project_id,)
                         )
                         conn.commit()
-                        logger.info(f"Project {project_id} status updated to 'failed' (safety check)")
+                        logger.info(f"Project {project_id} status updated to 'failed' (timeout)")
                 except Exception as db_error:
                     logger.error(f"Failed to update project status: {db_error}")
 
-        except subprocess.TimeoutExpired:
-            # Timeout
-            logger.error(f"Claude Code wrapper timeout for project {project_id}")
-
-            # Update project status to 'failed' in NEW DB session
-            try:
-                with get_db() as conn:
-                    conn.execute(
-                        "UPDATE projects SET status = 'failed' WHERE id = ?",
-                        (project_id,)
-                    )
-                    conn.commit()
-                    logger.info(f"Project {project_id} status updated to 'failed' (timeout)")
-            except Exception as db_error:
-                logger.error(f"Failed to update project status: {db_error}")
-
-        except Exception as e:
-            # Unexpected error
-            logger.error(f"Claude Code wrapper worker error for project {project_id}: {e}")
+            except Exception as e:
+                # Unexpected error
+                print("=" * 60)
+                print("WRAPPER ERROR:", str(e))
+                print("=" * 60)
+                import traceback
+                traceback.print_exc()
+                logger.error(f"Claude Code wrapper worker error for project {project_id}: {e}")
 
             # Update project status to 'failed' in NEW DB session
             try:
