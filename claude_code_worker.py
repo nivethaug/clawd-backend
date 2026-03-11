@@ -76,10 +76,13 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
 
             result = subprocess.run(
                 cmd_args,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
                 text=True,
                 timeout=3600,  # 60 minutes total
-                env=env  # Pass environment variables
+                close_fds=True,
+                env=env
             )
 
             if result.returncode != 0:
@@ -109,9 +112,13 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             try:
                 result = subprocess.run(
                     cmd_args,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.DEVNULL,
                     text=True,
-                    timeout=900  # 15 minutes max
+                    timeout=900,  # 15 minutes max
+                    close_fds=True,
+                    env=os.environ.copy()
                 )
 
                 # Robust logging after execution
