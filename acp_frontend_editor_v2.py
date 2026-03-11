@@ -620,6 +620,8 @@ class ACPFrontendEditorV2:
 
             # Step 6: Run ACPX
             try:
+                print("=" * 60)
+                print("PHASE_9_APPLY")
                 print("🔴 ACPX-V2-STEP5: Running ACPX CLI")
                 logger.info(f"[ACPX-V2] Step 4: Running ACPX...")
                 

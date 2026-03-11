@@ -695,7 +695,6 @@ That's all. Execute Phase {phase} now.
             return True
 
     def phase_9_acp_frontend_editor(self) -> bool:
-        print("🔴 PHASE_9_START: Starting Phase 9 method")
         """
         Phase 9: ACP Controlled Frontend Editor
 
@@ -715,6 +714,13 @@ That's all. Execute Phase {phase} now.
         4. Create ACP_README.md with documentation
         5. Report success
         """
+        # Debug tracing for Phase 9 execution
+        print("=" * 60)
+        print("PHASE_9_START")
+        print("PHASE_9_PROJECT:", self.project_name)
+        print("PHASE_9_FRONTEND_PATH:", str(self.frontend_path))
+        print("=" * 60)
+        
         logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor (Integrated)")
         
         # Track pipeline status - ACPX phase continues from phase 8
@@ -1499,7 +1505,19 @@ Execute the refinement now and make this template production-ready for: {self.pr
             # This MUST run before infrastructure so deployment verification doesn't block it
             logger.info(f"🤖 Phase 3/{total_phases}: ACPX Frontend Refinement")
             self.status_tracker.start_phase(PipelinePhase.ACPX)
-            if self.phase_9_acp_frontend_editor():
+            
+            print("PIPELINE TRACE: entering Phase 9 (ACPX Frontend Refinement)")
+            try:
+                result_phase9 = self.phase_9_acp_frontend_editor()
+                print("PIPELINE TRACE: exiting Phase 9")
+                print("PIPELINE TRACE: Phase 9 result =", result_phase9)
+            except Exception as e:
+                print("PHASE_9_ERROR:", str(e))
+                import traceback
+                traceback.print_exc()
+                result_phase9 = False
+            
+            if result_phase9:
                 phases_succeeded += 1
                 self.status_tracker.complete_phase(PipelinePhase.ACPX)
                 logger.info("✅ Phase 3 (ACPX) completed successfully")
