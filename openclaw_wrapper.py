@@ -699,6 +699,9 @@ That's all. Execute Phase {phase} now.
         """
         Phase 9: ACP Controlled Frontend Editor
 
+        NOTE: DreamPilot uses ACPFrontendEditorV2 exclusively.
+        The legacy ACPFrontendEditor implementation has been removed.
+
         This phase integrates ACP (Agent Client Protocol) as final phase in project creation.
         ACP provides safe, validated frontend editing with path validation, file limits,
         snapshot/rollback, and build gates.
@@ -707,7 +710,7 @@ That's all. Execute Phase {phase} now.
 
         Workflow:
         1. Log Phase 9 start
-        2. Initialize ACP Frontend Editor directly (no HTTP call)
+        2. Initialize ACP Frontend Editor V2 directly (no HTTP call)
         3. Generate and apply frontend customizations via acpx
         4. Create ACP_README.md with documentation
         5. Report success
@@ -718,39 +721,25 @@ That's all. Execute Phase {phase} now.
         # If ACPX was already tracked in phase 8, this is additional tracking
 
         try:
-
-            # Import ACP Frontend Editor directly
-            from acp_frontend_editor import ACPFrontendEditor
-
-            # Construct frontend/src path (ACPFrontendEditor expects full path to src/)
+            # Construct frontend/src path
             frontend_src_path = str(self.frontend_path / "src")
 
             logger.info(f"📁 Frontend path: {self.frontend_path}")
             logger.info(f"📁 Frontend src path: {frontend_src_path}")
-
 
             if not os.path.exists(frontend_src_path):
                 logger.warning("⚠️ Frontend src directory not found - Phase 9 will fail")
                 self.completed_phases.append("ACP Frontend Editor (Failed - No Frontend)")
                 return False  # Don't skip - let it fail with clear error
 
-            
-            # Initialize ACP editor with frontend/src path
-            # ACPFrontendEditor expects full path to src/ directory
-            
-            logger.debug(f"[Phase 9] Preparing frontend_src_path: {frontend_src_path}")
-            logger.debug(f"[Phase 9] Type: {type(frontend_src_path)}")
-            
             # Force str conversion early
             frontend_src_path = str(frontend_src_path).rstrip("/")
-            
             
             if not os.path.exists(frontend_src_path):
                 logger.debug(f"[Phase 9] ❌ Frontend src path does NOT exist: {frontend_src_path}")
                 raise RuntimeError(f"Frontend src directory not found: {frontend_src_path}")
 
-
-            # STEP 0: Run Frontend Optimizer (Rule-Based Branding) - NEW
+            # STEP 0: Run Frontend Optimizer (Rule-Based Branding)
             logger.info("🔧 Step 0: Running Frontend Optimizer (rule-based branding)")
             logger.info(f"[Phase 9-Step0] Project: {self.project_name}")
             logger.info(f"[Phase 9-Step0] Description: {self.description[:100]}...")
@@ -779,9 +768,6 @@ That's all. Execute Phase {phase} now.
                 logger.warning(f"[Phase 9-Step0]   Exception: {type(e).__name__}: {str(e)}")
                 logger.warning("[Phase 9-Step0]   Continuing with ACPX step...")
 
-            editor = ACPFrontendEditor(frontend_src_path, self.project_name)
-            logger.info("✓ ACP Frontend Editor initialized")
-
             # Generate execution ID
             import uuid
             execution_id = f"acp_{uuid.uuid4().hex[:12]}"
@@ -804,12 +790,14 @@ That's all. Execute Phase {phase} now.
             result = None
 
             try:
-                # Use V2 editor with filesystem diffing
+                # Use V2 editor with filesystem diffing (exclusive - no legacy editor)
                 print("🔴 PHASE_9_IMPORT: Importing ACPFrontendEditorV2")
                 from acp_frontend_editor_v2 import ACPFrontendEditorV2
 
                 print("🔴 PHASE_9_V2_INIT: Initializing ACPFrontendEditorV2")
                 editor_v2 = ACPFrontendEditorV2(frontend_src_path, self.project_name)
+                logger.info("✓ ACP Frontend Editor V2 initialized")
+
                 print("🔴 PHASE_9_APPLY: Calling apply_changes_via_acpx")
                 result = editor_v2.apply_changes_via_acpx(goal_description, execution_id)
 
