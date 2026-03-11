@@ -622,23 +622,25 @@ class ACPFrontendEditorV2:
             try:
                 print("🔴 ACPX-V2-STEP5: Running ACPX CLI")
                 logger.info(f"[ACPX-V2] Step 4: Running ACPX...")
-                logger.info(f"[ACPX-V2]   Acpx path: /usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js")
+                logger.info(f"[ACPX-V2]   Command: acpx-claude")
                 logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
                 logger.info(f"[ACPX-V2]   Timeout: {BUILD_TIMEOUT} seconds")
 
-                acpx_bin = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
-                cmd = [acpx_bin, "claude", "exec", prompt]
+                # Log execution details
+                print("[ACPX] cwd:", self.frontend_src_path)
+                print("[ACPX] running: acpx-claude")
 
                 # Before subprocess
                 print("🔴 ACPX-V2-SUBPROCESS-PRE: About to call subprocess.run()")
-                print(f"🔴 ACPX-V2-SUBPROCESS-PRE: Command: {' '.join(cmd[:3])}... (truncated)")
+                print("🔴 ACPX-V2-SUBPROCESS-PRE: Command: acpx-claude")
                 print(f"🔴 ACPX-V2-SUBPROCESS-PRE: Timeout: {BUILD_TIMEOUT}s")
                 print(f"🔴 ACPX-V2-SUBPROCESS-PRE: Working dir: {self.frontend_src_path}")
 
                 result = subprocess.run(
-                    cmd,
-                    capture_output=True,
+                    ["acpx-claude"],
+                    input=prompt,
                     text=True,
+                    capture_output=True,
                     timeout=BUILD_TIMEOUT,
                     cwd=self.frontend_src_path
                 )
@@ -925,19 +927,15 @@ Analytics dashboard → {{"pages": ["Dashboard", "Reports", "Analytics", "Settin
 Provide ONLY the JSON list, nothing else."""
 
         try:
-            # Call LLM for page inference
-            llm_cmd = [
-                "node",
-                "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js",
-                "claude",
-                "exec",
-                inference_prompt
-            ]
+            # Call LLM for page inference using acpx-claude
+            print("[ACPX] cwd: /tmp")
+            print("[ACPX] running: acpx-claude (page inference)")
 
             result = subprocess.run(
-                llm_cmd,
-                capture_output=True,
+                ["acpx-claude"],
+                input=inference_prompt,
                 text=True,
+                capture_output=True,
                 timeout=60,
                 cwd="/tmp"
             )
