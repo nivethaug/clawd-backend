@@ -59,15 +59,20 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             # Step 1: Run fast wrapper for phases 1-2 (template setup)
             logger.info(f"Executing: python3 fast_wrapper.py {project_id} {project_path} '{project_name}' (template_id: {template_id})")
 
-            # Build command args - use current Python interpreter and dynamic paths
+            # Build command args as list - use current Python interpreter and dynamic paths
+            # -u flag ensures unbuffered output for real-time logging
             python_exe = sys.executable
             fast_wrapper_path = str(BACKEND_DIR / "fast_wrapper.py")
-            cmd_args = [python_exe, fast_wrapper_path,
-                       str(project_id), project_path, project_name, description or "", template_id or ""]
-
-            # Add template_id if provided
-            if template_id:
-                cmd_args.append(template_id)
+            cmd_args = [
+                python_exe,
+                "-u",
+                fast_wrapper_path,
+                str(project_id),
+                str(project_path),
+                str(project_name),
+                str(description or ""),
+                str(template_id or "")
+            ]
 
             # Pass environment variables for EMPTY_TEMPLATE_MODE
             import os
@@ -94,11 +99,19 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             logger.info(f"Fast wrapper completed successfully for project {project_id}")
 
             # Step 2: Run OpenClaw wrapper for phases 3-7 (infrastructure provisioning)
-            # Build command args - use current Python interpreter and dynamic paths
+            # Build command args as list - use current Python interpreter and dynamic paths
+            # -u flag ensures unbuffered output for real-time logging
             openclaw_wrapper_path = str(BACKEND_DIR / "openclaw_wrapper.py")
-            cmd_args = [python_exe, openclaw_wrapper_path,
-                       str(project_id), project_path, project_name, description or "",
-                       template_id or ""]
+            cmd_args = [
+                python_exe,
+                "-u",
+                openclaw_wrapper_path,
+                str(project_id),
+                str(project_path),
+                str(project_name),
+                str(description or ""),
+                str(template_id or "")
+            ]
 
             # Robust logging before execution
             print("=" * 60)
