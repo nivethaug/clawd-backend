@@ -51,7 +51,8 @@ def get_connection_pool() -> pool.ThreadedConnectionPool:
             database=DB_NAME,
             user=DB_USER,
             password=DB_PASSWORD,
-            cursor_factory=cursor_factory
+            cursor_factory=cursor_factory,
+            connect_timeout=5  # Prevent hanging on unreachable database
         )
         logger.info(f"✓ Connection pool created (host={DB_HOST}, db={DB_NAME})")
 

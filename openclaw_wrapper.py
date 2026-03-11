@@ -14,7 +14,11 @@ Phases:
 7. Verification
 """
 
+# BOOT DIAGNOSTIC - Must be BEFORE any imports to detect blocking imports
 import sys
+print("OPENCLAW_WRAPPER_BOOT", flush=True)
+sys.stdout.flush()
+
 import json
 import logging
 import os
@@ -30,11 +34,11 @@ from pipeline_status import PipelineStatusTracker, PipelinePhase, PhaseStatus, E
 BACKEND_DIR = Path(__file__).parent.resolve()
 
 # DIAGNOSTIC: Track which file is actually loaded
-print(f"OPENCLAW_WRAPPER_LOADED: {__file__}")
-print(f"BACKEND_DIR: {BACKEND_DIR}")
-print(f"PID: {os.getpid()}")
-print(f"FILE_MODIFIED: {datetime.fromtimestamp(os.path.getmtime(__file__))}")
-print(f"CURRENT_TIME: {datetime.now()}")
+print(f"OPENCLAW_WRAPPER_LOADED: {__file__}", flush=True)
+print(f"BACKEND_DIR: {BACKEND_DIR}", flush=True)
+print(f"PID: {os.getpid()}", flush=True)
+print(f"FILE_MODIFIED: {datetime.fromtimestamp(os.path.getmtime(__file__))}", flush=True)
+print(f"CURRENT_TIME: {datetime.now()}", flush=True)
 
 # Configure logging
 logger = logging.getLogger(__name__)  # ← MUST BE FIRST
