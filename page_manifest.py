@@ -234,6 +234,158 @@ export default function {page_name}() {{
             logger.error(f"[Manifest] Error removing manifest: {e}")
             return False
 
+    def validate_scaffolded_pages(self, expected_pages: List[str]) -> Dict[str, Any]:
+        """
+        Validate that expected pages exist in the pages directory.
+        
+        This prevents AI hallucinations where pages are claimed to be created
+        but don't actually exist on the filesystem.
+        
+        Args:
+            expected_pages: List of page names that should exist
+            
+        Returns:
+            Dict with validation results:
+            - valid: True if all pages exist
+            - existing_pages: List of pages that exist
+            - missing_pages: List of pages that don't exist
+            - extra_pages: List of pages that exist but weren't expected
+        """
+        if not self.pages_path.exists():
+            logger.warning(f"[Manifest] Pages directory does not exist: {self.pages_path}")
+            return {
+                "valid": False,
+                "existing_pages": [],
+                "missing_pages": expected_pages,
+                "extra_pages": [],
+                "error": "Pages directory not found"
+            }
+        
+        # Get all .tsx files in pages directory
+        existing_files = list(self.pages_path.glob("*.tsx"))
+        existing_page_names = {f.stem for f in existing_files}
+        
+        # Normalize expected page names
+        expected_set = set(expected_pages)
+        
+        # Find missing and extra pages
+        missing = list(expected_set - existing_page_names)
+        extra = list(existing_page_names - expected_set)
+        
+        # Filter out system pages that are expected to exist
+        system_pages = {"App", "index", "NotFound", "Error", "Loading", "Welcome"}
+        extra = [p for p in extra if p not in system_pages]
+        
+        result = {
+            "valid": len(missing) == 0,
+            "existing_pages": list(existing_page_names),
+            "missing_pages": missing,
+            "extra_pages": extra,
+            "total_expected": len(expected_pages),
+            "total_found": len(existing_page_names)
+        }
+        
+        if result["valid"]:
+            logger.info(f"[Manifest] ✅ All {len(expected_pages)} expected pages exist")
+        else:
+            logger.warning(f"[Manifest] ⚠️ Missing pages: {missing}")
+            if extra:
+                logger.info(f"[Manifest] ℹ️ Extra pages found (not in manifest): {extra}")
+        
+        return result
+    
+    def verify_manifest_integrity(self) -> Dict[str, Any]:
+        """
+        Verify that the manifest file matches actual filesystem state.
+        
+        This should be called after ACPX editing to ensure:
+        1. Manifest exists
+        2. Pages in manifest exist on disk
+        3. No unexpected pages were created
+        
+        Returns:
+            Dict with integrity check results
+        """
+        # Load manifest
+        manifest = self.load_manifest()
+        if not manifest:
+            return {
+                "valid": False,
+                "error": "No manifest file found",
+                "manifest_path": str(self.manifest_path)
+            }
+        
+        expected_pages = manifest.get("pages", [])
+        if not expected_pages:
+            return {
+                "valid": False,
+                "error": "Manifest contains no pages",
+                "manifest": manifest
+            }
+        
+        # Validate pages exist
+        validation = self.validate_scaffolded_pages(expected_pages)
+        
+        return {
+            "valid": validation["valid"],
+            "manifest_pages": expected_pages,
+            "filesystem_pages": validation["existing_pages"],
+            "missing_pages": validation["missing_pages"],
+            "extra_pages": validation["extra_pages"],
+            "manifest_path": str(self.manifest_path)
+        }
+    
+    def mark_scaffolded(self) -> bool:
+        """
+        Mark manifest as scaffolded by updating the scaffolded flag.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            manifest = self.load_manifest()
+            if not manifest:
+                logger.error("[Manifest] Cannot mark scaffolded - no manifest found")
+                return False
+            
+            manifest["scaffolded"] = True
+            manifest["scaffolded_at"] = None  # Will be set by write
+            
+            with open(self.manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(manifest, f, indent=2)
+            
+            logger.info(f"[Manifest] Marked as scaffolded: {self.manifest_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[Manifest] Error marking scaffolded: {e}")
+            return False
+    
+    def get_pages_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of pages in manifest and on disk.
+        
+        Returns:
+            Dict with summary information
+        """
+        manifest = self.load_manifest()
+        manifest_pages = manifest.get("pages", [])
+        
+        # Get filesystem pages
+        fs_pages = []
+        if self.pages_path.exists():
+            fs_pages = [f.stem for f in self.pages_path.glob("*.tsx")]
+        
+        return {
+            "manifest_exists": self.manifest_path.exists(),
+            "manifest_pages": manifest_pages,
+            "manifest_scaffolded": manifest.get("scaffolded", False),
+            "filesystem_pages": fs_pages,
+            "pages_directory_exists": self.pages_path.exists(),
+            "total_manifest_pages": len(manifest_pages),
+            "total_filesystem_pages": len(fs_pages)
+        }
+
 
 def create_page_manifest(project_path: str, pages: List[str]) -> bool:
     """

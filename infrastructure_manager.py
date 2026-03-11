@@ -6,7 +6,7 @@ Handles all infrastructure provisioning for website projects:
 - Port allocation
 - Service management
 - Nginx configuration
-- Deployment verification
+- Deployment verification with retry logic
 """
 
 import subprocess
@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import dns_manager  # Internal DNS management module
 from typing import Optional, Dict, List, Tuple
+
+# Import enhanced deployment verifier
+from deployment_verifier import DeploymentVerifier as EnhancedDeploymentVerifier, format_verification_report
 
 # Configure logging
 logging.basicConfig(
@@ -1281,20 +1284,57 @@ class InfrastructureManager:
             import time
             time.sleep(10)
 
-            # Verification
-            logger.info("Verifying deployment...")
-            verification = self.verifier.verify_deployment(
-                self.project_name,
-                self.ports["frontend"],
-                self.ports["backend"]
+            # Verification with enhanced verifier
+            logger.info("🔍 Running enhanced deployment verification...")
+            
+            enhanced_verifier = EnhancedDeploymentVerifier(
+                project_path=str(self.project_path),
+                domain=self.domain,
+                frontend_port=self.ports["frontend"],
+                backend_port=self.ports["backend"],
+                max_retries=3,
+                retry_delay=5.0
             )
+            
+            verification = enhanced_verifier.verify_all(include_pm2=True)
+            
+            # Log detailed verification report
+            logger.info(format_verification_report(verification))
 
-            if verification["overall"]:
-                logger.info("✅ All infrastructure provisioned successfully!")
+            if verification["success"]:
+                logger.info("✅ All infrastructure provisioned and verified successfully!")
                 self._save_metadata()
                 return True
             else:
-                logger.error("❌ Deployment verification failed")
+                logger.error(f"❌ Deployment verification failed: {verification['failed_checks']}")
+                
+                # Check if build-related failure - attempt rebuild
+                if "build_output" in verification["failed_checks"]:
+                    logger.warning("⚠️ Build output check failed, attempting rebuild...")
+                    
+                    # Run npm build
+                    try:
+                        build_result = subprocess.run(
+                            ["npm", "run", "build"],
+                            cwd=self.project_path / "frontend",
+                            capture_output=True,
+                            text=True,
+                            timeout=600
+                        )
+                        
+                        if build_result.returncode == 0:
+                            logger.info("✅ Rebuild succeeded, re-running verification...")
+                            verification = enhanced_verifier.verify_all(include_pm2=True)
+                            
+                            if verification["success"]:
+                                logger.info("✅ Deployment verified after rebuild!")
+                                self._save_metadata()
+                                return True
+                        else:
+                            logger.error(f"❌ Rebuild failed: {build_result.stderr[:500]}")
+                    except Exception as e:
+                        logger.error(f"❌ Rebuild exception: {e}")
+                
                 self._rollback()
                 return False
 

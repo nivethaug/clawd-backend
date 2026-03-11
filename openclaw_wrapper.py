@@ -23,6 +23,9 @@ import requests
 from datetime import datetime
 from pathlib import Path
 
+# Pipeline status tracking
+from pipeline_status import PipelineStatusTracker, PipelinePhase, PhaseStatus, ErrorCode, format_status_report
+
 # DIAGNOSTIC: Track which file is actually loaded
 print(f"OPENCLAW_WRAPPER_LOADED: {__file__}")
 print(f"PID: {os.getpid()}")
@@ -80,6 +83,9 @@ class OpenClawWrapper:
         # Add template selection to __init__
         self.template_repo = None
         self.template_features = []
+        
+        # Pipeline status tracker
+        self.status_tracker = PipelineStatusTracker(project_id)
 
         # Step 0: Select template if not provided
         if not template_id:
@@ -321,6 +327,9 @@ That's all. Execute Phase {phase} now.
         - Determine best template (already done via Groq)
         """
         logger.info("📋 Phase 1/8: Analyze Project")
+        
+        # Track pipeline status
+        self.status_tracker.start_phase(PipelinePhase.PLANNER)
 
         # Template already selected via Groq in app.py
         # This phase is just confirmation
@@ -330,6 +339,10 @@ That's all. Execute Phase {phase} now.
         logger.info(f"✓ Template: already selected via Groq API")
 
         self.completed_phases.append("Analyze Project")
+        self.status_tracker.complete_phase(PipelinePhase.PLANNER, {
+            "template_id": self.template_id,
+            "project_name": self.project_name
+        })
         return True
 
 
@@ -387,17 +400,30 @@ That's all. Execute Phase {phase} now.
         - This phase just verifies completion
         """
         logger.info("📋 Phase 2/8: Template Setup")
+        
+        # Track pipeline status
+        self.status_tracker.start_phase(PipelinePhase.SCAFFOLD)
 
         # Verify frontend exists
         frontend_path = self.project_path / "frontend"
         if not frontend_path.exists():
             logger.error("❌ Frontend directory not found")
+            self.status_tracker.fail_phase(
+                PipelinePhase.SCAFFOLD,
+                ErrorCode.SCAFFOLD_FAILED,
+                "Frontend directory not found"
+            )
             return False
 
         # Verify backend exists
         backend_path = self.project_path / "backend"
         if not backend_path.exists():
             logger.error("❌ Backend directory not found")
+            self.status_tracker.fail_phase(
+                PipelinePhase.SCAFFOLD,
+                ErrorCode.SCAFFOLD_FAILED,
+                "Backend directory not found"
+            )
             return False
 
         logger.info("✓ Template setup complete")
@@ -405,6 +431,10 @@ That's all. Execute Phase {phase} now.
         logger.info(f"✓ Backend exists: {backend_path}")
 
         self.completed_phases.append("Template Setup")
+        self.status_tracker.complete_phase(PipelinePhase.SCAFFOLD, {
+            "frontend_path": str(frontend_path),
+            "backend_path": str(backend_path)
+        })
         return True
 
     def phase_3_database_provisioning(self) -> bool:
@@ -534,6 +564,9 @@ That's all. Execute Phase {phase} now.
         Executes batches of changes with build verification after each batch.
         """
         logger.info("📋 Phase 8/8: AI-Driven Frontend Refinement (CrewAI Multi-Agent Mode)")
+        
+        # Track pipeline status
+        self.status_tracker.start_phase(PipelinePhase.ACPX)
 
         try:
             # Check if this is a website project (type_id = 1)
@@ -543,6 +576,7 @@ That's all. Execute Phase {phase} now.
                 logger.info("✓ Skipping AI frontend refinement (not a website project)")
                 logger.info(f"  Project type_id: {project_type_id}")
                 self.completed_phases.append("AI Frontend Refinement (Skipped)")
+                self.status_tracker.skip_phase(PipelinePhase.ACPX, "Not a website project")
                 return True
 
             # Update status
@@ -675,6 +709,9 @@ That's all. Execute Phase {phase} now.
         5. Report success
         """
         logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor (Integrated)")
+        
+        # Track pipeline status - ACPX phase continues from phase 8
+        # If ACPX was already tracked in phase 8, this is additional tracking
 
         try:
 
@@ -1417,12 +1454,16 @@ Execute the refinement now and make this template production-ready for: {self.pr
             return None
 
     def run_all_phases(self):
-        """Execute all 7 phases in order."""
+        """Execute all 9 phases in order with structured status tracking."""
         try:
             logger.info("🚀 Project pipeline started")
             logger.info(f"📋 Project: {self.project_name}")
             logger.info(f"📁 Project path: {self.project_path}")
             logger.info(f"🆔 Project ID: {self.project_id}")
+            
+            # Initialize pipeline status tracking
+            self.status_tracker.initialize()
+            logger.info("📊 Pipeline status tracking initialized")
 
             total_phases = 9
             phases_succeeded = 0
@@ -1435,6 +1476,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
             else:
                 self.failed_phases.append("Analyze Project")
                 self.update_status("failed")
+                self.status_tracker.fail_phase(PipelinePhase.PLANNER, ErrorCode.PLANNER_INVALID_OUTPUT, "Phase 1 failed")
                 logger.error("❌ Initialization failed at phase 1")
                 return
 
@@ -1471,13 +1513,16 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 logger.error("❌ Initialization failed at phase 4")
                 return
 
-            # Phase 5: Service Setup
+            # Phase 5: Service Setup (includes build phase tracking)
             logger.info(f"📋 Phase 5/{total_phases}: Service Setup")
+            self.status_tracker.start_phase(PipelinePhase.BUILD)
             if self.phase_5_service_setup():
                 phases_succeeded += 1
+                self.status_tracker.complete_phase(PipelinePhase.BUILD)
                 logger.info(f"✓ Phase 5 completed!")
             else:
                 self.failed_phases.append("Service Setup")
+                self.status_tracker.fail_phase(PipelinePhase.BUILD, ErrorCode.BUILD_FAILED, "Service setup failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 5")
                 return
@@ -1493,13 +1538,16 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 logger.error("❌ Initialization failed at phase 6")
                 return
 
-            # Phase 7: Verification
+            # Phase 7: Verification (Deploy phase)
             logger.info(f"📋 Phase 7/{total_phases}: Verification")
+            self.status_tracker.start_phase(PipelinePhase.DEPLOY)
             if self.phase_7_verification():
                 phases_succeeded += 1
+                self.status_tracker.complete_phase(PipelinePhase.DEPLOY)
                 logger.info(f"✓ Phase 7 completed!")
             else:
                 self.failed_phases.append("Verification")
+                self.status_tracker.fail_phase(PipelinePhase.DEPLOY, ErrorCode.DEPLOY_FAILED, "Deployment verification failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 7")
                 return
@@ -1543,15 +1591,29 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 self.update_status("ready")
                 logger.info(f"✓ Project {self.project_id} status updated to 'ready'")
                 logger.info(f"📊 Completed phases: {', '.join(self.completed_phases)}")
+                
+                # Log final pipeline status
+                progress = self.status_tracker.get_progress_summary()
+                logger.info(f"📈 Pipeline Progress: {progress['progress_percent']}% - {progress['overall_status']}")
             else:
                 logger.error(f"❌ Initialization incomplete. Succeeded: {phases_succeeded}/{total_phases}, Failed: {', '.join(self.failed_phases)}")
                 self.update_status("failed")
+                
+                # Log pipeline status on failure
+                progress = self.status_tracker.get_progress_summary()
+                logger.error(f"📉 Pipeline Progress: {progress['progress_percent']}% - {progress['overall_status']}")
+                if progress.get('error_code'):
+                    logger.error(f"🔴 Error Code: {progress['error_code']}")
 
         except Exception as e:
             logger.error(f"💥 Unexpected error in OpenClaw wrapper: {e}")
             self.update_status("failed")
+            self.status_tracker.fail_phase(PipelinePhase.DEPLOY, ErrorCode.UNKNOWN_ERROR, str(e))
 
         finally:
+            # Print final status report
+            status_report = format_status_report(self.status_tracker.get_status())
+            logger.info(f"\n{status_report}")
             logger.info("🏁 OpenClaw wrapper finished")
 
 

@@ -264,6 +264,16 @@ def init_schema():
                 logger.info("✓ Added backend_port column for dynamic port allocation")
             _run_migration(migrate_backend_port)
 
+            def migrate_pipeline_status():
+                cur.execute("ALTER TABLE projects ADD COLUMN pipeline_status JSONB DEFAULT '{}'::jsonb")
+                logger.info("✓ Added pipeline_status column for structured progress tracking")
+            _run_migration(migrate_pipeline_status)
+
+            def migrate_error_code():
+                cur.execute("ALTER TABLE projects ADD COLUMN error_code VARCHAR(100)")
+                logger.info("✓ Added error_code column for detailed failure reasons")
+            _run_migration(migrate_error_code)
+
             # Sessions table
             cur.execute("""CREATE TABLE IF NOT EXISTS sessions (
                 id SERIAL PRIMARY KEY,
