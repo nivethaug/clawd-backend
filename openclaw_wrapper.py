@@ -26,8 +26,12 @@ from pathlib import Path
 # Pipeline status tracking
 from pipeline_status import PipelineStatusTracker, PipelinePhase, PhaseStatus, ErrorCode, format_status_report
 
+# Dynamically determine backend directory (works on both Windows and Linux)
+BACKEND_DIR = Path(__file__).parent.resolve()
+
 # DIAGNOSTIC: Track which file is actually loaded
 print(f"OPENCLAW_WRAPPER_LOADED: {__file__}")
+print(f"BACKEND_DIR: {BACKEND_DIR}")
 print(f"PID: {os.getpid()}")
 print(f"FILE_MODIFIED: {datetime.fromtimestamp(os.path.getmtime(__file__))}")
 print(f"CURRENT_TIME: {datetime.now()}")
@@ -42,7 +46,7 @@ logging.basicConfig(
 
 # Database configuration
 USE_POSTGRES = os.getenv("USE_POSTGRES", "true").lower() == "true"
-DB_PATH = "/root/clawd-backend/clawdbot_adapter.db"
+DB_PATH = os.getenv("DB_PATH", str(BACKEND_DIR / "clawdbot_adapter.db"))
 
 # PostgreSQL imports
 if USE_POSTGRES:
@@ -53,8 +57,8 @@ if USE_POSTGRES:
     DB_USER = os.getenv("DB_USER", "admin")
     DB_PASSWORD = os.getenv("DB_PASSWORD", "StrongAdminPass123")
 
-# Rules files
-RULES_DIR = Path("/root/dreampilot/website")
+# Rules files - use environment variable or default to parent directory
+RULES_DIR = Path(os.getenv("RULES_DIR", str(BACKEND_DIR.parent / "dreampilot" / "website")))
 RULE_FILES = [
     "rule.md",
     "frontend/strict-agent-rulebook.md",
@@ -592,7 +596,7 @@ That's all. Execute Phase {phase} now.
             logger.info("📝 Step 1: Running Phase 8 with OpenClaw agent sessions...")
 
             # Use OpenClaw session for Phase 8 (same as Phases 1-7)
-            phase8_script = Path("/root/clawd-backend/phase8_openclaw.py")
+            phase8_script = BACKEND_DIR / "phase8_openclaw.py"
             if not phase8_script.exists():
                 logger.warning(f"⚠️ Phase 8 OpenClaw script not found, skipping...")
                 self.completed_phases.append("AI Frontend Refinement (Skipped - Script Not Found)")

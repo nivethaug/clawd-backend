@@ -25,13 +25,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Dynamically determine backend directory (works on both Windows and Linux)
+BACKEND_DIR = Path(__file__).parent.resolve()
+
 # Database configuration
 USE_POSTGRES = os.getenv("USE_POSTGRES", "true").lower() == "true"
-DB_PATH = "/root/clawd-backend/clawdbot_adapter.db"
+DB_PATH = str(BACKEND_DIR / "clawdbot_adapter.db")
 
 # Template configuration
 EMPTY_TEMPLATE_MODE = os.getenv("EMPTY_TEMPLATE_MODE", "false").lower() == "true"
-BLANK_TEMPLATE_PATH = "/root/clawd-backend/templates/blank-template"
+BLANK_TEMPLATE_PATH = str(BACKEND_DIR / "templates" / "blank-template")
 
 # PostgreSQL imports
 if USE_POSTGRES:

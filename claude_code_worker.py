@@ -6,6 +6,8 @@ Handles background execution of Claude Code for website project initialization.
 import threading
 import subprocess
 import logging
+import sys
+from pathlib import Path
 from typing import Optional
 
 from database_adapter import get_db
@@ -13,6 +15,10 @@ from database_adapter import get_db
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Dynamically determine backend directory (works on both Windows and Linux)
+BACKEND_DIR = Path(__file__).parent.resolve()
+logger.info(f"BACKEND_DIR resolved to: {BACKEND_DIR}")
 
 
 def run_claude_code_background(project_id: int, project_path: str, project_name: str, description: Optional[str] = None, session_name: str = None, template_id: Optional[str] = None) -> threading.Thread:
@@ -53,8 +59,10 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             # Step 1: Run fast wrapper for phases 1-2 (template setup)
             logger.info(f"Executing: python3 fast_wrapper.py {project_id} {project_path} '{project_name}' (template_id: {template_id})")
 
-            # Build command args
-            cmd_args = ["python3", "/root/clawd-backend/fast_wrapper.py",
+            # Build command args - use current Python interpreter and dynamic paths
+            python_exe = sys.executable
+            fast_wrapper_path = str(BACKEND_DIR / "fast_wrapper.py")
+            cmd_args = [python_exe, fast_wrapper_path,
                        str(project_id), project_path, project_name, description or "", template_id or ""]
 
             # Add template_id if provided
@@ -85,9 +93,9 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             # Step 2: Run OpenClaw wrapper for phases 3-7 (infrastructure provisioning)
             logger.info(f"Executing: python3 openclaw_wrapper.py {project_id} {project_path} '{project_name}' (template_id: {template_id})")
 
-            # Build command args - use backend venv Python for psycopg2 dependency
-            backend_python = "/root/clawd-backend/venv/bin/python3"
-            cmd_args = [backend_python, "/root/clawd-backend/openclaw_wrapper.py",
+            # Build command args - use current Python interpreter and dynamic paths
+            openclaw_wrapper_path = str(BACKEND_DIR / "openclaw_wrapper.py")
+            cmd_args = [python_exe, openclaw_wrapper_path,
                        str(project_id), project_path, project_name, description or "",
                        template_id or ""]
 
