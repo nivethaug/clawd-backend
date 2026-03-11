@@ -623,31 +623,28 @@ class ACPFrontendEditorV2:
                 print("🔴 ACPX-V2-STEP5: Running ACPX CLI")
                 logger.info(f"[ACPX-V2] Step 4: Running ACPX...")
                 
-                # ACPX CLI path - uses node to run the CLI directly
-                acpx_cli = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
-                
-                # Build command: node cli.js --cwd <dir> claude exec "<prompt>"
+                # Build command: acpx --cwd <dir> --format quiet claude exec "<prompt>"
                 cmd = [
-                    "node",
-                    acpx_cli,
+                    "acpx",
                     "--cwd", self.frontend_src_path,
+                    "--format", "quiet",
                     "claude",
                     "exec",
                     prompt
                 ]
                 
-                logger.info(f"[ACPX-V2]   Command: node {acpx_cli} --cwd {self.frontend_src_path} claude exec <prompt>")
+                logger.info(f"[ACPX-V2]   Command: acpx --cwd {self.frontend_src_path} --format quiet claude exec <prompt>")
                 logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
                 logger.info(f"[ACPX-V2]   Timeout: {BUILD_TIMEOUT} seconds")
 
                 # Log execution details
                 print("[ACPX] cwd:", self.frontend_src_path)
-                print("[ACPX] running: node acpx cli.js")
-                print("ACPX CMD:", " ".join(cmd[:5]) + " <prompt>")  # Don't log full prompt
+                print("[ACPX] running: acpx --format quiet claude exec")
+                print("ACPX CMD:", " ".join(cmd[:6]) + " <prompt>")  # Don't log full prompt
 
                 # Before subprocess
                 print("🔴 ACPX-V2-SUBPROCESS-PRE: About to call subprocess.run()")
-                print("🔴 ACPX-V2-SUBPROCESS-PRE: Command: node acpx/cli.js")
+                print("🔴 ACPX-V2-SUBPROCESS-PRE: Command: acpx")
                 print(f"🔴 ACPX-V2-SUBPROCESS-PRE: Timeout: {BUILD_TIMEOUT}s")
                 print(f"🔴 ACPX-V2-SUBPROCESS-PRE: Working dir: {self.frontend_src_path}")
 
@@ -659,6 +656,9 @@ class ACPFrontendEditorV2:
                 )
 
                 # After subprocess returns
+                print("ACPX RETURN CODE:", result.returncode)
+                print("ACPX STDOUT:", result.stdout)
+                print("ACPX STDERR:", result.stderr)
                 print(f"🔴 ACPX-V2-SUBPROCESS-POST: Return code: {result.returncode}")
                 print(f"🔴 ACPX-V2-SUBPROCESS-POST: Stdout length: {len(result.stdout)}")
                 print(f"🔴 ACPX-V2-SUBPROCESS-POST: Stderr length: {len(result.stderr)}")
@@ -941,19 +941,18 @@ Provide ONLY the JSON list, nothing else."""
 
         try:
             # Call LLM for page inference using ACPX CLI
-            acpx_cli = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
             cmd = [
-                "node",
-                acpx_cli,
+                "acpx",
                 "--cwd", "/tmp",
+                "--format", "quiet",
                 "claude",
                 "exec",
                 inference_prompt
             ]
             
             print("[ACPX] cwd: /tmp")
-            print("[ACPX] running: node acpx cli.js (page inference)")
-            print("ACPX CMD:", " ".join(cmd[:5]) + " <prompt>")
+            print("[ACPX] running: acpx --format quiet claude exec (page inference)")
+            print("ACPX CMD:", " ".join(cmd[:6]) + " <prompt>")
 
             result = subprocess.run(
                 cmd,
@@ -961,6 +960,10 @@ Provide ONLY the JSON list, nothing else."""
                 text=True,
                 timeout=60
             )
+            
+            print("ACPX RETURN CODE:", result.returncode)
+            print("ACPX STDOUT:", result.stdout)
+            print("ACPX STDERR:", result.stderr)
 
             # Parse LLM response
             response_text = result.stdout.strip()
