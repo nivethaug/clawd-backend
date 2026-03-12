@@ -48,11 +48,6 @@ FRONTEND_PORT_MAX = 4000
 BACKEND_PORT_MIN = 8010
 BACKEND_PORT_MAX = 9000
 
-# Clawsd-ui settings
-CLAWD_UI_PATH = "/root/clawd-ui"
-CLAWD_UI_DIST = "/root/clawd-ui/dist"
-CLAWD_UI_DEV_PORT = 3001
-
 # DNS settings
 BASE_DOMAIN = "dreambigwithai.com"
 NGINX_CONFIG_DIR = "/etc/nginx/sites-available"
@@ -410,7 +405,7 @@ class ServiceManager:
 
     def build_frontend(self) -> bool:
         """
-        Build the clawd-ui frontend.
+        Build the frontend.
 
         Returns:
             True if successful, False otherwise
@@ -419,7 +414,7 @@ class ServiceManager:
         env = os.environ.copy()
         
         try:
-            logger.info("Building clawd-ui frontend...")
+            logger.info("Building frontend...")
 
             result = subprocess.run(
                 ["npm", "run", "build"],
