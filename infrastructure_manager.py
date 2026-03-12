@@ -1390,6 +1390,8 @@ class InfrastructureManager:
         - Run npm install
         - Run npm run build
         - Verify dist directory exists
+        - Clean Vite caches to prevent corruption issues
+        - Retry with clean reinstall on build failure
         
         Does NOT:
         - Create PM2 services
@@ -1398,6 +1400,8 @@ class InfrastructureManager:
         Returns:
             True if build successful, False otherwise
         """
+        import shutil  # Import here for cache cleanup
+        
         logger.info("PHASE_5_BUILD_START")
         logger.info("🔨 Starting build phase...")
         
@@ -1409,7 +1413,29 @@ class InfrastructureManager:
                 logger.info("PHASE_5_BUILD_COMPLETE: skipped (no frontend)")
                 return True
             
-            # Step 1: npm install
+            # Define paths for cache cleanup
+            node_modules_path = frontend_path / "node_modules"
+            vite_temp_path = node_modules_path / ".vite-temp"
+            vite_cache_path = node_modules_path / ".vite"
+            
+            # Step 1: Clean Vite caches to prevent corruption issues
+            logger.info("🧹 Cleaning Vite caches...")
+            
+            if vite_temp_path.exists():
+                try:
+                    shutil.rmtree(vite_temp_path)
+                    logger.info("✓ Cleaned corrupted .vite-temp directory")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not clean .vite-temp: {e}")
+            
+            if vite_cache_path.exists():
+                try:
+                    shutil.rmtree(vite_cache_path)
+                    logger.info("✓ Cleaned Vite cache directory")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not clean .vite cache: {e}")
+            
+            # Step 2: npm install
             logger.info("📦 Running npm install...")
             install_result = subprocess.run(
                 ["npm", "install"],
@@ -1425,7 +1451,7 @@ class InfrastructureManager:
             else:
                 logger.info("✓ npm install completed")
             
-            # Step 2: npm run build
+            # Step 3: npm run build
             logger.info("🏗️ Running npm run build...")
             build_result = subprocess.run(
                 ["npm", "run", "build"],
@@ -1435,25 +1461,68 @@ class InfrastructureManager:
                 timeout=600  # 10 minutes
             )
             
+            # Step 4: If build failed, try clean reinstall and retry
             if build_result.returncode != 0:
-                logger.error(f"❌ npm run build failed: {build_result.stderr[:500]}")
-                logger.info("PHASE_5_BUILD_COMPLETE: failed")
-                return False
+                logger.warning(f"⚠️ Initial build failed: {build_result.stderr[:300]}")
+                logger.info("🔄 Attempting clean reinstall and retry...")
+                logger.info("PHASE_5_BUILD_RETRY: performing clean reinstall")
+                
+                # Remove node_modules entirely
+                if node_modules_path.exists():
+                    try:
+                        shutil.rmtree(node_modules_path)
+                        logger.info("✓ Removed corrupted node_modules")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not remove node_modules: {e}")
+                
+                # Fresh npm install
+                logger.info("📦 Running fresh npm install...")
+                reinstall_result = subprocess.run(
+                    ["npm", "install"],
+                    cwd=str(frontend_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+                
+                if reinstall_result.returncode != 0:
+                    logger.error(f"❌ npm install failed on retry: {reinstall_result.stderr[:300]}")
+                    logger.info("PHASE_5_BUILD_FAILED: npm install failed")
+                    return False
+                
+                logger.info("✓ Fresh npm install completed")
+                
+                # Retry build
+                logger.info("🏗️ Retrying npm run build...")
+                build_result = subprocess.run(
+                    ["npm", "run", "build"],
+                    cwd=str(frontend_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+                
+                if build_result.returncode != 0:
+                    logger.error(f"❌ Build failed after clean reinstall: {build_result.stderr[:500]}")
+                    logger.info("PHASE_5_BUILD_FAILED: build failed after retry")
+                    return False
+                
+                logger.info("✓ Build succeeded after clean reinstall")
             
             logger.info("✓ npm run build completed")
             
-            # Step 3: Verify dist directory exists
+            # Step 5: Verify dist directory exists
             dist_path = frontend_path / "dist"
             if not dist_path.exists():
                 logger.error(f"❌ Dist directory not found: {dist_path}")
-                logger.info("PHASE_5_BUILD_COMPLETE: failed (no dist)")
+                logger.info("PHASE_5_BUILD_FAILED: dist directory missing")
                 return False
             
             # Verify dist has content
             dist_contents = list(dist_path.iterdir())
             if not dist_contents:
                 logger.error("❌ Dist directory is empty")
-                logger.info("PHASE_5_BUILD_COMPLETE: failed (empty dist)")
+                logger.info("PHASE_5_BUILD_FAILED: dist directory empty")
                 return False
             
             logger.info(f"✓ Dist directory verified with {len(dist_contents)} items")
@@ -1463,11 +1532,11 @@ class InfrastructureManager:
             
         except subprocess.TimeoutExpired:
             logger.error("❌ Build phase timed out")
-            logger.info("PHASE_5_BUILD_COMPLETE: failed (timeout)")
+            logger.info("PHASE_5_BUILD_FAILED: timeout")
             return False
         except Exception as e:
             logger.error(f"❌ Build phase failed: {e}")
-            logger.info("PHASE_5_BUILD_COMPLETE: failed (exception)")
+            logger.info("PHASE_5_BUILD_FAILED: exception")
             return False
 
     def _phase_6_service(self) -> bool:
