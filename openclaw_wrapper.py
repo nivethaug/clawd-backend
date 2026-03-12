@@ -94,6 +94,9 @@ class OpenClawWrapper:
         
         # Pipeline status tracker
         self.status_tracker = PipelineStatusTracker(project_id)
+        
+        # Track current phase for safety guard
+        self.current_phase = 0
 
         # Step 0: Select template if not provided
         if not template_id:
@@ -146,8 +149,14 @@ class OpenClawWrapper:
             self.template_features = ["dashboard", "users", "settings"]
 
     def update_status(self, status: str):
-        """Update project status in database."""
+        """Update project status in database with safety guard for 'ready' status."""
         try:
+            # Safety guard: Prevent premature 'ready' status
+            if status == "ready" and self.current_phase < 9:
+                logger.error(f"❌ SAFETY GUARD: Attempted premature 'ready' status at phase {self.current_phase}")
+                logger.error(f"❌ 'ready' status can only be set after Phase 9 verification")
+                return
+            
             logger.info(f"Updating project {self.project_id} status to '{status}'")
             
             if USE_POSTGRES:
@@ -1483,8 +1492,12 @@ Execute the refinement now and make this template production-ready for: {self.pr
             phases_succeeded = 0
 
             # Phase 1: Analyze Project (Planner)
+            self.current_phase = 1
             logger.info("PHASE_1_PLANNER_START")
             logger.info(f"📦 Phase 1/{total_phases}: Analyze Project (Planner)")
+            # Update status to initializing
+            logger.info(f"PROJECT STATUS UPDATE → initializing")
+            self.update_status("initializing")
             if self.phase_1_analyze_project():
                 phases_succeeded += 1
                 logger.info("PHASE_1_PLANNER_COMPLETE: success")
@@ -1498,6 +1511,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 return
 
             # Phase 2: Template Setup (includes scaffold pages, page manifest)
+            self.current_phase = 2
             logger.info("PHASE_2_TEMPLATE_START")
             logger.info(f"📦 Phase 2/{total_phases}: Template Setup")
             if self.phase_2_template_setup():
@@ -1513,6 +1527,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
 
             # Phase 3: ACPX Frontend Refinement (BEFORE infrastructure deployment)
             # This MUST run before infrastructure so deployment verification doesn't block it
+            self.current_phase = 3
             logger.info("PHASE_3_ACPX_START")
             logger.info(f"🤖 Phase 3/{total_phases}: ACPX Frontend Refinement")
             self.status_tracker.start_phase(PipelinePhase.ACPX)
@@ -1531,6 +1546,9 @@ Execute the refinement now and make this template production-ready for: {self.pr
             if result_phase9:
                 phases_succeeded += 1
                 self.status_tracker.complete_phase(PipelinePhase.ACPX)
+                # Update status to building after ACPX
+                logger.info(f"PROJECT STATUS UPDATE → building")
+                self.update_status("building")
                 logger.info("PHASE_3_ACPX_COMPLETE: success")
                 logger.info("✅ Phase 3 (ACPX) completed successfully")
             else:
@@ -1541,6 +1559,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 logger.warning("⚠️ ACPX failed, continuing with infrastructure deployment")
 
             # Phase 4: Database Provisioning
+            self.current_phase = 4
             logger.info("PHASE_4_DATABASE_START")
             logger.info(f"📋 Phase 4/{total_phases}: Database Provisioning")
             if self.phase_3_database_provisioning():
@@ -1555,6 +1574,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 return
 
             # Phase 5: Port Allocation
+            self.current_phase = 5
             logger.info("PHASE_5_PORT_START")
             logger.info(f"📋 Phase 5/{total_phases}: Port Allocation")
             if self.phase_4_port_allocation():
@@ -1569,12 +1589,16 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 return
 
             # Phase 6: Service Setup (includes build phase tracking)
+            self.current_phase = 6
             logger.info("PHASE_6_SERVICE_START")
             logger.info(f"📋 Phase 6/{total_phases}: Service Setup")
             self.status_tracker.start_phase(PipelinePhase.BUILD)
             if self.phase_5_service_setup():
                 phases_succeeded += 1
                 self.status_tracker.complete_phase(PipelinePhase.BUILD)
+                # Update status to deploying after service setup
+                logger.info(f"PROJECT STATUS UPDATE → deploying")
+                self.update_status("deploying")
                 logger.info("PHASE_6_SERVICE_COMPLETE: success")
                 logger.info(f"✓ Phase 6 completed!")
             else:
@@ -1586,10 +1610,14 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 return
 
             # Phase 7: Nginx Routing
+            self.current_phase = 7
             logger.info("PHASE_7_NGINX_START")
             logger.info(f"📋 Phase 7/{total_phases}: Nginx Routing")
             if self.phase_6_nginx_routing():
                 phases_succeeded += 1
+                # Update status to verifying after nginx setup
+                logger.info(f"PROJECT STATUS UPDATE → verifying")
+                self.update_status("verifying")
                 logger.info("PHASE_7_NGINX_COMPLETE: success")
                 logger.info(f"✓ Phase 7 completed!")
             else:
@@ -1600,6 +1628,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 return
 
             # Phase 8: AI-Driven Frontend Refinement (Legacy - skipped)
+            self.current_phase = 8
             logger.info("PHASE_8_AI_START")
             logger.info(f"📋 Phase 8/{total_phases}: AI-Driven Frontend Refinement (Legacy - Skipped)")
             # Phase 8 skipped - ACPX in Phase 3 handles frontend refinement
@@ -1609,6 +1638,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
 
             # Phase 9: Deployment Verification (FINAL step)
             # This verifies the entire deployment including ACPX changes
+            self.current_phase = 9
             logger.info("PHASE_9_VERIFY_START")
             logger.info(f"📋 Phase 9/{total_phases}: Deployment Verification")
             self.status_tracker.start_phase(PipelinePhase.DEPLOY)
@@ -1636,6 +1666,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 logger.info(f"📡 API endpoint: http://{domain}/api")
                 logger.info("🎉 Deployment completed successfully")
 
+                logger.info(f"PROJECT STATUS UPDATE → ready")
                 self.update_status("ready")
                 logger.info(f"✓ Project {self.project_id} status updated to 'ready'")
                 logger.info(f"📊 Completed phases: {', '.join(self.completed_phases)}")
