@@ -153,30 +153,62 @@ class FastWrapper:
             logger.error(f"❌ Git clone error: {e}")
             return False
 
-    def _copy_blank_template(self, target_dir: str) -> bool:
+    def _copy_blank_template(self, target_dir: str = None) -> bool:
         """Copy blank template directory to project."""
         try:
             logger.info(f"📁 Copying blank template from {BLANK_TEMPLATE_PATH}...")
 
             source_path = Path(BLANK_TEMPLATE_PATH)
-            target_path = self.project_path / target_dir
 
             if not source_path.exists():
                 logger.error(f"❌ Blank template not found at {BLANK_TEMPLATE_PATH}")
                 return False
 
-            # Use subprocess to copy directory (faster and more reliable)
-            result = subprocess.run(
-                ["cp", "-r", str(source_path), str(target_path)],
-                cwd=self.project_path,
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
+            # Check if template has restructured layout (frontend/ and backend/ directories)
+            has_frontend = (source_path / "frontend").exists()
+            has_backend = (source_path / "backend").exists()
 
-            if result.returncode == 0:
-                logger.info(f"✅ Blank template copied successfully")
-                logger.info(f"✓ Template copied to {target_dir}")
+            if has_frontend and has_backend:
+                # New restructured template - copy entire template to project root
+                logger.info(f"📋 Detected restructured template with frontend/ and backend/")
+                logger.info(f"📁 Copying template contents to project root...")
+
+                # Copy all contents of template to project path
+                result = subprocess.run(
+                    ["cp", "-r", f"{str(source_path)}/.", str(self.project_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+
+                if result.returncode == 0:
+                    logger.info(f"✅ Blank template copied successfully to project root")
+                    logger.info(f"✓ Frontend directory: {self.project_path / 'frontend'}")
+                    logger.info(f"✓ Backend directory: {self.project_path / 'backend'}")
+                    return True
+                else:
+                    logger.error(f"❌ Failed to copy template: {result.stderr}")
+                    return False
+            else:
+                # Old template structure - copy to target_dir
+                if not target_dir:
+                    target_dir = "frontend"
+                    logger.warning(f"⚠️ No target_dir specified, defaulting to 'frontend'")
+
+                target_path = self.project_path / target_dir
+                logger.info(f"📁 Copying template to target_dir: {target_dir}")
+
+                result = subprocess.run(
+                    ["cp", "-r", str(source_path), str(target_path)],
+                    cwd=self.project_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+
+                if result.returncode == 0:
+                    logger.info(f"✅ Blank template copied successfully")
+                    logger.info(f"✓ Template copied to {target_dir}")
 
                 # Verify copy
                 if target_path.exists():
@@ -471,9 +503,15 @@ SECRET_KEY=your-secret-key-here-generate-new-one-in-production
                     logger.error("❌ Initialization failed at task 2")
                     return
 
-            # Task 3: Create FastAPI backend
+            # Task 3: Create FastAPI backend (skip if already exists from template)
             logger.info(f"📋 Task 3/{total_tasks}: Create FastAPI backend")
-            if self.create_backend():
+            backend_path = self.project_path / "backend"
+            if backend_path.exists():
+                logger.info(f"✓ Backend directory already exists (from template) - skipping creation")
+                self.completed_tasks.append("Create backend")
+                tasks_succeeded += 1
+                logger.info(f"✓ Task 3 completed!")
+            elif self.create_backend():
                 self.completed_tasks.append("Create backend")
                 tasks_succeeded += 1
                 logger.info(f"✓ Task 3 completed!")
