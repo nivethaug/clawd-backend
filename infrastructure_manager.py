@@ -1246,24 +1246,16 @@ class InfrastructureManager:
             )
             logger.info(f"✓ Service configured: {self.service_name}")
 
-            # Phase 5: Build frontend
+            # Phase 5: Build frontend (BUILD PHASE ONLY - no service creation)
+            logger.info("PHASE_5_BUILD_START")
             logger.info("Phase 5/8: Building frontend")
-            frontend_path = self.project_path / "frontend"
-            if frontend_path.exists():
-                build_result = subprocess.run(
-                    ["npm", "run", "build"],
-                    cwd=str(frontend_path),
-                    capture_output=True,
-                    text=True,
-                    timeout=600
-                )
-                if build_result.returncode == 0:
-                    logger.info("DEPLOY: Build complete")
-                    logger.info("✓ Frontend build successful")
-                else:
-                    logger.warning(f"⚠️ Frontend build had issues: {build_result.stderr[:200]}")
+            build_success = self._phase_5_build()
+            if build_success:
+                logger.info("PHASE_5_BUILD_COMPLETE: success")
+                logger.info("✓ Frontend build phase completed")
             else:
-                logger.warning("⚠️ Frontend path not found, skipping build")
+                logger.warning("PHASE_5_BUILD_COMPLETE: partial (build had issues)")
+                logger.warning("⚠️ Frontend build had issues, continuing anyway")
 
             # Phase 6: Nginx configuration (with SPA routing)
             logger.info("Phase 6/8: Nginx configuration")
@@ -1280,59 +1272,16 @@ class InfrastructureManager:
             self.nginx_configurator.reload_nginx()
             logger.info(f"✓ Nginx configured with SPA routing: {self.domains}")
 
-            # Phase 7: Start services (PM2)
+            # Phase 7: Start services (PM2) - SERVICE PHASE ONLY
+            logger.info("PHASE_6_SERVICE_START")
             logger.info("Phase 7/8: Service startup")
-            logger.info("DEPLOY: Starting frontend service")
-
-            # Start backend service
-            self.service_manager.start_backend_service(self.service_name, self.project_path / "backend")
-            logger.info(f"✓ Backend service started: {self.service_name}")
-
-            # Start frontend service using PM2 serve for static files
-            dist_path = self.project_path / "frontend" / "dist"
-            if dist_path.exists():
-                frontend_service_name = f"project-{self.project_name}-frontend"
-                
-                # Stop existing service if any
-                subprocess.run(["pm2", "delete", frontend_service_name], capture_output=True)
-                
-                # Start PM2 serve for SPA
-                pm2_cmd = [
-                    "pm2", "serve",
-                    str(dist_path),
-                    str(self.ports["frontend"]),
-                    "--name", frontend_service_name,
-                    "--spa"
-                ]
-                pm2_result = subprocess.run(pm2_cmd, capture_output=True, text=True)
-                
-                if pm2_result.returncode == 0:
-                    logger.info("DEPLOY: PM2 service started")
-                    logger.info(f"✓ Frontend PM2 service started: {frontend_service_name}")
-                    self.frontend_app_name = frontend_service_name
-                else:
-                    logger.warning(f"⚠️ PM2 serve failed: {pm2_result.stderr[:200]}")
-                    # Fallback: create and start using service manager
-                    self.frontend_app_name = self.service_manager.create_frontend_service(
-                        self.project_name,
-                        self.ports["frontend"],
-                        self.project_path
-                    )
-                    self.service_manager.start_frontend_service(self.frontend_app_name, self.project_path)
+            service_success = self._phase_6_service()
+            if service_success:
+                logger.info("PHASE_6_SERVICE_COMPLETE: success")
+                logger.info("✓ Service phase completed")
             else:
-                logger.warning("⚠️ Frontend dist not found, creating service anyway")
-                self.frontend_app_name = self.service_manager.create_frontend_service(
-                    self.project_name,
-                    self.ports["frontend"],
-                    self.project_path
-                )
-                self.service_manager.start_frontend_service(self.frontend_app_name, self.project_path)
-
-            logger.info(f"⚙️ PM2 frontend service: {self.frontend_app_name}")
-            logger.info(f"⚙️ PM2 backend service: {self.service_name}")
-
-            # Save PM2 configuration
-            subprocess.run(["pm2", "save"], capture_output=True)
+                logger.error("PHASE_6_SERVICE_COMPLETE: failed")
+                logger.error("❌ Service phase had failures")
 
             # Phase 8: Health check
             logger.info("Phase 8/8: Health check")
@@ -1431,6 +1380,202 @@ class InfrastructureManager:
         except Exception as e:
             logger.error(f"❌ Infrastructure provisioning failed: {e}")
             self._rollback()
+            return False
+
+    def _phase_5_build(self) -> bool:
+        """
+        PHASE_5_BUILD: Build frontend only.
+        
+        Responsibilities:
+        - Run npm install
+        - Run npm run build
+        - Verify dist directory exists
+        
+        Does NOT:
+        - Create PM2 services
+        - Start any processes
+        
+        Returns:
+            True if build successful, False otherwise
+        """
+        logger.info("PHASE_5_BUILD_START")
+        logger.info("🔨 Starting build phase...")
+        
+        try:
+            frontend_path = self.project_path / "frontend"
+            
+            if not frontend_path.exists():
+                logger.warning("⚠️ Frontend path not found, skipping build")
+                logger.info("PHASE_5_BUILD_COMPLETE: skipped (no frontend)")
+                return True
+            
+            # Step 1: npm install
+            logger.info("📦 Running npm install...")
+            install_result = subprocess.run(
+                ["npm", "install"],
+                cwd=str(frontend_path),
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minutes
+            )
+            
+            if install_result.returncode != 0:
+                logger.warning(f"⚠️ npm install had issues: {install_result.stderr[:200]}")
+                # Continue anyway - dependencies might already be installed
+            else:
+                logger.info("✓ npm install completed")
+            
+            # Step 2: npm run build
+            logger.info("🏗️ Running npm run build...")
+            build_result = subprocess.run(
+                ["npm", "run", "build"],
+                cwd=str(frontend_path),
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minutes
+            )
+            
+            if build_result.returncode != 0:
+                logger.error(f"❌ npm run build failed: {build_result.stderr[:500]}")
+                logger.info("PHASE_5_BUILD_COMPLETE: failed")
+                return False
+            
+            logger.info("✓ npm run build completed")
+            
+            # Step 3: Verify dist directory exists
+            dist_path = frontend_path / "dist"
+            if not dist_path.exists():
+                logger.error(f"❌ Dist directory not found: {dist_path}")
+                logger.info("PHASE_5_BUILD_COMPLETE: failed (no dist)")
+                return False
+            
+            # Verify dist has content
+            dist_contents = list(dist_path.iterdir())
+            if not dist_contents:
+                logger.error("❌ Dist directory is empty")
+                logger.info("PHASE_5_BUILD_COMPLETE: failed (empty dist)")
+                return False
+            
+            logger.info(f"✓ Dist directory verified with {len(dist_contents)} items")
+            logger.info("PHASE_5_BUILD_COMPLETE: success")
+            logger.info("✅ Build phase completed successfully")
+            return True
+            
+        except subprocess.TimeoutExpired:
+            logger.error("❌ Build phase timed out")
+            logger.info("PHASE_5_BUILD_COMPLETE: failed (timeout)")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Build phase failed: {e}")
+            logger.info("PHASE_5_BUILD_COMPLETE: failed (exception)")
+            return False
+
+    def _phase_6_service(self) -> bool:
+        """
+        PHASE_6_SERVICE: Create and start PM2 services.
+        
+        Responsibilities:
+        - Create PM2 service configurations
+        - Start backend service
+        - Start frontend service
+        - Save PM2 configuration
+        
+        Does NOT:
+        - Run npm build (that's Phase 5)
+        
+        Returns:
+            True if services started successfully, False otherwise
+        """
+        logger.info("PHASE_6_SERVICE_START")
+        logger.info("🚀 Starting service phase...")
+        
+        try:
+            # Start backend service
+            logger.info(f"🔧 Starting backend service: {self.service_name}")
+            backend_success = self.service_manager.start_backend_service(
+                self.service_name, 
+                self.project_path / "backend"
+            )
+            
+            if backend_success:
+                logger.info(f"✓ Backend service started: {self.service_name}")
+            else:
+                logger.error(f"❌ Backend service failed to start: {self.service_name}")
+                logger.info("PHASE_6_SERVICE_COMPLETE: failed (backend)")
+                return False
+            
+            # Start frontend service using PM2 serve for static files
+            dist_path = self.project_path / "frontend" / "dist"
+            
+            if dist_path.exists():
+                frontend_service_name = f"project-{self.project_name}-frontend"
+                
+                # Stop existing service if any
+                logger.info(f"🔄 Stopping existing frontend service if any...")
+                subprocess.run(["pm2", "delete", frontend_service_name], capture_output=True)
+                
+                # Start PM2 serve for SPA
+                logger.info(f"🔧 Starting frontend PM2 service: {frontend_service_name}")
+                pm2_cmd = [
+                    "pm2", "serve",
+                    str(dist_path),
+                    str(self.ports["frontend"]),
+                    "--name", frontend_service_name,
+                    "--spa"
+                ]
+                pm2_result = subprocess.run(pm2_cmd, capture_output=True, text=True)
+                
+                if pm2_result.returncode == 0:
+                    logger.info("DEPLOY: PM2 service started")
+                    logger.info(f"✓ Frontend PM2 service started: {frontend_service_name}")
+                    self.frontend_app_name = frontend_service_name
+                else:
+                    logger.warning(f"⚠️ PM2 serve failed: {pm2_result.stderr[:200]}")
+                    # Fallback: create and start using service manager
+                    logger.info("🔄 Falling back to service manager...")
+                    self.frontend_app_name = self.service_manager.create_frontend_service(
+                        self.project_name,
+                        self.ports["frontend"],
+                        self.project_path
+                    )
+                    fallback_success = self.service_manager.start_frontend_service(
+                        self.frontend_app_name, 
+                        self.project_path
+                    )
+                    if not fallback_success:
+                        logger.error("❌ Frontend service fallback also failed")
+                        logger.info("PHASE_6_SERVICE_COMPLETE: failed (frontend)")
+                        return False
+            else:
+                logger.warning("⚠️ Frontend dist not found, creating service anyway")
+                self.frontend_app_name = self.service_manager.create_frontend_service(
+                    self.project_name,
+                    self.ports["frontend"],
+                    self.project_path
+                )
+                fallback_success = self.service_manager.start_frontend_service(
+                    self.frontend_app_name, 
+                    self.project_path
+                )
+                if not fallback_success:
+                    logger.error("❌ Frontend service creation failed")
+                    logger.info("PHASE_6_SERVICE_COMPLETE: failed (frontend)")
+                    return False
+
+            logger.info(f"⚙️ PM2 frontend service: {self.frontend_app_name}")
+            logger.info(f"⚙️ PM2 backend service: {self.service_name}")
+
+            # Save PM2 configuration
+            logger.info("💾 Saving PM2 configuration...")
+            subprocess.run(["pm2", "save"], capture_output=True)
+            
+            logger.info("PHASE_6_SERVICE_COMPLETE: success")
+            logger.info("✅ Service phase completed successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Service phase failed: {e}")
+            logger.info("PHASE_6_SERVICE_COMPLETE: failed (exception)")
             return False
 
     def _configure_backend_env(self):
