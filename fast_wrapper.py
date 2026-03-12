@@ -108,9 +108,16 @@ class FastWrapper:
                 logger.warning(f"⚠️ Target directory '{target_dir}' already exists, skipping clone")
                 return True
 
-            # Check if blank template mode is enabled
-            if EMPTY_TEMPLATE_MODE:
-                logger.info(f"🚀 EMPTY_TEMPLATE_MODE is enabled - copying blank template...")
+            # Check if blank template mode is enabled OR local file:// template
+            if EMPTY_TEMPLATE_MODE or (repo_url and repo_url.startswith("file://")):
+                if repo_url and repo_url.startswith("file://"):
+                    logger.info(f"🚀 Local file:// URL detected - copying blank template...")
+                    # Extract local path from file:// URL
+                    local_path = repo_url.replace("file://", "")
+                    if local_path != str(BLANK_TEMPLATE_PATH):
+                        logger.warning(f"⚠️ Local template path mismatch: expected {BLANK_TEMPLATE_PATH}, got {local_path}")
+                else:
+                    logger.info(f"🚀 EMPTY_TEMPLATE_MODE is enabled - copying blank template...")
                 return self._copy_blank_template(target_dir)
 
             # Run git clone (original behavior)
