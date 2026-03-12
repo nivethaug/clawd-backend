@@ -32,21 +32,37 @@ class ProjectFileManager:
         self.base_dir = base_dir
         os.makedirs(self.base_dir, exist_ok=True)
 
+    def slugify(self, text: str) -> str:
+        """
+        Convert text to filesystem-safe slug.
+        
+        Converts to lowercase, Replaces non-alphanumeric
+        characters with hyphens. Removes leading/trailing hyphens.
+        
+        Example: 'Pipeline Validation 7' -> 'pipeline-validation-7'
+        """
+        text = text.lower()
+        text = re.sub(r'[^a-z0-9]+', '-', text)
+        return text.strip('-')
+
     def sanitize_name(self, name: str) -> str:
         """
         Sanitize project name for filesystem use.
-        Replaces invalid characters with underscore.
+        Uses slugify for consistent directory naming.
         """
-        return re.sub(r'[^\w\s-]', '_', name).strip()
+        return self.slugify(name)
 
     def generate_folder_name(self, project_id: int, name: str) -> str:
         """
         Generate unique folder name with timestamp.
-        Format: <project_id>_<sanitized_name>_<timestamp>
+        Format: <project_id>_<slugified_name>_<timestamp>
+        
+        Example: 634_Pipeline Validation 7_20260312_121516
+                     -> 634_pipeline-validation-7_20260312_121516
         """
-        sanitized = self.sanitize_name(name)
+        safe_name = self.slugify(name)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"{project_id}_{sanitized}_{timestamp}"
+        return f"{project_id}_{safe_name}_{timestamp}"
 
     def get_project_type(self, type_id: Optional[int]) -> str:
         """
