@@ -1483,11 +1483,14 @@ Execute the refinement now and make this template production-ready for: {self.pr
             phases_succeeded = 0
 
             # Phase 1: Analyze Project (Planner)
+            logger.info("PHASE_1_PLANNER_START")
             logger.info(f"📦 Phase 1/{total_phases}: Analyze Project (Planner)")
             if self.phase_1_analyze_project():
                 phases_succeeded += 1
+                logger.info("PHASE_1_PLANNER_COMPLETE: success")
                 logger.info("✅ Phase 1 completed successfully")
             else:
+                logger.error("PHASE_1_PLANNER_COMPLETE: failed")
                 self.failed_phases.append("Analyze Project")
                 self.update_status("failed")
                 self.status_tracker.fail_phase(PipelinePhase.PLANNER, ErrorCode.PLANNER_INVALID_OUTPUT, "Phase 1 failed")
@@ -1495,11 +1498,14 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 return
 
             # Phase 2: Template Setup (includes scaffold pages, page manifest)
+            logger.info("PHASE_2_TEMPLATE_START")
             logger.info(f"📦 Phase 2/{total_phases}: Template Setup")
             if self.phase_2_template_setup():
                 phases_succeeded += 1
+                logger.info("PHASE_2_TEMPLATE_COMPLETE: success")
                 logger.info("✅ Phase 2 completed successfully")
             else:
+                logger.error("PHASE_2_TEMPLATE_COMPLETE: failed")
                 self.failed_phases.append("Template Setup")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 2")
@@ -1507,6 +1513,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
 
             # Phase 3: ACPX Frontend Refinement (BEFORE infrastructure deployment)
             # This MUST run before infrastructure so deployment verification doesn't block it
+            logger.info("PHASE_3_ACPX_START")
             logger.info(f"🤖 Phase 3/{total_phases}: ACPX Frontend Refinement")
             self.status_tracker.start_phase(PipelinePhase.ACPX)
             
@@ -1524,73 +1531,91 @@ Execute the refinement now and make this template production-ready for: {self.pr
             if result_phase9:
                 phases_succeeded += 1
                 self.status_tracker.complete_phase(PipelinePhase.ACPX)
+                logger.info("PHASE_3_ACPX_COMPLETE: success")
                 logger.info("✅ Phase 3 (ACPX) completed successfully")
             else:
                 self.failed_phases.append("ACPX Frontend Editor")
                 self.status_tracker.fail_phase(PipelinePhase.ACPX, ErrorCode.ACPX_FAILED, "ACPX refinement failed")
+                logger.warning("PHASE_3_ACPX_COMPLETE: failed (continuing)")
                 # Don't fail the pipeline - continue with infrastructure
                 logger.warning("⚠️ ACPX failed, continuing with infrastructure deployment")
 
             # Phase 4: Database Provisioning
+            logger.info("PHASE_4_DATABASE_START")
             logger.info(f"📋 Phase 4/{total_phases}: Database Provisioning")
             if self.phase_3_database_provisioning():
                 phases_succeeded += 1
+                logger.info("PHASE_4_DATABASE_COMPLETE: success")
                 logger.info(f"✓ Phase 4 completed!")
             else:
                 self.failed_phases.append("Database Provisioning")
+                logger.error("PHASE_4_DATABASE_COMPLETE: failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 4")
                 return
 
             # Phase 5: Port Allocation
+            logger.info("PHASE_5_PORT_START")
             logger.info(f"📋 Phase 5/{total_phases}: Port Allocation")
             if self.phase_4_port_allocation():
                 phases_succeeded += 1
+                logger.info("PHASE_5_PORT_COMPLETE: success")
                 logger.info(f"✓ Phase 5 completed!")
             else:
                 self.failed_phases.append("Port Allocation")
+                logger.error("PHASE_5_PORT_COMPLETE: failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 5")
                 return
 
             # Phase 6: Service Setup (includes build phase tracking)
+            logger.info("PHASE_6_SERVICE_START")
             logger.info(f"📋 Phase 6/{total_phases}: Service Setup")
             self.status_tracker.start_phase(PipelinePhase.BUILD)
             if self.phase_5_service_setup():
                 phases_succeeded += 1
                 self.status_tracker.complete_phase(PipelinePhase.BUILD)
+                logger.info("PHASE_6_SERVICE_COMPLETE: success")
                 logger.info(f"✓ Phase 6 completed!")
             else:
                 self.failed_phases.append("Service Setup")
                 self.status_tracker.fail_phase(PipelinePhase.BUILD, ErrorCode.BUILD_FAILED, "Service setup failed")
+                logger.error("PHASE_6_SERVICE_COMPLETE: failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 6")
                 return
 
             # Phase 7: Nginx Routing
+            logger.info("PHASE_7_NGINX_START")
             logger.info(f"📋 Phase 7/{total_phases}: Nginx Routing")
             if self.phase_6_nginx_routing():
                 phases_succeeded += 1
+                logger.info("PHASE_7_NGINX_COMPLETE: success")
                 logger.info(f"✓ Phase 7 completed!")
             else:
                 self.failed_phases.append("Nginx Routing")
+                logger.error("PHASE_7_NGINX_COMPLETE: failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 7")
                 return
 
             # Phase 8: AI-Driven Frontend Refinement (Legacy - skipped)
+            logger.info("PHASE_8_AI_START")
             logger.info(f"📋 Phase 8/{total_phases}: AI-Driven Frontend Refinement (Legacy - Skipped)")
             # Phase 8 skipped - ACPX in Phase 3 handles frontend refinement
             phases_succeeded += 1
+            logger.info("PHASE_8_AI_COMPLETE: skipped")
             logger.info(f"✓ Phase 8 skipped (using ACPX from Phase 3)")
 
             # Phase 9: Deployment Verification (FINAL step)
             # This verifies the entire deployment including ACPX changes
+            logger.info("PHASE_9_VERIFY_START")
             logger.info(f"📋 Phase 9/{total_phases}: Deployment Verification")
             self.status_tracker.start_phase(PipelinePhase.DEPLOY)
             if self.phase_7_verification():
                 phases_succeeded += 1
                 self.status_tracker.complete_phase(PipelinePhase.DEPLOY)
+                logger.info("PHASE_9_VERIFY_COMPLETE: success")
                 logger.info(f"✓ Phase 9 completed!")
             else:
                 self.failed_phases.append("Deployment Verification")

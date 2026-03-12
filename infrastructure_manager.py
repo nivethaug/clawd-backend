@@ -463,6 +463,19 @@ class ServiceManager:
                 if package_json.exists():
                     logger.info(f"Building frontend for production (correct MIME types)...")
                     try:
+                        # Clean Vite cache before build to prevent stale cache issues
+                        vite_cache = frontend_dist_path / "node_modules" / ".vite"
+                        vite_temp_cache = frontend_dist_path / "node_modules" / ".vite-temp"
+                        
+                        for cache_path in [vite_cache, vite_temp_cache]:
+                            if cache_path.exists():
+                                try:
+                                    import shutil
+                                    shutil.rmtree(str(cache_path))
+                                    logger.info(f"✓ Cleaned Vite cache: {cache_path.name}")
+                                except Exception as cache_err:
+                                    logger.warning(f"⚠️ Could not clean cache {cache_path}: {cache_err}")
+                        
                         # Install dependencies
                         install_result = subprocess.run(
                             ["npm", "install"],

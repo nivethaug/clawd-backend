@@ -39,7 +39,30 @@ logger = logging.getLogger(__name__)
 # Allowed paths
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 FORBIDDEN_BACKEND = "/root/clawd-backend"
-FORBIDDEN_UI_COMPONENTS = "components/ui"
+
+# Allowed directories for ACPX editing (relative to frontend/src)
+ALLOWED_EDIT_PATHS = [
+    "src/pages",
+    "src/components", 
+    "src/layouts",
+    "src/App.tsx",
+    "src/main.tsx"
+]
+
+# Forbidden paths that ACPX must NOT modify
+FORBIDDEN_EDIT_PATHS = [
+    "node_modules",
+    "package.json",
+    "package-lock.json",
+    "vite.config.ts",
+    "vite.config.js",
+    "tsconfig.json",
+    ".env",
+    ".env.local",
+    "src/components/ui",
+    "src/lib",
+    "src/utils"
+]
 
 # File limits - Increased for reliable multi-page execution
 MAX_NEW_FILES = 50  # Allow enough pages without early termination
@@ -78,29 +101,33 @@ class ACPPathValidator:
             Tuple of (is_allowed, reason)
         """
         path = Path(file_path).resolve()
-
-        # Check 1: Forbidden backend path
+        
+        # Get relative path from frontend_src_path
         try:
-            if FORBIDDEN_BACKEND in str(path) or str(path).startswith(FORBIDDEN_BACKEND):
-                return False, f"Forbidden: Cannot modify backend files ({path})"
-        except (ValueError, RuntimeError):
-            return False, f"Forbidden: Invalid path ({path})"
-
-        # Check 2: Must be inside frontend/src
-        try:
-            path.relative_to(self.frontend_src_path)
+            rel_path = path.relative_to(self.frontend_src_path)
+            rel_path_str = str(rel_path)
         except ValueError:
             return False, f"Forbidden: Path outside frontend/src ({path})"
 
-        # Check 3: Forbidden UI components directory
-        try:
-            if self.ui_components_path.exists():
-                path.relative_to(self.ui_components_path)
-                return False, f"Forbidden: Cannot modify components/ui/ ({path})"
-        except ValueError:
-            pass
+        # Check 1: Forbidden paths (node_modules, package.json, vite.config.ts, etc.)
+        for forbidden in FORBIDDEN_EDIT_PATHS:
+            if forbidden in rel_path_str or rel_path_str.startswith(forbidden):
+                return False, f"Forbidden: Cannot modify {forbidden} ({rel_path})"
 
-        # All checks passed
+        # Check 2: Specifically block src/components/ui
+        if "src/components/ui" in rel_path_str or "components/ui" in rel_path_str:
+            return False, f"Forbidden: Cannot modify UI components ({rel_path})"
+
+        # Check 3: Must be in allowed edit paths
+        is_allowed = False
+        for allowed_path in ALLOWED_EDIT_PATHS:
+            if rel_path_str.startswith(allowed_path) or rel_path_str == allowed_path.replace("src/", ""):
+                is_allowed = True
+                break
+        
+        if not is_allowed:
+            return False, f"Forbidden: Path not in allowed edit paths ({rel_path})"
+
         return True, "Allowed"
 
 
@@ -618,12 +645,12 @@ class ACPFrontendEditorV2:
                 traceback.print_exc()
                 return {"success": False, "message": f"Failed to build ACPX prompt: {str(e)}"}
 
-            # Step 6: Run ACPX
+            # Step 6: Run ACPX with Watchdog Protection
             try:
                 print("=" * 60)
                 print("PHASE_9_APPLY")
-                print("🔴 ACPX-V2-STEP5: Running ACPX CLI")
-                logger.info(f"[ACPX-V2] Step 4: Running ACPX...")
+                print("🔴 ACPX-V2-STEP5: Running ACPX CLI with watchdog")
+                logger.info(f"[ACPX-V2] Step 6: Running ACPX with watchdog protection...")
                 
                 # Build command: acpx --cwd <dir> --format quiet claude exec "<prompt>"
                 # Ensure all args are strings to avoid TypeError with PosixPath
@@ -638,48 +665,142 @@ class ACPFrontendEditorV2:
                 
                 logger.info(f"[ACPX-V2]   Command: acpx --cwd {self.frontend_src_path} --format quiet claude exec <prompt>")
                 logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
-                logger.info(f"[ACPX-V2]   Timeout: {BUILD_TIMEOUT} seconds")
+                logger.info(f"[ACPX-V2]   Hard timeout: 600 seconds, Idle timeout: 60 seconds")
 
                 # Robust debug logging
                 print("ACPX CMD:", " ".join(cmd[:6]) + " <prompt>")
                 print("[ACPX] cwd:", str(self.frontend_src_path))
-                print("[ACPX] running: acpx --format quiet claude exec")
+                print("[ACPX] running: acpx --format quiet claude exec (with watchdog)")
 
-                result = subprocess.run(
+                # Use Popen for streaming with watchdog protection
+                import time
+                import threading
+                
+                HARD_TIMEOUT = 600  # 10 minutes max
+                IDLE_TIMEOUT = 60   # 60 seconds without output
+                
+                process = subprocess.Popen(
                     cmd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.DEVNULL,
                     text=True,
-                    timeout=BUILD_TIMEOUT
+                    cwd=str(self.frontend_src_path)
                 )
-
+                
+                stdout_lines = []
+                stderr_lines = []
+                last_output_time = time.time()
+                start_time = time.time()
+                watchdog_killed = False
+                idle_killed = False
+                
+                def read_stream(stream, lines_list):
+                    """Read from stream line by line."""
+                    try:
+                        for line in iter(stream.readline, ''):
+                            if line:
+                                lines_list.append(line)
+                        stream.close()
+                    except:
+                        pass
+                
+                # Start reader threads for stdout and stderr
+                stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, stdout_lines), daemon=True)
+                stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, stderr_lines), daemon=True)
+                stdout_thread.start()
+                stderr_thread.start()
+                
+                # Watchdog loop
+                while process.poll() is None:
+                    current_time = time.time()
+                    elapsed = current_time - start_time
+                    
+                    # Check for new output
+                    if stdout_lines or stderr_lines:
+                        last_output_time = current_time
+                    
+                    idle_time = current_time - last_output_time
+                    
+                    # Hard timeout check
+                    if elapsed > HARD_TIMEOUT:
+                        logger.error(f"[ACPX-V2] 🔴 WATCHDOG: Hard timeout exceeded ({elapsed:.1f}s > {HARD_TIMEOUT}s) — killing process")
+                        print(f"🔴 ACPX-V2-WATCHDOG: Hard timeout exceeded, killing process")
+                        process.kill()
+                        process.wait(timeout=5)
+                        watchdog_killed = True
+                        break
+                    
+                    # Idle timeout check
+                    if idle_time > IDLE_TIMEOUT:
+                        logger.warning(f"[ACPX-V2] ⚠️ WATCHDOG: Idle timeout exceeded ({idle_time:.1f}s > {IDLE_TIMEOUT}s) — terminating process")
+                        print(f"🔴 ACPX-V2-WATCHDOG: Idle timeout exceeded, terminating process")
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
+                        idle_killed = True
+                        break
+                    
+                    time.sleep(0.5)
+                
+                # Wait for reader threads to finish
+                stdout_thread.join(timeout=2)
+                stderr_thread.join(timeout=2)
+                
+                # Collect output
+                stdout_output = ''.join(stdout_lines)
+                stderr_output = ''.join(stderr_lines)
+                return_code = process.returncode
+                
                 # Robust debug logging after execution
-                print("ACPX RETURN CODE:", result.returncode)
-                print("ACPX STDOUT:", result.stdout)
-                print("ACPX STDERR:", result.stderr)
+                print("ACPX RETURN CODE:", return_code)
+                print("ACPX STDOUT:", stdout_output[:500] if stdout_output else "(empty)")
+                print("ACPX STDERR:", stderr_output[:500] if stderr_output else "(empty)")
+                
+                # Handle watchdog kills
+                if watchdog_killed:
+                    self.snapshot_manager.restore_snapshot()
+                    self.snapshot_manager.cleanup_snapshot()
+                    result = {
+                        "success": False,
+                        "message": f"ACPX hard timeout exceeded ({HARD_TIMEOUT}s) — process killed",
+                        "rollback": True
+                    }
+                    print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Reason=hard_timeout")
+                    return result
+                
+                if idle_killed:
+                    self.snapshot_manager.restore_snapshot()
+                    self.snapshot_manager.cleanup_snapshot()
+                    result = {
+                        "success": False,
+                        "message": f"ACPX idle timeout exceeded ({IDLE_TIMEOUT}s no output) — process terminated",
+                        "rollback": True
+                    }
+                    print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Reason=idle_timeout")
+                    return result
                 
                 # Fail fast if ACPX fails
-                if result.returncode != 0:
-                    raise RuntimeError(f"ACPX execution failed: {result.stderr}")
+                if return_code != 0:
+                    raise RuntimeError(f"ACPX execution failed (code {return_code}): {stderr_output}")
 
                 logger.info(f"[ACPX-V2] ACPX subprocess completed successfully")
-                logger.info(f"[ACPX-V2]   Return code: {result.returncode}")
-                logger.info(f"[ACPX-V2]   Stdout length: {len(result.stdout)} chars")
-                logger.info(f"[ACPX-V2]   Stderr length: {len(result.stderr)} chars")
+                logger.info(f"[ACPX-V2]   Return code: {return_code}")
+                logger.info(f"[ACPX-V2]   Stdout length: {len(stdout_output)} chars")
+                logger.info(f"[ACPX-V2]   Stderr length: {len(stderr_output)} chars")
 
                 print("🔴 ACPX-V2-STEP5-DONE: ACPX CLI completed")
 
-            except subprocess.TimeoutExpired:
-                print(f"🔴 ACPX-V2-SUBPROCESS-TIMEOUT: subprocess.TimeoutExpired raised")
-                logger.error(f"[ACPX-V2] 🔴 HEARTBEAT: ❌ TIMED OUT after {BUILD_TIMEOUT} seconds")
+            except Exception as e:
+                print(f"🔴 ACPX-V2-STEP5-ERROR: {type(e).__name__}: {str(e)}")
+                logger.error(f"[ACPX-V2] ACPX execution error: {type(e).__name__}: {str(e)}")
+                traceback.print_exc()
                 self.snapshot_manager.restore_snapshot()
                 self.snapshot_manager.cleanup_snapshot()
-                result = {
-                    "success": False,
-                    "message": f"ACPX timed out after {BUILD_TIMEOUT} seconds",
-                    "rollback": True
-                }
-                print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
-                return result
+                return {"success": False, "message": f"ACPX execution failed: {str(e)}"}
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP5-ERROR: {type(e).__name__}: {str(e)}")
                 traceback.print_exc()

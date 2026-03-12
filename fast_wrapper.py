@@ -510,8 +510,9 @@ SECRET_KEY=your-secret-key-here-generate-new-one-in-production
             # All tasks completed!
             if tasks_succeeded == 5:
                 logger.info(f"✅ All {total_tasks} initialization tasks completed successfully!")
-                self.update_status("ready")
-                logger.info(f"✓ Project {self.project_id} status updated to 'ready'")
+                # Set to 'scaffolded' - infrastructure deployment will set to 'ready' after verification
+                self.update_status("scaffolded")
+                logger.info(f"✓ Project {self.project_id} status updated to 'scaffolded' (awaiting infrastructure)")
                 logger.info(f"📊 Completed tasks: {', '.join(self.completed_tasks)}")
             else:
                 logger.error(f"❌ Initialization incomplete. Succeeded: {tasks_succeeded}/{total_tasks}, Failed: {', '.join(self.failed_tasks)}")
