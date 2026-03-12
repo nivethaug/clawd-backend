@@ -15,6 +15,7 @@ import random
 import string
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import dns_manager  # Internal DNS management module
@@ -414,6 +415,9 @@ class ServiceManager:
         Returns:
             True if successful, False otherwise
         """
+        # Copy system environment to ensure npm/node are accessible
+        env = os.environ.copy()
+        
         try:
             logger.info("Building clawd-ui frontend...")
 
@@ -422,7 +426,8 @@ class ServiceManager:
                 cwd=CLAWD_UI_PATH,
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minutes
+                timeout=300,  # 5 minutes
+                env=env
             )
 
             if result.returncode == 0:
@@ -445,6 +450,9 @@ class ServiceManager:
         Returns:
             PM2 app name
         """
+        # Copy system environment to ensure npm/node are accessible
+        env = os.environ.copy()
+        
         try:
             app_name = f"{project_name}-frontend"
             
@@ -482,7 +490,8 @@ class ServiceManager:
                             capture_output=True,
                             text=True,
                             timeout=300,
-                            cwd=str(frontend_dist_path)
+                            cwd=str(frontend_dist_path),
+                            env=env
                         )
                         
                         if install_result.returncode != 0:
@@ -496,7 +505,8 @@ class ServiceManager:
                             capture_output=True,
                             text=True,
                             timeout=300,
-                            cwd=str(frontend_dist_path)
+                            cwd=str(frontend_dist_path),
+                            env=env
                         )
                         
                         if build_result.returncode != 0:
@@ -542,7 +552,8 @@ class ServiceManager:
                         capture_output=True,
                         text=True,
                         timeout=300,  # 5 minutes
-                        cwd=str(frontend_dist_path)
+                        cwd=str(frontend_dist_path),
+                        env=env
                     )
                     
                     if build_result.returncode != 0:
@@ -1401,9 +1412,13 @@ class InfrastructureManager:
             True if build successful, False otherwise
         """
         import shutil  # Import here for cache cleanup
+        import os  # Import for environment handling
         
         logger.info("PHASE_5_BUILD_START")
         logger.info("🔨 Starting build phase...")
+        
+        # Copy system environment to ensure npm/node are accessible
+        env = os.environ.copy()
         
         try:
             frontend_path = self.project_path / "frontend"
@@ -1412,6 +1427,14 @@ class InfrastructureManager:
                 logger.warning("⚠️ Frontend path not found, skipping build")
                 logger.info("PHASE_5_BUILD_COMPLETE: skipped (no frontend)")
                 return True
+            
+            # Verify package.json exists before proceeding
+            package_json_path = frontend_path / "package.json"
+            if not package_json_path.exists():
+                logger.error(f"❌ package.json not found in {frontend_path}")
+                logger.info("PHASE_5_BUILD_FAILED: missing package.json")
+                return False
+            logger.info(f"✓ Found package.json at {package_json_path}")
             
             # Define paths for cache cleanup
             node_modules_path = frontend_path / "node_modules"
@@ -1435,11 +1458,12 @@ class InfrastructureManager:
                 except Exception as e:
                     logger.warning(f"⚠️ Could not clean .vite cache: {e}")
             
-            # Step 2: npm install
+            # Step 2: npm install with --legacy-peer-deps and full environment
             logger.info("📦 Running npm install...")
             install_result = subprocess.run(
-                ["npm", "install"],
+                ["npm", "install", "--legacy-peer-deps"],
                 cwd=str(frontend_path),
+                env=env,
                 capture_output=True,
                 text=True,
                 timeout=600  # 10 minutes
@@ -1451,11 +1475,12 @@ class InfrastructureManager:
             else:
                 logger.info("✓ npm install completed")
             
-            # Step 3: npm run build
+            # Step 3: npm run build with full environment
             logger.info("🏗️ Running npm run build...")
             build_result = subprocess.run(
                 ["npm", "run", "build"],
                 cwd=str(frontend_path),
+                env=env,
                 capture_output=True,
                 text=True,
                 timeout=600  # 10 minutes
@@ -1475,11 +1500,12 @@ class InfrastructureManager:
                     except Exception as e:
                         logger.warning(f"⚠️ Could not remove node_modules: {e}")
                 
-                # Fresh npm install
+                # Fresh npm install with environment
                 logger.info("📦 Running fresh npm install...")
                 reinstall_result = subprocess.run(
-                    ["npm", "install"],
+                    ["npm", "install", "--legacy-peer-deps"],
                     cwd=str(frontend_path),
+                    env=env,
                     capture_output=True,
                     text=True,
                     timeout=600
@@ -1492,11 +1518,12 @@ class InfrastructureManager:
                 
                 logger.info("✓ Fresh npm install completed")
                 
-                # Retry build
+                # Retry build with environment
                 logger.info("🏗️ Retrying npm run build...")
                 build_result = subprocess.run(
                     ["npm", "run", "build"],
                     cwd=str(frontend_path),
+                    env=env,
                     capture_output=True,
                     text=True,
                     timeout=600
@@ -1529,6 +1556,15 @@ class InfrastructureManager:
             logger.info("PHASE_5_BUILD_COMPLETE: success")
             logger.info("✅ Build phase completed successfully")
             return True
+            
+        except subprocess.TimeoutExpired:
+            logger.error("❌ Build phase timed out")
+            logger.info("PHASE_5_BUILD_FAILED: timeout")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Build phase failed: {e}")
+            logger.info("PHASE_5_BUILD_FAILED: exception")
+            return False
             
         except subprocess.TimeoutExpired:
             logger.error("❌ Build phase timed out")
