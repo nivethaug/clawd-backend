@@ -423,7 +423,7 @@ class ServiceManager:
 
             result = subprocess.run(
                 ["npm", "run", "build"],
-                cwd=CLAWD_UI_PATH,
+                cwd=str(frontend_path),
                 capture_output=True,
                 text=True,
                 timeout=300,  # 5 minutes
