@@ -210,17 +210,17 @@ class FastWrapper:
                     logger.info(f"✅ Blank template copied successfully")
                     logger.info(f"✓ Template copied to {target_dir}")
 
-                # Verify copy
-                if target_path.exists():
-                    logger.info(f"✓ Target directory verified: {target_dir}")
-                    return True
+                    # Verify copy
+                    if target_path.exists():
+                        logger.info(f"✓ Target directory verified: {target_dir}")
+                        return True
+                    else:
+                        logger.error(f"❌ Target directory not created: {target_dir}")
+                        return False
                 else:
-                    logger.error(f"❌ Target directory not created: {target_dir}")
+                    logger.error(f"❌ Failed to copy blank template with code: {result.returncode}")
+                    logger.error(f"Error output: {result.stderr}")
                     return False
-            else:
-                logger.error(f"❌ Failed to copy blank template with code: {result.returncode}")
-                logger.error(f"Error output: {result.stderr}")
-                return False
 
         except subprocess.TimeoutExpired:
             logger.error(f"❌ Template copy timed out after 300 seconds")
