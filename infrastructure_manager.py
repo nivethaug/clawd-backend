@@ -16,6 +16,7 @@ import string
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import dns_manager  # Internal DNS management module
@@ -331,30 +332,38 @@ class ServiceManager:
     def start_backend_service(self, app_name: str, backend_path: Path) -> bool:
         """Start backend service."""
         try:
-            logger.info(f"Starting service: {app_name}")
+            logger.info(f"[SERVICE] Starting backend service: {app_name}")
 
-            # Start with PM2 using ecosystem config
-            ecosystem_path = backend_path / "ecosystem.config.json"
-            if not ecosystem_path.exists():
-                logger.error(f"Ecosystem config not found: {ecosystem_path}")
-                return False
+            backend_cmd = [
+                "pm2",
+                "start",
+                "server.js",
+                "--name",
+                app_name
+            ]
+
+            logger.info(f"[SERVICE] Backend command: {' '.join(backend_cmd)}")
+            logger.info(f"[SERVICE] Backend working directory: {backend_path}")
 
             result = subprocess.run(
-                ["pm2", "start", str(ecosystem_path)],
+                backend_cmd,
+                cwd=str(backend_path),
+                check=True,
                 capture_output=True,
                 text=True,
                 timeout=30
             )
 
-            if result.returncode == 0:
-                logger.info(f"✓ Service started: {app_name}")
-                return True
-            else:
-                logger.error(f"Failed to start service: {result.stderr}")
-                return False
+            logger.info(f"[SERVICE] Backend service started successfully: {app_name}")
+            logger.info(f"[SERVICE] Backend stdout: {result.stdout[:200]}")
+            return True
 
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[SERVICE] Backend service failed to start: {e}")
+            logger.error(f"[SERVICE] Backend stderr: {e.stderr[:300]}")
+            return False
         except Exception as e:
-            logger.error(f"Failed to start service: {e}")
+            logger.error(f"[SERVICE] Backend service error: {e}")
             return False
 
     def stop_service(self, app_name: str) -> bool:
@@ -1289,99 +1298,35 @@ class InfrastructureManager:
                 logger.error("PHASE_6_SERVICE_COMPLETE: failed")
                 logger.error("❌ Service phase had failures")
 
-            # Phase 8: Health check
-            logger.info("Phase 8/8: Health check")
-            
-            # Wait for services to start
-            logger.info("Waiting for services to initialize...")
-            import time
-            time.sleep(5)
+            # PHASE_9 Verification
+            logger.info("[VERIFY] PHASE_9_VERIFY_START")
 
-            # Health check via localhost (no DNS dependency)
-            health_check_url = f"http://localhost:{self.ports['frontend']}"
-            health_passed = False
-            
-            for attempt in range(1, 4):
-                try:
-                    logger.info(f"🩺 Health check attempt {attempt}/3: {health_check_url}")
-                    health_response = requests.get(health_check_url, timeout=10)
-                    
-                    if health_response.status_code == 200:
-                        logger.info("DEPLOY: Health check passed")
-                        logger.info(f"✅ Health check passed: HTTP {health_response.status_code}")
-                        health_passed = True
-                        break
-                    else:
-                        logger.warning(f"⚠️ Health check returned: HTTP {health_response.status_code}")
-                        
-                except Exception as e:
-                    logger.warning(f"⚠️ Health check attempt {attempt} failed: {e}")
-                
-                if attempt < 3:
-                    # Restart PM2 service and retry
-                    logger.info("Restarting frontend service...")
-                    subprocess.run(["pm2", "restart", self.frontend_app_name], capture_output=True)
-                    time.sleep(5)
-
-            if not health_passed:
-                logger.error("❌ Health check failed after 3 attempts")
-                self._rollback()
-                return False
-
-            # Verification with enhanced verifier (DNS check disabled)
-            logger.info("🔍 Running deployment verification...")
-            
-            enhanced_verifier = EnhancedDeploymentVerifier(
-                project_path=str(self.project_path),
-                domain=self.domain,
-                frontend_port=self.ports["frontend"],
-                backend_port=self.ports["backend"],
-                max_retries=2,
-                retry_delay=3.0
+            logger.info("[VERIFY] Checking frontend availability")
+            frontend_check = subprocess.run(
+                ["curl", "-I", f"http://localhost:{self.ports['frontend']}"],
+                capture_output=True,
+                text=True
             )
-            
-            # Skip DNS check - wildcard DNS is pre-configured
-            verification = enhanced_verifier.verify_all(include_pm2=True, include_dns=False)
-            
-            logger.info(format_verification_report(verification))
 
-            if verification["success"]:
-                logger.info("DEPLOY: Project READY")
-                logger.info("✅ All infrastructure provisioned and verified successfully!")
-                self._save_metadata()
-                return True
-            else:
-                logger.error(f"❌ Deployment verification failed: {verification['failed_checks']}")
-                
-                # Check if build-related failure - attempt rebuild
-                if "build_output" in verification["failed_checks"]:
-                    logger.warning("⚠️ Build output check failed, attempting rebuild...")
-                    
-                    try:
-                        build_result = subprocess.run(
-                            ["npm", "run", "build"],
-                            cwd=self.project_path / "frontend",
-                            capture_output=True,
-                            text=True,
-                            timeout=600
-                        )
-                        
-                        if build_result.returncode == 0:
-                            logger.info("✅ Rebuild succeeded, re-running verification...")
-                            verification = enhanced_verifier.verify_all(include_pm2=True, include_dns=False)
-                            
-                            if verification["success"]:
-                                logger.info("DEPLOY: Project READY")
-                                logger.info("✅ Deployment verified after rebuild!")
-                                self._save_metadata()
-                                return True
-                        else:
-                            logger.error(f"❌ Rebuild failed: {build_result.stderr[:500]}")
-                    except Exception as e:
-                        logger.error(f"❌ Rebuild exception: {e}")
-                
-                self._rollback()
-                return False
+            logger.info("[VERIFY] Checking backend health")
+            backend_check = subprocess.run(
+                ["curl", f"http://localhost:{self.ports['backend']}/health"],
+                capture_output=True,
+                text=True
+            )
+
+            if "200" not in frontend_check.stdout:
+                raise RuntimeError("Frontend verification failed")
+
+            if "200" not in backend_check.stdout and "ok" not in backend_check.stdout.lower():
+                raise RuntimeError("Backend verification failed")
+
+            logger.info("[VERIFY] ✓ Deployment verified successfully")
+            logger.info("PHASE_9_VERIFY_COMPLETE: success")
+            logger.info("DEPLOY: Project READY")
+            logger.info("✅ All infrastructure provisioned and verified successfully!")
+            self._save_metadata()
+            return True
 
         except Exception as e:
             logger.error(f"❌ Infrastructure provisioning failed: {e}")
@@ -1595,48 +1540,47 @@ class InfrastructureManager:
                 logger.info("PHASE_6_SERVICE_COMPLETE: failed (backend)")
                 return False
             
-            # Start frontend service using PM2 serve for static files
+            # Start frontend service using PM2 with npx serve for static files
             dist_path = self.project_path / "frontend" / "dist"
-            
+
             if dist_path.exists():
-                frontend_service_name = f"project-{self.project_name}-frontend"
-                
+                frontend_app_name = f"project-{self.project_name}-frontend"
+
                 # Stop existing service if any
                 logger.info(f"🔄 Stopping existing frontend service if any...")
-                subprocess.run(["pm2", "delete", frontend_service_name], capture_output=True)
-                
-                # Start PM2 serve for SPA
-                logger.info(f"🔧 Starting frontend PM2 service: {frontend_service_name}")
-                pm2_cmd = [
-                    "pm2", "serve",
-                    str(dist_path),
-                    str(self.ports["frontend"]),
-                    "--name", frontend_service_name,
-                    "--spa"
+                subprocess.run(["pm2", "delete", frontend_app_name], capture_output=True)
+
+                # Start PM2 service with npx serve -s dist -l port
+                logger.info(f"[SERVICE] Starting frontend service: {frontend_app_name}")
+                frontend_cmd = [
+                    "pm2",
+                    "start",
+                    "npx",
+                    "--name",
+                    frontend_app_name,
+                    "--",
+                    "serve",
+                    "-s",
+                    "dist",
+                    "-l",
+                    str(self.ports["frontend"])
                 ]
-                pm2_result = subprocess.run(pm2_cmd, capture_output=True, text=True)
-                
-                if pm2_result.returncode == 0:
-                    logger.info("DEPLOY: PM2 service started")
-                    logger.info(f"✓ Frontend PM2 service started: {frontend_service_name}")
-                    self.frontend_app_name = frontend_service_name
-                else:
-                    logger.warning(f"⚠️ PM2 serve failed: {pm2_result.stderr[:200]}")
-                    # Fallback: create and start using service manager
-                    logger.info("🔄 Falling back to service manager...")
-                    self.frontend_app_name = self.service_manager.create_frontend_service(
-                        self.project_name,
-                        self.ports["frontend"],
-                        self.project_path
-                    )
-                    fallback_success = self.service_manager.start_frontend_service(
-                        self.frontend_app_name, 
-                        self.project_path
-                    )
-                    if not fallback_success:
-                        logger.error("❌ Frontend service fallback also failed")
-                        logger.info("PHASE_6_SERVICE_COMPLETE: failed (frontend)")
-                        return False
+
+                logger.info(f"[SERVICE] Frontend command: {' '.join(frontend_cmd)}")
+                logger.info(f"[SERVICE] Frontend working directory: {self.project_path / 'frontend'}")
+
+                frontend_result = subprocess.run(
+                    frontend_cmd,
+                    cwd=str(self.project_path / "frontend"),
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+
+                logger.info("DEPLOY: PM2 service started")
+                logger.info(f"[SERVICE] Frontend service started successfully: {frontend_app_name}")
+                logger.info(f"[SERVICE] Frontend stdout: {frontend_result.stdout[:200]}")
+                self.frontend_app_name = frontend_app_name
             else:
                 logger.warning("⚠️ Frontend dist not found, creating service anyway")
                 self.frontend_app_name = self.service_manager.create_frontend_service(
@@ -1645,7 +1589,7 @@ class InfrastructureManager:
                     self.project_path
                 )
                 fallback_success = self.service_manager.start_frontend_service(
-                    self.frontend_app_name, 
+                    self.frontend_app_name,
                     self.project_path
                 )
                 if not fallback_success:
@@ -1656,10 +1600,27 @@ class InfrastructureManager:
             logger.info(f"⚙️ PM2 frontend service: {self.frontend_app_name}")
             logger.info(f"⚙️ PM2 backend service: {self.service_name}")
 
-            # Save PM2 configuration
-            logger.info("💾 Saving PM2 configuration...")
-            subprocess.run(["pm2", "save"], capture_output=True)
-            
+            # Service Stability Check
+            logger.info("[SERVICE] Waiting for PM2 services to stabilize...")
+            time.sleep(5)
+
+            pm2_check = subprocess.run(
+                ["pm2", "list"],
+                capture_output=True,
+                text=True
+            )
+
+            if self.frontend_app_name not in pm2_check.stdout:
+                raise RuntimeError(f"Frontend service {self.frontend_app_name} not running")
+
+            if self.service_name not in pm2_check.stdout:
+                raise RuntimeError(f"Backend service {self.service_name} not running")
+
+            logger.info("[SERVICE] ✓ PM2 services running")
+
+            # Save PM2 State
+            subprocess.run(["pm2", "save"], check=True)
+
             logger.info("PHASE_6_SERVICE_COMPLETE: success")
             logger.info("✅ Service phase completed successfully")
             return True
