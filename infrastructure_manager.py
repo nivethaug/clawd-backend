@@ -1433,30 +1433,20 @@ class InfrastructureManager:
             
             # Define paths for cache cleanup
             node_modules_path = frontend_path / "node_modules"
-            vite_temp_path = node_modules_path / ".vite-temp"
-            vite_cache_path = node_modules_path / ".vite"
             
-            # Step 1: Clean Vite caches to prevent corruption issues
-            logger.info("🧹 Cleaning Vite caches...")
-            
-            if vite_temp_path.exists():
+            # Step 1: Remove corrupted node_modules to ensure clean install
+            logger.info("🧹 Removing existing node_modules for clean install...")
+            if node_modules_path.exists():
                 try:
-                    shutil.rmtree(vite_temp_path)
-                    logger.info("✓ Cleaned corrupted .vite-temp directory")
+                    shutil.rmtree(node_modules_path)
+                    logger.info("✓ Removed existing node_modules")
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not clean .vite-temp: {e}")
+                    logger.warning(f"⚠️ Could not remove node_modules: {e}")
             
-            if vite_cache_path.exists():
-                try:
-                    shutil.rmtree(vite_cache_path)
-                    logger.info("✓ Cleaned Vite cache directory")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not clean .vite cache: {e}")
-            
-            # Step 2: npm install with --legacy-peer-deps and full environment
-            logger.info("📦 Running npm install...")
+            # Step 2: npm install with dev dependencies
+            logger.info(f"[BUILD] Running npm install in {frontend_path}")
             install_result = subprocess.run(
-                ["npm", "install", "--legacy-peer-deps"],
+                ["npm", "install", "--include=dev", "--legacy-peer-deps"],
                 cwd=str(frontend_path),
                 env=env,
                 capture_output=True,
@@ -1465,13 +1455,14 @@ class InfrastructureManager:
             )
             
             if install_result.returncode != 0:
-                logger.warning(f"⚠️ npm install had issues: {install_result.stderr[:200]}")
-                # Continue anyway - dependencies might already be installed
+                logger.error(f"❌ npm install failed: {install_result.stderr[:300]}")
+                logger.info("PHASE_5_BUILD_FAILED: npm install failed")
+                return False
             else:
-                logger.info("✓ npm install completed")
+                logger.info("✓ npm install completed (including dev dependencies)")
             
             # Step 3: npm run build with full environment
-            logger.info("🏗️ Running npm run build...")
+            logger.info(f"[BUILD] Running npm build in {frontend_path}")
             build_result = subprocess.run(
                 ["npm", "run", "build"],
                 cwd=str(frontend_path),
@@ -1496,9 +1487,9 @@ class InfrastructureManager:
                         logger.warning(f"⚠️ Could not remove node_modules: {e}")
                 
                 # Fresh npm install with environment
-                logger.info("📦 Running fresh npm install...")
+                logger.info(f"[BUILD] Running fresh npm install in {frontend_path}")
                 reinstall_result = subprocess.run(
-                    ["npm", "install", "--legacy-peer-deps"],
+                    ["npm", "install", "--include=dev", "--legacy-peer-deps"],
                     cwd=str(frontend_path),
                     env=env,
                     capture_output=True,
