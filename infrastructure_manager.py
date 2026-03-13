@@ -370,11 +370,12 @@ class ServiceManager:
             # Prepare backend port
             backend_port = port if port else 8000
 
-            # Start FastAPI backend with uvicorn via PM2
+            # Start FastAPI backend with uvicorn via PM2 using Python interpreter
             backend_cmd = [
-                "pm2", "start", "uvicorn",
+                "pm2", "start", "python",
                 "--name", app_name,
                 "--",
+                "-m", "uvicorn",
                 "main:app",
                 "--host", "0.0.0.0",
                 "--port", str(backend_port)
