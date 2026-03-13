@@ -227,9 +227,10 @@ def verify_frontend(domain: str) -> bool:
 
 
 def verify_backend(domain: str) -> bool:
-    """Verify backend health endpoint."""
-    full_domain = f"{domain}.dreambigwithai.com" if "." not in domain else domain
-    url = f"http://{full_domain}/api/health"
+    """Verify backend health endpoint on -api subdomain."""
+    base_domain = domain.split('.')[0] if '.' in domain else domain
+    api_domain = f"{base_domain}-api.dreambigwithai.com"
+    url = f"http://{api_domain}/health"
     log_check(f"Verifying backend health: {url}")
     
     try:
@@ -319,7 +320,9 @@ def check_pm2(project_name: str) -> Tuple[bool, bool]:
 def print_deployment_info(project: Dict) -> None:
     """Print deployment URLs and info."""
     domain = project.get("domain", "")
-    full_domain = f"{domain}.dreambigwithai.com" if "." not in domain else domain
+    base_domain = domain.split('.')[0] if '.' in domain else domain
+    frontend_domain = f"{base_domain}.dreambigwithai.com"
+    backend_domain = f"{base_domain}-api.dreambigwithai.com"
     
     print()
     print("=" * 60)
@@ -328,12 +331,12 @@ def print_deployment_info(project: Dict) -> None:
     print(f"Project ID:    {project.get('id')}")
     print(f"Name:          {project.get('name')}")
     print(f"Status:        {project.get('status')}")
-    print(f"Domain:        {full_domain}")
+    print(f"Domain:        {base_domain}")
     print()
     print("URLs:")
-    print(f"  Frontend:    http://{full_domain}")
-    print(f"  Backend:     http://{full_domain}/api")
-    print(f"  Health:      http://{full_domain}/api/health")
+    print(f"  Frontend:    http://{frontend_domain}")
+    print(f"  Backend:     http://{backend_domain}")
+    print(f"  Health:      http://{backend_domain}/health")
     print("=" * 60)
 
 
@@ -366,12 +369,13 @@ def run_pipeline_test(
     # Step 2: Monitor pipeline
     final_status, elapsed = poll_project_status(project_id, timeout, agent_mode)
     
+    base_domain = domain.split('.')[0] if '.' in domain else domain
     result = {
         "project_id": project_id,
         "status": final_status,
         "domain": domain,
-        "frontend_url": f"http://{domain}",
-        "backend_url": f"http://{domain}/api",
+        "frontend_url": f"http://{base_domain}.dreambigwithai.com",
+        "backend_url": f"http://{base_domain}-api.dreambigwithai.com",
         "pipeline_time": f"{elapsed // 60}m {elapsed % 60}s"
     }
     
