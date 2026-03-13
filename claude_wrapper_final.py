@@ -352,6 +352,58 @@ def main():
     description = sys.argv[4] if len(sys.argv) > 4 else None
     template_id = sys.argv[5] if len(sys.argv) > 5 else None
 
+    # Handle DNS repair commands
+    if len(sys.argv) > 1 and sys.argv[1] == "repair-dns":
+        # Repair DNS for single project
+        project_id = int(sys.argv[2])
+        print(f"🔧 Repairing DNS for project {project_id}...")
+        
+        from infrastructure_manager import InfrastructureManager
+        infra = InfrastructureManager(project_name="temp", project_path=Path("/tmp"))
+        
+        result = infra.repair_dns(project_id)
+        
+        if result:
+            print(f"✅ DNS repair successful for project {project_id}")
+        else:
+            print(f"❌ DNS repair failed for project {project_id}")
+        
+        sys.exit(0 if result else 1)
+    
+    elif len(sys.argv) > 1 and sys.argv[1] == "repair-dns-all":
+        # Repair DNS for all projects
+        print(f"🔧 Repairing DNS for all projects...")
+        
+        from infrastructure_manager import InfrastructureManager
+        infra = InfrastructureManager(project_name="temp", project_path=Path("/tmp"))
+        
+        # Get all projects and repair DNS
+        import json
+        projects_file = Path("/root/dreampilot/projects/projects.json")
+        if projects_file.exists():
+            with open(projects_file, 'r') as f:
+                projects = json.load(f)
+            
+            success_count = 0
+            for project in projects:
+                if isinstance(project, dict):
+                    project_id = project.get('id')
+                    project_name = project.get('name', '')
+                    
+                    if project_id:
+                        result = infra.repair_dns(project_id)
+                        if result:
+                            success_count += 1
+                            print(f"✅ DNS repaired for {project_name} ({project_id})")
+                        else:
+                            print(f"⚠️  DNS repair failed for {project_name} ({project_id})")
+            
+            print(f"📊 DNS repair complete: {success_count}/{len(projects)} projects repaired")
+            sys.exit(0)
+        else:
+            print("❌ Projects file not found: /root/dreampilot/projects/projects.json")
+            sys.exit(1)
+
     # Create and run wrapper
     wrapper = StepByStepWrapper(
         project_id=project_id,

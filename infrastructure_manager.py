@@ -2122,3 +2122,60 @@ class InfrastructureManager:
 
             except Exception as e:
                 logger.error(f"Teardown failed: {e}")
+
+    def repair_dns(self, project_id: int) -> bool:
+        """Repair DNS for existing projects that were deployed before PHASE_8_DNS automation.
+        
+        This method loads project metadata, extracts domain,
+        and calls _phase_8_dns to create missing DNS A-record.
+        
+        Args:
+            project_id: ID of project to repair DNS for
+            
+        Returns:
+            True if DNS repair succeeded, False otherwise
+        """
+        try:
+            logger.info(f"[DNS] Repairing DNS for project {project_id}")
+            
+            # Load project metadata
+            project = self.get_project(project_id)
+            
+            if not project:
+                logger.error(f"[DNS] Project not found: {project_id}")
+                return False
+            
+            # Extract domain from project data
+            project_data = project.get("project", {})
+            domains = project_data.get("domains", {})
+            
+            if not domains:
+                logger.warning(f"[DNS] No domains found in project {project_id}")
+                return False
+            
+            # Get frontend domain (primary domain for DNS)
+            frontend_domain = domains.get("frontend")
+            
+            if not frontend_domain:
+                logger.warning(f"[DNS] No frontend domain found for project {project_id}")
+                return False
+            
+            # Call _phase_8_dns to create DNS A-record
+            result = self._phase_8_dns(frontend_domain)
+            
+            if result:
+                logger.info(f"[DNS] ✓ DNS repair successful for project {project_id}")
+                
+                # Update project metadata to track that DNS has been repaired
+                if "dns_repaired" not in project_data:
+                    project_data["dns_repaired"] = True
+                    self.update_project(project_id, {"project": project_data})
+                
+                return True
+            else:
+                logger.error(f"[DNS] ❌ DNS repair failed for project {project_id}")
+                return False
+
+        except Exception as e:
+            logger.error(f"[DNS] ❌ Exception during DNS repair: {e}")
+            return False
