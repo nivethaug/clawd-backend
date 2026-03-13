@@ -866,7 +866,7 @@ class NginxConfigurator:
             logger.error(f"Failed to generate SSL certificates: {e}")
             return False
 
-    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = False) -> Tuple[str, str]:
+    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = False, project_path: str = None) -> Tuple[str, str]:
         """
         Generate nginx configuration for project.
 
@@ -875,6 +875,8 @@ class NginxConfigurator:
             frontend_port: Frontend service port
             backend_port: Backend service port
             enable_ssl: Whether to generate SSL config (default: False)
+            project_path: Actual project folder path (e.g., "686_test_20260313_142220"). 
+                          If not provided, falls back to domain name.
 
         Returns:
             Tuple of (frontend_domain, backend_domain, config)
@@ -882,6 +884,11 @@ class NginxConfigurator:
         try:
             frontend_domain = f"{domain}.{BASE_DOMAIN}"
             backend_domain = f"{domain}-api.{BASE_DOMAIN}"
+            
+            # Use project_path if provided, otherwise fall back to domain
+            # The actual folder is like "686_test778786_20260313_142220"
+            # but domain is like "test778786-7hbrzr"
+            website_folder = project_path if project_path else domain
 
             if enable_ssl:
                 # Generate HTTPS configuration with SSL and SPA routing
@@ -899,7 +906,7 @@ server {{
     ssl_certificate /etc/letsencrypt/live/{frontend_domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{frontend_domain}/privkey.pem;
 
-    root /root/dreampilot/projects/website/{domain}/frontend/dist;
+    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
     index index.html;
 
     # SPA routing - serve index.html for all routes
@@ -956,7 +963,7 @@ server {{
     listen 80;
     server_name {frontend_domain};
 
-    root /root/dreampilot/projects/website/{domain}/frontend/dist;
+    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
     index index.html;
 
     # SPA routing - serve index.html for all routes
@@ -1451,10 +1458,18 @@ class InfrastructureManager:
 
             # Phase 6: Nginx configuration (with SPA routing)
             logger.info("Phase 6/8: Nginx configuration")
+            
+            # Get the actual project folder name from the project path
+            # project_path is like Path("/root/dreampilot/projects/website/686_test778786_20260313_142220")
+            # We need just "686_test778786_20260313_142220" for the nginx root
+            project_folder_name = self.project_path.name if hasattr(self.project_path, 'name') else str(self.project_path).split('/')[-1]
+            logger.info(f"Using project folder for nginx: {project_folder_name}")
+            
             frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
                 self.domain,
                 self.ports["frontend"],
-                self.ports["backend"]
+                self.ports["backend"],
+                project_path=project_folder_name
             )
             self.domains = {
                 "frontend": frontend_domain,
