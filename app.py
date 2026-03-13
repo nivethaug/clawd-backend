@@ -343,18 +343,32 @@ async def create_project(request: CreateProjectRequest):
                 type_id = website_type['id']
 
     # Step 1: Get project_id first to use in folder naming
+    logger.info("[PROJECT] inserting project into database")
     with get_db() as conn:
-        conn.execute(
-            "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name) VALUES (?, ?, ?, ?, '', ?, 'creating', NULL) RETURNING id",
-            (user_id, request.name, domain, request.description, type_id)
-        )
-        result = conn.fetchone()
-        # Handle both dict (PostgreSQL) and tuple (SQLite) row types
-        if isinstance(result, dict):
-            project_id = result.get('id')
-        else:
-            project_id = result[0] if result else None
-        conn.commit()
+        try:
+            conn.execute(
+                "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (user_id, request.name, domain, request.description, '', type_id, 'creating', None)
+            )
+            result = conn.fetchone()
+            # Handle both dict (PostgreSQL) and tuple (SQLite) row types
+            if isinstance(result, dict):
+                project_id = result.get('id')
+            else:
+                project_id = result[0] if result else None
+            
+            if not project_id:
+                raise RuntimeError("Failed to get project_id from INSERT RETURNING")
+                
+            logger.info(f"[PROJECT] database insert successful, project_id: {project_id}")
+            conn.commit()
+            logger.info("[PROJECT] database commit successful")
+        except Exception as e:
+            logger.error(f"[PROJECT] database insert failed: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create project record: {str(e)}"
+            )
 
     # Step 2: Create project folder with Git initialization
     project_manager = ProjectFileManager()
@@ -438,6 +452,7 @@ async def create_project(request: CreateProjectRequest):
                 conn.commit()
 
         try:
+            logger.info(f"[PROJECT] launching fast_wrapper for project {project_id}")
             run_claude_code_background(
                 project_id=project_id,
                 project_path=project_folder_path,
@@ -446,10 +461,18 @@ async def create_project(request: CreateProjectRequest):
                 session_name=session_name,
                 template_id=selected_template_id  # Pass selected template ID
             )
+            logger.info(f"[PROJECT] fast_wrapper launched successfully for project {project_id}")
         except Exception as e:
             # Log error but don't fail the project creation
             # Project will remain in 'creating' status
-            logger.error(f"Failed to start Claude Code background worker: {e}")
+            logger.error(f"[PROJECT] failed to launch fast_wrapper: {e}")
+            # Update project status to failed
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
 
     # Fetch the final project data from database (includes status and session_key)
     with get_db() as conn:

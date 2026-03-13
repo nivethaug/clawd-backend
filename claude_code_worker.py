@@ -189,17 +189,17 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
                 traceback.print_exc()
                 logger.error(f"Claude Code wrapper worker error for project {project_id}: {e}")
 
-            # Update project status to 'failed' in NEW DB session
-            try:
-                with get_db() as conn:
-                    conn.execute(
-                        "UPDATE projects SET status = 'failed' WHERE id = ?",
-                        (project_id,)
-                    )
-                    conn.commit()
-                    logger.info(f"Project {project_id} status updated to 'failed' (error)")
-            except Exception as db_error:
-                logger.error(f"Failed to update project status: {db_error}")
+                # Update project status to 'failed' in NEW DB session
+                try:
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE projects SET status = 'failed' WHERE id = ?",
+                            (project_id,)
+                        )
+                        conn.commit()
+                        logger.info(f"Project {project_id} status updated to 'failed' (error)")
+                except Exception as db_error:
+                    logger.error(f"Failed to update project status: {db_error}")
 
         finally:
             # Thread cleanup (DB session is auto-closed by get_db context manager)
