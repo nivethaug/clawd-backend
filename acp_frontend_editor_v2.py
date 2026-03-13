@@ -716,37 +716,37 @@ class ACPFrontendEditorV2:
                     # Watchdog loop for process monitoring
                     while process.poll() is None:
                         current_time = time.time()
-                    elapsed = current_time - start_time
-                    
-                    # Check for new output
-                    if stdout_lines or stderr_lines:
-                        last_output_time = current_time
-                    
-                    idle_time = current_time - last_output_time
-                    
-                    # Hard timeout check
-                    if elapsed > HARD_TIMEOUT:
-                        logger.error(f"[ACPX-V2] 🔴 WATCHDOG: Hard timeout exceeded ({elapsed:.1f}s > {HARD_TIMEOUT}s) — killing process")
-                        print(f"🔴 ACPX-V2-WATCHDOG: Hard timeout exceeded, killing process")
-                        process.kill()
-                        process.wait(timeout=5)
-                        watchdog_killed = True
-                        break
-                    
-                    # Idle timeout check
-                    if idle_time > IDLE_TIMEOUT:
-                        logger.warning(f"[ACPX-V2] ⚠️ WATCHDOG: Idle timeout exceeded ({idle_time:.1f}s > {IDLE_TIMEOUT}s) — terminating process")
-                        print(f"🔴 ACPX-V2-WATCHDOG: Idle timeout exceeded, terminating process")
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
+                        elapsed = current_time - start_time
+                        
+                        # Check for new output
+                        if stdout_lines or stderr_lines:
+                            last_output_time = current_time
+                        
+                        idle_time = current_time - last_output_time
+                        
+                        # Hard timeout check
+                        if elapsed > HARD_TIMEOUT:
+                            logger.error(f"[ACPX-V2] 🔴 WATCHDOG: Hard timeout exceeded ({elapsed:.1f}s > {HARD_TIMEOUT}s) — killing process")
+                            print(f"🔴 ACPX-V2-WATCHDOG: Hard timeout exceeded, killing process")
                             process.kill()
                             process.wait(timeout=5)
-                        idle_killed = True
-                        break
-                    
-                    time.sleep(0.5)
+                            watchdog_killed = True
+                            break
+                        
+                        # Idle timeout check
+                        if idle_time > IDLE_TIMEOUT:
+                            logger.warning(f"[ACPX-V2] ⚠️ WATCHDOG: Idle timeout exceeded ({idle_time:.1f}s > {IDLE_TIMEOUT}s) — terminating process")
+                            print(f"🔴 ACPX-V2-WATCHDOG: Idle timeout exceeded, terminating process")
+                            process.terminate()
+                            try:
+                                process.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.wait(timeout=5)
+                            idle_killed = True
+                            break
+                        
+                        time.sleep(0.5)
                 
                 except KeyboardInterrupt:
                     # Handle external interrupt gracefully
