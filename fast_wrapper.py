@@ -25,13 +25,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Dynamically determine backend directory (works on both Windows and Linux)
+BACKEND_DIR = Path(__file__).parent.resolve()
+
 # Database configuration
 USE_POSTGRES = os.getenv("USE_POSTGRES", "true").lower() == "true"
-DB_PATH = "/root/clawd-backend/clawdbot_adapter.db"
+DB_PATH = str(BACKEND_DIR / "clawdbot_adapter.db")
 
 # Template configuration
-EMPTY_TEMPLATE_MODE = os.getenv("EMPTY_TEMPLATE_MODE", "false").lower() == "true"
-BLANK_TEMPLATE_PATH = "/root/clawd-backend/templates/blank-template"
+# ALWAYS use blank template - AI will build from scratch
+EMPTY_TEMPLATE_MODE = True  # Hardcoded - always use blank template
+BLANK_TEMPLATE_PATH = str(BACKEND_DIR / "templates" / "blank-template")
 
 # PostgreSQL imports
 if USE_POSTGRES:
@@ -105,9 +109,16 @@ class FastWrapper:
                 logger.warning(f"⚠️ Target directory '{target_dir}' already exists, skipping clone")
                 return True
 
-            # Check if blank template mode is enabled
-            if EMPTY_TEMPLATE_MODE:
-                logger.info(f"🚀 EMPTY_TEMPLATE_MODE is enabled - copying blank template...")
+            # Check if blank template mode is enabled OR local file:// template
+            if EMPTY_TEMPLATE_MODE or (repo_url and repo_url.startswith("file://")):
+                if repo_url and repo_url.startswith("file://"):
+                    logger.info(f"🚀 Local file:// URL detected - copying blank template...")
+                    # Extract local path from file:// URL
+                    local_path = repo_url.replace("file://", "")
+                    if local_path != str(BLANK_TEMPLATE_PATH):
+                        logger.warning(f"⚠️ Local template path mismatch: expected {BLANK_TEMPLATE_PATH}, got {local_path}")
+                else:
+                    logger.info(f"🚀 EMPTY_TEMPLATE_MODE is enabled - copying blank template...")
                 return self._copy_blank_template(target_dir)
 
             # Run git clone (original behavior)
@@ -150,42 +161,74 @@ class FastWrapper:
             logger.error(f"❌ Git clone error: {e}")
             return False
 
-    def _copy_blank_template(self, target_dir: str) -> bool:
+    def _copy_blank_template(self, target_dir: str = None) -> bool:
         """Copy blank template directory to project."""
         try:
             logger.info(f"📁 Copying blank template from {BLANK_TEMPLATE_PATH}...")
 
             source_path = Path(BLANK_TEMPLATE_PATH)
-            target_path = self.project_path / target_dir
 
             if not source_path.exists():
                 logger.error(f"❌ Blank template not found at {BLANK_TEMPLATE_PATH}")
                 return False
 
-            # Use subprocess to copy directory (faster and more reliable)
-            result = subprocess.run(
-                ["cp", "-r", str(source_path), str(target_path)],
-                cwd=self.project_path,
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
+            # Check if template has restructured layout (frontend/ and backend/ directories)
+            has_frontend = (source_path / "frontend").exists()
+            has_backend = (source_path / "backend").exists()
 
-            if result.returncode == 0:
-                logger.info(f"✅ Blank template copied successfully")
-                logger.info(f"✓ Template copied to {target_dir}")
+            if has_frontend and has_backend:
+                # New restructured template - copy entire template to project root
+                logger.info(f"📋 Detected restructured template with frontend/ and backend/")
+                logger.info(f"📁 Copying template contents to project root...")
 
-                # Verify copy
-                if target_path.exists():
-                    logger.info(f"✓ Target directory verified: {target_dir}")
+                # Copy all contents of template to project path
+                result = subprocess.run(
+                    ["cp", "-r", f"{str(source_path)}/.", str(self.project_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+
+                if result.returncode == 0:
+                    logger.info(f"✅ Blank template copied successfully to project root")
+                    logger.info(f"✓ Frontend directory: {self.project_path / 'frontend'}")
+                    logger.info(f"✓ Backend directory: {self.project_path / 'backend'}")
                     return True
                 else:
-                    logger.error(f"❌ Target directory not created: {target_dir}")
+                    logger.error(f"❌ Failed to copy template: {result.stderr}")
                     return False
             else:
-                logger.error(f"❌ Failed to copy blank template with code: {result.returncode}")
-                logger.error(f"Error output: {result.stderr}")
-                return False
+                # Old template structure - copy to target_dir
+                if not target_dir:
+                    target_dir = "frontend"
+                    logger.warning(f"⚠️ No target_dir specified, defaulting to 'frontend'")
+
+                target_path = self.project_path / target_dir
+                logger.info(f"📁 Copying template to target_dir: {target_dir}")
+
+                result = subprocess.run(
+                    ["cp", "-r", str(source_path), str(target_path)],
+                    cwd=self.project_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+
+                if result.returncode == 0:
+                    logger.info(f"✅ Blank template copied successfully")
+                    logger.info(f"✓ Template copied to {target_dir}")
+
+                    # Verify copy
+                    if target_path.exists():
+                        logger.info(f"✓ Target directory verified: {target_dir}")
+                        return True
+                    else:
+                        logger.error(f"❌ Target directory not created: {target_dir}")
+                        return False
+                else:
+                    logger.error(f"❌ Failed to copy blank template with code: {result.returncode}")
+                    logger.error(f"Error output: {result.stderr}")
+                    return False
 
         except subprocess.TimeoutExpired:
             logger.error(f"❌ Template copy timed out after 300 seconds")
@@ -468,9 +511,15 @@ SECRET_KEY=your-secret-key-here-generate-new-one-in-production
                     logger.error("❌ Initialization failed at task 2")
                     return
 
-            # Task 3: Create FastAPI backend
+            # Task 3: Create FastAPI backend (skip if already exists from template)
             logger.info(f"📋 Task 3/{total_tasks}: Create FastAPI backend")
-            if self.create_backend():
+            backend_path = self.project_path / "backend"
+            if backend_path.exists():
+                logger.info(f"✓ Backend directory already exists (from template) - skipping creation")
+                self.completed_tasks.append("Create backend")
+                tasks_succeeded += 1
+                logger.info(f"✓ Task 3 completed!")
+            elif self.create_backend():
                 self.completed_tasks.append("Create backend")
                 tasks_succeeded += 1
                 logger.info(f"✓ Task 3 completed!")
@@ -507,8 +556,9 @@ SECRET_KEY=your-secret-key-here-generate-new-one-in-production
             # All tasks completed!
             if tasks_succeeded == 5:
                 logger.info(f"✅ All {total_tasks} initialization tasks completed successfully!")
-                self.update_status("ready")
-                logger.info(f"✓ Project {self.project_id} status updated to 'ready'")
+                # Set to 'scaffolded' - infrastructure deployment will set to 'ready' after verification
+                self.update_status("scaffolded")
+                logger.info(f"✓ Project {self.project_id} status updated to 'scaffolded' (awaiting infrastructure)")
                 logger.info(f"📊 Completed tasks: {', '.join(self.completed_tasks)}")
             else:
                 logger.error(f"❌ Initialization incomplete. Succeeded: {tasks_succeeded}/{total_tasks}, Failed: {', '.join(self.failed_tasks)}")

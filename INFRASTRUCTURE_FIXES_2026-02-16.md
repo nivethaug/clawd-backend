@@ -195,8 +195,7 @@ BACKEND_PORT_MIN = 8010
 BACKEND_PORT_MAX = 9000
 
 # Frontend
-CLAWD_UI_PATH = "/root/clawd-ui"
-CLAWD_UI_DIST = "/root/clawd-ui/dist"
+
 CLAWD_UI_DEV_PORT = 3001
 
 # DNS

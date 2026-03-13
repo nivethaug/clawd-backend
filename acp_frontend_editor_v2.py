@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-ACP Frontend Editor v2 - Filesystem Diff Architecture
+ACP Controlled Frontend Editor Module
 
-Implements safe, validated frontend editing using filesystem diffing:
-- Snapshot before changes
-- Run ACPX (lets AI edit files naturally)
-- Detect changes via filesystem comparison
-- Validate paths and file limits
-- Build gate and rollback on failure
-
-This is the correct architecture for tool-using AI agents like Claude.
+Implements safe, validated frontend editing for Phase 8 projects with:
+- Path validation (whitelist src/, forbid backend, forbid components/ui/)
+- File limit (max 4 new files per execution)
+- Snapshot system (backup before modifications)
+- Rollback (restore on validation/build failure)
+- Build gate (npm install && npm run build)
+- Mutation logging (track all changes)
 """
 
 import os
+import re
+import json
 import shutil
 import subprocess
 import logging
-import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Dict, List, Optional, Tuple, Any
 
 # Configure logging
 logging.basicConfig(
@@ -38,11 +38,11 @@ ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 FORBIDDEN_BACKEND = "/root/clawd-backend"
 FORBIDDEN_UI_COMPONENTS = "components/ui"
 
-# File limits - Increased for reliable multi-page execution
-MAX_NEW_FILES = 50  # Allow enough pages without early termination
+# File limits
+MAX_NEW_FILES = 12
 
 # Build settings
-BUILD_TIMEOUT = 1800  # 30 minutes
+BUILD_TIMEOUT = 600  # 10 minutes (increased for complex templates like finance)
 
 # =============================================================================
 # PATH VALIDATION
@@ -61,6 +61,7 @@ class ACPPathValidator:
         self.frontend_src_path = Path(frontend_src_path).resolve()
         self.ui_components_path = self.frontend_src_path / "components" / "ui"
 
+        # Ensure paths exist
         if not self.frontend_src_path.exists():
             raise ValueError(f"Frontend src path does not exist: {frontend_src_path}")
 
@@ -74,13 +75,21 @@ class ACPPathValidator:
         Returns:
             Tuple of (is_allowed, reason)
         """
-        path = Path(file_path).resolve()
+        # Normalize path - resolve relative paths to frontend_src_path
+        path = Path(file_path)
+        if not path.is_absolute():
+            # Relative path: resolve it relative to frontend_src_path
+            path = (self.frontend_src_path / file_path).resolve()
+        else:
+            # Absolute path: normalize it
+            path = path.resolve()
 
         # Check 1: Forbidden backend path
         try:
             if FORBIDDEN_BACKEND in str(path) or str(path).startswith(FORBIDDEN_BACKEND):
                 return False, f"Forbidden: Cannot modify backend files ({path})"
         except (ValueError, RuntimeError):
+            # Handle case where relative path goes above root
             return False, f"Forbidden: Invalid path ({path})"
 
         # Check 2: Must be inside frontend/src
@@ -95,93 +104,63 @@ class ACPPathValidator:
                 path.relative_to(self.ui_components_path)
                 return False, f"Forbidden: Cannot modify components/ui/ ({path})"
         except ValueError:
+            # Path is not inside components/ui, which is good
             pass
+
+        # Check 4: Must be inside src directory (not parent directories)
+        # Normalize both paths for comparison
+        try:
+            path_str = str(path)
+            src_str = str(self.frontend_src_path)
+            if not path_str.startswith(src_str):
+                return False, f"Forbidden: Path must be inside frontend/src ({path})"
+        except Exception as e:
+            return False, f"Forbidden: Path validation error ({e})"
 
         # All checks passed
         return True, "Allowed"
 
-
-# =============================================================================
-# FILESYSTEM SNAPSHOT
-# =============================================================================
-
-def _file_hash(file_path: Path) -> str:
-    """
-    Compute SHA1 hash of a file.
-
-    Args:
-        file_path: Path to file
-
-    Returns:
-        Hex digest string
-    """
-    h = hashlib.sha1()
-    with open(file_path, 'rb') as f:
-        h.update(f.read())
-    return h.hexdigest()
-
-class FilesystemSnapshot:
-    """Captures and compares filesystem state using file hashes."""
-
-    @staticmethod
-    def get_file_hashes(base_path: Path) -> Dict[str, str]:
+    def validate_paths(self, file_paths: List[str]) -> Tuple[bool, List[str]]:
         """
-        Get dict of file hashes in directory (recursively).
+        Validate multiple file paths.
 
         Args:
-            base_path: Base directory to scan
+            file_paths: List of file paths to validate
 
         Returns:
-            Dict mapping file path (relative to base) to hash
+            Tuple of (all_valid, error_messages)
         """
-        hashes = {}
-        if not base_path.exists():
-            return hashes
+        errors = []
+        for file_path in file_paths:
+            logger.info(f"[ACP] Validating path: '{file_path}'")
+            allowed, reason = self.is_path_allowed(file_path)
+            logger.info(f"[ACP]   Result: allowed={allowed}, reason='{reason}'")
+            if not allowed:
+                errors.append(reason)
 
-        for path in base_path.rglob("*"):
-            if path.is_file():
-                # Exclude node_modules, dist, build directories
-                if not any(excluded in str(path) for excluded in ['node_modules', '.git', 'dist', 'build']):
-                    rel_path = str(path.relative_to(base_path))
-                    hashes[rel_path] = _file_hash(path)
+        return len(errors) == 0, errors
 
-        return hashes
-
-    @staticmethod
-    def compute_diff(before: Dict[str, str], after: Dict[str, str]) -> Dict[str, List[str]]:
+    def is_ui_component_file(self, file_path: str) -> bool:
         """
-        Compute difference between two file hash states.
+        Check if file is inside components/ui directory.
 
         Args:
-            before: File hashes before changes
-            after: File hashes after changes
+            file_path: File path to check
 
         Returns:
-            Dict with 'added', 'removed', 'modified' file lists
+            True if file is inside components/ui/
         """
-        before_paths = set(before.keys())
-        after_paths = set(after.keys())
-
-        added = list(after_paths - before_paths)
-        removed = list(before_paths - after_paths)
-
-        # Modified: exists in both but hash changed
-        modified = []
-        for path in before_paths & after_paths:
-            if before[path] != after[path]:
-                modified.append(path)
-
-        return {
-            'added': added,
-            'removed': removed,
-            'modified': modified
-        }
+        try:
+            path = Path(file_path).resolve()
+            path.relative_to(self.ui_components_path)
+            return True
+        except ValueError:
+            return False
 
 
 # =============================================================================
 # SNAPSHOT MANAGER
 # =============================================================================
-
 class ACPSnapshotManager:
     """Manages snapshot creation and restoration for frontend editing."""
 
@@ -203,9 +182,12 @@ class ACPSnapshotManager:
             Tuple of (success, backup_path_or_error)
         """
         try:
-            logger.info(f"[Snapshot] Creating snapshot at {self.backup_dir}")
+            logger.info(f"Creating snapshot at {self.backup_dir}")
+
+            # Create backup directory
             self.backup_dir.mkdir(parents=True, exist_ok=True)
 
+            # Copy entire frontend directory
             if self.frontend_path.exists():
                 shutil.copytree(
                     self.frontend_path,
@@ -220,13 +202,14 @@ class ACPSnapshotManager:
                     )
                 )
             else:
+                # If frontend doesn't exist, create empty backup
                 (self.backup_dir / "frontend").mkdir(parents=True)
 
-            logger.info(f"[Snapshot] ✓ Snapshot created successfully")
+            logger.info(f"Snapshot created successfully")
             return True, str(self.backup_dir)
 
         except Exception as e:
-            logger.error(f"[Snapshot] ❌ Failed to create snapshot: {e}")
+            logger.error(f"Failed to create snapshot: {e}")
             return False, str(e)
 
     def restore_snapshot(self) -> Tuple[bool, str]:
@@ -245,16 +228,18 @@ class ACPSnapshotManager:
             if not backup_frontend.exists():
                 return False, "Frontend backup not found in snapshot"
 
+            # Remove existing frontend directory
             if self.frontend_path.exists():
                 shutil.rmtree(self.frontend_path)
 
+            # Restore from backup
             shutil.copytree(backup_frontend, self.frontend_path)
 
-            logger.info(f"[Snapshot] ✓ Restored snapshot from {self.backup_dir}")
+            logger.info(f"Restored snapshot from {self.backup_dir}")
             return True, "Snapshot restored successfully"
 
         except Exception as e:
-            logger.error(f"[Snapshot] ❌ Failed to restore snapshot: {e}")
+            logger.error(f"Failed to restore snapshot: {e}")
             return False, str(e)
 
     def cleanup_snapshot(self) -> bool:
@@ -267,11 +252,235 @@ class ACPSnapshotManager:
         try:
             if self.backup_dir.exists():
                 shutil.rmtree(self.backup_dir)
-                logger.info(f"[Snapshot] ✓ Cleaned up snapshot at {self.backup_dir}")
+                logger.info(f"Cleaned up snapshot at {self.backup_dir}")
             return True
         except Exception as e:
-            logger.error(f"[Snapshot] ❌ Failed to cleanup snapshot: {e}")
+            logger.error(f"Failed to cleanup snapshot: {e}")
             return False
+
+
+# =============================================================================
+# MUTATION LOGGER
+# =============================================================================
+
+class ACPMutationLogger:
+    """Logs all mutations made during ACP frontend editing."""
+
+    def __init__(self, frontend_path: str):
+        """
+        Initialize mutation logger.
+
+        Args:
+            frontend_path: Absolute path to frontend directory
+        """
+        self.frontend_path = Path(frontend_path).resolve()
+        self.log_file = self.frontend_path / ".acp_mutation_log.json"
+
+    def create_log_entry(self, execution_id: str) -> Dict[str, Any]:
+        """
+        Create a new log entry for this ACP execution.
+
+        Args:
+            execution_id: Unique ID for this execution
+
+        Returns:
+            Log entry dictionary
+        """
+        return {
+            "execution_id": execution_id,
+            "timestamp": datetime.now().isoformat(),
+            "files_added": [],
+            "files_modified": [],
+            "files_removed": [],
+            "build_result": None,
+            "rollback_status": None,
+            "status": "in_progress"
+        }
+
+    def save_log(self, log_entry: Dict[str, Any]) -> bool:
+        """
+        Save log entry to mutation log file.
+
+        Args:
+            log_entry: Log entry dictionary
+
+        Returns:
+            True if save successful
+        """
+        try:
+            # Read existing logs or create new
+            logs = []
+            if self.log_file.exists():
+                try:
+                    with open(self.log_file, 'r') as f:
+                        logs = json.load(f)
+                except json.JSONDecodeError:
+                    logs = []
+
+            # Append new log
+            logs.append(log_entry)
+
+            # Write back
+            with open(self.log_file, 'w') as f:
+                json.dump(logs, f, indent=2)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save mutation log: {e}")
+            return False
+
+    def log_file_added(self, log_entry: Dict[str, Any], file_path: str) -> None:
+        """Log a file being added."""
+        log_entry["files_added"].append(file_path)
+
+    def log_file_modified(self, log_entry: Dict[str, Any], file_path: str) -> None:
+        """Log a file being modified."""
+        log_entry["files_modified"].append(file_path)
+
+    def log_file_removed(self, log_entry: Dict[str, Any], file_path: str) -> None:
+        """Log a file being removed."""
+        log_entry["files_removed"].append(file_path)
+
+    def update_build_result(self, log_entry: Dict[str, Any], success: bool, output: str = "") -> None:
+        """Update build result in log."""
+        log_entry["build_result"] = {
+            "success": success,
+            "output": output[:1000] if output else "",  # Limit output size
+            "timestamp": datetime.now().isoformat()
+        }
+
+    def update_rollback_status(self, log_entry: Dict[str, Any], rolled_back: bool, reason: str = "") -> None:
+        """Update rollback status in log."""
+        log_entry["rollback_status"] = {
+            "rolled_back": rolled_back,
+            "reason": reason,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    def finalize_status(self, log_entry: Dict[str, Any], status: str) -> None:
+        """Finalize log entry status."""
+        log_entry["status"] = status
+        log_entry["completed_at"] = datetime.now().isoformat()
+
+
+# =============================================================================
+# FILE OPERATIONS
+# =============================================================================
+
+class ACPFileOperations:
+    """Handles file operations with validation."""
+
+    def __init__(self, validator: ACPPathValidator, logger_obj: ACPMutationLogger):
+        """
+        Initialize file operations.
+
+        Args:
+            validator: Path validator instance
+            logger_obj: Mutation logger instance
+        """
+        self.validator = validator
+        self.logger = logger_obj
+        self._new_files_count = 0
+
+    def write_file(self, file_path: str, content: str, log_entry: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Write a file with validation.
+
+        Args:
+            file_path: Path to file
+            content: File content
+            log_entry: Log entry to update
+
+        Returns:
+            Tuple of (success, message)
+        """
+        # Validate path
+        allowed, reason = self.validator.is_path_allowed(file_path)
+        if not allowed:
+            logger.error(f"[FileOps] Path validation failed: {reason}")
+            return False, reason
+
+        # Resolve path the same way as is_path_allowed (relative paths resolve to frontend_src_path)
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = (self.validator.frontend_src_path / file_path).resolve()
+        else:
+            path = path.resolve()
+
+        logger.info(f"[FileOps] Resolved path: {path}")
+        logger.info(f"[FileOps] File exists: {path.exists()}")
+
+        # Check file limit for new files
+        if not path.exists():
+            if self._new_files_count >= MAX_NEW_FILES:
+                logger.error(f"[FileOps] File limit exceeded: {self._new_files_count} >= {MAX_NEW_FILES}")
+                return False, f"File limit exceeded: max {MAX_NEW_FILES} new files allowed"
+
+            self._new_files_count += 1
+            self.logger.log_file_added(log_entry, file_path)
+            logger.info(f"[FileOps] New file #{self._new_files_count}: {file_path}")
+        else:
+            self.logger.log_file_modified(log_entry, file_path)
+            logger.info(f"[FileOps] Modifying existing file: {file_path}")
+
+        # Create parent directories if needed
+        path.parent.mkdir(parents=True, exist_ok=True)
+        logger.debug(f"[FileOps] Created parent directory: {path.parent}")
+
+        # Write file
+        try:
+            logger.info(f"[FileOps] Writing {len(content)} bytes to {path}")
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            logger.info(f"[FileOps] ✓ File written successfully: {file_path}")
+            return True, f"File written: {file_path}"
+        except Exception as e:
+            logger.error(f"[FileOps] ❌ Failed to write file: {e}")
+            return False, f"Failed to write file: {e}"
+
+    def remove_file(self, file_path: str, log_entry: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Remove a file with validation.
+
+        Args:
+            file_path: Path to file
+            log_entry: Log entry to update
+
+        Returns:
+            Tuple of (success, message)
+        """
+        # Validate path
+        allowed, reason = self.validator.is_path_allowed(file_path)
+        if not allowed:
+            return False, reason
+
+        # Resolve path the same way as is_path_allowed (relative paths resolve to frontend_src_path)
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = (self.validator.frontend_src_path / file_path).resolve()
+        else:
+            path = path.resolve()
+
+        # Check if file exists
+        if not path.exists():
+            return False, f"File not found: {file_path}"
+
+        # Remove file
+        try:
+            path.unlink()
+            self.logger.log_file_removed(log_entry, file_path)
+            return True, f"File removed: {file_path}"
+        except Exception as e:
+            return False, f"Failed to remove file: {e}"
+
+    def get_new_files_count(self) -> int:
+        """Get count of new files created."""
+        return self._new_files_count
+
+    def validate_file_limit(self) -> bool:
+        """Check if file limit is within allowed range."""
+        return self._new_files_count <= MAX_NEW_FILES
 
 
 # =============================================================================
@@ -301,6 +510,7 @@ class ACPBuildGate:
         if not self.package_json_path.exists():
             return False, "package.json not found"
 
+        # Check for npm
         try:
             result = subprocess.run(
                 ["npm", "--version"],
@@ -322,6 +532,7 @@ class ACPBuildGate:
         Returns:
             Tuple of (success, output)
         """
+        # Validate environment first
         valid, message = self.validate_environment()
         if not valid:
             return False, f"Environment validation failed: {message}"
@@ -383,25 +594,25 @@ class ACPBuildGate:
 
 
 # =============================================================================
-# MAIN ACP EDITOR V2
+# MAIN ACP EDITOR
 # =============================================================================
 
-class ACPFrontendEditorV2:
+class ACPFrontendEditor:
     """
-    ACP Frontend Editor v2 using filesystem diffing.
+    Main ACP Frontend Editor orchestrates the entire editing process.
 
     Workflow:
-    1. Capture filesystem snapshot
-    2. Run ACPX (AI edits files naturally)
-    3. Detect changes via filesystem comparison
-    4. Validate paths and file limits
-    5. Run build gate
-    6. On failure: rollback
+    1. Create snapshot
+    2. Validate all paths
+    3. Apply changes ( respecting file limit )
+    4. Run build gate
+    5. On failure: rollback and log
+    6. On success: cleanup snapshot and log
     """
 
     def __init__(self, frontend_src_path: str, project_name: str):
         """
-        Initialize ACP Frontend Editor v2.
+        Initialize ACP Frontend Editor.
 
         Args:
             frontend_src_path: Absolute path to frontend/src directory
@@ -414,160 +625,188 @@ class ACPFrontendEditorV2:
         # Initialize components
         self.validator = ACPPathValidator(frontend_src_path)
         self.snapshot_manager = ACPSnapshotManager(str(self.frontend_path))
+        self.mutation_logger = ACPMutationLogger(str(self.frontend_path))
+        self.file_ops = ACPFileOperations(self.validator, self.mutation_logger)
         self.build_gate = ACPBuildGate(str(self.frontend_path))
 
-        # Phase 9: Guardrails - Store allowed pages whitelist
-        self.allowed_pages: Set[str] = set()
-
-    def apply_changes_via_acpx(
+    def apply_changes(
         self,
-        goal_description: str,
+        changes: List[Dict[str, Any]],
         execution_id: str
     ) -> Dict[str, Any]:
         """
-        Apply frontend changes by running ACPX and detecting filesystem changes.
+        Apply a set of changes to the frontend.
 
         Args:
-            goal_description: Natural language description of changes
-            execution_id: Unique ID for tracking
+            changes: List of change dictionaries with keys:
+                - action: 'write', 'remove', or 'modify'
+                - path: file path
+                - content: file content (for write/modify)
+            execution_id: Unique ID for this execution
 
         Returns:
-            Dict with success, message, files changed, build output, rollback status
+            Result dictionary with keys:
+                - success: bool
+                - message: str
+                - files_modified: int
+                - files_added: int
+                - files_removed: int
+                - build_output: str
+                - rollback: bool
         """
-        logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Starting Phase 9 (Filesystem Diff Architecture)")
-        logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Project: {self.project_name}")
-        logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Execution ID: {execution_id}")
+        # Create log entry
+        log_entry = self.mutation_logger.create_log_entry(execution_id)
 
         # Step 1: Create snapshot
-        logger.info(f"[ACPX-V2] Step 1: Creating filesystem snapshot...")
         snapshot_success, snapshot_msg = self.snapshot_manager.create_snapshot()
         if not snapshot_success:
+            log_entry["status"] = "snapshot_failed"
+            self.mutation_logger.save_log(log_entry)
             return {
                 "success": False,
                 "message": f"Snapshot creation failed: {snapshot_msg}",
                 "rollback": False
             }
 
-        # Step 2: Capture filesystem state BEFORE ACPX
-        logger.info(f"[ACPX-V2] Step 2: Capturing filesystem state before ACPX...")
-        hashes_before = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
-        logger.info(f"[ACPX-V2]   Found {len(hashes_before)} files before ACPX")
+        logger.info(f"Snapshot created: {snapshot_msg}")
 
-        # Step 3: Build ACPX prompt (no JSON requirement) with completion tracking
-        logger.info(f"[ACPX-V2] Step 3: Building ACPX prompt...")
-        prompt = self._build_acpx_prompt(goal_description)
+        # Step 2: Validate all paths first
+        all_paths = [c["path"] for c in changes]
+        valid, errors = self.validator.validate_paths(all_paths)
 
-        # Step 4: Run ACPX
-        logger.info(f"[ACPX-V2] Step 4: Running ACPX...")
-        logger.info(f"[ACPX-V2]   Acpx path: /usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js")
-        logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
-        logger.info(f"[ACPX-V2]   Timeout: {BUILD_TIMEOUT} seconds")
+        if not valid:
+            # Rollback immediately on validation failure
+            self.snapshot_manager.restore_snapshot()
+            self.snapshot_manager.cleanup_snapshot()
 
-        acpx_bin = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
-        cmd = [acpx_bin, "claude", "exec", prompt]
+            log_entry["status"] = "validation_failed"
+            self.mutation_logger.update_rollback_status(log_entry, True, "Path validation failed")
+            self.mutation_logger.finalize_status(log_entry, "validation_failed")
+            self.mutation_logger.save_log(log_entry)
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=BUILD_TIMEOUT,
-                cwd=self.frontend_src_path
+            return {
+                "success": False,
+                "message": "Path validation failed",
+                "errors": errors,
+                "rollback": True
+            }
+
+        # Step 3: Count potential new files
+        new_file_count = sum(
+            1 for c in changes
+            if c.get("action") in ("write", "modify")
+            and not Path(c["path"]).exists()
+        )
+
+        if new_file_count > MAX_NEW_FILES:
+            # Rollback on file limit violation
+            self.snapshot_manager.restore_snapshot()
+            self.snapshot_manager.cleanup_snapshot()
+
+            log_entry["status"] = "file_limit_exceeded"
+            self.mutation_logger.update_rollback_status(
+                log_entry,
+                True,
+                f"File limit exceeded: {new_file_count} > {MAX_NEW_FILES}"
             )
+            self.mutation_logger.finalize_status(log_entry, "file_limit_exceeded")
+            self.mutation_logger.save_log(log_entry)
 
-            logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: ACPX subprocess completed (no timeout)")
-            logger.info(f"[ACPX-V2]   Return code: {result.returncode}")
-            logger.info(f"[ACPX-V2]   Stdout length: {len(result.stdout)} chars")
-            logger.info(f"[ACPX-V2]   Stderr length: {len(result.stderr)} chars")
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"[ACPX-V2] 🔴 HEARTBEAT: ❌ TIMED OUT after {BUILD_TIMEOUT} seconds")
-            self.snapshot_manager.restore_snapshot()
-            self.snapshot_manager.cleanup_snapshot()
             return {
                 "success": False,
-                "message": f"ACPX timed out after {BUILD_TIMEOUT} seconds",
+                "message": f"File limit exceeded: {new_file_count} new files, max {MAX_NEW_FILES} allowed",
                 "rollback": True
             }
 
-        # Step 5: Capture filesystem state AFTER ACPX
-        logger.info(f"[ACPX-V2] Step 5: Capturing filesystem state after ACPX...")
-        hashes_after = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
-        logger.info(f"[ACPX-V2]   Found {len(hashes_after)} files after ACPX")
+        # Step 4: Apply changes
+        files_added = 0
+        files_modified = 0
+        files_removed = 0
 
-        # Step 6: Compute changes (filesystem diff)
-        logger.info(f"[ACPX-V2] Step 6: Computing filesystem diff...")
-        diff = FilesystemSnapshot.compute_diff(hashes_before, hashes_after)
+        logger.info(f"[ACPX] Starting to apply {len(changes)} change(s)")
 
-        files_added = diff['added']
-        files_removed = diff['removed']
-        files_modified = diff['modified']
+        for i, change in enumerate(changes):
+            action = change.get("action")
+            path = change.get("path")
+            content = change.get("content", "")
 
-        logger.info(f"[ACPX-V2]   Files added: {len(files_added)}")
-        for f in files_added[:10]:
-            logger.info(f"[ACPX-V2]     + {f}")
-        if len(files_added) > 10:
-            logger.info(f"[ACPX-V2]     ... and {len(files_added) - 10} more")
+            logger.info(f"[ACPX] [{i+1}/{len(changes)}] Processing: action={action}, path={path}")
 
-        logger.info(f"[ACPX-V2]   Files removed: {len(files_removed)}")
-        for f in files_removed[:10]:
-            logger.info(f"[ACPX-V2]     - {f}")
-        if len(files_removed) > 10:
-            logger.info(f"[ACPX-V2]     ... and {len(files_removed) - 10} more")
+            try:
+                if action in ("write", "modify"):
+                    logger.info(f"[ACPX]   Writing/Modifying file: {path}")
+                    success, msg = self.file_ops.write_file(path, content, log_entry)
+                    if success:
+                        logger.info(f"[ACPX]   ✓ File written successfully")
+                        if "written" in msg and path not in log_entry["files_modified"]:
+                            # Check if it was added or modified
+                            if "added" in str(log_entry["files_added"][-1:] if log_entry["files_added"] else []):
+                                files_added += 1
+                            else:
+                                files_modified += 1
+                    else:
+                        logger.error(f"[ACPX]   ❌ Failed to write file: {msg}")
+                        raise Exception(msg)
 
-        logger.info(f"[ACPX-V2]   Files modified: {len(files_modified)}")
-        for f in files_modified[:10]:
-            logger.info(f"[ACPX-V2]     ~ {f}")
-        if len(files_modified) > 10:
-            logger.info(f"[ACPX-V2]     ... and {len(files_modified) - 10} more")
+                elif action == "remove":
+                    logger.info(f"[ACPX]   Removing file: {path}")
+                    success, msg = self.file_ops.remove_file(path, log_entry)
+                    if success:
+                        logger.info(f"[ACPX]   ✓ File removed successfully")
+                        files_removed += 1
+                    else:
+                        logger.error(f"[ACPX]   ❌ Failed to remove file: {msg}")
+                        raise Exception(msg)
 
-        # Step 7: Validate file limits
-        logger.info(f"[ACPX-V2] Step 7: Validating file limits...")
-        if len(files_added) > MAX_NEW_FILES:
-            logger.error(f"[ACPX-V2] ❌ File limit exceeded: {len(files_added)} > {MAX_NEW_FILES}")
-            self.snapshot_manager.restore_snapshot()
-            self.snapshot_manager.cleanup_snapshot()
-            return {
-                "success": False,
-                "message": f"File limit exceeded: {len(files_added)} new files, max {MAX_NEW_FILES} allowed",
-                "rollback": True
-            }
-        logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{MAX_NEW_FILES})")
+                else:
+                    logger.error(f"[ACPX]   ❌ Unknown action: {action}")
+                    raise Exception(f"Unknown action: {action}")
 
-        # Step 8: Validate paths
-        logger.info(f"[ACPX-V2] Step 8: Validating paths...")
-        for file_path in files_added + files_removed:
-            rel_path = str(file_path.relative_to(self.frontend_src_path))
-            allowed, reason = self.validator.is_path_allowed(rel_path)
-            if not allowed:
-                logger.error(f"[ACPX-V2] ❌ Path validation failed: {reason}")
+            except Exception as e:
+                # Rollback on any error
                 self.snapshot_manager.restore_snapshot()
                 self.snapshot_manager.cleanup_snapshot()
+
+                log_entry["status"] = "apply_failed"
+                self.mutation_logger.update_rollback_status(log_entry, True, str(e))
+                self.mutation_logger.finalize_status(log_entry, "apply_failed")
+                self.mutation_logger.save_log(log_entry)
+
                 return {
                     "success": False,
-                    "message": f"Path validation failed: {reason}",
+                    "message": f"Failed to apply changes: {e}",
                     "rollback": True
                 }
-        logger.info(f"[ACPX-V2]   ✓ All paths valid")
 
-        # Step 9: Enforce page guardrails (BEFORE build to prevent routing issues)
-        logger.info(f"[ACPX-V2] Step 9: Enforcing page guardrails (BEFORE build)...")
-        unauthorized_removed = self._enforce_page_guardrails()
+        logger.info(f"Applied changes: {files_added} added, {files_modified} modified, {files_removed} removed")
 
-        if unauthorized_removed > 0:
-            logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
-        else:
-            logger.info(f"[ACPX-V2]   ✓ All pages authorized")
+        # Step 5: Run build gate
+        logger.info(f"[ACPX] Running build gate (npm install && npm run build)")
+        logger.info(f"[ACPX] Build timeout set to {BUILD_TIMEOUT} seconds")
 
-        # Step 10: Run build gate (AFTER guardrails to prevent build errors)
-        logger.info(f"[ACPX-V2] Step 10: Running build gate (npm install && npm run build)...")
         build_success, build_output = self.build_gate.run_build()
 
+        log_entry["build_result"] = {
+            "success": build_success,
+            "output": build_output[:1000] if build_output else ""
+        }
+
+        if build_success:
+            logger.info(f"[ACPX] ✓ Build succeeded!")
+        else:
+            logger.error(f"[ACPX] ❌ Build failed!")
+            logger.error(f"[ACPX] Build output (last 500 chars):\n{build_output[-500:] if build_output else 'N/A'}")
+
         if not build_success:
-            logger.error(f"[ACPX-V2] ❌ Build failed")
-            logger.error(f"[ACPX-V2]   Build output (last 500 chars):\n{build_output[-500:]}")
+            # Rollback on build failure
             self.snapshot_manager.restore_snapshot()
             self.snapshot_manager.cleanup_snapshot()
+
+            log_entry["status"] = "build_failed"
+            self.mutation_logger.update_rollback_status(log_entry, True, "Build failed")
+            self.mutation_logger.finalize_status(log_entry, "build_failed")
+            self.mutation_logger.save_log(log_entry)
+
             return {
                 "success": False,
                 "message": "Build failed",
@@ -575,167 +814,50 @@ class ACPFrontendEditorV2:
                 "rollback": True
             }
 
-        logger.info(f"[ACPX-V2] ✓ Build succeeded!")
-
-        # Step 11: Success - cleanup snapshot
-        logger.info(f"[ACPX-V2] Step 10: Cleanup snapshot...")
+        # Step 6: Success - cleanup snapshot and finalize log
         self.snapshot_manager.cleanup_snapshot()
+
+        log_entry["status"] = "success"
+        self.mutation_logger.update_rollback_status(log_entry, False, "")
+        self.mutation_logger.finalize_status(log_entry, "success")
+        self.mutation_logger.save_log(log_entry)
 
         return {
             "success": True,
-            "message": "ACPX changes applied successfully",
-            "files_added": len(files_added),
-            "files_modified": len(files_modified),
-            "files_removed": len(files_removed),
+            "message": "Changes applied successfully",
+            "files_added": files_added,
+            "files_modified": files_modified,
+            "files_removed": files_removed,
             "build_output": build_output,
             "rollback": False
         }
 
-    def _build_acpx_prompt(self, goal_description: str) -> str:
+    def generate_and_apply_changes(self, goal_description: str, execution_id: str) -> Dict[str, Any]:
         """
-        Build ACPX prompt with explicit required artifacts and completion checklist.
+        Full flow: Ask Claude for changes → validate → apply → build → log/rollback
 
         Args:
-            goal_description: Goal for changes
+            goal_description: Natural language description of changes
+            execution_id: Unique ID for tracking
 
         Returns:
-            Prompt string for ACPX
+            Dict with success status, message, files changed, build output, rollback status
         """
-        # Extract required pages from goal description (improved planner)
-        required_pages = []
-        required_components = []
+        logger.info(f"Starting ACP edit for goal: {goal_description}")
 
-        # Page keyword mappings for improved detection
-        PAGE_KEYWORDS = {
-            "Dashboard": ["dashboard", "overview"],
-            "Documents": ["document", "docflow", "panda", "agreement", "contract"],
-            "Templates": ["template"],
-            "DocumentEditor": ["document editor", "doc editor", "editor"],
-            "Signing": ["sign", "signature", "esign", "electronically sign"],
-            "Analytics": ["analytics", "metrics", "reports", "statistics"],
-            "Contacts": ["contacts", "crm", "customer", "customers", "lead", "leads"],
-            "Team": ["team", "members", "users", "staff"],
-            "Billing": ["billing", "subscription", "payments", "invoice", "pricing"],
-            "Notifications": ["notifications", "alerts", "messages", "notification"],
-            "Tasks": ["task", "todo", "project", "kanban"],
-            "Settings": ["setting", "settings", "config", "preference", "preferences"],
-            "Posts": ["post", "posts", "article", "articles", "blog"],
-            "Create": ["create", "write", "compose"]
-        }
-
-        desc_lower = goal_description.lower()
-
-        # Step 1: Extract explicit page lists (highest priority)
-        # Matches patterns like: "pages: Dashboard, Documents, Templates"
-        # Or: "with 10 pages: Dashboard, Documents, Templates..."
-        import re
-        explicit_list_pattern = r'pages?:\s*(.+)'
-        explicit_match = re.search(explicit_list_pattern, goal_description, re.IGNORECASE)
-
-        if explicit_match:
-            pages_str = explicit_match.group(1)
-            # Normalize and split by comma
-            explicit_pages = [p.strip() for p in pages_str.split(',')]
-
-            # Normalize page names: "Document Editor" → "DocumentEditor"
-            for page in explicit_pages:
-                # Remove leading/trailing whitespace and special chars
-                normalized = re.sub(r'\s+', '', page.strip().title())
-                # Skip empty strings or strings with only special chars
-                if normalized and len(normalized) > 0 and any(c.isalpha() for c in normalized):
-                    required_pages.append(normalized)
-                    logger.info(f"[Planner] Explicit page detected: {page} → {normalized}")
-
-            logger.info(f"[Planner] Explicit page list detected: {len(required_pages)} pages")
-
-        # Step 2: Keyword matching (if explicit list not found or incomplete)
-        desc_lower = goal_description.lower()
-        for page_name, keywords in PAGE_KEYWORDS.items():
-            if page_name not in required_pages:  # Skip if already in explicit list
-                if any(keyword in desc_lower for keyword in keywords):
-                    required_pages.append(page_name)
-
-        # Step 3: SaaS default fallback (if less than 3 pages detected)
-        if len(required_pages) < 3:
-            logger.info(f"[Planner] Fewer than 3 pages detected ({len(required_pages)}), adding SaaS defaults")
-            saas_defaults = ["Dashboard", "Analytics", "Contacts", "Settings"]
-            for default_page in saas_defaults:
-                if default_page not in required_pages:
-                    required_pages.append(default_page)
-
-        # Step 4: Remove duplicates while preserving order
-        required_pages = list(dict.fromkeys(required_pages))
-
-        # Phase 9: Store allowed pages whitelist for guardrails
-        self.allowed_pages = set(required_pages)
-        logger.info(f"[Phase9] Allowed pages: {required_pages}")
-
-        # Planner logging
-        logger.info(f"[Planner] Description: {goal_description}")
-        logger.info(f"[Planner] Detected pages: {required_pages}")
-
-        # Build required artifacts list
-        required_pages_list = required_pages
-        required_components_list = list(set(required_components))
-
-        required_pages_str = "\n".join([f"- src/pages/{page}.tsx" for page in required_pages_list])
-        required_components_str = "\n".join([f"- src/components/{comp}.tsx" for comp in required_components_list])
-
-        # Phase 9: Build page templates section
-        page_templates_section = self._build_page_templates_section(required_pages, goal_description)
-
-        return f"""You are editing a React + Vite + TypeScript SaaS application.
+        # Build instruction for Claude - Production-Grade UI Redesign Mode
+        instruction = f"""You are editing a React + Vite + TypeScript project.
 
 Project Name: {self.project_name}
 Project Description: {goal_description}
 
-YOUR TASK
+GOAL:
+Redesign the existing dashboard UI to a modern, professional analytics dashboard while preserving project structure.
 
-Transform the existing template into a production-ready application based on the project description above.
+STRICT RULES
 
-PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
-
-⚠️  CRITICAL: EXACT PAGE CREATION REQUIRED ⚠️
-
-1. ONLY create the pages listed below:
-{required_pages_str}
-
-2. File names must match EXACTLY:
-   - Use this pattern: src/pages/{{PageName}}.tsx
-   - Examples: src/pages/Dashboard.tsx, src/pages/Contacts.tsx, src/pages/Settings.tsx
-   - DO NOT add "Page" suffix: ✗ DashboardPage.tsx → ✓ Dashboard.tsx
-   - DO NOT add "Overview" suffix: ✗ AnalyticsOverview.tsx → ✓ Analytics.tsx
-   - DO NOT use variations: ✗ ReportsPage.tsx → ✓ Reports.tsx
-
-3. ABSOLUTELY FORBIDDEN:
-   - DO NOT create any additional pages beyond the list
-   - DO NOT create variations like: Account.tsx, Activity.tsx, Users.tsx, Team.tsx, Billing.tsx
-   - DO NOT rename pages - use exact names from REQUIRED PAGES list
-   - DO NOT generate default SaaS pages when explicit pages are provided
-
-4. FINAL VERIFICATION CHECKLIST:
-   Before marking task complete, verify:
-   - [ ] ONLY pages from REQUIRED PAGES list exist in src/pages/
-   - [ ] NO unauthorized pages were created
-   - [ ] All required pages are complete
-   - [ ] File names match exactly with REQUIRED PAGES list
-
-PAGE TEMPLATES
-{page_templates_section}
-
-SCOPE LIMITATION (CRITICAL - Reduces AI scanning time)
-
-ONLY modify files in these directories:
-- src/pages/
-- src/components/
-- src/layout/
-- src/features/
-
-DO NOT scan:
-- node_modules
-- dist
-- build
-- .git
+You may ONLY modify files inside:
+src/
 
 DO NOT modify:
 - src/components/ui/ (UI primitives only)
@@ -743,118 +865,253 @@ DO NOT modify:
 - backend files, .env files
 - Do NOT change project architecture
 
-COMPLETION CHECKLIST
+SCOPE LIMITATION (CRITICAL)
+- ONLY scan files in src/pages/ and src/components/ directories
+- DO NOT scan entire project tree
+- DO NOT index node_modules, dist, or build directories
+- Focus on UI/UX changes, not architectural refactoring
+- Limit file operations to {MAX_NEW_FILES} files maximum
 
-✓ All required pages created in src/pages/ (EXACT file names)
-✓ All required components created in src/components/
-✓ Routing updated in src/App.tsx
-✓ Navigation/sidebar updated
-✓ Responsive design implemented
-✓ Code is production-ready
-✓ npm run build succeeds
+UI DESIGN OBJECTIVE
 
-WORKING METHODOLOGY
+Transform the existing template into a premium analytics dashboard similar to modern SaaS platforms.
 
-You must work systematically through ALL required pages.
+IMPROVE:
+• Visual hierarchy
+• Layout spacing
+• Typography scale
+• Component grouping
+• Responsive behavior
+• Chart presentation
+• Sidebar styling
+• Header UX
 
-1. Read the project description and page templates carefully
-2. Plan your approach
-3. Execute step by step following page templates
-4. DO NOT STOP until ALL required pages are created
-5. After completing a page, move to the next page
-6. Continue until the entire checklist is complete
-7. Run npm run build after all pages are created
+DASHBOARD REDESIGN REQUIREMENTS
 
-EXECUTION RULES
+Redesign the main dashboard page to include:
 
-1. Work through pages ONE AT A TIME using page templates
-2. Complete each page fully before moving to the next
-3. Use EXACT page names from REQUIRED PAGES list
-4. Do not skip any required page
-5. Do not stop early - continue until checklist is 100% complete
-6. Only mark task complete when ALL checklist items are done
-7. Use page templates as guidance but adapt to existing code structure
+1. HERO HEADER SECTION
+ - Title: {self.project_name}
+ - Subtitle based on project description ({goal_description})
+ - Action buttons (Add Asset, Refresh Data, View All)
 
-TECHNICAL REQUIREMENTS
+2. STATS CARDS ROW
+Modern cards with:
+ - Icon
+ - Label
+ - Large value
+ - Change indicator (+/- %)
+ - Subtle gradient background
 
-- Keep the code buildable (npm run build must succeed)
-- Use existing UI components from src/components/ui/
-- Follow existing code patterns and style
-- Write clean, production-ready code
-- Do not introduce placeholder content unless required
-- Follow page template specifications for professional UI
+3. ANALYTICS GRID LAYOUT
 
-IMPLEMENTATION
+Left column:
+- Portfolio performance chart
+- Market trends chart
+- Activity timeline
 
-Make your changes directly to files.
+Right column:
+- Asset allocation donut/pie chart
+- Top assets table
+- Recent transactions
 
-Do NOT request JSON output or any specific format.
+4. ASSETS / DATA TABLE
+Columns with proper alignment:
+- Asset / Name
+- Price
+- 24h Change
+- Holdings
+- Value
+- Actions
 
-Just implement the changes using your available tools.
+5. MODERN SIDEBAR
+Improve sidebar UX:
+- Active indicator glow
+- Better spacing and padding
+- Proper icon alignment
+- Improved branding for {self.project_name}
+- Collapse/expand behavior
+
+6. HEADER IMPROVEMENTS
+Improve header bar:
+- Search bar with icon
+- Notification badge icon
+- Profile avatar dropdown
+- Theme toggle (if not present)
+
+DESIGN STYLE
+
+Use modern dashboard design patterns:
+- Glassmorphism or subtle gradients
+- Card-based layout with proper spacing
+- Rounded corners (xl/2xl)
+- Soft shadows
+- Proper padding and gaps (4, 6, 8)
+- Responsive grid (1 col mobile, 2 col tablet, 3-4 col desktop)
+
+Use existing UI primitives from:
+src/components/ui/
+
+Do NOT recreate base UI components. Reuse Card, Button, Badge, Table, etc.
+
+FILE CREATION RULES
+
+Minimum new components: 2
+Maximum new components: {MAX_NEW_FILES}
+
+Allowed files to create:
+- src/pages/ (new dashboard views)
+- src/components/ (new dashboard widgets)
+- src/features/ (feature-specific components)
+
+Remove generic template pages if they are unused and don't fit the project.
+
+ROUTING
+
+If new pages are added, update routing inside:
+src/App.tsx or src/main.tsx
+
+Do NOT break existing routes.
+
+CRITICAL: DO NOT ONLY RENAME TITLES
+- Improve layout structure and component organization
+- Add proper sections and groupings
+- Create visual hierarchy with spacing and typography
+- Transform generic template into project-specific dashboard
+
+OUTPUT
+
+Make the UI look like a modern SaaS analytics dashboard.
+
+Focus on visual quality and layout improvement rather than simple text changes.
+
+You MUST return ONLY a valid JSON array with the following structure. Do not include any other text, explanations, or markdown formatting:
+
+[
+  {{
+    "action": "write" | "modify" | "remove",
+    "path": "relative/path/from/src e.g. components/StatsCard.tsx",
+    "content": "full file content as string (use empty string for remove)"
+  }}
+]
+
+Execute this UI redesign now.
 """
 
-    def _build_page_templates_section(self, required_pages: List[str], goal_description: str) -> str:
-        """
-        Build page templates section for ACPX prompt.
+        # Call acpx using the configured CLI command
+        # Use acpx CLI with proper arguments
+        logger.info(f"[ACPX] cwd: {self.validator.frontend_src_path}")
+        logger.info(f"[ACPX] running: acpx --format quiet claude exec")
 
-        Args:
-            required_pages: List of required page names
-            goal_description: Project goal description
+        try:
+            # Run acpx with prompt as argument (not stdin)
+            cmd = [
+                "acpx",
+                "--cwd", str(self.validator.frontend_src_path),
+                "--format", "quiet",
+                "claude",
+                "exec",
+                str(instruction)
+            ]
+            result = subprocess.run(
+                cmd,
+                text=True,
+                capture_output=True,
+                timeout=1800,  # 30 minutes
+                cwd=str(self.validator.frontend_src_path)
+            )
+
+            logger.info(f"[ACPX] 🔴 HEARTBEAT: ACPX subprocess completed (did NOT timeout)")
+            logger.info(f"[ACPX] 🔴 HEARTBEAT: Total elapsed time likely < 30 minutes")
+
+            output = result.stdout.strip()
+            stderr = result.stderr.strip()
+
+            logger.info(f"[ACPX] Subprocess completed")
+            logger.info(f"[ACPX] Return code: {result.returncode}")
+
+            # Log output for debugging (ignore harmless telemetry errors)
+            if "session/update" in stderr or "Invalid params" in stderr:
+                logger.debug(f"Ignoring harmless telemetry error (ACP bug)")
+            elif stderr:
+                logger.debug(f"acpx stderr (last 500 chars): {stderr[-500:]}")  # Last 500 chars
+
+            logger.info(f"[ACPX] Output length: {len(output)} chars")
+            logger.info(f"[ACPX] First 500 chars:\n{output[:500]}")
+            logger.info(f"[ACPX] Last 500 chars:\n{output[-500:]}")
+
+            # Extract JSON patch (robust version - handle markdown formatting)
+            logger.info(f"[ACPX] Attempting to extract JSON patch from output")
+
+            # Try multiple patterns to find JSON array
+            match = re.search(r'```json\s*\[\s*\{.*\}\s*\]\s*```', output, re.DOTALL)
+            if not match:
+                match = re.search(r'\[\s*\{.*\}\s*\]', output, re.DOTALL)
+
+            if not match:
+                logger.error(f"[ACPX] ❌ JSON patch not found in output!")
+                logger.error(f"[ACPX] Full output:\n{output}")
+                raise ValueError("No JSON patch found in output")
+
+            patch_str = match.group(0)
+            logger.info(f"[ACPX] ✓ Found JSON patch (length: {len(patch_str)} chars)")
+
+            # Strip markdown if present
+            patch_str = re.sub(r'^```json\s*|\s*```$', '', patch_str.strip(), flags=re.MULTILINE | re.IGNORECASE)
+            logger.info(f"[ACPX] Patch after markdown strip (first 300 chars):\n{patch_str[:300]}")
+
+            changes = json.loads(patch_str)
+            if not isinstance(changes, list):
+                logger.error(f"[ACPX] ❌ Patch is not a list! Type: {type(changes)}")
+                raise ValueError("Patch must be a list")
+
+            logger.info(f"[ACPX] ✓ Parsed JSON array with {len(changes)} change(s)")
+
+            # Log each change
+            for i, change in enumerate(changes):
+                action = change.get('action', 'unknown')
+                path = change.get('path', 'unknown')
+                content_len = len(change.get('content', ''))
+                logger.info(f"[ACPX]   Change {i+1}: action={action}, path={path}, content_length={content_len}")
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: ❌ TIMED OUT after 30 minutes (1800 seconds)")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: ACPX subprocess was killed by timeout")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: This usually means Claude was:")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT:   1. Stuck in a long analysis/scanning phase")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT:   2. Waiting for tool approval (permissions)")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT:   3. Processing too many files")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: Permission flag was used, so #2 should not happen")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: Consider reducing AI scope further")
+            return {
+                "success": False,
+                "message": "Claude/acpx timed out after 30 minutes"
+            }
+        except Exception as e:
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: ❌ EXCEPTION occurred")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: Exception type: {type(e).__name__}")
+            logger.error(f"[ACPX] 🔴 HEARTBEAT: Exception message: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Failed to generate changes: {e}"
+            }
+
+        # Now apply the received changes
+        return self.apply_changes(changes, execution_id)
+
+    def get_mutation_log(self) -> List[Dict[str, Any]]:
+        """
+        Get the mutation log for this frontend.
 
         Returns:
-            Page templates section for prompt
+            List of mutation log entries
         """
-        template_sections = []
+        log_file = self.mutation_logger.log_file
+        if not log_file.exists():
+            return []
 
-        for page_name in required_pages:
-            template_content = get_page_template_for_prompt(page_name, goal_description)
-            template_sections.append(template_content)
-
-        return "\n".join(template_sections)
-
-    def _enforce_page_guardrails(self) -> int:
-        """
-        Enforce page guardrails by removing unauthorized pages.
-
-        Scans src/pages/ and removes any pages not in the allowed_pages whitelist.
-
-        Returns:
-            Number of unauthorized pages removed
-        """
-        pages_dir = self.frontend_src_path / "pages"
-
-        if not pages_dir.exists():
-            logger.warning(f"[Guardrail] Pages directory not found: {pages_dir}")
-            return 0
-
-        # Always allowed pages (system pages)
-        always_allowed = {"NotFound", "Welcome", "_app", "_layout", "index", "Error", "Loading"}
-
-        unauthorized_removed = 0
-
-        for page_file in pages_dir.glob("*.tsx"):
-            # Extract page name (remove .tsx extension)
-            page_name = page_file.stem
-
-            # Skip always-allowed pages
-            if page_name in always_allowed:
-                continue
-
-            # Check if page is in allowed whitelist
-            if page_name not in self.allowed_pages:
-                logger.warning(f"[Guardrail] Removing unauthorized page: {page_name}")
-                try:
-                    page_file.unlink()
-                    unauthorized_removed += 1
-                except Exception as e:
-                    logger.error(f"[Guardrail] Failed to remove {page_name}: {e}")
-
-        if unauthorized_removed > 0:
-            logger.info(f"[Guardrail] Removed {unauthorized_removed} unauthorized page(s)")
-            logger.info(f"[Guardrail] Remaining allowed pages: {sorted(self.allowed_pages)}")
-        else:
-            logger.info(f"[Guardrail] ✓ All pages are authorized")
-
-        logger.info(f"[Phase9] Final validated pages: {sorted(self.allowed_pages)}")
-
-        return unauthorized_removed
+        try:
+            with open(log_file, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return []

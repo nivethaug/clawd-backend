@@ -6,7 +6,7 @@ Handles all infrastructure provisioning for website projects:
 - Port allocation
 - Service management
 - Nginx configuration
-- Deployment verification
+- Deployment verification with retry logic
 """
 
 import subprocess
@@ -15,10 +15,19 @@ import random
 import string
 import json
 import logging
+import os
+import time
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import dns_manager  # Internal DNS management module
 from typing import Optional, Dict, List, Tuple
+
+# Import enhanced deployment verifier
+from deployment_verifier import DeploymentVerifier as EnhancedDeploymentVerifier, format_verification_report
 
 # Configure logging
 logging.basicConfig(
@@ -43,11 +52,6 @@ FRONTEND_PORT_MIN = 3000
 FRONTEND_PORT_MAX = 4000
 BACKEND_PORT_MIN = 8010
 BACKEND_PORT_MAX = 9000
-
-# Clawsd-ui settings
-CLAWD_UI_PATH = "/root/clawd-ui"
-CLAWD_UI_DIST = "/root/clawd-ui/dist"
-CLAWD_UI_DEV_PORT = 3001
 
 # DNS settings
 BASE_DOMAIN = "dreambigwithai.com"
@@ -160,12 +164,20 @@ class DatabaseProvisioner:
         """Sanitize database name by replacing hyphens with underscores."""
         return name.replace("-", "_")
 
-    def _execute_sql(self, sql: str) -> List[Tuple]:
-        """Execute SQL command in PostgreSQL container."""
+    def _execute_sql(self, sql: str, database_name: str = "defaultdb") -> List[Tuple]:
+        """Execute SQL command in PostgreSQL container.
+
+        Args:
+            sql: SQL command to execute
+            database_name: Database to connect to (defaults to "defaultdb")
+
+        Returns:
+            List of tuples with query results
+        """
         try:
             cmd = [
                 "docker", "exec", self.container,
-                "psql", "-U", POSTGRES_USER, "-d", "defaultdb", "-c", sql
+                "psql", "-U", POSTGRES_USER, "-d", database_name, "-c", sql
             ]
 
             result = subprocess.run(
@@ -245,20 +257,21 @@ class DatabaseProvisioner:
 
             logger.info(f"Dropping database: {db_name}")
 
-            # Drop connections first
+            # Drop connections first (connect to project-specific database)
             self._execute_sql(
                 f"SELECT pg_terminate_backend(pg_stat_activity.pid) "
                 f"FROM pg_stat_activity "
                 f"WHERE pg_stat_activity.datname = '{db_name}' "
-                f"AND pid <> pg_backend_pid();"
+                f"AND pid <> pg_backend_pid();",
+                database_name=db_name
             )
 
-            # Drop database (quoted to handle SQL keywords)
-            self._execute_sql(f'DROP DATABASE IF EXISTS "{db_name}";')
+            # Drop database (quoted to handle SQL keywords, connect to project-specific database)
+            self._execute_sql(f'DROP DATABASE IF EXISTS "{db_name}";', database_name=db_name)
             logger.info(f"✓ Database dropped: {db_name}")
 
-            # Drop user (quoted to handle SQL keywords)
-            self._execute_sql(f'DROP USER IF EXISTS "{username}";')
+            # Drop user (quoted to handle SQL keywords, connect to project-specific database)
+            self._execute_sql(f'DROP USER IF EXISTS "{username}";', database_name=db_name)
             logger.info(f"✓ User dropped: {username}")
 
         except Exception as e:
@@ -270,7 +283,8 @@ class DatabaseProvisioner:
             db_name = f"{self._sanitize_db_name(project_name)}_db"
 
             result = self._execute_sql(
-                f'SELECT pg_database_size(\'{db_name}\') AS size;'
+                f'SELECT pg_database_size(\'{db_name}\') AS size;',
+                database_name=db_name
             )
 
             if result and len(result) > 0:
@@ -329,33 +343,100 @@ class ServiceManager:
             logger.error(f"Failed to create backend service config: {e}")
             raise
 
-    def start_backend_service(self, app_name: str, backend_path: Path) -> bool:
-        """Start backend service."""
+    def start_backend_service(self, app_name: str, backend_path: Path, port: int = None) -> bool:
+        """Start backend service with FastAPI/uvicorn and dependency installation."""
         try:
-            logger.info(f"Starting service: {app_name}")
+            logger.info(f"[SERVICE] Starting backend service: {app_name}")
+            logger.info(f"[SERVICE] Backend working directory: {backend_path}")
+            logger.info(f"[SERVICE] Backend port: {port}")
 
-            # Start with PM2 using ecosystem config
+            # Install Python dependencies first
+            requirements_path = backend_path / "requirements.txt"
+            if requirements_path.exists():
+                logger.info("[SERVICE] Installing Python dependencies from requirements.txt...")
+                try:
+                    subprocess.run(
+                        ["pip", "install", "--break-system-packages", "-r", "requirements.txt"],
+                        cwd=str(backend_path),
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=300  # 5 minutes
+                    )
+                    logger.info("[SERVICE] ✓ Python dependencies installed successfully")
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"[SERVICE] Failed to install dependencies: {e}")
+                    logger.error(f"[SERVICE] Install stderr: {e.stderr[:500]}")
+                    return False
+            else:
+                logger.warning(f"[SERVICE] No requirements.txt found at {requirements_path}")
+
+            # Prepare backend port
+            backend_port = port if port else 8000
+
+            # Create ecosystem config for PM2 with Python FastAPI backend
+            ecosystem_config = {
+                "apps": [{
+                    "name": app_name,
+                    "script": "python3",
+                    "args": f"-m uvicorn main:app --host 0.0.0.0 --port {backend_port}",
+                    "cwd": str(backend_path),
+                    "instances": 1,
+                    "exec_mode": "fork",
+                    "watch": False,
+                    "max_memory_restart": "500M",
+                    "env": {
+                        "PORT": str(backend_port),
+                        "BACKEND_HOST": "0.0.0.0",
+                        "BACKEND_PORT": str(backend_port)
+                    }
+                }]
+            }
+
+            # Write ecosystem config file
+            import json
             ecosystem_path = backend_path / "ecosystem.config.json"
-            if not ecosystem_path.exists():
-                logger.error(f"Ecosystem config not found: {ecosystem_path}")
-                return False
+            ecosystem_path.write_text(json.dumps(ecosystem_config, indent=2))
+
+            # Start FastAPI backend using ecosystem config
+            backend_cmd = [
+                "pm2", "start", str(ecosystem_path)
+            ]
+
+            logger.info(f"[SERVICE] Backend command: {' '.join(backend_cmd)}")
 
             result = subprocess.run(
-                ["pm2", "start", str(ecosystem_path)],
+                backend_cmd,
+                cwd=str(backend_path),
+                check=True,
                 capture_output=True,
                 text=True,
                 timeout=30
             )
 
-            if result.returncode == 0:
-                logger.info(f"✓ Service started: {app_name}")
-                return True
-            else:
-                logger.error(f"Failed to start service: {result.stderr}")
-                return False
+            logger.info(f"[SERVICE] Backend service started successfully: {app_name}")
+            logger.info(f"[SERVICE] Backend stdout: {result.stdout[:200]}")
 
+            # Add startup delay to ensure backend is ready
+            logger.info("[SERVICE] Waiting for backend to start (5s)...")
+            time.sleep(5)
+
+            # Log PM2 status to verify backend is running
+            pm2_status = subprocess.run(
+                ["pm2", "list"],
+                capture_output=True,
+                text=True
+            )
+            logger.info(f"[SERVICE] PM2 status after startup:\n{pm2_status.stdout}")
+
+            return True
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[SERVICE] Backend service failed to start: {e}")
+            logger.error(f"[SERVICE] Backend stderr: {e.stderr[:300]}")
+            return False
         except Exception as e:
-            logger.error(f"Failed to start service: {e}")
+            logger.error(f"[SERVICE] Backend service error: {e}")
             return False
 
     def stop_service(self, app_name: str) -> bool:
@@ -406,31 +487,112 @@ class ServiceManager:
 
     def build_frontend(self) -> bool:
         """
-        Build the clawd-ui frontend.
+        Build frontend with Vite cache cleanup and build verification.
 
         Returns:
             True if successful, False otherwise
         """
+        # Copy system environment to ensure npm/node are accessible
+        env = os.environ.copy()
+        
         try:
-            logger.info("Building clawd-ui frontend...")
-
-            result = subprocess.run(
-                ["npm", "run", "build"],
-                cwd=CLAWD_UI_PATH,
+            logger.info("PHASE_5_BUILD_START")
+            logger.info(f"[BUILD] Starting frontend build for {self.project_name}")
+            
+            frontend_dist_path = self.project_path / "frontend"
+            
+            # Check if frontend exists
+            if not frontend_dist_path.exists():
+                logger.error(f"[BUILD] Frontend directory not found: {frontend_dist_path}")
+                logger.info("PHASE_5_BUILD_FAILED: missing frontend")
+                return False
+            
+            # Clean Vite caches before build to prevent stale cache issues
+            logger.info("[BUILD] Cleaning Vite caches to prevent corrupted node_modules...")
+            vite_cache_paths = [
+                frontend_dist_path / "node_modules" / ".vite",
+                frontend_dist_path / "node_modules" / ".vite-temp",
+            ]
+            
+            caches_cleaned = 0
+            for cache_path in vite_cache_paths:
+                if cache_path.exists():
+                    try:
+                        import shutil
+                        shutil.rmtree(str(cache_path))
+                        logger.info(f"[BUILD] ✓ Cleaned Vite cache: {cache_path.name}")
+                        caches_cleaned += 1
+                    except Exception as cache_err:
+                        logger.warning(f"[BUILD] ⚠️ Could not clean cache {cache_path.name}: {cache_err}")
+            
+            logger.info(f"[BUILD] Cleaned {caches_cleaned} Vite cache directories")
+            
+            # Install dependencies before build
+            logger.info("[BUILD] Installing frontend dependencies...")
+            install_result = subprocess.run(
+                ["npm", "install"],
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minutes
+                timeout=600,  # 10 minutes
+                cwd=str(frontend_dist_path),
+                env=env
             )
-
-            if result.returncode == 0:
-                logger.info(f"✓ Frontend built successfully")
-                return True
-            else:
-                logger.error(f"Failed to build frontend: {result.stderr}")
+            
+            if install_result.returncode != 0:
+                logger.error(f"[BUILD] npm install failed with code {install_result.returncode}")
+                logger.error(f"[BUILD] npm install stderr: {install_result.stderr[:500]}")
+                logger.info("PHASE_5_BUILD_FAILED: npm install failed")
                 return False
+            
+            logger.info("[BUILD] ✓ npm install completed successfully")
+            
+            # Build the app
+            logger.info("[BUILD] Building frontend with Vite...")
+            build_result = subprocess.run(
+                ["npm", "run", "build"],
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 minutes
+                cwd=str(frontend_dist_path),
+                env=env
+            )
+            
+            if build_result.returncode != 0:
+                logger.error(f"[BUILD] Frontend build failed with code {build_result.returncode}")
+                logger.error(f"[BUILD] Build stderr (last 500 chars): {build_result.stderr[-500:]}")
+                logger.info("PHASE_5_BUILD_FAILED: build command failed")
+                return False
+            
+            # Verify dist directory was created
+            dist_path = frontend_dist_path / "dist"
+            if not dist_path.exists():
+                logger.error(f"[BUILD] Build completed but dist directory missing: {dist_path}")
+                logger.info("PHASE_5_BUILD_FAILED: dist directory not created")
+                return False
+            
+            if not any(dist_path.iterdir()):
+                logger.error(f"[BUILD] Build completed but dist directory is empty: {dist_path}")
+                logger.info("PHASE_5_BUILD_FAILED: dist directory empty")
+                return False
+            
+            # Verify index.html exists (critical for SPA routing)
+            index_html = dist_path / "index.html"
+            if not index_html.exists():
+                logger.error(f"[BUILD] index.html not found in dist: {index_html}")
+                logger.info("PHASE_5_BUILD_FAILED: index.html missing")
+                return False
+            
+            logger.info(f"[BUILD] ✓ Frontend built successfully")
+            logger.info(f"[BUILD] ✓ Dist directory created: {dist_path}")
+            logger.info("[BUILD] ✓ index.html verified")
+            logger.info("PHASE_5_BUILD_COMPLETE: success")
+            return True
 
+        except subprocess.TimeoutExpired:
+            logger.error("PHASE_5_BUILD_FAILED: build timed out after 10 minutes")
+            return False
         except Exception as e:
-            logger.error(f"Failed to build frontend: {e}")
+            logger.error(f"PHASE_5_BUILD_FAILED: {type(e).__name__}: {str(e)}")
             return False
 
     def create_frontend_service(self, project_name: str, frontend_port: int, project_path: Path) -> str:
@@ -442,6 +604,9 @@ class ServiceManager:
         Returns:
             PM2 app name
         """
+        # Copy system environment to ensure npm/node are accessible
+        env = os.environ.copy()
+        
         try:
             app_name = f"{project_name}-frontend"
             
@@ -460,13 +625,27 @@ class ServiceManager:
                 if package_json.exists():
                     logger.info(f"Building frontend for production (correct MIME types)...")
                     try:
+                        # Clean Vite cache before build to prevent stale cache issues
+                        vite_cache = frontend_dist_path / "node_modules" / ".vite"
+                        vite_temp_cache = frontend_dist_path / "node_modules" / ".vite-temp"
+                        
+                        for cache_path in [vite_cache, vite_temp_cache]:
+                            if cache_path.exists():
+                                try:
+                                    import shutil
+                                    shutil.rmtree(str(cache_path))
+                                    logger.info(f"✓ Cleaned Vite cache: {cache_path.name}")
+                                except Exception as cache_err:
+                                    logger.warning(f"⚠️ Could not clean cache {cache_path}: {cache_err}")
+                        
                         # Install dependencies
                         install_result = subprocess.run(
                             ["npm", "install"],
                             capture_output=True,
                             text=True,
                             timeout=300,
-                            cwd=str(frontend_dist_path)
+                            cwd=str(frontend_dist_path),
+                            env=env
                         )
                         
                         if install_result.returncode != 0:
@@ -480,7 +659,8 @@ class ServiceManager:
                             capture_output=True,
                             text=True,
                             timeout=300,
-                            cwd=str(frontend_dist_path)
+                            cwd=str(frontend_dist_path),
+                            env=env
                         )
                         
                         if build_result.returncode != 0:
@@ -526,7 +706,8 @@ class ServiceManager:
                         capture_output=True,
                         text=True,
                         timeout=300,  # 5 minutes
-                        cwd=str(frontend_dist_path)
+                        cwd=str(frontend_dist_path),
+                        env=env
                     )
                     
                     if build_result.returncode != 0:
@@ -685,7 +866,7 @@ class NginxConfigurator:
             logger.error(f"Failed to generate SSL certificates: {e}")
             return False
 
-    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = False) -> Tuple[str, str]:
+    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = False, project_path: str = None) -> Tuple[str, str]:
         """
         Generate nginx configuration for project.
 
@@ -694,6 +875,8 @@ class NginxConfigurator:
             frontend_port: Frontend service port
             backend_port: Backend service port
             enable_ssl: Whether to generate SSL config (default: False)
+            project_path: Actual project folder path (e.g., "686_test_20260313_142220"). 
+                          If not provided, falls back to domain name.
 
         Returns:
             Tuple of (frontend_domain, backend_domain, config)
@@ -701,9 +884,14 @@ class NginxConfigurator:
         try:
             frontend_domain = f"{domain}.{BASE_DOMAIN}"
             backend_domain = f"{domain}-api.{BASE_DOMAIN}"
+            
+            # Use project_path if provided, otherwise fall back to domain
+            # The actual folder is like "686_test778786_20260313_142220"
+            # but domain is like "test778786-7hbrzr"
+            website_folder = project_path if project_path else domain
 
             if enable_ssl:
-                # Generate HTTPS configuration with SSL
+                # Generate HTTPS configuration with SSL and SPA routing
                 config = f"""# Frontend: {frontend_domain}
 server {{
     listen 80;
@@ -718,8 +906,18 @@ server {{
     ssl_certificate /etc/letsencrypt/live/{frontend_domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{frontend_domain}/privkey.pem;
 
+    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
+    index index.html;
+
+    # SPA routing - serve index.html for all routes
     location / {{
-        proxy_pass http://127.0.0.1:{frontend_port};
+        try_files $uri $uri/ /index.html;
+    }}
+
+    # API proxy
+    # API proxy (trailing slash strips /api prefix)
+    location /api/ {{
+        proxy_pass http://127.0.0.1:{backend_port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -759,14 +957,23 @@ server {{
 }}
 """
             else:
-                # Generate HTTP-only configuration
+                # Generate HTTP-only configuration with SPA routing
                 config = f"""# Frontend: {frontend_domain}
 server {{
     listen 80;
     server_name {frontend_domain};
 
+    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
+    index index.html;
+
+    # SPA routing - serve index.html for all routes
     location / {{
-        proxy_pass http://127.0.0.1:{frontend_port};
+        try_files $uri $uri/ /index.html;
+    }}
+
+    # API proxy (trailing slash strips /api prefix)
+    location /api/ {{
+        proxy_pass http://127.0.0.1:{backend_port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1160,6 +1367,19 @@ class InfrastructureManager:
         """
         Provision all infrastructure for project.
 
+        Pipeline order:
+        1. Port allocation
+        2. Database provisioning
+        3. Backend environment configuration
+        4. Service configuration
+        5. Build frontend
+        6. Nginx configuration (with SPA routing)
+        7. Start frontend service (PM2 serve)
+        8. Health check
+        9. Mark project READY
+
+        Note: DNS provisioning is SKIPPED - wildcard DNS (*.dreambigwithai.com) is pre-configured.
+
         Returns:
             True if successful, False otherwise
         """
@@ -1167,7 +1387,7 @@ class InfrastructureManager:
             logger.info(f"🚀 Starting infrastructure provisioning for {self.project_name}")
 
             # Phase 1: Allocate ports
-            logger.info("Phase 1/6: Port allocation")
+            logger.info("Phase 1/8: Port allocation")
             self.ports = {
                 "frontend": self.port_allocator.allocate_frontend_port(),
                 "backend": self.port_allocator.allocate_backend_port()
@@ -1175,23 +1395,23 @@ class InfrastructureManager:
             logger.info(f"✓ Ports allocated: {self.ports}")
 
             # Log API URL creation
-            api_url = f"http://{self.domain}/api"
-            logger.info(f"🔗 Backend API URL created: {api_url}")
+            api_url = f"http://{self.domain}.dreambigwithai.com/api"
+            logger.info(f"🔗 Backend API URL: {api_url}")
             logger.info(f"🔌 Backend port: {self.ports['backend']}")
-            logger.info(f"🌐 Frontend domain: http://{self.domain}")
+            logger.info(f"🌐 Frontend domain: http://{self.domain}.dreambigwithai.com")
 
             # Phase 2: Provision database
-            logger.info("Phase 2/6: Database provisioning")
+            logger.info("Phase 2/8: Database provisioning")
             self.database_info = self.db_provisioner.create_database_and_user(self.project_name)
             logger.info(f"✓ Database created: {self.database_info['database_name']}")
 
             # Phase 3: Configure backend environment
-            logger.info("Phase 3/6: Backend environment configuration")
+            logger.info("Phase 3/8: Backend environment configuration")
             self._configure_backend_env()
             logger.info("✓ Backend environment configured")
 
             # Phase 4: Create service config
-            logger.info("Phase 4/6: Service configuration")
+            logger.info("Phase 4/8: Service configuration")
             self.service_name = self.service_manager.create_backend_service(
                 self.project_name,
                 self.ports["backend"],
@@ -1199,12 +1419,57 @@ class InfrastructureManager:
             )
             logger.info(f"✓ Service configured: {self.service_name}")
 
-            # Phase 5: Nginx configuration
-            logger.info("Phase 5/8: Nginx configuration")
+            # Phase 5: Build frontend (BUILD PHASE ONLY - no service creation)
+            logger.info("PHASE_5_BUILD_START")
+            logger.info("Phase 5/8: Building frontend")
+            build_success = self._phase_5_build()
+            if build_success:
+                logger.info("PHASE_5_BUILD_COMPLETE: success")
+                logger.info("✓ Frontend build phase completed")
+            else:
+                logger.warning("PHASE_5_BUILD_COMPLETE: partial (build had issues)")
+                logger.warning("⚠️ Frontend build had issues, continuing anyway")
+
+            # Fix permissions on project directory for nginx access
+            logger.info("🔧 Fixing permissions for nginx access...")
+            try:
+                import stat
+                # Fix permissions on entire project path chain
+                project_root = self.project_path
+                while project_root != project_root.parent:
+                    try:
+                        os.chmod(project_root, 0o755)
+                    except:
+                        pass
+                    if project_root.name == "dreampilot":
+                        break
+                    project_root = project_root.parent
+                
+                # Fix permissions on project directory and all subdirectories
+                for item in self.project_path.rglob("*"):
+                    if item.is_dir():
+                        os.chmod(item, 0o755)
+                    elif item.is_file():
+                        os.chmod(item, 0o644)
+                
+                logger.info("✓ Permissions fixed for nginx (755 dirs, 644 files)")
+            except Exception as perm_error:
+                logger.warning(f"⚠️ Could not fix all permissions: {perm_error}")
+
+            # Phase 6: Nginx configuration (with SPA routing)
+            logger.info("Phase 6/8: Nginx configuration")
+            
+            # Get the actual project folder name from the project path
+            # project_path is like Path("/root/dreampilot/projects/website/686_test778786_20260313_142220")
+            # We need just "686_test778786_20260313_142220" for the nginx root
+            project_folder_name = self.project_path.name if hasattr(self.project_path, 'name') else str(self.project_path).split('/')[-1]
+            logger.info(f"Using project folder for nginx: {project_folder_name}")
+            
             frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
                 self.domain,
                 self.ports["frontend"],
-                self.ports["backend"]
+                self.ports["backend"],
+                project_path=project_folder_name
             )
             self.domains = {
                 "frontend": frontend_domain,
@@ -1212,99 +1477,462 @@ class InfrastructureManager:
             }
             self.nginx_configurator.install_config(self.domain, config)
             self.nginx_configurator.reload_nginx()
-            logger.info(f"✓ Nginx configured: {self.domains}")
+            logger.info(f"✓ Nginx configured with SPA routing: {self.domains}")
 
-            # Phase 6: SSL certificate provisioning
-            logger.info("Phase 6/8: SSL certificate provisioning")
-            if self.nginx_configurator.generate_ssl_certificates(self.domain):
-                logger.info("✓ SSL certificates generated successfully")
-
-                # Regenerate nginx config with SSL
-                frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
-                    self.domain,
-                    self.ports["frontend"],
-                    self.ports["backend"],
-                    enable_ssl=True
-                )
-                self.nginx_configurator.install_config(self.domain, config)
-                self.nginx_configurator.reload_nginx()
-                logger.info("✓ Nginx reconfigured with SSL")
+            # Phase 7: Start services (PM2) - SERVICE PHASE ONLY
+            logger.info("PHASE_6_SERVICE_START")
+            logger.info("Phase 7/8: Service startup")
+            service_success = self._phase_6_service()
+            if service_success:
+                logger.info("PHASE_6_SERVICE_COMPLETE: success")
+                logger.info("✓ Service phase completed")
             else:
-                logger.warning("⚠️ SSL certificate generation failed, continuing with HTTP-only")
-            
-            # Phase 7: DNS provisioning
-            logger.info("Phase 7/8: DNS provisioning")
-            self.dns_results = self.dns_provisioner.provision_project_dns(self.domain, self.project_name)
-            logger.info(f"✓ DNS provisioned: {self.domains}")
+                logger.error("PHASE_6_SERVICE_COMPLETE: failed")
+                logger.error("❌ Service phase had failures")
 
-            # Phase 8: Service startup
-            logger.info("Phase 8/8: Service startup")
+            # PHASE_9 Verification
+            logger.info("[VERIFY] PHASE_9_VERIFY_START")
 
-            # Start backend service
-            self.service_manager.start_backend_service(self.service_name, self.project_path / "backend")
-            logger.info(f"✓ Backend service started: {self.service_name}")
+            # Add startup delay to ensure backend is ready
+            logger.info("[VERIFY] Waiting for backend to fully start (5s)...")
+            time.sleep(5)
 
-            # Backend health check
-            import time
-            logger.info("🩺 Performing backend health check...")
-            time.sleep(3)
+            # DNS Resolution Check with Auto-Repair
+            frontend_domain = self.domains.get("frontend")
+            if frontend_domain:
+                logger.info(f"[DNS] Checking DNS resolution for {frontend_domain}")
+                if not self._domain_resolves(frontend_domain):
+                    logger.warning(f"[DNS] Missing DNS record detected for {frontend_domain}")
+                    logger.info("[DNS] Attempting automatic repair...")
+                    
+                    try:
+                        dns_repair_result = self._phase_8_dns(frontend_domain)
+                        if dns_repair_result:
+                            logger.info("[DNS] A-record created successfully")
+                            logger.info("[DNS] Waiting for DNS propagation...")
+                            
+                            # DNS propagation retry loop - wait up to 120 seconds
+                            dns_resolved = False
+                            for attempt in range(12):
+                                logger.info(f"[DNS] Propagation check {attempt + 1}/12...")
+                                time.sleep(10)
+                                
+                                if self._domain_resolves(frontend_domain):
+                                    logger.info(f"[DNS] ✓ Domain resolving correctly: {frontend_domain}")
+                                    dns_resolved = True
+                                    break
+                                else:
+                                    logger.info(f"[DNS] Still waiting for propagation...")
+                            
+                            if not dns_resolved:
+                                logger.warning(f"[DNS] DNS propagation taking longer than expected for {frontend_domain}")
+                                logger.warning(f"[DNS] Domain may need manual verification in 5-60 minutes")
+                        else:
+                            logger.error("[DNS] Automatic repair failed - DNS record could not be created")
+                            logger.warning("[DNS] Manual DNS configuration may be required in Hostinger hPanel")
+                    except Exception as dns_error:
+                        logger.error(f"[DNS] Repair attempt failed: {dns_error}")
+                        logger.warning("[DNS] Continuing with local verification only")
+                else:
+                    logger.info(f"[DNS] Domain resolving correctly: {frontend_domain}")
 
-            try:
-                import requests
-                health_check_url = f"http://localhost:{self.ports['backend']}/health"
-                health_response = requests.get(health_check_url, timeout=5)
-                logger.info(f"🩺 Backend health check status: {health_response.status_code}")
-            except Exception as e:
-                logger.error(f"❌ Backend health check failed: {e}")
-
-            # Create and start frontend service
-            logger.info("Creating frontend service...")
-            self.frontend_app_name = self.service_manager.create_frontend_service(
-                self.project_name,
-                self.ports["frontend"],
-                self.project_path
+            logger.info("[VERIFY] Checking frontend availability")
+            frontend_check = subprocess.run(
+                ["curl", "-I", f"http://localhost:{self.ports['frontend']}"],
+                capture_output=True,
+                text=True
             )
 
-            logger.info(f"✓ Frontend service configured: {self.frontend_app_name}")
-
-            if self.service_manager.start_frontend_service(self.frontend_app_name, self.project_path):
-                logger.info(f"✓ Frontend service started: {self.frontend_app_name}")
-            else:
-                logger.warning(f"⚠️ Frontend service failed to start: {self.frontend_app_name}")
-
-            # Log PM2 service creation completion
-            logger.info(f"⚙️ PM2 frontend service started: {self.frontend_app_name}")
-            logger.info(f"⚙️ PM2 backend service started: {self.service_name}")
-
-            # Wait for services to start up
-            logger.info("Waiting for services to initialize...")
-            import time
-            time.sleep(10)
-
-            # Verification
-            logger.info("Verifying deployment...")
-            verification = self.verifier.verify_deployment(
-                self.project_name,
-                self.ports["frontend"],
-                self.ports["backend"]
+            logger.info("[VERIFY] Checking backend health")
+            backend_check = subprocess.run(
+                ["curl", f"http://localhost:{self.ports['backend']}/health"],
+                capture_output=True,
+                text=True
             )
 
-            if verification["overall"]:
-                logger.info("✅ All infrastructure provisioned successfully!")
-                self._save_metadata()
-                return True
-            else:
-                logger.error("❌ Deployment verification failed")
-                self._rollback()
-                return False
+            # Debug: Log the actual backend health check response
+            logger.info(f"[VERIFY] Backend health check response (stdout): {backend_check.stdout[:200]}")
+            logger.info(f"[VERIFY] Backend health check response (stderr): {backend_check.stderr[:200]}")
+            logger.info(f"[VERIFY] Backend health check return code: {backend_check.returncode}")
+
+            if "200" not in frontend_check.stdout:
+                raise RuntimeError("Frontend verification failed")
+
+            if "200" not in backend_check.stdout and "ok" not in backend_check.stdout.lower():
+                logger.error(f"[VERIFY] Backend verification failed - Expected HTTP 200 or 'ok', got: {backend_check.stdout[:100]}")
+                raise RuntimeError("Backend verification failed")
+
+            logger.info("[VERIFY] ✓ Deployment verified successfully")
+            logger.info("PHASE_9_VERIFY_COMPLETE: success")
+            logger.info("DEPLOY: Project READY")
+            logger.info("✅ All infrastructure provisioned and verified successfully!")
+            self._save_metadata()
+            return True
 
         except Exception as e:
             logger.error(f"❌ Infrastructure provisioning failed: {e}")
             self._rollback()
             return False
 
+    def _phase_5_build(self) -> bool:
+        """
+        PHASE_5_BUILD: Build frontend only.
+        
+        Responsibilities:
+        - Run npm install
+        - Run npm run build
+        - Verify dist directory exists
+        - Clean Vite caches to prevent corruption issues
+        - Retry with clean reinstall on build failure
+        
+        Does NOT:
+        - Create PM2 services
+        - Start any processes
+        
+        Returns:
+            True if build successful, False otherwise
+        """
+        import shutil  # Import here for cache cleanup
+        import os  # Import for environment handling
+        
+        logger.info("PHASE_5_BUILD_START")
+        logger.info("🔨 Starting build phase...")
+        
+        # Copy system environment to ensure npm/node are accessible
+        env = os.environ.copy()
+        
+        try:
+            frontend_path = self.project_path / "frontend"
+            
+            if not frontend_path.exists():
+                logger.warning("⚠️ Frontend path not found, skipping build")
+                logger.info("PHASE_5_BUILD_COMPLETE: skipped (no frontend)")
+                return True
+            
+            # Verify package.json exists before proceeding
+            package_json_path = frontend_path / "package.json"
+            if not package_json_path.exists():
+                logger.error(f"❌ package.json not found in {frontend_path}")
+                logger.info("PHASE_5_BUILD_FAILED: missing package.json")
+                return False
+            logger.info(f"✓ Found package.json at {package_json_path}")
+            
+            # Define paths for cache cleanup
+            node_modules_path = frontend_path / "node_modules"
+            vite_temp_path = node_modules_path / ".vite-temp"
+            vite_cache_path = node_modules_path / ".vite"
+            
+            # Step 1: Clean Vite caches to prevent corrupted node_modules
+            logger.info("🧹 Cleaning Vite caches to prevent corrupted node_modules...")
+            caches_cleaned = 0
+            
+            if vite_temp_path.exists():
+                try:
+                    shutil.rmtree(vite_temp_path)
+                    logger.info("✓ Cleaned corrupted .vite-temp directory")
+                    caches_cleaned += 1
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not clean .vite-temp: {e}")
+            
+            if vite_cache_path.exists():
+                try:
+                    shutil.rmtree(vite_cache_path)
+                    logger.info("✓ Cleaned Vite cache directory")
+                    caches_cleaned += 1
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not clean .vite cache: {e}")
+            
+            logger.info(f"✓ Cleaned {caches_cleaned} Vite cache directories")
+            
+            # Step 2: Remove existing node_modules for clean install
+            logger.info("🧹 Removing existing node_modules for clean install...")
+            if node_modules_path.exists():
+                try:
+                    shutil.rmtree(node_modules_path)
+                    logger.info("✓ Removed existing node_modules")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not remove node_modules: {e}")
+            
+            # Step 2: npm install with dev dependencies
+            logger.info(f"[BUILD] Running npm install in {frontend_path}")
+            install_result = subprocess.run(
+                ["npm", "install", "--include=dev", "--legacy-peer-deps"],
+                cwd=str(frontend_path),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minutes
+            )
+            
+            if install_result.returncode != 0:
+                logger.error(f"❌ npm install failed: {install_result.stderr[:300]}")
+                logger.info("PHASE_5_BUILD_FAILED: npm install failed")
+                return False
+            else:
+                logger.info("✓ npm install completed (including dev dependencies)")
+            
+            # Step 3: npm run build with full environment
+            logger.info(f"[BUILD] Running npm build in {frontend_path}")
+            build_result = subprocess.run(
+                ["npm", "run", "build"],
+                cwd=str(frontend_path),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minutes
+            )
+            
+            # Step 4: If build failed, try clean reinstall and retry
+            if build_result.returncode != 0:
+                logger.warning(f"⚠️ Initial build failed: {build_result.stderr[:300]}")
+                logger.info("🔄 Attempting clean reinstall and retry...")
+                logger.info("PHASE_5_BUILD_RETRY: performing clean reinstall")
+                
+                # Remove node_modules entirely
+                if node_modules_path.exists():
+                    try:
+                        shutil.rmtree(node_modules_path)
+                        logger.info("✓ Removed corrupted node_modules")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not remove node_modules: {e}")
+                
+                # Fresh npm install with environment
+                logger.info(f"[BUILD] Running fresh npm install in {frontend_path}")
+                reinstall_result = subprocess.run(
+                    ["npm", "install", "--include=dev", "--legacy-peer-deps"],
+                    cwd=str(frontend_path),
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+                
+                if reinstall_result.returncode != 0:
+                    logger.error(f"❌ npm install failed on retry: {reinstall_result.stderr[:300]}")
+                    logger.info("PHASE_5_BUILD_FAILED: npm install failed")
+                    return False
+                
+                logger.info("✓ Fresh npm install completed")
+                
+                # Retry build with environment
+                logger.info("🏗️ Retrying npm run build...")
+                build_result = subprocess.run(
+                    ["npm", "run", "build"],
+                    cwd=str(frontend_path),
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+                
+                if build_result.returncode != 0:
+                    logger.error(f"❌ Build failed after clean reinstall: {build_result.stderr[:500]}")
+                    logger.info("PHASE_5_BUILD_FAILED: build failed after retry")
+                    return False
+                
+                logger.info("✓ Build succeeded after clean reinstall")
+            
+            logger.info("✓ npm run build completed")
+            
+            # Step 5: Verify dist directory exists
+            dist_path = frontend_path / "dist"
+            if not dist_path.exists():
+                logger.error(f"❌ Dist directory not found: {dist_path}")
+                logger.info("PHASE_5_BUILD_FAILED: dist directory missing")
+                return False
+            
+            # Verify dist has content
+            dist_contents = list(dist_path.iterdir())
+            if not dist_contents:
+                logger.error("❌ Dist directory is empty")
+                logger.info("PHASE_5_BUILD_FAILED: dist directory empty")
+                return False
+            
+            logger.info(f"✓ Dist directory verified with {len(dist_contents)} items")
+            
+            # Step 6: Fix permissions so nginx can read files
+            logger.info("🔧 Fixing permissions for nginx access...")
+            try:
+                # Fix permissions on the entire project directory
+                os.chmod(frontend_path, 0o755)
+                dist_path_chmod = frontend_path / "dist"
+                if dist_path_chmod.exists():
+                    os.chmod(dist_path_chmod, 0o755)
+                    # Fix permissions on all files in dist
+                    for item in dist_path_chmod.rglob("*"):
+                        if item.is_file():
+                            os.chmod(item, 0o644)
+                        elif item.is_dir():
+                            os.chmod(item, 0o755)
+                    logger.info("✓ Permissions fixed for nginx (755/644)")
+            except Exception as perm_error:
+                logger.warning(f"⚠️ Could not fix permissions: {perm_error}")
+                # Don't fail the build, just warn
+            
+            logger.info("PHASE_5_BUILD_COMPLETE: success")
+            logger.info("✅ Build phase completed successfully")
+            return True
+            
+        except subprocess.TimeoutExpired:
+            logger.error("❌ Build phase timed out")
+            logger.info("PHASE_5_BUILD_FAILED: timeout")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Build phase failed: {e}")
+            logger.info("PHASE_5_BUILD_FAILED: exception")
+            return False
+            
+        except subprocess.TimeoutExpired:
+            logger.error("❌ Build phase timed out")
+            logger.info("PHASE_5_BUILD_FAILED: timeout")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Build phase failed: {e}")
+            logger.info("PHASE_5_BUILD_FAILED: exception")
+            return False
+
+    def _phase_6_service(self) -> bool:
+        """
+        PHASE_6_SERVICE: Create and start PM2 services.
+        
+        Responsibilities:
+        - Create PM2 service configurations
+        - Start backend service
+        - Start frontend service
+        - Save PM2 configuration
+        
+        Does NOT:
+        - Run npm build (that's Phase 5)
+        
+        Returns:
+            True if services started successfully, False otherwise
+        """
+        logger.info("PHASE_6_SERVICE_START")
+        logger.info("🚀 Starting service phase...")
+        
+        try:
+            # Start backend service
+            logger.info(f"🔧 Starting backend service: {self.service_name}")
+            backend_success = self.service_manager.start_backend_service(
+                self.service_name, 
+                self.project_path / "backend",
+                self.ports["backend"]
+            )
+            
+            if backend_success:
+                logger.info(f"✓ Backend service started: {self.service_name}")
+            else:
+                logger.error(f"❌ Backend service failed to start: {self.service_name}")
+                logger.info("PHASE_6_SERVICE_COMPLETE: failed (backend)")
+                return False
+            
+            # Start frontend service using PM2 with npx serve for static files
+            dist_path = self.project_path / "frontend" / "dist"
+
+            if dist_path.exists():
+                frontend_app_name = f"project-{self.project_name}-frontend"
+
+                # Stop existing service if any
+                logger.info(f"🔄 Stopping existing frontend service if any...")
+                subprocess.run(["pm2", "delete", frontend_app_name], capture_output=True)
+
+                # Start PM2 service with npx serve -s dist -l port
+                logger.info(f"[SERVICE] Starting frontend service: {frontend_app_name}")
+                frontend_cmd = [
+                    "pm2",
+                    "start",
+                    "npx",
+                    "--name",
+                    frontend_app_name,
+                    "--",
+                    "serve",
+                    "-s",
+                    "dist",
+                    "-l",
+                    str(self.ports["frontend"])
+                ]
+
+                logger.info(f"[SERVICE] Frontend command: {' '.join(frontend_cmd)}")
+                logger.info(f"[SERVICE] Frontend working directory: {self.project_path / 'frontend'}")
+
+                frontend_result = subprocess.run(
+                    frontend_cmd,
+                    cwd=str(self.project_path / "frontend"),
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+
+                logger.info("DEPLOY: PM2 service started")
+                logger.info(f"[SERVICE] Frontend service started successfully: {frontend_app_name}")
+                logger.info(f"[SERVICE] Frontend stdout: {frontend_result.stdout[:200]}")
+                self.frontend_app_name = frontend_app_name
+            else:
+                logger.warning("⚠️ Frontend dist not found, creating service anyway")
+                self.frontend_app_name = self.service_manager.create_frontend_service(
+                    self.project_name,
+                    self.ports["frontend"],
+                    self.project_path
+                )
+                fallback_success = self.service_manager.start_frontend_service(
+                    self.frontend_app_name,
+                    self.project_path
+                )
+                if not fallback_success:
+                    logger.error("❌ Frontend service creation failed")
+                    logger.info("PHASE_6_SERVICE_COMPLETE: failed (frontend)")
+                    return False
+
+            logger.info(f"⚙️ PM2 frontend service: {self.frontend_app_name}")
+            logger.info(f"⚙️ PM2 backend service: {self.service_name}")
+
+            # Service Stability Check
+            logger.info("[SERVICE] Waiting for PM2 services to stabilize...")
+            time.sleep(5)
+
+            pm2_check = subprocess.run(
+                ["pm2", "list"],
+                capture_output=True,
+                text=True
+            )
+
+            if self.frontend_app_name not in pm2_check.stdout:
+                raise RuntimeError(f"Frontend service {self.frontend_app_name} not running")
+
+            if self.service_name not in pm2_check.stdout:
+                raise RuntimeError(f"Backend service {self.service_name} not running")
+
+            logger.info("[SERVICE] ✓ PM2 services running")
+
+            # PHASE_8_DNS: Create DNS records for project domain
+            logger.info("PHASE_8_DNS_START")
+            dns_result = self._phase_8_dns(self.domains.get("frontend"))
+
+            if not dns_result:
+                logger.error("PHASE_8_DNS_FAILED")
+                raise RuntimeError("PHASE_8_DNS_COMPLETE: DNS creation failed")
+
+            logger.info("PHASE_8_DNS_COMPLETE: success")
+            logger.info("✅ DNS record created successfully")
+
+            # Wait for DNS propagation
+            logger.info("[DNS] Waiting for DNS propagation (20s)...")
+            time.sleep(20)
+
+            # Save PM2 State
+            subprocess.run(["pm2", "save"], check=True)
+
+            logger.info("PHASE_6_SERVICE_COMPLETE: success")
+            logger.info("✅ Service phase completed successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Service phase failed: {e}")
+            logger.info("PHASE_6_SERVICE_COMPLETE: failed (exception)")
+            return False
+
     def _configure_backend_env(self):
-        """Configure backend .env file with database and ports."""
+        """Configure backend .env file with database and ports for FastAPI."""
         try:
             env_path = self.project_path / "backend" / ".env"
 
@@ -1317,6 +1945,7 @@ class InfrastructureManager:
 
             # Track what we've updated
             updated_vars = set()
+            backend_port = self.ports.get("backend", 8000)
 
             # Update or add database URL
             for line in lines:
@@ -1329,8 +1958,15 @@ class InfrastructureManager:
             if 'DATABASE_URL' not in updated_vars:
                 updated_lines.append(f'DATABASE_URL={self.database_info["database_url"]}')
 
+            # Add FastAPI-specific environment variables
+            if 'BACKEND_HOST' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
+                updated_lines.append(f'BACKEND_HOST=0.0.0.0')
+
+            if 'BACKEND_PORT' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
+                updated_lines.append(f'BACKEND_PORT={backend_port}')
+
             if 'API_PORT' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
-                updated_lines.append(f'API_PORT={self.ports["backend"]}')
+                updated_lines.append(f'API_PORT={backend_port}')
 
             if 'PROJECT_NAME' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
                 updated_lines.append(f'PROJECT_NAME={self.project_name}')
@@ -1338,7 +1974,7 @@ class InfrastructureManager:
             # Write updated .env
             env_path.write_text('\n'.join(updated_lines))
 
-            logger.info(f"✓ Backend .env configured")
+            logger.info(f"✓ Backend .env configured for FastAPI")
 
         except Exception as e:
             logger.error(f"Failed to configure backend env: {e}")
@@ -1407,10 +2043,180 @@ class InfrastructureManager:
             # Note: DNS A records are not deleted on rollback
             # This requires manual cleanup via Hostinger hPanel or DNS skill update
 
-            logger.info("✓ Rollback complete")
-
         except Exception as e:
             logger.error(f"Rollback failed: {e}")
+
+    def _phase_8_dns(self, project_domain: str) -> bool:
+        """PHASE_8_DNS: Create DNS A records for project domain.
+        
+        This phase uses the existing dns_manager module to automatically
+        create DNS A records for the project's frontend domain.
+        
+        Args:
+            project_domain: The auto-generated domain (e.g., "project-name-xxxxx.dreambigwithai.com")
+        
+        Returns:
+            True if DNS record created successfully, False otherwise
+        """
+        try:
+            logger.info("PHASE_8_DNS_START")
+            logger.info(f"[DNS] Creating DNS record for domain: {project_domain}")
+
+            # Import dns_manager module
+            from dns_manager import HostingerDNSAPI, get_api_token
+
+            # Initialize DNS manager
+            api_token = get_api_token()
+            dns_manager = HostingerDNSAPI(api_token)
+
+            # Extract subdomain from project domain
+            # Format: "project-name-xxxxx.dreambigwithai.com"
+            if '.' in project_domain:
+                # Split and take the project subdomain part
+                parts = project_domain.split('.')
+                if len(parts) >= 2:
+                    subdomain = parts[0]
+                    base_domain = '.'.join(parts[1:])
+                else:
+                    subdomain = project_domain
+                    base_domain = None
+            else:
+                subdomain = project_domain
+                base_domain = None
+
+            # Get server IP for A record
+            server_ip = self._get_server_ip()
+
+            if not server_ip:
+                logger.error(f"[DNS] Could not determine server IP")
+                logger.info("PHASE_8_DNS_FAILED")
+                return False
+
+            logger.info(f"[DNS] Server IP: {server_ip}")
+            
+            # Create A records for BOTH frontend and backend subdomains
+            # Frontend: subdomain.base_domain (e.g., test4-xxx.dreambigwithai.com)
+            # Backend: subdomain-api.base_domain (e.g., test4-xxx-api.dreambigwithai.com)
+            
+            frontend_success = False
+            backend_success = False
+            
+            if base_domain:
+                # Create frontend A record
+                logger.info(f"[DNS] Creating frontend A record: {subdomain}.{base_domain} → {server_ip}")
+                frontend_result = dns_manager.create_a_record(
+                    domain=base_domain,
+                    subdomain=subdomain,
+                    ip=server_ip,
+                    ttl=14400  # 4 hours
+                )
+                
+                if frontend_result.get("success"):
+                    logger.info(f"[DNS] ✓ Frontend A record created: {subdomain}.{base_domain} → {server_ip}")
+                    frontend_success = True
+                else:
+                    logger.error(f"[DNS] ❌ Failed to create frontend DNS record: {frontend_result.get('error', 'Unknown error')}")
+                
+                # Create backend A record (subdomain-api)
+                backend_subdomain = f"{subdomain}-api"
+                logger.info(f"[DNS] Creating backend A record: {backend_subdomain}.{base_domain} → {server_ip}")
+                backend_result = dns_manager.create_a_record(
+                    domain=base_domain,
+                    subdomain=backend_subdomain,
+                    ip=server_ip,
+                    ttl=14400  # 4 hours
+                )
+                
+                if backend_result.get("success"):
+                    logger.info(f"[DNS] ✓ Backend A record created: {backend_subdomain}.{base_domain} → {server_ip}")
+                    backend_success = True
+                else:
+                    logger.error(f"[DNS] ❌ Failed to create backend DNS record: {backend_result.get('error', 'Unknown error')}")
+            else:
+                # Fallback if we can't determine base domain
+                logger.warning(f"[DNS] Could not determine base domain from: {project_domain}")
+                logger.warning("[DNS] Skipping DNS creation (will use default subdomain)")
+
+            if frontend_success and backend_success:
+                logger.info(f"[DNS] ✓ Both DNS records created successfully")
+                logger.info("PHASE_8_DNS_COMPLETE")
+                return True
+            elif frontend_success:
+                logger.warning(f"[DNS] ⚠️ Frontend DNS created, but backend DNS failed")
+                logger.info("PHASE_8_DNS_COMPLETE: partial")
+                return True  # Return true so deployment continues
+            else:
+                logger.error(f"[DNS] ❌ DNS creation failed")
+                logger.info("PHASE_8_DNS_FAILED")
+                return False
+
+        except Exception as e:
+            logger.error(f"[DNS] ❌ DNS creation failed: {e}")
+            logger.info("PHASE_8_DNS_FAILED")
+            return False
+
+    def _domain_resolves(self, domain: str) -> bool:
+        """Check if domain resolves (DNS propagation check)."""
+        try:
+            import socket
+            
+            logger.info(f"[DNS] Checking if domain resolves: {domain}")
+            
+            # Simple DNS check with 5-second timeout
+            socket.setdefaulttimeout(5)
+            
+            try:
+                socket.gethostbyname(domain)
+                logger.info(f"[DNS] ✓ Domain {domain} resolves successfully")
+                return True
+            except socket.gaierror:
+                logger.warning(f"[DNS] ⚠️ Domain {domain} does not resolve yet (may need more time)")
+                return False
+            except Exception as e:
+                logger.error(f"[DNS] ❌ DNS resolution error: {e}")
+                return False
+
+        except Exception as e:
+            logger.error(f"[DNS] ❌ DNS resolution check failed: {e}")
+            return False
+
+    def _get_server_ip(self) -> str:
+        """Get server public IPv4 address for DNS A record."""
+        try:
+            # Try multiple services to get IPv4 address
+            ipv4_services = [
+                "https://api.ipify.org",
+                "https://icanhazip.com",
+                "https://ifconfig.me/ip",
+            ]
+
+            for service in ipv4_services:
+                try:
+                    result = subprocess.run(
+                        ["curl", "-4", "-s", service],  # -4 forces IPv4
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+
+                    if result.returncode == 0:
+                        ip = result.stdout.strip()
+                        # Validate it's an IPv4 address (not IPv6)
+                        if '.' in ip and not ':' in ip:
+                            logger.info(f"[DNS] Server IPv4 detected: {ip}")
+                            return ip
+                        else:
+                            logger.warning(f"[DNS] Service {service} returned non-IPv4: {ip}")
+                except Exception as e:
+                    logger.warning(f"[DNS] Failed to get IP from {service}: {e}")
+                    continue
+
+            logger.error("[DNS] Could not obtain IPv4 address from any service")
+            return None
+
+        except Exception as e:
+            logger.error(f"[DNS] Exception getting server IP: {e}")
+            return None
 
     def teardown(self):
         """Teardown infrastructure for project deletion."""
@@ -1451,3 +2257,85 @@ class InfrastructureManager:
 
             except Exception as e:
                 logger.error(f"Teardown failed: {e}")
+
+    def repair_dns(self, project_id: int) -> bool:
+        """Repair DNS for existing projects that were deployed before PHASE_8_DNS automation.
+        
+        This method loads project metadata, extracts domain,
+        and calls _phase_8_dns to create missing DNS A-record.
+        
+        Args:
+            project_id: ID of project to repair DNS for
+            
+        Returns:
+            True if DNS repair succeeded, False otherwise
+        """
+        try:
+            logger.info(f"[DNS] === Starting DNS Repair for Project {project_id} ===")
+            
+            # Load project metadata
+            logger.info(f"[DNS] Loading project metadata...")
+            project = self.get_project(project_id)
+            
+            if not project:
+                logger.error(f"[DNS] ❌ Project not found: {project_id}")
+                logger.error(f"[DNS] Verify the project ID exists in the database")
+                return False
+            
+            # Extract domain from project data
+            project_data = project.get("project", {})
+            domains = project_data.get("domains", {})
+            project_name = project_data.get("name", "unknown")
+            
+            logger.info(f"[DNS] Project name: {project_name}")
+            logger.info(f"[DNS] Found domains: {domains}")
+            
+            if not domains:
+                logger.warning(f"[DNS] ⚠️ No domains found in project {project_id}")
+                logger.warning(f"[DNS] Project may not have completed deployment properly")
+                return False
+            
+            # Get frontend domain (primary domain for DNS)
+            frontend_domain = domains.get("frontend")
+            
+            if not frontend_domain:
+                logger.warning(f"[DNS] ⚠️ No frontend domain found for project {project_id}")
+                return False
+            
+            logger.info(f"[DNS] Target domain: {frontend_domain}")
+            
+            # Check current DNS status
+            logger.info(f"[DNS] Checking current DNS resolution...")
+            current_status = self._domain_resolves(frontend_domain)
+            
+            if current_status:
+                logger.info(f"[DNS] ✓ Domain already resolves correctly - no repair needed")
+                return True
+            
+            logger.warning(f"[DNS] Missing DNS record detected")
+            logger.info(f"[DNS] Attempting to create A-record via Hostinger API...")
+            
+            # Call _phase_8_dns to create DNS A-record
+            result = self._phase_8_dns(frontend_domain)
+            
+            if result:
+                logger.info(f"[DNS] ✓ A-record created successfully")
+                logger.info(f"[DNS] ✓ DNS repair successful for project {project_id}")
+                logger.info(f"[DNS] Note: DNS propagation may take 1-5 minutes")
+                
+                # Update project metadata to track that DNS has been repaired
+                if "dns_repaired" not in project_data:
+                    project_data["dns_repaired"] = True
+                    self.update_project(project_id, {"project": project_data})
+                    logger.info(f"[DNS] Updated project metadata with dns_repaired flag")
+                
+                return True
+            else:
+                logger.error(f"[DNS] ❌ DNS repair failed for project {project_id}")
+                logger.error(f"[DNS] Check Hostinger API credentials and rate limits")
+                return False
+
+        except Exception as e:
+            logger.error(f"[DNS] ❌ Exception during DNS repair: {e}")
+            logger.exception(f"[DNS] Full traceback:")
+            return False

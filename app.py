@@ -343,18 +343,32 @@ async def create_project(request: CreateProjectRequest):
                 type_id = website_type['id']
 
     # Step 1: Get project_id first to use in folder naming
+    logger.info("[PROJECT] inserting project into database")
     with get_db() as conn:
-        conn.execute(
-            "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name) VALUES (?, ?, ?, ?, '', ?, 'creating', NULL) RETURNING id",
-            (user_id, request.name, domain, request.description, type_id)
-        )
-        result = conn.fetchone()
-        # Handle both dict (PostgreSQL) and tuple (SQLite) row types
-        if isinstance(result, dict):
-            project_id = result.get('id')
-        else:
-            project_id = result[0] if result else None
-        conn.commit()
+        try:
+            conn.execute(
+                "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (user_id, request.name, domain, request.description, '', type_id, 'creating', None)
+            )
+            result = conn.fetchone()
+            # Handle both dict (PostgreSQL) and tuple (SQLite) row types
+            if isinstance(result, dict):
+                project_id = result.get('id')
+            else:
+                project_id = result[0] if result else None
+            
+            if not project_id:
+                raise RuntimeError("Failed to get project_id from INSERT RETURNING")
+                
+            logger.info(f"[PROJECT] database insert successful, project_id: {project_id}")
+            conn.commit()
+            logger.info("[PROJECT] database commit successful")
+        except Exception as e:
+            logger.error(f"[PROJECT] database insert failed: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create project record: {str(e)}"
+            )
 
     # Step 2: Create project folder with Git initialization
     project_manager = ProjectFileManager()
@@ -438,6 +452,7 @@ async def create_project(request: CreateProjectRequest):
                 conn.commit()
 
         try:
+            logger.info(f"[PROJECT] launching fast_wrapper for project {project_id}")
             run_claude_code_background(
                 project_id=project_id,
                 project_path=project_folder_path,
@@ -446,10 +461,18 @@ async def create_project(request: CreateProjectRequest):
                 session_name=session_name,
                 template_id=selected_template_id  # Pass selected template ID
             )
+            logger.info(f"[PROJECT] fast_wrapper launched successfully for project {project_id}")
         except Exception as e:
             # Log error but don't fail the project creation
             # Project will remain in 'creating' status
-            logger.error(f"Failed to start Claude Code background worker: {e}")
+            logger.error(f"[PROJECT] failed to launch fast_wrapper: {e}")
+            # Update project status to failed
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
 
     # Fetch the final project data from database (includes status and session_key)
     with get_db() as conn:
@@ -937,6 +960,97 @@ def cleanup_project_directory(project_path: str) -> Dict[str, Any]:
         logger.info(f"Project directory not found (already removed): {project_path}")
 
     return results
+
+
+# ============================================================================
+# DYNAMIC BACKEND PORT ALLOCATION
+# ============================================================================
+
+def check_port_availability(port: int) -> bool:
+    """
+    Check if a port is available for binding.
+
+    Args:
+        port: Port number to check
+
+    Returns:
+        True if port is available, False if in use
+    """
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('0.0.0.0', port))
+            return True
+    except OSError as e:
+        if e.errno == 98:  # Address already in use
+            return False
+        raise
+
+
+def get_next_backend_port() -> int:
+    """
+    Get next available backend port from database.
+
+    Scans ports 8010-9000 to find an unused port.
+
+    Returns:
+        Available port number
+
+    Raises:
+        Exception if no available ports in range
+    """
+    # Get used ports from database
+    with get_db() as conn:
+        used_ports_result = conn.execute(
+            "SELECT backend_port FROM projects WHERE backend_port IS NOT NULL"
+        ).fetchall()
+        used_ports = set(row[0] for row in used_ports_result)
+
+    logger.info(f"[Port Allocation] Currently used ports: {sorted(used_ports)}")
+
+    # Find next available port in range 8010-9000
+    for port in range(8010, 9000):
+        # Skip if port is in use by other projects
+        if port in used_ports:
+            continue
+
+        # Check if port is actually available at system level
+        if not check_port_availability(port):
+            logger.warning(f"[Port Allocation] Port {port} in use by system, skipping")
+            continue
+
+        logger.info(f"[Port Allocation] Found available port: {port}")
+        return port
+
+    raise Exception("No available ports in range 8010-9000")
+
+
+def allocate_backend_port(project_id: int) -> int:
+    """
+    Allocate a backend port for a project and save to database.
+
+    Args:
+        project_id: Project ID
+
+    Returns:
+        Allocated port number
+
+    Raises:
+        Exception if port allocation fails
+    """
+    port = get_next_backend_port()
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE projects SET backend_port = ? WHERE id = ?",
+            (port, project_id)
+        )
+        conn.commit()
+
+    logger.info(f"[Port Allocation] Allocated port {port} for project {project_id}")
+    return port
+
 
 
 def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
@@ -2167,7 +2281,15 @@ if __name__ == "__main__":
     print(f"Starting Clawdbot Adapter API...")
     print(f"Images directory: {IMAGES_DIR}")
     print(f"Images accessible at: {IMAGES_BASE_URL}")
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+
+    # Dynamic port allocation
+    try:
+        port = get_next_backend_port()
+        print(f"Allocated backend port: {port}")
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except Exception as e:
+        logger.error(f"Failed to allocate backend port: {e}")
+        raise
 
 # TEMPORARY FIX: Make domain field optional to allow testing
 # This is a quick workaround to unblock Phase 9 ACP integration

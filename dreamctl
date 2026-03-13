@@ -1,0 +1,342 @@
+#!/usr/bin/env python3
+"""
+DreamPilot CLI (dreamctl)
+
+Command-line interface for DreamPilot infrastructure management.
+
+Usage:
+    dreamctl repair-dns <project_id>    Repair DNS records for a project
+    dreamctl verify <project_id>        Verify deployment status
+    dreamctl list                       List all projects
+    dreamctl status <project_id>        Show project status
+    dreamctl --help                     Show this help message
+
+Examples:
+    dreamctl repair-dns 657             Repair DNS for project 657
+    dreamctl list                       List all projects
+"""
+
+import sys
+import os
+import argparse
+import logging
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+def cmd_repair_dns(args):
+    """Repair DNS records for a project."""
+    from infrastructure_manager import InfrastructureManager
+    
+    project_id = args.project_id
+    
+    print(f"\n🔧 DNS Repair for Project {project_id}")
+    print("=" * 50)
+    
+    try:
+        manager = InfrastructureManager()
+        result = manager.repair_dns(project_id)
+        
+        if result:
+            print(f"\n✅ DNS repair successful for project {project_id}")
+            print(f"   The domain should now resolve correctly.")
+            print(f"   Note: DNS propagation may take 1-5 minutes.\n")
+            return 0
+        else:
+            print(f"\n❌ DNS repair failed for project {project_id}")
+            print(f"   Check logs above for details.\n")
+            return 1
+            
+    except Exception as e:
+        print(f"\n❌ Error: {e}\n")
+        logger.error(f"DNS repair failed: {e}")
+        return 1
+
+
+def cmd_verify(args):
+    """Verify deployment status for a project."""
+    from infrastructure_manager import InfrastructureManager
+    
+    project_id = args.project_id
+    
+    print(f"\n🔍 Verifying Project {project_id}")
+    print("=" * 50)
+    
+    try:
+        manager = InfrastructureManager()
+        project = manager.get_project(project_id)
+        
+        if not project:
+            print(f"\n❌ Project {project_id} not found.\n")
+            return 1
+        
+        project_data = project.get("project", {})
+        domains = project_data.get("domains", {})
+        frontend_domain = domains.get("frontend")
+        
+        if not frontend_domain:
+            print(f"\n❌ No domain found for project {project_id}.\n")
+            return 1
+        
+        # Check DNS resolution
+        print(f"\n[DNS] Checking resolution for: {frontend_domain}")
+        dns_resolves = manager._domain_resolves(frontend_domain)
+        
+        if dns_resolves:
+            print(f"   ✅ Domain resolves correctly")
+        else:
+            print(f"   ❌ Domain does not resolve")
+            print(f"   💡 Run 'dreamctl repair-dns {project_id}' to fix")
+        
+        # Check HTTP response
+        print(f"\n[HTTP] Checking HTTP response...")
+        import requests
+        try:
+            response = requests.get(f"http://{frontend_domain}", timeout=10)
+            if response.status_code == 200:
+                print(f"   ✅ HTTP 200 OK")
+            else:
+                print(f"   ❌ HTTP {response.status_code}")
+        except Exception as e:
+            print(f"   ❌ HTTP check failed: {e}")
+        
+        print()
+        return 0 if dns_resolves else 1
+        
+    except Exception as e:
+        print(f"\n❌ Error: {e}\n")
+        logger.error(f"Verification failed: {e}")
+        return 1
+
+
+def cmd_list(args):
+    """List all projects."""
+    import sqlite3
+    
+    print("\n📋 DreamPilot Projects")
+    print("=" * 70)
+    
+    try:
+        conn = sqlite3.connect("/root/clawd-backend/projects.db")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("""
+            SELECT id, name, status, frontend_port, backend_port, created_at
+            FROM projects
+            ORDER BY id DESC
+            LIMIT 50
+        """)
+        
+        rows = cursor.fetchall()
+        
+        if not rows:
+            print("   No projects found.\n")
+            return 0
+        
+        print(f"{'ID':<6} {'Name':<30} {'Status':<10} {'Ports':<15}")
+        print("-" * 70)
+        
+        for row in rows:
+            ports = f"F:{row['frontend_port']} B:{row['backend_port']}"
+            print(f"{row['id']:<6} {row['name'][:28]:<30} {row['status']:<10} {ports:<15}")
+        
+        print()
+        return 0
+        
+    except Exception as e:
+        print(f"\n❌ Error: {e}\n")
+        return 1
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+
+def cmd_status(args):
+    """Show detailed status for a project."""
+    from infrastructure_manager import InfrastructureManager
+    
+    project_id = args.project_id
+    
+    print(f"\n📊 Project {project_id} Status")
+    print("=" * 50)
+    
+    try:
+        manager = InfrastructureManager()
+        project = manager.get_project(project_id)
+        
+        if not project:
+            print(f"\n❌ Project {project_id} not found.\n")
+            return 1
+        
+        project_data = project.get("project", {})
+        
+        # Display project info
+        print(f"\n📝 Project Info:")
+        print(f"   Name: {project_data.get('name', 'N/A')}")
+        print(f"   Status: {project_data.get('status', 'N/A')}")
+        print(f"   Template: {project_data.get('template_id', 'N/A')}")
+        
+        # Display ports
+        ports = project_data.get("ports", {})
+        print(f"\n🔌 Ports:")
+        print(f"   Frontend: {ports.get('frontend', 'N/A')}")
+        print(f"   Backend: {ports.get('backend', 'N/A')}")
+        
+        # Display domains
+        domains = project_data.get("domains", {})
+        print(f"\n🌐 Domains:")
+        print(f"   Frontend: {domains.get('frontend', 'N/A')}")
+        print(f"   Backend: {domains.get('backend', 'N/A')}")
+        
+        # Check DNS
+        frontend_domain = domains.get("frontend")
+        if frontend_domain:
+            dns_resolves = manager._domain_resolves(frontend_domain)
+            print(f"\n🔍 DNS Resolution:")
+            print(f"   {frontend_domain}: {'✅ Resolves' if dns_resolves else '❌ Does not resolve'}")
+            
+            if not dns_resolves:
+                print(f"\n💡 Tip: Run 'dreamctl repair-dns {project_id}' to fix DNS")
+        
+        print()
+        return 0
+        
+    except Exception as e:
+        print(f"\n❌ Error: {e}\n")
+        logger.error(f"Status check failed: {e}")
+        return 1
+
+
+def cmd_repair_all_dns(args):
+    """Repair DNS for all projects that need it."""
+    from infrastructure_manager import InfrastructureManager
+    import sqlite3
+    
+    print("\n🔧 DNS Repair for All Projects")
+    print("=" * 50)
+    
+    try:
+        manager = InfrastructureManager()
+        
+        # Get all projects
+        conn = sqlite3.connect("/root/clawd-backend/projects.db")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("""
+            SELECT id, name, status FROM projects WHERE status = 'ready'
+        """)
+        
+        rows = cursor.fetchall()
+        repaired = 0
+        failed = 0
+        skipped = 0
+        
+        for row in rows:
+            project_id = row['id']
+            project = manager.get_project(project_id)
+            
+            if not project:
+                continue
+            
+            project_data = project.get("project", {})
+            domains = project_data.get("domains", {})
+            frontend_domain = domains.get("frontend")
+            
+            if not frontend_domain:
+                print(f"  [{project_id}] Skipped - no domain")
+                skipped += 1
+                continue
+            
+            # Check if DNS resolves
+            if manager._domain_resolves(frontend_domain):
+                print(f"  [{project_id}] ✅ {frontend_domain} - OK")
+                skipped += 1
+                continue
+            
+            # Try to repair
+            print(f"  [{project_id}] 🔧 Repairing {frontend_domain}...")
+            result = manager.repair_dns(project_id)
+            
+            if result:
+                print(f"  [{project_id}] ✅ Repaired successfully")
+                repaired += 1
+            else:
+                print(f"  [{project_id}] ❌ Repair failed")
+                failed += 1
+            
+            # Rate limiting: wait 1 second between API calls to prevent Hostinger rate limit
+            time.sleep(1)
+        
+        conn.close()
+        
+        print()
+        print(f"📊 Summary:")
+        print(f"   Repaired: {repaired}")
+        print(f"   Failed: {failed}")
+        print(f"   Skipped (OK): {skipped}")
+        print()
+        
+        return 0 if failed == 0 else 1
+        
+    except Exception as e:
+        print(f"\n❌ Error: {e}\n")
+        logger.error(f"Bulk DNS repair failed: {e}")
+        return 1
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="DreamPilot CLI - Infrastructure Management Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  dreamctl repair-dns 657       Repair DNS for project 657
+  dreamctl repair-all-dns       Repair DNS for all projects
+  dreamctl verify 657           Verify project 657 deployment
+  dreamctl list                 List all projects
+  dreamctl status 657           Show project 657 status
+"""
+    )
+    
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    
+    # repair-dns command
+    repair_parser = subparsers.add_parser("repair-dns", help="Repair DNS records for a project")
+    repair_parser.add_argument("project_id", type=int, help="Project ID to repair DNS for")
+    repair_parser.set_defaults(func=cmd_repair_dns)
+    
+    # repair-all-dns command
+    repair_all_parser = subparsers.add_parser("repair-all-dns", help="Repair DNS for all projects")
+    repair_all_parser.set_defaults(func=cmd_repair_all_dns)
+    
+    # verify command
+    verify_parser = subparsers.add_parser("verify", help="Verify deployment status")
+    verify_parser.add_argument("project_id", type=int, help="Project ID to verify")
+    verify_parser.set_defaults(func=cmd_verify)
+    
+    # list command
+    list_parser = subparsers.add_parser("list", help="List all projects")
+    list_parser.set_defaults(func=cmd_list)
+    
+    # status command
+    status_parser = subparsers.add_parser("status", help="Show project status")
+    status_parser.add_argument("project_id", type=int, help="Project ID to show status for")
+    status_parser.set_defaults(func=cmd_status)
+    
+    args = parser.parse_args()
+    
+    if args.command is None:
+        parser.print_help()
+        return 0
+    
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

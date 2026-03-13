@@ -998,25 +998,19 @@ You MUST return ONLY a valid JSON array with the following structure. Do not inc
 Execute this UI redesign now.
 """
 
-        # Call acpx using the working path (from MEMORY.md)
-        # Fixed path based on successful test: /usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js
-        acpx_bin = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
-        cmd = [acpx_bin, "claude", "exec", "--dangerously-skip-permissions", instruction]
-
-        logger.info(f"[ACPX] 🔴 HEARTBEAT: Starting ACPX subprocess")
-        logger.info(f"[ACPX] 🔴 HEARTBEAT: Command: {acpx_bin} claude exec --dangerously-skip-permissions")
-        logger.info(f"[ACPX] 🔴 HEARTBEAT: Timeout set to 1800 seconds (30 minutes)")
-        logger.info(f"[ACPX] 🔴 HEARTBEAT: Working directory: {self.validator.frontend_src_path}")
+        # Call acpx using the configured CLI command
+        # Use acpx-claude wrapper instead of direct Node path
+        logger.info(f"[ACPX] cwd: {self.validator.frontend_src_path}")
+        logger.info(f"[ACPX] running: acpx-claude")
 
         try:
-            # Run acpx - ignore exit codes (telemetry bug can cause non-zero exit)
-            # Instead, parse the output to detect if changes were made
+            # Run acpx-claude with prompt via stdin
             result = subprocess.run(
-                cmd,
-                capture_output=True,
+                ["acpx-claude"],
+                input=instruction,
                 text=True,
-                timeout=1800,  # Increased from 600s to 1800s (30 minutes)
-                # Don't use check=True - telemetry bug can cause false failures
+                capture_output=True,
+                timeout=1800,  # 30 minutes
                 cwd=self.validator.frontend_src_path
             )
 

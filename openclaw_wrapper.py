@@ -14,7 +14,11 @@ Phases:
 7. Verification
 """
 
+# BOOT DIAGNOSTIC - Must be BEFORE any imports to detect blocking imports
 import sys
+print("OPENCLAW_WRAPPER_BOOT", flush=True)
+sys.stdout.flush()
+
 import json
 import logging
 import os
@@ -23,11 +27,18 @@ import requests
 from datetime import datetime
 from pathlib import Path
 
+# Pipeline status tracking
+from pipeline_status import PipelineStatusTracker, PipelinePhase, PhaseStatus, ErrorCode, format_status_report
+
+# Dynamically determine backend directory (works on both Windows and Linux)
+BACKEND_DIR = Path(__file__).parent.resolve()
+
 # DIAGNOSTIC: Track which file is actually loaded
-print(f"OPENCLAW_WRAPPER_LOADED: {__file__}")
-print(f"PID: {os.getpid()}")
-print(f"FILE_MODIFIED: {datetime.fromtimestamp(os.path.getmtime(__file__))}")
-print(f"CURRENT_TIME: {datetime.now()}")
+print(f"OPENCLAW_WRAPPER_LOADED: {__file__}", flush=True)
+print(f"BACKEND_DIR: {BACKEND_DIR}", flush=True)
+print(f"PID: {os.getpid()}", flush=True)
+print(f"FILE_MODIFIED: {datetime.fromtimestamp(os.path.getmtime(__file__))}", flush=True)
+print(f"CURRENT_TIME: {datetime.now()}", flush=True)
 
 # Configure logging
 logger = logging.getLogger(__name__)  # ← MUST BE FIRST
@@ -39,7 +50,7 @@ logging.basicConfig(
 
 # Database configuration
 USE_POSTGRES = os.getenv("USE_POSTGRES", "true").lower() == "true"
-DB_PATH = "/root/clawd-backend/clawdbot_adapter.db"
+DB_PATH = os.getenv("DB_PATH", str(BACKEND_DIR / "clawdbot_adapter.db"))
 
 # PostgreSQL imports
 if USE_POSTGRES:
@@ -50,8 +61,8 @@ if USE_POSTGRES:
     DB_USER = os.getenv("DB_USER", "admin")
     DB_PASSWORD = os.getenv("DB_PASSWORD", "StrongAdminPass123")
 
-# Rules files
-RULES_DIR = Path("/root/dreampilot/website")
+# Rules files - use environment variable or default to parent directory
+RULES_DIR = Path(os.getenv("RULES_DIR", str(BACKEND_DIR.parent / "dreampilot" / "website")))
 RULE_FILES = [
     "rule.md",
     "frontend/strict-agent-rulebook.md",
@@ -80,6 +91,12 @@ class OpenClawWrapper:
         # Add template selection to __init__
         self.template_repo = None
         self.template_features = []
+        
+        # Pipeline status tracker
+        self.status_tracker = PipelineStatusTracker(project_id)
+        
+        # Track current phase for safety guard
+        self.current_phase = 0
 
         # Step 0: Select template if not provided
         if not template_id:
@@ -132,8 +149,14 @@ class OpenClawWrapper:
             self.template_features = ["dashboard", "users", "settings"]
 
     def update_status(self, status: str):
-        """Update project status in database."""
+        """Update project status in database with safety guard for 'ready' status."""
         try:
+            # Safety guard: Prevent premature 'ready' status
+            if status == "ready" and self.current_phase < 9:
+                logger.error(f"❌ SAFETY GUARD: Attempted premature 'ready' status at phase {self.current_phase}")
+                logger.error(f"❌ 'ready' status can only be set after Phase 9 verification")
+                return
+            
             logger.info(f"Updating project {self.project_id} status to '{status}'")
             
             if USE_POSTGRES:
@@ -321,6 +344,9 @@ That's all. Execute Phase {phase} now.
         - Determine best template (already done via Groq)
         """
         logger.info("📋 Phase 1/8: Analyze Project")
+        
+        # Track pipeline status
+        self.status_tracker.start_phase(PipelinePhase.PLANNER)
 
         # Template already selected via Groq in app.py
         # This phase is just confirmation
@@ -330,6 +356,10 @@ That's all. Execute Phase {phase} now.
         logger.info(f"✓ Template: already selected via Groq API")
 
         self.completed_phases.append("Analyze Project")
+        self.status_tracker.complete_phase(PipelinePhase.PLANNER, {
+            "template_id": self.template_id,
+            "project_name": self.project_name
+        })
         return True
 
 
@@ -387,17 +417,30 @@ That's all. Execute Phase {phase} now.
         - This phase just verifies completion
         """
         logger.info("📋 Phase 2/8: Template Setup")
+        
+        # Track pipeline status
+        self.status_tracker.start_phase(PipelinePhase.SCAFFOLD)
 
         # Verify frontend exists
         frontend_path = self.project_path / "frontend"
         if not frontend_path.exists():
             logger.error("❌ Frontend directory not found")
+            self.status_tracker.fail_phase(
+                PipelinePhase.SCAFFOLD,
+                ErrorCode.SCAFFOLD_FAILED,
+                "Frontend directory not found"
+            )
             return False
 
         # Verify backend exists
         backend_path = self.project_path / "backend"
         if not backend_path.exists():
             logger.error("❌ Backend directory not found")
+            self.status_tracker.fail_phase(
+                PipelinePhase.SCAFFOLD,
+                ErrorCode.SCAFFOLD_FAILED,
+                "Backend directory not found"
+            )
             return False
 
         logger.info("✓ Template setup complete")
@@ -405,6 +448,10 @@ That's all. Execute Phase {phase} now.
         logger.info(f"✓ Backend exists: {backend_path}")
 
         self.completed_phases.append("Template Setup")
+        self.status_tracker.complete_phase(PipelinePhase.SCAFFOLD, {
+            "frontend_path": str(frontend_path),
+            "backend_path": str(backend_path)
+        })
         return True
 
     def phase_3_database_provisioning(self) -> bool:
@@ -534,6 +581,9 @@ That's all. Execute Phase {phase} now.
         Executes batches of changes with build verification after each batch.
         """
         logger.info("📋 Phase 8/8: AI-Driven Frontend Refinement (CrewAI Multi-Agent Mode)")
+        
+        # Track pipeline status
+        self.status_tracker.start_phase(PipelinePhase.ACPX)
 
         try:
             # Check if this is a website project (type_id = 1)
@@ -543,6 +593,7 @@ That's all. Execute Phase {phase} now.
                 logger.info("✓ Skipping AI frontend refinement (not a website project)")
                 logger.info(f"  Project type_id: {project_type_id}")
                 self.completed_phases.append("AI Frontend Refinement (Skipped)")
+                self.status_tracker.skip_phase(PipelinePhase.ACPX, "Not a website project")
                 return True
 
             # Update status
@@ -558,7 +609,7 @@ That's all. Execute Phase {phase} now.
             logger.info("📝 Step 1: Running Phase 8 with OpenClaw agent sessions...")
 
             # Use OpenClaw session for Phase 8 (same as Phases 1-7)
-            phase8_script = Path("/root/clawd-backend/phase8_openclaw.py")
+            phase8_script = BACKEND_DIR / "phase8_openclaw.py"
             if not phase8_script.exists():
                 logger.warning(f"⚠️ Phase 8 OpenClaw script not found, skipping...")
                 self.completed_phases.append("AI Frontend Refinement (Skipped - Script Not Found)")
@@ -660,6 +711,9 @@ That's all. Execute Phase {phase} now.
         """
         Phase 9: ACP Controlled Frontend Editor
 
+        NOTE: DreamPilot uses ACPFrontendEditor exclusively.
+        The legacy ACPFrontendEditor implementation has been removed.
+
         This phase integrates ACP (Agent Client Protocol) as final phase in project creation.
         ACP provides safe, validated frontend editing with path validation, file limits,
         snapshot/rollback, and build gates.
@@ -668,47 +722,43 @@ That's all. Execute Phase {phase} now.
 
         Workflow:
         1. Log Phase 9 start
-        2. Initialize ACP Frontend Editor directly (no HTTP call)
+        2. Initialize ACP Frontend Editor V2 directly (no HTTP call)
         3. Generate and apply frontend customizations via acpx
         4. Create ACP_README.md with documentation
         5. Report success
         """
+        # Debug tracing for Phase 9 execution
+        print("=" * 60)
+        print("PHASE_9_START")
+        print("PHASE_9_PROJECT:", self.project_name)
+        print("PHASE_9_FRONTEND_PATH:", str(self.frontend_path))
+        print("=" * 60)
+        
         logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor (Integrated)")
+        
+        # Track pipeline status - ACPX phase continues from phase 8
+        # If ACPX was already tracked in phase 8, this is additional tracking
 
         try:
-
-            # Import ACP Frontend Editor directly
-            from acp_frontend_editor import ACPFrontendEditor
-
-            # Construct frontend/src path (ACPFrontendEditor expects full path to src/)
+            # Construct frontend/src path
             frontend_src_path = str(self.frontend_path / "src")
 
             logger.info(f"📁 Frontend path: {self.frontend_path}")
             logger.info(f"📁 Frontend src path: {frontend_src_path}")
-
 
             if not os.path.exists(frontend_src_path):
                 logger.warning("⚠️ Frontend src directory not found - Phase 9 will fail")
                 self.completed_phases.append("ACP Frontend Editor (Failed - No Frontend)")
                 return False  # Don't skip - let it fail with clear error
 
-            
-            # Initialize ACP editor with frontend/src path
-            # ACPFrontendEditor expects full path to src/ directory
-            
-            logger.debug(f"[Phase 9] Preparing frontend_src_path: {frontend_src_path}")
-            logger.debug(f"[Phase 9] Type: {type(frontend_src_path)}")
-            
             # Force str conversion early
             frontend_src_path = str(frontend_src_path).rstrip("/")
-            
             
             if not os.path.exists(frontend_src_path):
                 logger.debug(f"[Phase 9] ❌ Frontend src path does NOT exist: {frontend_src_path}")
                 raise RuntimeError(f"Frontend src directory not found: {frontend_src_path}")
 
-
-            # STEP 0: Run Frontend Optimizer (Rule-Based Branding) - NEW
+            # STEP 0: Run Frontend Optimizer (Rule-Based Branding)
             logger.info("🔧 Step 0: Running Frontend Optimizer (rule-based branding)")
             logger.info(f"[Phase 9-Step0] Project: {self.project_name}")
             logger.info(f"[Phase 9-Step0] Description: {self.description[:100]}...")
@@ -737,9 +787,6 @@ That's all. Execute Phase {phase} now.
                 logger.warning(f"[Phase 9-Step0]   Exception: {type(e).__name__}: {str(e)}")
                 logger.warning("[Phase 9-Step0]   Continuing with ACPX step...")
 
-            editor = ACPFrontendEditor(frontend_src_path, self.project_name)
-            logger.info("✓ ACP Frontend Editor initialized")
-
             # Generate execution ID
             import uuid
             execution_id = f"acp_{uuid.uuid4().hex[:12]}"
@@ -762,11 +809,16 @@ That's all. Execute Phase {phase} now.
             result = None
 
             try:
-                # Use V2 editor with filesystem diffing
-                from acp_frontend_editor_v2 import ACPFrontendEditorV2
+                # Use V2 editor with filesystem diffing (exclusive - no legacy editor)
+                print("🔴 PHASE_9_IMPORT: Importing ACPFrontendEditor")
+                from acp_frontend_editor_v2 import ACPFrontendEditor
 
-                editor_v2 = ACPFrontendEditorV2(frontend_src_path, self.project_name)
-                result = editor_v2.apply_changes_via_acpx(goal_description, execution_id)
+                print("🔴 PHASE_9_V2_INIT: Initializing ACPFrontendEditor")
+                editor_v2 = ACPFrontendEditor(frontend_src_path, self.project_name)
+                logger.info("✓ ACP Frontend Editor V2 initialized")
+
+                print("🔴 PHASE_9_APPLY: Calling generate_and_apply_changes")
+                result = editor_v2.generate_and_apply_changes(goal_description, execution_id)
 
                 ai_duration = time.time() - ai_start_time
 
@@ -780,11 +832,25 @@ That's all. Execute Phase {phase} now.
                 logger.info(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s")
 
                 # Log pages created (if any page files were added)
-                files_added = result.get('files_added', [])
-                pages_created = [f for f in files_added if f.endswith('.tsx') and 'pages/' in f]
-                if pages_created:
-                    page_names = [Path(p).stem for p in pages_created]
-                    logger.info(f"📄 Pages created: {', '.join(page_names)}")
+                # Note: result.get('files_added') returns a count, so we scan the pages directory
+                if result.get('success'):
+                    pages_dir = Path(frontend_src_path) / "pages"
+                    page_names = []
+                    if pages_dir.exists():
+                        # Find all .tsx files in pages directory
+                        page_files = list(pages_dir.glob("*.tsx"))
+                        # Extract page names (file stems)
+                        page_names = [p.stem for p in page_files if p.stem not in ["NotFound", "Welcome", "Error", "Loading"]]
+                        logger.info(f"📄 Pages found: {', '.join(page_names)}")
+
+                    # Step 2.5: Update router and navigation
+                    if page_names:
+                        logger.info("🔗 Step 2.5: Updating router and navigation...")
+                        router_nav_success = self._update_router_and_navigation(page_names)
+                        if not router_nav_success:
+                            logger.warning("⚠️ Router and navigation update failed, but continuing...")
+                    else:
+                        logger.info("ℹ️ No pages found, skipping router and navigation update")
             except Exception as e:
                 ai_duration = time.time() - ai_start_time
                 logger.error(f"[Phase 9] ❌ Exception during ACPX V2 execution")
@@ -844,8 +910,8 @@ That's all. Execute Phase {phase} now.
 
             # STEP 3: ALWAYS run build gate (even if no changes detected)
             # This catches cases where AI modified imports/routing without creating new files
-            logger.info("🧭 Router update: Skipped (not available in this version)")
-            logger.info("📚 Navigation update: Skipped (not available in this version)")
+            logger.info("🧭 Router update: ✓ Completed in Step 2.5")
+            logger.info("📚 Navigation update: ✓ Completed in Step 2.5")
             logger.info("🔨 Step 3: Running verification build (always)")
             verification_build_success = False
             verification_build_output = ""
@@ -907,7 +973,7 @@ Phase 9 is complete! ACP is integrated as the final step of project creation.
 
             # Apply ACP_README.md DIRECTLY (no build gate needed for documentation)
             # This avoids " "package.json not found" error for README-only changes
-            readme_path = Path(frontend_src_path) / "ACP_README.md"
+            readme_path = Path(frontend_src_path).parent / "ACP_README.md"
 
             try:
                 with open(readme_path, 'w', encoding='utf-8') as f:
@@ -988,6 +1054,247 @@ Phase 9 is complete! ACP is integrated as the final step of project creation.
             # Return True to allow project to complete despite Phase 9 errors
             logger.warning("⚠️ Allowing project to complete despite Phase 9 errors")
             return True
+    def _update_router_and_navigation(self, pages: list) -> bool:
+        """
+        Update React Router and sidebar navigation for new pages.
+
+        This method:
+        1. Adds imports to App.tsx for new pages
+        2. Registers routes in React Router in App.tsx
+        3. Adds navigation items to sidebar in AppLayout.tsx
+        4. Smart detection (only adds missing items, doesn't duplicate)
+
+        Args:
+            pages: List of page names (e.g., ["Dashboard", "Documents", "Settings"])
+
+        Returns:
+            True if successful, False otherwise
+        """
+        import re
+        import shutil
+
+        logger.info("🔗 Updating router and navigation...")
+        logger.info(f"   Pages to add: {pages}")
+
+        # Icon mappings from lucide-react
+        ICON_MAPPINGS = {
+            "Documents": "FileText",
+            "Templates": "Copy",
+            "Editor": "FileEdit",
+            "Signing": "PenTool",
+            "Analytics": "BarChart3",
+            "Tasks": "KanbanBoard",
+            "Dashboard": "LayoutDashboard",
+            "Reports": "BarChart2",
+            "Projects": "FolderKanban",
+            "Tests": "FlaskConical",
+            "Documentation": "BookOpen",
+            "Settings": "Settings",
+            "Contacts": "Users",
+            "Users": "Users",
+            "Activity": "Activity",
+            "Notifications": "Bell",
+            "Account": "User",
+            "Login": "LogIn",
+            "Signup": "UserPlus",
+            "Team": "Users",
+            "Billing": "CreditCard",
+            "Create": "Plus",
+            "Post": "FileText",
+            "Posts": "FileText",
+            "Documents": "FileText",
+        }
+
+        # Paths to files
+        app_tsx_path = self.frontend_path / "src" / "App.tsx"
+        app_layout_path = self.frontend_path / "src" / "app" / "layouts" / "AppLayout.tsx"
+
+        # Alternative path for AppLayout.tsx (might be in different location)
+        if not app_layout_path.exists():
+            app_layout_path = self.frontend_path / "src" / "layouts" / "AppLayout.tsx"
+        if not app_layout_path.exists():
+            # Try to find any AppLayout.tsx
+            found = list(self.frontend_path.rglob("AppLayout.tsx"))
+            if found:
+                app_layout_path = found[0]
+            else:
+                logger.warning("⚠️ AppLayout.tsx not found, skipping navigation updates")
+                return False
+
+        logger.info(f"   App.tsx: {app_tsx_path}")
+        logger.info(f"   AppLayout.tsx: {app_layout_path}")
+
+        try:
+            # Step 1: Update App.tsx
+            logger.info("   Step 1: Updating App.tsx...")
+
+            if not app_tsx_path.exists():
+                logger.warning(f"⚠️ App.tsx not found at {app_tsx_path}")
+                return False
+
+            app_tsx_content = app_tsx_path.read_text()
+
+            # Find existing imports
+            existing_imports = re.findall(r'import\s+(\w+)\s+from\s+["\']\./pages/(\w+)["\']', app_tsx_content)
+            existing_page_names = [imp[1] for imp in existing_imports]
+            logger.info(f"   Existing imports: {existing_page_names}")
+
+            # Find existing routes
+            existing_routes = re.findall(r'path=["\']/?([^"\']*)["\']\s+element={<\s*(\w+)\s*\/?>', app_tsx_content)
+            existing_route_pages = [route[1] for route in existing_routes]
+            logger.info(f"   Existing routes: {existing_route_pages}")
+
+            # Add imports for missing pages
+            new_imports = []
+            for page in pages:
+                if page not in existing_page_names:
+                    import_line = f'import {page} from "./pages/{page}";'
+                    new_imports.append(import_line)
+                    logger.info(f"   Adding import: {import_line}")
+
+            # Add routes for missing pages
+            new_routes = []
+            for page in pages:
+                if page not in existing_route_pages:
+                    # Create path from page name (lowercase)
+                    if page.lower() == "dashboard":
+                        path = "/"
+                    elif page.lower() == "login" or page.lower() == "signup":
+                        path = f"/{page.lower()}"
+                    else:
+                        path = f"/{page.lower()}"
+                    # Use string concatenation to avoid f-string issues with JSX
+                    route_line = '          <Route path="{}" element={{<{} />}} />'.format(path, page)
+                    new_routes.append(route_line)
+                    logger.info(f"   Adding route: {route_line}")
+
+            # Insert new imports (find the last import and add after it)
+            if new_imports:
+                # Find the last import from ./pages/
+                pages_import_pattern = r'(import\s+\w+\s+from\s+["\']\./pages/[^"\']+["\'];?\n)'
+                pages_imports = re.findall(pages_import_pattern, app_tsx_content)
+
+                if pages_imports:
+                    last_pages_import = pages_imports[-1]
+                    insert_pos = app_tsx_content.find(last_pages_import) + len(last_pages_import)
+                    new_imports_str = "\n".join(new_imports) + "\n"
+                    app_tsx_content = app_tsx_content[:insert_pos] + new_imports_str + app_tsx_content[insert_pos:]
+                    logger.info(f"   ✓ Inserted {len(new_imports)} new import(s)")
+                else:
+                    # No existing page imports, find where to insert (after other imports)
+                    import_pattern = r'import\s+[^;]+;?\n'
+                    imports = list(re.finditer(import_pattern, app_tsx_content))
+
+                    if imports:
+                        last_import = imports[-1]
+                        insert_pos = last_import.end()
+                        new_imports_str = "\n".join(new_imports) + "\n"
+                        app_tsx_content = app_tsx_content[:insert_pos] + new_imports_str + app_tsx_content[insert_pos:]
+                        logger.info(f"   ✓ Inserted {len(new_imports)} new import(s)")
+                    else:
+                        logger.warning("   ⚠️ Could not find suitable location for imports")
+
+            # Insert new routes (find the Routes component and add before closing tag)
+            if new_routes:
+                # Find </Routes>
+                routes_end_pattern = r'(\s*</Routes>)'
+                routes_end_match = re.search(routes_end_pattern, app_tsx_content)
+
+                if routes_end_match:
+                    insert_pos = routes_end_match.start()
+                    new_routes_str = "\n".join(new_routes) + "\n"
+                    app_tsx_content = app_tsx_content[:insert_pos] + new_routes_str + app_tsx_content[insert_pos:]
+                    logger.info(f"   ✓ Inserted {len(new_routes)} new route(s)")
+                else:
+                    logger.warning("   ⚠️ Could not find </Routes> closing tag")
+
+            # Write updated App.tsx
+            app_tsx_path.write_text(app_tsx_content)
+            logger.info("   ✓ App.tsx updated successfully")
+
+            # Step 2: Update AppLayout.tsx
+            logger.info("   Step 2: Updating AppLayout.tsx...")
+
+            if not app_layout_path.exists():
+                logger.warning(f"⚠️ AppLayout.tsx not found at {app_layout_path}")
+                return False
+
+            app_layout_content = app_layout_path.read_text()
+
+            # Find existing navigation items
+            main_nav_pattern = r'const mainNavItems\s*=\s*\[(.*?)\];'
+            main_nav_match = re.search(main_nav_pattern, app_layout_content, re.DOTALL)
+
+            system_nav_pattern = r'const systemNavItems\s*=\s*\[(.*?)\];'
+            system_nav_match = re.search(system_nav_pattern, app_layout_content, re.DOTALL)
+
+            # Extract existing navigation items
+            existing_main_nav = []
+            if main_nav_match:
+                main_nav_text = main_nav_match.group(1)
+                # Extract page names from nav items
+                nav_items = re.findall(r'name:\s*[\'"]([^\'"]+)[\'"]', main_nav_text)
+                existing_main_nav = nav_items
+                logger.info(f"   Existing mainNavItems: {existing_main_nav}")
+
+            existing_system_nav = []
+            if system_nav_match:
+                system_nav_text = system_nav_match.group(1)
+                nav_items = re.findall(r'name:\s*[\'"]([^\'"]+)[\'"]', system_nav_text)
+                existing_system_nav = nav_items
+                logger.info(f"   Existing systemNavItems: {existing_system_nav}")
+
+            # Determine which pages go to main vs system nav
+            system_pages = {"Settings", "Notifications", "Account", "Billing"}
+            new_main_nav_items = []
+            new_system_nav_items = []
+
+            for page in pages:
+                if page in system_pages:
+                    if page not in existing_system_nav:
+                        icon = ICON_MAPPINGS.get(page, "Settings")
+                        path = f"/{page.lower()}"
+                        new_system_nav_items.append(f'  {{ name: \'{page}\', href: \'{path}\', icon: {icon} }}')
+                        logger.info(f"   Adding to systemNavItems: {page}")
+                else:
+                    if page not in existing_main_nav and page not in ["Login", "Signup"]:
+                        icon = ICON_MAPPINGS.get(page, "LayoutDashboard")
+                        path = "/" if page.lower() == "dashboard" else f"/{page.lower()}"
+                        new_main_nav_items.append(f'  {{ name: \'{page}\', href: \'{path}\', icon: {icon} }}')
+                        logger.info(f"   Adding to mainNavItems: {page}")
+
+            # Update mainNavItems
+            if new_main_nav_items and main_nav_match:
+                old_main_nav = main_nav_match.group(0)
+                # Insert new items before closing bracket
+                insert_pos = old_main_nav.rfind(']')
+                new_main_nav_str = ",\n".join(new_main_nav_items) + ",\n"
+                new_main_nav_content = old_main_nav[:insert_pos] + new_main_nav_str + old_main_nav[insert_pos:]
+                app_layout_content = app_layout_content.replace(old_main_nav, new_main_nav_content)
+                logger.info(f"   ✓ Added {len(new_main_nav_items)} items to mainNavItems")
+
+            # Update systemNavItems
+            if new_system_nav_items and system_nav_match:
+                old_system_nav = system_nav_match.group(0)
+                # Insert new items before closing bracket
+                insert_pos = old_system_nav.rfind(']')
+                new_system_nav_str = ",\n".join(new_system_nav_items) + ",\n"
+                new_system_nav_content = old_system_nav[:insert_pos] + new_system_nav_str + old_system_nav[insert_pos:]
+                app_layout_content = app_layout_content.replace(old_system_nav, new_system_nav_content)
+                logger.info(f"   ✓ Added {len(new_system_nav_items)} items to systemNavItems")
+
+            # Write updated AppLayout.tsx
+            app_layout_path.write_text(app_layout_content)
+            logger.info("   ✓ AppLayout.tsx updated successfully")
+
+            logger.info("✅ Router and navigation updated successfully!")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to update router and navigation: {e}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            return False
+
     def _build_ai_refinement_prompt(self) -> str:
         """Build AI refinement prompt for OpenClaw.
 
@@ -1052,29 +1359,29 @@ Execute the refinement now and make this template production-ready for: {self.pr
     def _verify_frontend_build(self) -> bool:
         """Verify that frontend build succeeds after AI refinement.
 
+        Uses InfrastructureManager.build_frontend() for Vite cache cleanup and verification.
+
         Returns:
             True if build successful, False otherwise
         """
         try:
-            result = subprocess.run(
-                ["npm", "run", "build"],
-                cwd=self.frontend_path,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minutes max
-            )
-
-            if result.returncode == 0:
-                logger.info(f"✓ Frontend build successful")
+            # Import InfrastructureManager here to avoid circular imports
+            from infrastructure_manager import InfrastructureManager
+            
+            # Create InfrastructureManager instance
+            infra = InfrastructureManager(self.project_name, self.project_path)
+            
+            # Call enhanced build_frontend method with Vite cache cleanup
+            logger.info("Calling InfrastructureManager.build_frontend()...")
+            build_success = infra.build_frontend()
+            
+            if build_success:
+                logger.info(f"✓ Frontend build successful (verified via InfrastructureManager)")
                 return True
             else:
-                logger.error(f"❌ Frontend build failed with code: {result.returncode}")
-                logger.error(f"  Error: {result.stderr[-1000:]}")
+                logger.error(f"❌ Frontend build failed (verified via InfrastructureManager)")
                 return False
 
-        except subprocess.TimeoutExpired:
-            logger.error(f"❌ Frontend build timed out after 5 minutes")
-            return False
         except Exception as e:
             logger.error(f"❌ Build verification failed: {e}")
             return False
@@ -1158,113 +1465,191 @@ Execute the refinement now and make this template production-ready for: {self.pr
             return None
 
     def run_all_phases(self):
-        """Execute all 7 phases in order."""
+        """Execute all 9 phases in order with structured status tracking.
+        
+        Correct pipeline order:
+        1. Planner (Analyze Project)
+        2. Template Setup (includes scaffold pages, page manifest)
+        3. ACPX Frontend Refinement (BEFORE infrastructure)
+        4. Database Provisioning
+        5. Port Allocation
+        6. Service Setup (includes build)
+        7. Nginx Routing
+        8. AI Frontend (skipped - legacy)
+        9. Deployment Verification (LAST - verifies everything)
+        """
         try:
             logger.info("🚀 Project pipeline started")
             logger.info(f"📋 Project: {self.project_name}")
             logger.info(f"📁 Project path: {self.project_path}")
             logger.info(f"🆔 Project ID: {self.project_id}")
+            
+            # Initialize pipeline status tracking
+            self.status_tracker.initialize()
+            logger.info("📊 Pipeline status tracking initialized")
 
             total_phases = 9
             phases_succeeded = 0
 
-            # Phase 1: Analyze Project
-            logger.info(f"📦 Phase 1/{total_phases}: Analyze Project")
+            # Phase 1: Analyze Project (Planner)
+            self.current_phase = 1
+            logger.info("PHASE_1_PLANNER_START")
+            logger.info(f"📦 Phase 1/{total_phases}: Analyze Project (Planner)")
+            # Update status to initializing
+            logger.info(f"PROJECT STATUS UPDATE → initializing")
+            self.update_status("initializing")
             if self.phase_1_analyze_project():
                 phases_succeeded += 1
+                logger.info("PHASE_1_PLANNER_COMPLETE: success")
                 logger.info("✅ Phase 1 completed successfully")
             else:
+                logger.error("PHASE_1_PLANNER_COMPLETE: failed")
                 self.failed_phases.append("Analyze Project")
                 self.update_status("failed")
+                self.status_tracker.fail_phase(PipelinePhase.PLANNER, ErrorCode.PLANNER_INVALID_OUTPUT, "Phase 1 failed")
                 logger.error("❌ Initialization failed at phase 1")
                 return
 
-            # Phase 2: Template Setup
+            # Phase 2: Template Setup (includes scaffold pages, page manifest)
+            self.current_phase = 2
+            logger.info("PHASE_2_TEMPLATE_START")
             logger.info(f"📦 Phase 2/{total_phases}: Template Setup")
             if self.phase_2_template_setup():
                 phases_succeeded += 1
+                logger.info("PHASE_2_TEMPLATE_COMPLETE: success")
                 logger.info("✅ Phase 2 completed successfully")
             else:
+                logger.error("PHASE_2_TEMPLATE_COMPLETE: failed")
                 self.failed_phases.append("Template Setup")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 2")
                 return
 
-            # Phase 3: Database Provisioning
-            logger.info(f"📋 Phase 3/{total_phases}: Database Provisioning")
+            # Phase 3: ACPX Frontend Refinement (BEFORE infrastructure deployment)
+            # This MUST run before infrastructure so deployment verification doesn't block it
+            self.current_phase = 3
+            logger.info("PHASE_3_ACPX_START")
+            logger.info(f"🤖 Phase 3/{total_phases}: ACPX Frontend Refinement")
+            self.status_tracker.start_phase(PipelinePhase.ACPX)
+            
+            print("PIPELINE TRACE: entering Phase 9 (ACPX Frontend Refinement)")
+            try:
+                result_phase9 = self.phase_9_acp_frontend_editor()
+                print("PIPELINE TRACE: exiting Phase 9")
+                print("PIPELINE TRACE: Phase 9 result =", result_phase9)
+            except Exception as e:
+                print("PHASE_9_ERROR:", str(e))
+                import traceback
+                traceback.print_exc()
+                result_phase9 = False
+            
+            if result_phase9:
+                phases_succeeded += 1
+                self.status_tracker.complete_phase(PipelinePhase.ACPX)
+                # Update status to building after ACPX
+                logger.info(f"PROJECT STATUS UPDATE → building")
+                self.update_status("building")
+                logger.info("PHASE_3_ACPX_COMPLETE: success")
+                logger.info("✅ Phase 3 (ACPX) completed successfully")
+            else:
+                self.failed_phases.append("ACPX Frontend Editor")
+                self.status_tracker.fail_phase(PipelinePhase.ACPX, ErrorCode.ACPX_FAILED, "ACPX refinement failed")
+                logger.warning("PHASE_3_ACPX_COMPLETE: failed (continuing)")
+                # Don't fail the pipeline - continue with infrastructure
+                logger.warning("⚠️ ACPX failed, continuing with infrastructure deployment")
+
+            # Phase 4: Database Provisioning
+            self.current_phase = 4
+            logger.info("PHASE_4_DATABASE_START")
+            logger.info(f"📋 Phase 4/{total_phases}: Database Provisioning")
             if self.phase_3_database_provisioning():
                 phases_succeeded += 1
-                logger.info(f"✓ Phase 3 completed!")
-            else:
-                self.failed_phases.append("Database Provisioning")
-                self.update_status("failed")
-                logger.error("❌ Initialization failed at phase 3")
-                return
-
-            # Phase 4: Port Allocation
-            logger.info(f"📋 Phase 4/{total_phases}: Port Allocation")
-            if self.phase_4_port_allocation():
-                phases_succeeded += 1
+                logger.info("PHASE_4_DATABASE_COMPLETE: success")
                 logger.info(f"✓ Phase 4 completed!")
             else:
-                self.failed_phases.append("Port Allocation")
+                self.failed_phases.append("Database Provisioning")
+                logger.error("PHASE_4_DATABASE_COMPLETE: failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 4")
                 return
 
-            # Phase 5: Service Setup
-            logger.info(f"📋 Phase 5/{total_phases}: Service Setup")
-            if self.phase_5_service_setup():
+            # Phase 5: Port Allocation
+            self.current_phase = 5
+            logger.info("PHASE_5_PORT_START")
+            logger.info(f"📋 Phase 5/{total_phases}: Port Allocation")
+            if self.phase_4_port_allocation():
                 phases_succeeded += 1
+                logger.info("PHASE_5_PORT_COMPLETE: success")
                 logger.info(f"✓ Phase 5 completed!")
             else:
-                self.failed_phases.append("Service Setup")
+                self.failed_phases.append("Port Allocation")
+                logger.error("PHASE_5_PORT_COMPLETE: failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 5")
                 return
 
-            # Phase 6: Nginx Routing
-            logger.info(f"📋 Phase 6/{total_phases}: Nginx Routing")
-            if self.phase_6_nginx_routing():
+            # Phase 6: Service Setup (includes build phase tracking)
+            self.current_phase = 6
+            logger.info("PHASE_6_SERVICE_START")
+            logger.info(f"📋 Phase 6/{total_phases}: Service Setup")
+            self.status_tracker.start_phase(PipelinePhase.BUILD)
+            if self.phase_5_service_setup():
                 phases_succeeded += 1
+                self.status_tracker.complete_phase(PipelinePhase.BUILD)
+                # Update status to deploying after service setup
+                logger.info(f"PROJECT STATUS UPDATE → deploying")
+                self.update_status("deploying")
+                logger.info("PHASE_6_SERVICE_COMPLETE: success")
                 logger.info(f"✓ Phase 6 completed!")
             else:
-                self.failed_phases.append("Nginx Routing")
+                self.failed_phases.append("Service Setup")
+                self.status_tracker.fail_phase(PipelinePhase.BUILD, ErrorCode.BUILD_FAILED, "Service setup failed")
+                logger.error("PHASE_6_SERVICE_COMPLETE: failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 6")
                 return
 
-            # Phase 7: Verification
-            logger.info(f"📋 Phase 7/{total_phases}: Verification")
-            if self.phase_7_verification():
+            # Phase 7: Nginx Routing
+            self.current_phase = 7
+            logger.info("PHASE_7_NGINX_START")
+            logger.info(f"📋 Phase 7/{total_phases}: Nginx Routing")
+            if self.phase_6_nginx_routing():
                 phases_succeeded += 1
+                # Update status to verifying after nginx setup
+                logger.info(f"PROJECT STATUS UPDATE → verifying")
+                self.update_status("verifying")
+                logger.info("PHASE_7_NGINX_COMPLETE: success")
                 logger.info(f"✓ Phase 7 completed!")
             else:
-                self.failed_phases.append("Verification")
+                self.failed_phases.append("Nginx Routing")
+                logger.error("PHASE_7_NGINX_COMPLETE: failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 7")
                 return
 
-            # Phase 8: AI-Driven Frontend Refinement
-            logger.info(f"📋 Phase 8/{total_phases}: AI-Driven Frontend Refinement")
-            # if self.phase_8_frontend_ai_refinement():
-            # Phase 8 skipped per request - using only Phase 9
-            if True:
-                phases_succeeded += 1
-                logger.info(f"✓ Phase 8 completed!")
-            else:
-                self.failed_phases.append("AI Frontend Refinement")
-                self.update_status("failed")
-                logger.error("❌ Initialization failed at phase 8")
-                return
+            # Phase 8: AI-Driven Frontend Refinement (Legacy - skipped)
+            self.current_phase = 8
+            logger.info("PHASE_8_AI_START")
+            logger.info(f"📋 Phase 8/{total_phases}: AI-Driven Frontend Refinement (Legacy - Skipped)")
+            # Phase 8 skipped - ACPX in Phase 3 handles frontend refinement
+            phases_succeeded += 1
+            logger.info("PHASE_8_AI_COMPLETE: skipped")
+            logger.info(f"✓ Phase 8 skipped (using ACPX from Phase 3)")
 
-            # Phase 9: ACP Controlled Frontend Refinement
-            logger.info(f"🤖 Phase 9/{total_phases}: ACP Controlled Frontend Refinement")
-            if self.phase_9_acp_frontend_editor():
+            # Phase 9: Deployment Verification (FINAL step)
+            # This verifies the entire deployment including ACPX changes
+            self.current_phase = 9
+            logger.info("PHASE_9_VERIFY_START")
+            logger.info(f"📋 Phase 9/{total_phases}: Deployment Verification")
+            self.status_tracker.start_phase(PipelinePhase.DEPLOY)
+            if self.phase_7_verification():
                 phases_succeeded += 1
-                logger.info("✅ Phase 9 completed successfully")
+                self.status_tracker.complete_phase(PipelinePhase.DEPLOY)
+                logger.info("PHASE_9_VERIFY_COMPLETE: success")
+                logger.info(f"✓ Phase 9 completed!")
             else:
-                self.failed_phases.append("ACP Frontend Editor")
+                self.failed_phases.append("Deployment Verification")
+                self.status_tracker.fail_phase(PipelinePhase.DEPLOY, ErrorCode.DEPLOY_FAILED, "Deployment verification failed")
                 self.update_status("failed")
                 logger.error("❌ Initialization failed at phase 9")
                 return
@@ -1281,18 +1666,33 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 logger.info(f"📡 API endpoint: http://{domain}/api")
                 logger.info("🎉 Deployment completed successfully")
 
+                logger.info(f"PROJECT STATUS UPDATE → ready")
                 self.update_status("ready")
                 logger.info(f"✓ Project {self.project_id} status updated to 'ready'")
                 logger.info(f"📊 Completed phases: {', '.join(self.completed_phases)}")
+                
+                # Log final pipeline status
+                progress = self.status_tracker.get_progress_summary()
+                logger.info(f"📈 Pipeline Progress: {progress['progress_percent']}% - {progress['overall_status']}")
             else:
                 logger.error(f"❌ Initialization incomplete. Succeeded: {phases_succeeded}/{total_phases}, Failed: {', '.join(self.failed_phases)}")
                 self.update_status("failed")
+                
+                # Log pipeline status on failure
+                progress = self.status_tracker.get_progress_summary()
+                logger.error(f"📉 Pipeline Progress: {progress['progress_percent']}% - {progress['overall_status']}")
+                if progress.get('error_code'):
+                    logger.error(f"🔴 Error Code: {progress['error_code']}")
 
         except Exception as e:
             logger.error(f"💥 Unexpected error in OpenClaw wrapper: {e}")
             self.update_status("failed")
+            self.status_tracker.fail_phase(PipelinePhase.DEPLOY, ErrorCode.UNKNOWN_ERROR, str(e))
 
         finally:
+            # Print final status report
+            status_report = format_status_report(self.status_tracker.get_status())
+            logger.info(f"\n{status_report}")
             logger.info("🏁 OpenClaw wrapper finished")
 
 

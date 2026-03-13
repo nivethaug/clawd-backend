@@ -16,6 +16,14 @@ import json
 import logging
 from pathlib import Path
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, use system environment only
+    pass
+
 try:
     import requests
 except ImportError as e:

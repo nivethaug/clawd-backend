@@ -51,7 +51,8 @@ def get_connection_pool() -> pool.ThreadedConnectionPool:
             database=DB_NAME,
             user=DB_USER,
             password=DB_PASSWORD,
-            cursor_factory=cursor_factory
+            cursor_factory=cursor_factory,
+            connect_timeout=5  # Prevent hanging on unreachable database
         )
         logger.info(f"✓ Connection pool created (host={DB_HOST}, db={DB_NAME})")
 
@@ -258,6 +259,21 @@ def init_schema():
                 cur.execute("ALTER TABLE projects RENAME COLUMN openclaw_session_key TO claude_code_session_name")
                 logger.info("✓ Renamed column to claude_code_session_name")
             _run_migration(rename_claude_code_session_name)
+
+            def migrate_backend_port():
+                cur.execute("ALTER TABLE projects ADD COLUMN backend_port INTEGER")
+                logger.info("✓ Added backend_port column for dynamic port allocation")
+            _run_migration(migrate_backend_port)
+
+            def migrate_pipeline_status():
+                cur.execute("ALTER TABLE projects ADD COLUMN pipeline_status JSONB DEFAULT '{}'::jsonb")
+                logger.info("✓ Added pipeline_status column for structured progress tracking")
+            _run_migration(migrate_pipeline_status)
+
+            def migrate_error_code():
+                cur.execute("ALTER TABLE projects ADD COLUMN error_code VARCHAR(100)")
+                logger.info("✓ Added error_code column for detailed failure reasons")
+            _run_migration(migrate_error_code)
 
             # Sessions table
             cur.execute("""CREATE TABLE IF NOT EXISTS sessions (
