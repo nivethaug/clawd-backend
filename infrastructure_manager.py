@@ -370,15 +370,33 @@ class ServiceManager:
             # Prepare backend port
             backend_port = port if port else 8000
 
-            # Start FastAPI backend with uvicorn via PM2 using Python interpreter
+            # Create ecosystem config for PM2 with Python FastAPI backend
+            ecosystem_config = {
+                "apps": [{
+                    "name": app_name,
+                    "script": "python3",
+                    "args": f"-m uvicorn main:app --host 0.0.0.0 --port {backend_port}",
+                    "cwd": str(backend_path),
+                    "instances": 1,
+                    "exec_mode": "fork",
+                    "watch": False,
+                    "max_memory_restart": "500M",
+                    "env": {
+                        "PORT": str(backend_port),
+                        "BACKEND_HOST": "0.0.0.0",
+                        "BACKEND_PORT": str(backend_port)
+                    }
+                }]
+            }
+
+            # Write ecosystem config file
+            import json
+            ecosystem_path = backend_path / "ecosystem.config.json"
+            ecosystem_path.write_text(json.dumps(ecosystem_config, indent=2))
+
+            # Start FastAPI backend using ecosystem config
             backend_cmd = [
-                "pm2", "start", "python",
-                "--name", app_name,
-                "--",
-                "-m", "uvicorn",
-                "main:app",
-                "--host", "0.0.0.0",
-                "--port", str(backend_port)
+                "pm2", "start", str(ecosystem_path)
             ]
 
             logger.info(f"[SERVICE] Backend command: {' '.join(backend_cmd)}")
