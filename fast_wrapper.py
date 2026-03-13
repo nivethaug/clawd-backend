@@ -33,7 +33,8 @@ USE_POSTGRES = os.getenv("USE_POSTGRES", "true").lower() == "true"
 DB_PATH = str(BACKEND_DIR / "clawdbot_adapter.db")
 
 # Template configuration
-EMPTY_TEMPLATE_MODE = os.getenv("EMPTY_TEMPLATE_MODE", "false").lower() == "true"
+# ALWAYS use blank template - AI will build from scratch
+EMPTY_TEMPLATE_MODE = True  # Hardcoded - always use blank template
 BLANK_TEMPLATE_PATH = str(BACKEND_DIR / "templates" / "blank-template")
 
 # PostgreSQL imports
