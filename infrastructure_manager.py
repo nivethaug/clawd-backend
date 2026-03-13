@@ -17,6 +17,10 @@ import json
 import logging
 import os
 import time
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import dns_manager  # Internal DNS management module
@@ -1451,6 +1455,45 @@ class InfrastructureManager:
             logger.info("[VERIFY] Waiting for backend to fully start (5s)...")
             time.sleep(5)
 
+            # DNS Resolution Check with Auto-Repair
+            frontend_domain = self.domains.get("frontend")
+            if frontend_domain:
+                logger.info(f"[DNS] Checking DNS resolution for {frontend_domain}")
+                if not self._domain_resolves(frontend_domain):
+                    logger.warning(f"[DNS] Missing DNS record detected for {frontend_domain}")
+                    logger.info("[DNS] Attempting automatic repair...")
+                    
+                    try:
+                        dns_repair_result = self._phase_8_dns(frontend_domain)
+                        if dns_repair_result:
+                            logger.info("[DNS] A-record created successfully")
+                            logger.info("[DNS] Waiting for DNS propagation...")
+                            
+                            # DNS propagation retry loop - wait up to 120 seconds
+                            dns_resolved = False
+                            for attempt in range(12):
+                                logger.info(f"[DNS] Propagation check {attempt + 1}/12...")
+                                time.sleep(10)
+                                
+                                if self._domain_resolves(frontend_domain):
+                                    logger.info(f"[DNS] ✓ Domain resolving correctly: {frontend_domain}")
+                                    dns_resolved = True
+                                    break
+                                else:
+                                    logger.info(f"[DNS] Still waiting for propagation...")
+                            
+                            if not dns_resolved:
+                                logger.warning(f"[DNS] DNS propagation taking longer than expected for {frontend_domain}")
+                                logger.warning(f"[DNS] Domain may need manual verification in 5-60 minutes")
+                        else:
+                            logger.error("[DNS] Automatic repair failed - DNS record could not be created")
+                            logger.warning("[DNS] Manual DNS configuration may be required in Hostinger hPanel")
+                    except Exception as dns_error:
+                        logger.error(f"[DNS] Repair attempt failed: {dns_error}")
+                        logger.warning("[DNS] Continuing with local verification only")
+                else:
+                    logger.info(f"[DNS] Domain resolving correctly: {frontend_domain}")
+
             logger.info("[VERIFY] Checking frontend availability")
             frontend_check = subprocess.run(
                 ["curl", "-I", f"http://localhost:{self.ports['frontend']}"],
@@ -2136,46 +2179,71 @@ class InfrastructureManager:
             True if DNS repair succeeded, False otherwise
         """
         try:
-            logger.info(f"[DNS] Repairing DNS for project {project_id}")
+            logger.info(f"[DNS] === Starting DNS Repair for Project {project_id} ===")
             
             # Load project metadata
+            logger.info(f"[DNS] Loading project metadata...")
             project = self.get_project(project_id)
             
             if not project:
-                logger.error(f"[DNS] Project not found: {project_id}")
+                logger.error(f"[DNS] ❌ Project not found: {project_id}")
+                logger.error(f"[DNS] Verify the project ID exists in the database")
                 return False
             
             # Extract domain from project data
             project_data = project.get("project", {})
             domains = project_data.get("domains", {})
+            project_name = project_data.get("name", "unknown")
+            
+            logger.info(f"[DNS] Project name: {project_name}")
+            logger.info(f"[DNS] Found domains: {domains}")
             
             if not domains:
-                logger.warning(f"[DNS] No domains found in project {project_id}")
+                logger.warning(f"[DNS] ⚠️ No domains found in project {project_id}")
+                logger.warning(f"[DNS] Project may not have completed deployment properly")
                 return False
             
             # Get frontend domain (primary domain for DNS)
             frontend_domain = domains.get("frontend")
             
             if not frontend_domain:
-                logger.warning(f"[DNS] No frontend domain found for project {project_id}")
+                logger.warning(f"[DNS] ⚠️ No frontend domain found for project {project_id}")
                 return False
+            
+            logger.info(f"[DNS] Target domain: {frontend_domain}")
+            
+            # Check current DNS status
+            logger.info(f"[DNS] Checking current DNS resolution...")
+            current_status = self._domain_resolves(frontend_domain)
+            
+            if current_status:
+                logger.info(f"[DNS] ✓ Domain already resolves correctly - no repair needed")
+                return True
+            
+            logger.warning(f"[DNS] Missing DNS record detected")
+            logger.info(f"[DNS] Attempting to create A-record via Hostinger API...")
             
             # Call _phase_8_dns to create DNS A-record
             result = self._phase_8_dns(frontend_domain)
             
             if result:
+                logger.info(f"[DNS] ✓ A-record created successfully")
                 logger.info(f"[DNS] ✓ DNS repair successful for project {project_id}")
+                logger.info(f"[DNS] Note: DNS propagation may take 1-5 minutes")
                 
                 # Update project metadata to track that DNS has been repaired
                 if "dns_repaired" not in project_data:
                     project_data["dns_repaired"] = True
                     self.update_project(project_id, {"project": project_data})
+                    logger.info(f"[DNS] Updated project metadata with dns_repaired flag")
                 
                 return True
             else:
                 logger.error(f"[DNS] ❌ DNS repair failed for project {project_id}")
+                logger.error(f"[DNS] Check Hostinger API credentials and rate limits")
                 return False
 
         except Exception as e:
             logger.error(f"[DNS] ❌ Exception during DNS repair: {e}")
+            logger.exception(f"[DNS] Full traceback:")
             return False
