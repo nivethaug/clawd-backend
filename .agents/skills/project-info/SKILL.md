@@ -60,7 +60,9 @@ POST /projects (app.py:288)
 | `claude_code_worker.py` | Background thread | `run_claude_code_background()`, `_worker()` |
 | `fast_wrapper.py` | Quick scaffolding | `FastWrapper.run()`, `git_clone()`, `create_backend()` |
 | `openclaw_wrapper.py` | Infrastructure pipeline | `run_all_phases()`, `phase_*()` methods |
-| `infrastructure_manager.py` | PM2, nginx, DB | `provision_all()`, `DatabaseProvisioner`, `ServiceManager` |
+| `infrastructure_manager.py` | PM2, nginx, DB, DNS | `provision_all()`, `repair_dns()`, `_phase_8_dns()`, `DatabaseProvisioner`, `ServiceManager` |
+| `dns_manager.py` | Hostinger DNS API | `HostingerDNSAPI`, `create_a_record()`, `check_subdomain_exists()` |
+| `dreamctl` | CLI management tool | `repair-dns`, `repair-all-dns`, `verify`, `list`, `status` |
 | `database_adapter.py` | DB abstraction | `get_db()`, `init_schema()` |
 | `database_postgres.py` | PostgreSQL connection | `get_connection_pool()`, `CursorAsConnection` |
 | `acp_frontend_editor_v2.py` | AI frontend editing | `apply_changes_via_acpx()` |
@@ -128,6 +130,13 @@ python test_full_pipeline.py
 
 # Database connection
 docker exec -it dreampilot-postgres psql -U admin -d dreampilot
+
+# DNS repair (CLI tool)
+python dreamctl repair-dns <project_id>    # Repair single project
+python dreamctl repair-all-dns              # Repair all projects
+python dreamctl list                        # List all projects
+python dreamctl status <project_id>         # Show project status
+python dreamctl verify <project_id>         # Verify deployment
 ```
 
 ## Status Progression
@@ -138,6 +147,38 @@ docker exec -it dreampilot-postgres psql -U admin -d dreampilot
 | `ai_provisioning` | Phase 3 starts | `openclaw_wrapper.py:740` |
 | `ready` | All phases complete | `openclaw_wrapper.py:1607` |
 | `failed` | Any phase fails | Multiple locations |
+
+## DNS Automation
+
+### Auto-Repair Flow
+```
+PHASE_9 Verification
+    │
+    ├─→ Check DNS resolution for frontend domain
+    │       │
+    │       ├─→ If NOT resolving:
+    │       │       ├─→ Log: [DNS] Missing DNS record detected
+    │       │       ├─→ Log: [DNS] Attempting automatic repair
+    │       │       ├─→ Call _phase_8_dns() → Hostinger API
+    │       │       ├─→ Log: [DNS] A-record created
+    │       │       └─→ Retry loop (12 attempts, 10s each)
+    │       │               ├─→ Log: [DNS] Waiting for propagation...
+    │       │               └─→ Log: [DNS] Domain resolving correctly
+    │       │
+    │       └─→ If resolving:
+    │               └─→ Log: [DNS] Domain resolving correctly
+    │
+    └─→ Continue to HTTP verification
+```
+
+### DNS Propagation Retry
+- **Max attempts:** 12
+- **Delay between attempts:** 10 seconds
+- **Total max wait:** 120 seconds
+
+### Rate Limiting
+- `dreamctl repair-all-dns` includes 1-second delay between API calls
+- Prevents Hostinger API rate limit errors (HTTP 423)
 
 ## Quick Debugging
 
