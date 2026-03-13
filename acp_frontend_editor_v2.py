@@ -677,7 +677,7 @@ class ACPFrontendEditorV2:
                 import threading
                 
                 HARD_TIMEOUT = 600  # 10 minutes max
-                IDLE_TIMEOUT = 60   # 60 seconds without output
+                IDLE_TIMEOUT = 180  # 3 minutes without output (increased from 60s)
                 
                 process = subprocess.Popen(
                     cmd,
@@ -779,16 +779,10 @@ class ACPFrontendEditorV2:
                     print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Reason=hard_timeout")
                     return result
                 
+                # Don't immediately rollback on idle timeout - check if files were modified
                 if idle_killed:
-                    self.snapshot_manager.restore_snapshot()
-                    self.snapshot_manager.cleanup_snapshot()
-                    result = {
-                        "success": False,
-                        "message": f"ACPX idle timeout exceeded ({IDLE_TIMEOUT}s no output) — process terminated",
-                        "rollback": True
-                    }
-                    print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Reason=idle_timeout")
-                    return result
+                    logger.warning(f"[ACPX-V2] ⚠️ Idle timeout exceeded ({IDLE_TIMEOUT}s) - checking if edits succeeded...")
+                    print(f"🔴 ACPX-V2-IDLE-TIMEOUT: Checking if files were modified before rolling back")
                 
                 # Tolerant error handling: ignore harmless JSON-RPC notification errors
                 # and handle ACPX idle timeout (returns -6 even when edits succeed)
@@ -796,7 +790,7 @@ class ACPFrontendEditorV2:
                 if "session/update" in stderr_output and "Invalid params" in stderr_output:
                     logger.warning("[ACPX] Ignoring JSON-RPC notification error (session/update Invalid params)")
                     should_fail = False
-                elif return_code == -6:
+                elif return_code == -6 or idle_killed:
                     logger.warning("[ACPX] ACPX idle timeout detected but edits may have succeeded")
                     should_fail = False
 
