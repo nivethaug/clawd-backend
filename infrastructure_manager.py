@@ -1423,6 +1423,32 @@ class InfrastructureManager:
                 logger.warning("PHASE_5_BUILD_COMPLETE: partial (build had issues)")
                 logger.warning("⚠️ Frontend build had issues, continuing anyway")
 
+            # Fix permissions on project directory for nginx access
+            logger.info("🔧 Fixing permissions for nginx access...")
+            try:
+                import stat
+                # Fix permissions on entire project path chain
+                project_root = self.project_path
+                while project_root != project_root.parent:
+                    try:
+                        os.chmod(project_root, 0o755)
+                    except:
+                        pass
+                    if project_root.name == "dreampilot":
+                        break
+                    project_root = project_root.parent
+                
+                # Fix permissions on project directory and all subdirectories
+                for item in self.project_path.rglob("*"):
+                    if item.is_dir():
+                        os.chmod(item, 0o755)
+                    elif item.is_file():
+                        os.chmod(item, 0o644)
+                
+                logger.info("✓ Permissions fixed for nginx (755 dirs, 644 files)")
+            except Exception as perm_error:
+                logger.warning(f"⚠️ Could not fix all permissions: {perm_error}")
+
             # Phase 6: Nginx configuration (with SPA routing)
             logger.info("Phase 6/8: Nginx configuration")
             frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
@@ -1708,6 +1734,26 @@ class InfrastructureManager:
                 return False
             
             logger.info(f"✓ Dist directory verified with {len(dist_contents)} items")
+            
+            # Step 6: Fix permissions so nginx can read files
+            logger.info("🔧 Fixing permissions for nginx access...")
+            try:
+                # Fix permissions on the entire project directory
+                os.chmod(frontend_path, 0o755)
+                dist_path_chmod = frontend_path / "dist"
+                if dist_path_chmod.exists():
+                    os.chmod(dist_path_chmod, 0o755)
+                    # Fix permissions on all files in dist
+                    for item in dist_path_chmod.rglob("*"):
+                        if item.is_file():
+                            os.chmod(item, 0o644)
+                        elif item.is_dir():
+                            os.chmod(item, 0o755)
+                    logger.info("✓ Permissions fixed for nginx (755/644)")
+            except Exception as perm_error:
+                logger.warning(f"⚠️ Could not fix permissions: {perm_error}")
+                # Don't fail the build, just warn
+            
             logger.info("PHASE_5_BUILD_COMPLETE: success")
             logger.info("✅ Build phase completed successfully")
             return True
