@@ -999,19 +999,26 @@ Execute this UI redesign now.
 """
 
         # Call acpx using the configured CLI command
-        # Use acpx-claude wrapper instead of direct Node path
+        # Use acpx CLI with proper arguments
         logger.info(f"[ACPX] cwd: {self.validator.frontend_src_path}")
-        logger.info(f"[ACPX] running: acpx-claude")
+        logger.info(f"[ACPX] running: acpx --format quiet claude exec")
 
         try:
-            # Run acpx-claude with prompt via stdin
+            # Run acpx with prompt as argument (not stdin)
+            cmd = [
+                "acpx",
+                "--cwd", str(self.validator.frontend_src_path),
+                "--format", "quiet",
+                "claude",
+                "exec",
+                str(instruction)
+            ]
             result = subprocess.run(
-                ["acpx-claude"],
-                input=instruction,
+                cmd,
                 text=True,
                 capture_output=True,
                 timeout=1800,  # 30 minutes
-                cwd=self.validator.frontend_src_path
+                cwd=str(self.validator.frontend_src_path)
             )
 
             logger.info(f"[ACPX] 🔴 HEARTBEAT: ACPX subprocess completed (did NOT timeout)")
