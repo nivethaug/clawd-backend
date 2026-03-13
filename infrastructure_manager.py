@@ -2032,30 +2032,60 @@ class InfrastructureManager:
                 return False
 
             logger.info(f"[DNS] Server IP: {server_ip}")
-            logger.info(f"[DNS] Creating A record: {subdomain}.{base_domain} → {server_ip}")
-
-            # Create A record for frontend domain
-            # Note: We use base_domain from project_domain, not from dns_manager
+            
+            # Create A records for BOTH frontend and backend subdomains
+            # Frontend: subdomain.base_domain (e.g., test4-xxx.dreambigwithai.com)
+            # Backend: subdomain-api.base_domain (e.g., test4-xxx-api.dreambigwithai.com)
+            
+            frontend_success = False
+            backend_success = False
+            
             if base_domain:
-                full_domain = f"{subdomain}.{base_domain}"
-                result = dns_manager.create_a_record(
+                # Create frontend A record
+                logger.info(f"[DNS] Creating frontend A record: {subdomain}.{base_domain} → {server_ip}")
+                frontend_result = dns_manager.create_a_record(
                     domain=base_domain,
                     subdomain=subdomain,
                     ip=server_ip,
                     ttl=14400  # 4 hours
                 )
+                
+                if frontend_result.get("success"):
+                    logger.info(f"[DNS] ✓ Frontend A record created: {subdomain}.{base_domain} → {server_ip}")
+                    frontend_success = True
+                else:
+                    logger.error(f"[DNS] ❌ Failed to create frontend DNS record: {frontend_result.get('error', 'Unknown error')}")
+                
+                # Create backend A record (subdomain-api)
+                backend_subdomain = f"{subdomain}-api"
+                logger.info(f"[DNS] Creating backend A record: {backend_subdomain}.{base_domain} → {server_ip}")
+                backend_result = dns_manager.create_a_record(
+                    domain=base_domain,
+                    subdomain=backend_subdomain,
+                    ip=server_ip,
+                    ttl=14400  # 4 hours
+                )
+                
+                if backend_result.get("success"):
+                    logger.info(f"[DNS] ✓ Backend A record created: {backend_subdomain}.{base_domain} → {server_ip}")
+                    backend_success = True
+                else:
+                    logger.error(f"[DNS] ❌ Failed to create backend DNS record: {backend_result.get('error', 'Unknown error')}")
             else:
                 # Fallback if we can't determine base domain
                 logger.warning(f"[DNS] Could not determine base domain from: {project_domain}")
                 logger.warning("[DNS] Skipping DNS creation (will use default subdomain)")
-                result = {"success": False, "error": "Could not determine base domain"}
 
-            if result.get("success"):
-                logger.info(f"[DNS] ✓ A record created: {subdomain}.{base_domain} → {server_ip}")
+            if frontend_success and backend_success:
+                logger.info(f"[DNS] ✓ Both DNS records created successfully")
                 logger.info("PHASE_8_DNS_COMPLETE")
                 return True
+            elif frontend_success:
+                logger.warning(f"[DNS] ⚠️ Frontend DNS created, but backend DNS failed")
+                logger.info("PHASE_8_DNS_COMPLETE: partial")
+                return True  # Return true so deployment continues
             else:
-                logger.error(f"[DNS] ❌ Failed to create DNS record: {result.get('error', 'Unknown error')}")
+                logger.error(f"[DNS] ❌ DNS creation failed")
                 logger.info("PHASE_8_DNS_FAILED")
                 return False
 
