@@ -299,21 +299,6 @@ def check_pm2(project_name: str) -> Tuple[bool, bool]:
                         backend_running = True
                         log_success(f"Backend PM2 process running")
             
-            # Normalize project name for matching
-            name_lower = project_name.lower().replace(" ", "-")
-            
-            for proc in processes:
-                proc_name = proc.get("name", "").lower()
-                status = proc.get("pm2_env", {}).get("status", "")
-                
-                if name_lower in proc_name:
-                    if "frontend" in proc_name and status == "online":
-                        frontend_running = True
-                        log_success(f"Frontend PM2 process running: {proc['name']}")
-                    elif "backend" in proc_name and status == "online":
-                        backend_running = True
-                        log_success(f"Backend PM2 process running: {proc['name']}")
-            
             if not frontend_running:
                 log_error("Frontend PM2 process not found or not running")
             if not backend_running:
