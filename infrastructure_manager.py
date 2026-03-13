@@ -339,10 +339,17 @@ class ServiceManager:
             logger.error(f"Failed to create backend service config: {e}")
             raise
 
-    def start_backend_service(self, app_name: str, backend_path: Path) -> bool:
-        """Start backend service."""
+    def start_backend_service(self, app_name: str, backend_path: Path, port: int = None) -> bool:
+        """Start backend service with PORT environment variable and startup delay."""
         try:
             logger.info(f"[SERVICE] Starting backend service: {app_name}")
+            logger.info(f"[SERVICE] Backend working directory: {backend_path}")
+            logger.info(f"[SERVICE] Backend port: {port}")
+
+            # Copy system environment and add PORT variable
+            env = os.environ.copy()
+            if port:
+                env["PORT"] = str(port)
 
             backend_cmd = [
                 "pm2",
@@ -353,11 +360,11 @@ class ServiceManager:
             ]
 
             logger.info(f"[SERVICE] Backend command: {' '.join(backend_cmd)}")
-            logger.info(f"[SERVICE] Backend working directory: {backend_path}")
 
             result = subprocess.run(
                 backend_cmd,
                 cwd=str(backend_path),
+                env=env,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -366,6 +373,19 @@ class ServiceManager:
 
             logger.info(f"[SERVICE] Backend service started successfully: {app_name}")
             logger.info(f"[SERVICE] Backend stdout: {result.stdout[:200]}")
+            
+            # Add startup delay to ensure backend is ready
+            logger.info("[SERVICE] Waiting for backend to start (5s)...")
+            time.sleep(5)
+            
+            # Log PM2 status to verify backend is running
+            pm2_status = subprocess.run(
+                ["pm2", "list"],
+                capture_output=True,
+                text=True
+            )
+            logger.info(f"[SERVICE] PM2 status after startup:\n{pm2_status.stdout}")
+            
             return True
 
         except subprocess.CalledProcessError as e:
@@ -1388,6 +1408,10 @@ class InfrastructureManager:
             # PHASE_9 Verification
             logger.info("[VERIFY] PHASE_9_VERIFY_START")
 
+            # Add startup delay to ensure backend is ready
+            logger.info("[VERIFY] Waiting for backend to fully start (5s)...")
+            time.sleep(5)
+
             logger.info("[VERIFY] Checking frontend availability")
             frontend_check = subprocess.run(
                 ["curl", "-I", f"http://localhost:{self.ports['frontend']}"],
@@ -1647,7 +1671,8 @@ class InfrastructureManager:
             logger.info(f"🔧 Starting backend service: {self.service_name}")
             backend_success = self.service_manager.start_backend_service(
                 self.service_name, 
-                self.project_path / "backend"
+                self.project_path / "backend",
+                self.ports["backend"]
             )
             
             if backend_success:
