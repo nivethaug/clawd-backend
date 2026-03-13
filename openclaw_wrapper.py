@@ -810,11 +810,11 @@ That's all. Execute Phase {phase} now.
 
             try:
                 # Use V2 editor with filesystem diffing (exclusive - no legacy editor)
-                print("🔴 PHASE_9_IMPORT: Importing ACPFrontendEditor")
-                from acp_frontend_editor_v2 import ACPFrontendEditor
+                print("🔴 PHASE_9_IMPORT: Importing ACPFrontendEditorV2")
+                from acp_frontend_editor_v2 import ACPFrontendEditorV2
 
-                print("🔴 PHASE_9_V2_INIT: Initializing ACPFrontendEditor")
-                editor_v2 = ACPFrontendEditor(frontend_src_path, self.project_name)
+                print("🔴 PHASE_9_V2_INIT: Initializing ACPFrontendEditorV2")
+                editor_v2 = ACPFrontendEditorV2(frontend_src_path, self.project_name)
                 logger.info("✓ ACP Frontend Editor V2 initialized")
 
                 print("🔴 PHASE_9_APPLY: Calling apply_changes_via_acpx (Filesystem Diff Architecture)")
