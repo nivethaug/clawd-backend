@@ -1359,29 +1359,29 @@ Execute the refinement now and make this template production-ready for: {self.pr
     def _verify_frontend_build(self) -> bool:
         """Verify that frontend build succeeds after AI refinement.
 
+        Uses InfrastructureManager.build_frontend() for Vite cache cleanup and verification.
+
         Returns:
             True if build successful, False otherwise
         """
         try:
-            result = subprocess.run(
-                ["npm", "run", "build"],
-                cwd=self.frontend_path,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minutes max
-            )
-
-            if result.returncode == 0:
-                logger.info(f"✓ Frontend build successful")
+            # Import InfrastructureManager here to avoid circular imports
+            from infrastructure_manager import InfrastructureManager
+            
+            # Create InfrastructureManager instance
+            infra = InfrastructureManager(self.project_name, self.project_path)
+            
+            # Call enhanced build_frontend method with Vite cache cleanup
+            logger.info("Calling InfrastructureManager.build_frontend()...")
+            build_success = infra.build_frontend()
+            
+            if build_success:
+                logger.info(f"✓ Frontend build successful (verified via InfrastructureManager)")
                 return True
             else:
-                logger.error(f"❌ Frontend build failed with code: {result.returncode}")
-                logger.error(f"  Error: {result.stderr[-1000:]}")
+                logger.error(f"❌ Frontend build failed (verified via InfrastructureManager)")
                 return False
 
-        except subprocess.TimeoutExpired:
-            logger.error(f"❌ Frontend build timed out after 5 minutes")
-            return False
         except Exception as e:
             logger.error(f"❌ Build verification failed: {e}")
             return False
