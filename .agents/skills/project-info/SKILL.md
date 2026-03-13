@@ -7,25 +7,38 @@
 
 ## Architecture Overview
 
-### System Architecture
+### System Architecture (Two-Subdomain Model)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        CLIENT REQUEST                           │
-│                   project.dreambigwithai.com                    │
+│         {project}.dreambigwithai.com (Frontend)                 │
+│         {project}-api.dreambigwithai.com (Backend)              │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      NGINX (Port 80/443)                        │
 │                                                                 │
-│  server_name project.dreambigwithai.com;                        │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │ FRONTEND SERVER BLOCK                                      │  │
+│  │ server_name {project}.dreambigwithai.com;                  │  │
+│  │                                                            │  │
+│  │ root /root/dreampilot/projects/website/{domain}/dist;     │  │
+│  │                                                            │  │
+│  │ location /     → try_files $uri /index.html (SPA)         │  │
+│  │ location /api/  → proxy_pass http://127.0.0.1:8xxx/       │  │
+│  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│  location /     → proxy_pass http://127.0.0.1:3xxx (Frontend)  │
-│  location /api  → proxy_pass http://127.0.0.1:8xxx (Backend)   │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │ BACKEND SERVER BLOCK                                       │  │
+│  │ server_name {project}-api.dreambigwithai.com;              │  │
+│  │                                                            │  │
+│  │ location /     → proxy_pass http://127.0.0.1:8xxx         │  │
+│  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
-                    │                       │
-                    ▼                       ▼
+                              │
+                              ▼
 ┌──────────────────────────────┐  ┌──────────────────────────────┐
 │   FRONTEND SERVICE (PM2)     │  │    BACKEND SERVICE (PM2)     │
 │                              │  │                              │
@@ -42,6 +55,15 @@
                                │   (Docker Container)         │
                                └──────────────────────────────┘
 ```
+
+### URL Structure
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Frontend | `http(s)://{project}.dreambigwithai.com/` | React SPA |
+| Frontend API Proxy | `http(s)://{project}.dreambigwithai.com/api/` | Proxied to backend |
+| Backend Direct | `http(s)://{project}-api.dreambigwithai.com/` | Direct API access |
+| Health Check | `http(s)://{project}-api.dreambigwithai.com/health` | Backend health |
 
 ### Backend Stack
 
@@ -200,25 +222,44 @@ uvicorn main:app --host 0.0.0.0 --port <backend_port>
 - Managed by PM2 as `{project-name}-backend`
 - Health endpoint: `GET /health` → `{"status": "ok"}`
 
-### Nginx Routing
+### Nginx Routing (Two-Subdomain Architecture)
 
 ```nginx
+# Frontend: project.dreambigwithai.com
 server {
-    server_name project123.dreambigwithai.com;
+    listen 80;
+    server_name project.dreambigwithai.com;
 
+    root /root/dreampilot/projects/website/project/frontend/dist;
+    index index.html;
+
+    # SPA routing - serve index.html for all routes
     location / {
-        proxy_pass http://127.0.0.1:3xxx;
+        try_files $uri $uri/ /index.html;
     }
 
-    location /api {
+    # API proxy (trailing slash strips /api prefix)
+    location /api/ {
+        proxy_pass http://127.0.0.1:8xxx/;
+    }
+}
+
+# Backend: project-api.dreambigwithai.com
+server {
+    listen 80;
+    server_name project-api.dreambigwithai.com;
+
+    location / {
         proxy_pass http://127.0.0.1:8xxx;
     }
 }
 ```
 
 Result:
-- `project.domain.com/` → Frontend (React SPA)
-- `project.domain.com/api` → Backend (FastAPI)
+- `{project}.dreambigwithai.com/` → Frontend (React SPA)
+- `{project}.dreambigwithai.com/api/` → Backend (via proxy, `/api` stripped)
+- `{project}-api.dreambigwithai.com/` → Backend (direct access)
+- `{project}-api.dreambigwithai.com/health` → Health check endpoint
 
 ---
 
@@ -434,6 +475,15 @@ SELECT id, name, status FROM projects ORDER BY id DESC LIMIT 5;
 
 ### Test Backend Directly
 ```bash
+# Via backend subdomain
+curl http://project-api.dreambigwithai.com/health
+# Expected: {"status":"ok"}
+
+# Via frontend API proxy
+curl http://project.dreambigwithai.com/api/health
+# Expected: {"status":"ok"}
+
+# Direct port access
 curl http://127.0.0.1:<backend_port>/health
 # Expected: {"status":"ok"}
 ```
@@ -446,21 +496,40 @@ sudo nginx -t  # Test configuration
 
 ### Check DNS Resolution
 ```bash
+# Frontend domain
 nslookup <domain>.dreambigwithai.com
 dig <domain>.dreambigwithai.com
+
+# Backend domain
+nslookup <domain>-api.dreambigwithai.com
+dig <domain>-api.dreambigwithai.com
 ```
 
 ### Common Issue: Frontend Loads but Backend Unreachable
 
 **Symptoms:**
-- Frontend page loads at `http://project.domain.com/`
-- API calls to `/api` fail with 502 or timeout
+- Frontend page loads at `http://project.dreambigwithai.com/`
+- API calls to `/api/` fail with 502 or timeout
+- Backend subdomain `http://project-api.dreambigwithai.com/` unreachable
 
 **Debugging Steps:**
-1. Check nginx config has `/api` location block
+1. Check both nginx server blocks exist (frontend + backend)
 2. Verify backend PM2 process is running: `pm2 list`
 3. Check backend logs: `pm2 logs project-<id>-backend`
 4. Test backend directly: `curl http://127.0.0.1:<backend_port>/health`
+5. Check DNS for both domains: `dig project-api.dreambigwithai.com`
+
+### Common Issue: HTTP 500 on Frontend
+
+**Symptoms:**
+- Frontend returns HTTP 500
+- Nginx error logs show "permission denied" or "file not found"
+
+**Debugging Steps:**
+1. Check `dist/` directory exists: `ls -la /root/dreampilot/projects/website/{domain}/frontend/dist/`
+2. Verify `index.html` exists: `cat /root/dreampilot/projects/website/{domain}/frontend/dist/index.html`
+3. Check nginx error logs: `tail -50 /var/log/nginx/error.log`
+4. Verify nginx config has correct `root` path
 
 ---
 

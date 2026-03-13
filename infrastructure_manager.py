@@ -908,8 +908,9 @@ server {{
     }}
 
     # API proxy
-    location /api {{
-        proxy_pass http://127.0.0.1:{backend_port};
+    # API proxy (trailing slash strips /api prefix)
+    location /api/ {{
+        proxy_pass http://127.0.0.1:{backend_port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -963,9 +964,9 @@ server {{
         try_files $uri $uri/ /index.html;
     }}
 
-    # API proxy
-    location /api {{
-        proxy_pass http://127.0.0.1:{backend_port};
+    # API proxy (trailing slash strips /api prefix)
+    location /api/ {{
+        proxy_pass http://127.0.0.1:{backend_port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
