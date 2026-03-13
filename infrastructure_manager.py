@@ -1799,6 +1799,21 @@ class InfrastructureManager:
 
             logger.info("[SERVICE] ✓ PM2 services running")
 
+            # PHASE_8_DNS: Create DNS records for project domain
+            logger.info("PHASE_8_DNS_START")
+            dns_result = self._phase_8_dns(self.domains.get("frontend"))
+
+            if not dns_result:
+                logger.error("PHASE_8_DNS_FAILED")
+                raise RuntimeError("PHASE_8_DNS_COMPLETE: DNS creation failed")
+
+            logger.info("PHASE_8_DNS_COMPLETE: success")
+            logger.info("✅ DNS record created successfully")
+
+            # Wait for DNS propagation
+            logger.info("[DNS] Waiting for DNS propagation (20s)...")
+            time.sleep(20)
+
             # Save PM2 State
             subprocess.run(["pm2", "save"], check=True)
 
@@ -1922,6 +1937,127 @@ class InfrastructureManager:
 
             # Note: DNS A records are not deleted on rollback
             # This requires manual cleanup via Hostinger hPanel or DNS skill update
+
+    def _phase_8_dns(self, project_domain: str) -> bool:
+        """PHASE_8_DNS: Create DNS A records for project domain.
+        
+        This phase uses the existing dns_manager module to automatically
+        create DNS A records for the project's frontend domain.
+        
+        Args:
+            project_domain: The auto-generated domain (e.g., "project-name-xxxxx.dreambigwithai.com")
+        
+        Returns:
+            True if DNS record created successfully, False otherwise
+        """
+        try:
+            logger.info("PHASE_8_DNS_START")
+            logger.info(f"[DNS] Creating DNS record for domain: {project_domain}")
+
+            # Import dns_manager module
+            from dns_manager import DNSManager
+
+            # Initialize DNS manager
+            dns_manager = DNSManager()
+
+            # Extract subdomain from project domain
+            # Format: "project-name-xxxxx.dreambigwithai.com"
+            if '.' in project_domain:
+                # Split and take the project subdomain part
+                parts = project_domain.split('.')
+                if len(parts) >= 2:
+                    subdomain = parts[0]
+                    base_domain = '.'.join(parts[1:])
+                else:
+                    subdomain = project_domain
+                    base_domain = None
+            else:
+                subdomain = project_domain
+                base_domain = None
+
+            # Get server IP for A record
+            server_ip = self._get_server_ip()
+
+            if not server_ip:
+                logger.error(f"[DNS] Could not determine server IP")
+                logger.info("PHASE_8_DNS_FAILED")
+                return False
+
+            logger.info(f"[DNS] Server IP: {server_ip}")
+            logger.info(f"[DNS] Creating A record: {subdomain}.{base_domain} → {server_ip}")
+
+            # Create A record for frontend domain
+            # Note: We use base_domain from project_domain, not from dns_manager
+            if base_domain:
+                full_domain = f"{subdomain}.{base_domain}"
+                result = dns_manager.create_a_record(
+                    domain=base_domain,
+                    subdomain=subdomain,
+                    ip=server_ip,
+                    ttl=14400  # 4 hours
+                )
+            else:
+                # Fallback if we can't determine base domain
+                logger.warning(f"[DNS] Could not determine base domain from: {project_domain}")
+                logger.warning("[DNS] Skipping DNS creation (will use default subdomain)")
+                result = {"success": False, "error": "Could not determine base domain"}
+
+            if result.get("success"):
+                logger.info(f"[DNS] ✓ A record created: {subdomain}.{base_domain} → {server_ip}")
+                logger.info("PHASE_8_DNS_COMPLETE")
+                return True
+            else:
+                logger.error(f"[DNS] ❌ Failed to create DNS record: {result.get('error', 'Unknown error')}")
+                logger.info("PHASE_8_DNS_FAILED")
+                return False
+
+        except Exception as e:
+            logger.error(f"[DNS] ❌ DNS creation failed: {e}")
+            logger.info("PHASE_8_DNS_FAILED")
+            return False
+
+    def _domain_resolves(self, domain: str) -> bool:
+        """Check if domain resolves (DNS propagation check)."""
+        try:
+            import socket
+            
+            logger.info(f"[DNS] Checking if domain resolves: {domain}")
+            
+            # Simple DNS check with 5-second timeout
+            socket.setdefaulttimeout(5)
+            
+            try:
+                socket.gethostbyname(domain)
+                logger.info(f"[DNS] ✓ Domain {domain} resolves successfully")
+                return True
+            except socket.gaierror:
+                logger.warning(f"[DNS] ⚠️ Domain {domain} does not resolve yet (may need more time)")
+                return False
+            except Exception as e:
+                logger.error(f"[DNS] ❌ DNS resolution error: {e}")
+                return False
+
+    def _get_server_ip(self) -> str:
+        """Get server public IP address."""
+        try:
+            result = subprocess.run(
+                ["curl", "-s", "https://ifconfig.me/ip"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                ip = result.stdout.strip()
+                logger.info(f"[DNS] Server IP detected: {ip}")
+                return ip
+            else:
+                logger.error(f"[DNS] Failed to get server IP: {result.stderr}")
+                return None
+
+        except Exception as e:
+            logger.error(f"[DNS] Exception getting server IP: {e}")
+            return None
 
             logger.info("✓ Rollback complete")
 
