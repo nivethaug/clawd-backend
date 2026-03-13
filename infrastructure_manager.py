@@ -352,7 +352,7 @@ class ServiceManager:
                 logger.info("[SERVICE] Installing Python dependencies from requirements.txt...")
                 try:
                     subprocess.run(
-                        ["pip", "install", "-r", "requirements.txt"],
+                        ["pip", "install", "--break-system-packages", "-r", "requirements.txt"],
                         cwd=str(backend_path),
                         check=True,
                         capture_output=True,
