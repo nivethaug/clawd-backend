@@ -817,8 +817,8 @@ That's all. Execute Phase {phase} now.
                 editor_v2 = ACPFrontendEditor(frontend_src_path, self.project_name)
                 logger.info("✓ ACP Frontend Editor V2 initialized")
 
-                print("🔴 PHASE_9_APPLY: Calling generate_and_apply_changes")
-                result = editor_v2.generate_and_apply_changes(goal_description, execution_id)
+                print("🔴 PHASE_9_APPLY: Calling apply_changes_via_acpx (Filesystem Diff Architecture)")
+                result = editor_v2.apply_changes_via_acpx(goal_description, execution_id)
 
                 ai_duration = time.time() - ai_start_time
 
