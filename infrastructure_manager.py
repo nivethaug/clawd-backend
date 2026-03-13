@@ -414,7 +414,7 @@ class ServiceManager:
 
     def build_frontend(self) -> bool:
         """
-        Build the frontend.
+        Build frontend with Vite cache cleanup and build verification.
 
         Returns:
             True if successful, False otherwise
@@ -423,26 +423,103 @@ class ServiceManager:
         env = os.environ.copy()
         
         try:
-            logger.info("Building frontend...")
-
-            result = subprocess.run(
-                ["npm", "run", "build"],
-                cwd=str(frontend_path),
+            logger.info("PHASE_5_BUILD_START")
+            logger.info(f"[BUILD] Starting frontend build for {self.project_name}")
+            
+            frontend_dist_path = self.project_path / "frontend"
+            
+            # Check if frontend exists
+            if not frontend_dist_path.exists():
+                logger.error(f"[BUILD] Frontend directory not found: {frontend_dist_path}")
+                logger.info("PHASE_5_BUILD_FAILED: missing frontend")
+                return False
+            
+            # Clean Vite caches before build to prevent stale cache issues
+            logger.info("[BUILD] Cleaning Vite caches to prevent corrupted node_modules...")
+            vite_cache_paths = [
+                frontend_dist_path / "node_modules" / ".vite",
+                frontend_dist_path / "node_modules" / ".vite-temp",
+            ]
+            
+            caches_cleaned = 0
+            for cache_path in vite_cache_paths:
+                if cache_path.exists():
+                    try:
+                        import shutil
+                        shutil.rmtree(str(cache_path))
+                        logger.info(f"[BUILD] ✓ Cleaned Vite cache: {cache_path.name}")
+                        caches_cleaned += 1
+                    except Exception as cache_err:
+                        logger.warning(f"[BUILD] ⚠️ Could not clean cache {cache_path.name}: {cache_err}")
+            
+            logger.info(f"[BUILD] Cleaned {caches_cleaned} Vite cache directories")
+            
+            # Install dependencies before build
+            logger.info("[BUILD] Installing frontend dependencies...")
+            install_result = subprocess.run(
+                ["npm", "install"],
                 capture_output=True,
                 text=True,
-                timeout=300,  # 5 minutes
+                timeout=600,  # 10 minutes
+                cwd=str(frontend_dist_path),
                 env=env
             )
-
-            if result.returncode == 0:
-                logger.info(f"✓ Frontend built successfully")
-                return True
-            else:
-                logger.error(f"Failed to build frontend: {result.stderr}")
+            
+            if install_result.returncode != 0:
+                logger.error(f"[BUILD] npm install failed with code {install_result.returncode}")
+                logger.error(f"[BUILD] npm install stderr: {install_result.stderr[:500]}")
+                logger.info("PHASE_5_BUILD_FAILED: npm install failed")
                 return False
+            
+            logger.info("[BUILD] ✓ npm install completed successfully")
+            
+            # Build the app
+            logger.info("[BUILD] Building frontend with Vite...")
+            build_result = subprocess.run(
+                ["npm", "run", "build"],
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 minutes
+                cwd=str(frontend_dist_path),
+                env=env
+            )
+            
+            if build_result.returncode != 0:
+                logger.error(f"[BUILD] Frontend build failed with code {build_result.returncode}")
+                logger.error(f"[BUILD] Build stderr (last 500 chars): {build_result.stderr[-500:]}")
+                logger.info("PHASE_5_BUILD_FAILED: build command failed")
+                return False
+            
+            # Verify dist directory was created
+            dist_path = frontend_dist_path / "dist"
+            if not dist_path.exists():
+                logger.error(f"[BUILD] Build completed but dist directory missing: {dist_path}")
+                logger.info("PHASE_5_BUILD_FAILED: dist directory not created")
+                return False
+            
+            if not any(dist_path.iterdir()):
+                logger.error(f"[BUILD] Build completed but dist directory is empty: {dist_path}")
+                logger.info("PHASE_5_BUILD_FAILED: dist directory empty")
+                return False
+            
+            # Verify index.html exists (critical for SPA routing)
+            index_html = dist_path / "index.html"
+            if not index_html.exists():
+                logger.error(f"[BUILD] index.html not found in dist: {index_html}")
+                logger.info("PHASE_5_BUILD_FAILED: index.html missing")
+                return False
+            
+            logger.info(f"[BUILD] ✓ Frontend built successfully")
+            logger.info(f"[BUILD] ✓ Dist directory created: {dist_path}")
+            logger.info("[BUILD] ✓ index.html verified")
+            logger.info("PHASE_5_BUILD_COMPLETE: success")
+            return True
 
+        except subprocess.TimeoutExpired:
+            logger.error("PHASE_5_BUILD_FAILED: build timed out after 10 minutes")
+            return False
         except Exception as e:
-            logger.error(f"Failed to build frontend: {e}")
+            logger.error(f"PHASE_5_BUILD_FAILED: {type(e).__name__}: {str(e)}")
             return False
 
     def create_frontend_service(self, project_name: str, frontend_port: int, project_path: Path) -> str:
