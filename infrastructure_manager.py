@@ -1938,6 +1938,9 @@ class InfrastructureManager:
             # Note: DNS A records are not deleted on rollback
             # This requires manual cleanup via Hostinger hPanel or DNS skill update
 
+        except Exception as e:
+            logger.error(f"Rollback failed: {e}")
+
     def _phase_8_dns(self, project_domain: str) -> bool:
         """PHASE_8_DNS: Create DNS A records for project domain.
         
@@ -2037,6 +2040,10 @@ class InfrastructureManager:
                 logger.error(f"[DNS] ❌ DNS resolution error: {e}")
                 return False
 
+        except Exception as e:
+            logger.error(f"[DNS] ❌ DNS resolution check failed: {e}")
+            return False
+
     def _get_server_ip(self) -> str:
         """Get server public IP address."""
         try:
@@ -2058,11 +2065,6 @@ class InfrastructureManager:
         except Exception as e:
             logger.error(f"[DNS] Exception getting server IP: {e}")
             return None
-
-            logger.info("✓ Rollback complete")
-
-        except Exception as e:
-            logger.error(f"Rollback failed: {e}")
 
     def teardown(self):
         """Teardown infrastructure for project deletion."""
