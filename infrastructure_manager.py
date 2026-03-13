@@ -1402,10 +1402,16 @@ class InfrastructureManager:
                 text=True
             )
 
+            # Debug: Log the actual backend health check response
+            logger.info(f"[VERIFY] Backend health check response (stdout): {backend_check.stdout[:200]}")
+            logger.info(f"[VERIFY] Backend health check response (stderr): {backend_check.stderr[:200]}")
+            logger.info(f"[VERIFY] Backend health check return code: {backend_check.returncode}")
+
             if "200" not in frontend_check.stdout:
                 raise RuntimeError("Frontend verification failed")
 
             if "200" not in backend_check.stdout and "ok" not in backend_check.stdout.lower():
+                logger.error(f"[VERIFY] Backend verification failed - Expected HTTP 200 or 'ok', got: {backend_check.stdout[:100]}")
                 raise RuntimeError("Backend verification failed")
 
             logger.info("[VERIFY] ✓ Deployment verified successfully")
