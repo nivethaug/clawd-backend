@@ -209,7 +209,8 @@ def poll_project_status(project_id: int, timeout: int = DEFAULT_TIMEOUT, agent_m
 
 def verify_frontend(domain: str) -> bool:
     """Verify frontend is reachable via HTTP."""
-    url = f"http://{domain}"
+    full_domain = f"{domain}.dreambigwithai.com" if "." not in domain else domain
+    url = f"http://{full_domain}"
     log_check(f"Verifying frontend: {url}")
     
     try:
@@ -227,7 +228,8 @@ def verify_frontend(domain: str) -> bool:
 
 def verify_backend(domain: str) -> bool:
     """Verify backend health endpoint."""
-    url = f"http://{domain}/api/health"
+    full_domain = f"{domain}.dreambigwithai.com" if "." not in domain else domain
+    url = f"http://{full_domain}/api/health"
     log_check(f"Verifying backend health: {url}")
     
     try:
@@ -275,14 +277,27 @@ def check_pm2(project_name: str) -> Tuple[bool, bool]:
     
     try:
         result = subprocess.run(
-            ["pm2", "list", "--json"],
+            ["pm2", "list"],
             capture_output=True,
             text=True,
             timeout=10
         )
         
         if result.returncode == 0:
-            processes = json.loads(result.stdout)
+            # Parse PM2 text output (no --json flag available)
+            output = result.stdout
+            name_lower = project_name.lower().replace(" ", "-")
+            
+            # Check for frontend and backend in PM2 list
+            for line in output.split("\n"):
+                line_lower = line.lower()
+                if name_lower in line_lower:
+                    if "frontend" in line_lower and "online" in line_lower:
+                        frontend_running = True
+                        log_success(f"Frontend PM2 process running")
+                    elif "backend" in line_lower and "online" in line_lower:
+                        backend_running = True
+                        log_success(f"Backend PM2 process running")
             
             # Normalize project name for matching
             name_lower = project_name.lower().replace(" ", "-")
@@ -319,6 +334,7 @@ def check_pm2(project_name: str) -> Tuple[bool, bool]:
 def print_deployment_info(project: Dict) -> None:
     """Print deployment URLs and info."""
     domain = project.get("domain", "")
+    full_domain = f"{domain}.dreambigwithai.com" if "." not in domain else domain
     
     print()
     print("=" * 60)
@@ -327,12 +343,12 @@ def print_deployment_info(project: Dict) -> None:
     print(f"Project ID:    {project.get('id')}")
     print(f"Name:          {project.get('name')}")
     print(f"Status:        {project.get('status')}")
-    print(f"Domain:        {domain}")
+    print(f"Domain:        {full_domain}")
     print()
     print("URLs:")
-    print(f"  Frontend:    http://{domain}")
-    print(f"  Backend:     http://{domain}/api")
-    print(f"  Health:      http://{domain}/api/health")
+    print(f"  Frontend:    http://{full_domain}")
+    print(f"  Backend:     http://{full_domain}/api")
+    print(f"  Health:      http://{full_domain}/api/health")
     print("=" * 60)
 
 
