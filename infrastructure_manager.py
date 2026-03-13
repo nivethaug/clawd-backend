@@ -2046,22 +2046,38 @@ class InfrastructureManager:
             return False
 
     def _get_server_ip(self) -> str:
-        """Get server public IP address."""
+        """Get server public IPv4 address for DNS A record."""
         try:
-            result = subprocess.run(
-                ["curl", "-s", "https://ifconfig.me/ip"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                ip = result.stdout.strip()
-                logger.info(f"[DNS] Server IP detected: {ip}")
-                return ip
-            else:
-                logger.error(f"[DNS] Failed to get server IP: {result.stderr}")
-                return None
+            # Try multiple services to get IPv4 address
+            ipv4_services = [
+                "https://api.ipify.org",
+                "https://icanhazip.com",
+                "https://ifconfig.me/ip",
+            ]
+
+            for service in ipv4_services:
+                try:
+                    result = subprocess.run(
+                        ["curl", "-4", "-s", service],  # -4 forces IPv4
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+
+                    if result.returncode == 0:
+                        ip = result.stdout.strip()
+                        # Validate it's an IPv4 address (not IPv6)
+                        if '.' in ip and not ':' in ip:
+                            logger.info(f"[DNS] Server IPv4 detected: {ip}")
+                            return ip
+                        else:
+                            logger.warning(f"[DNS] Service {service} returned non-IPv4: {ip}")
+                except Exception as e:
+                    logger.warning(f"[DNS] Failed to get IP from {service}: {e}")
+                    continue
+
+            logger.error("[DNS] Could not obtain IPv4 address from any service")
+            return None
 
         except Exception as e:
             logger.error(f"[DNS] Exception getting server IP: {e}")
