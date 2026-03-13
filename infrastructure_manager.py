@@ -1958,10 +1958,11 @@ class InfrastructureManager:
             logger.info(f"[DNS] Creating DNS record for domain: {project_domain}")
 
             # Import dns_manager module
-            from dns_manager import DNSManager
+            from dns_manager import HostingerDNSAPI, get_api_token
 
             # Initialize DNS manager
-            dns_manager = DNSManager()
+            api_token = get_api_token()
+            dns_manager = HostingerDNSAPI(api_token)
 
             # Extract subdomain from project domain
             # Format: "project-name-xxxxx.dreambigwithai.com"
