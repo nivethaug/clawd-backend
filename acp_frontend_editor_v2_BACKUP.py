@@ -715,8 +715,8 @@ class ACPFrontendEditorV2:
                 try:
                     # Watchdog loop for process monitoring
                     while process.poll() is None:
-                    current_time = time.time()
-                    elapsed = current_time - start_time
+                        current_time = time.time()
+                        elapsed = current_time - start_time
                     
                     # Check for new output
                     if stdout_lines or stderr_lines:
