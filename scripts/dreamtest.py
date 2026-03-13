@@ -110,15 +110,18 @@ def create_project(name: str, description: str = "") -> Optional[Dict]:
 
 
 def get_project(project_id: int) -> Optional[Dict]:
-    """Get project details by ID."""
+    """Get project details by ID from /projects list."""
     try:
         response = requests.get(
-            f"{API_BASE_URL}/projects/{project_id}",
+            f"{API_BASE_URL}/projects",
             timeout=10
         )
         
         if response.status_code == 200:
-            return response.json()
+            projects = response.json()
+            for project in projects:
+                if project.get("id") == project_id:
+                    return project
         return None
         
     except requests.RequestException:
