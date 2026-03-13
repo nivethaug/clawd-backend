@@ -340,23 +340,44 @@ class ServiceManager:
             raise
 
     def start_backend_service(self, app_name: str, backend_path: Path, port: int = None) -> bool:
-        """Start backend service with PORT environment variable and startup delay."""
+        """Start backend service with FastAPI/uvicorn and dependency installation."""
         try:
             logger.info(f"[SERVICE] Starting backend service: {app_name}")
             logger.info(f"[SERVICE] Backend working directory: {backend_path}")
             logger.info(f"[SERVICE] Backend port: {port}")
 
-            # Copy system environment and add PORT variable
-            env = os.environ.copy()
-            if port:
-                env["PORT"] = str(port)
+            # Install Python dependencies first
+            requirements_path = backend_path / "requirements.txt"
+            if requirements_path.exists():
+                logger.info("[SERVICE] Installing Python dependencies from requirements.txt...")
+                try:
+                    subprocess.run(
+                        ["pip", "install", "-r", "requirements.txt"],
+                        cwd=str(backend_path),
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=300  # 5 minutes
+                    )
+                    logger.info("[SERVICE] ✓ Python dependencies installed successfully")
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"[SERVICE] Failed to install dependencies: {e}")
+                    logger.error(f"[SERVICE] Install stderr: {e.stderr[:500]}")
+                    return False
+            else:
+                logger.warning(f"[SERVICE] No requirements.txt found at {requirements_path}")
 
+            # Prepare backend port
+            backend_port = port if port else 8000
+
+            # Start FastAPI backend with uvicorn via PM2
             backend_cmd = [
-                "pm2",
-                "start",
-                "server.js",
-                "--name",
-                app_name
+                "pm2", "start", "uvicorn",
+                "--name", app_name,
+                "--",
+                "main:app",
+                "--host", "0.0.0.0",
+                "--port", str(backend_port)
             ]
 
             logger.info(f"[SERVICE] Backend command: {' '.join(backend_cmd)}")
@@ -364,7 +385,6 @@ class ServiceManager:
             result = subprocess.run(
                 backend_cmd,
                 cwd=str(backend_path),
-                env=env,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -373,11 +393,11 @@ class ServiceManager:
 
             logger.info(f"[SERVICE] Backend service started successfully: {app_name}")
             logger.info(f"[SERVICE] Backend stdout: {result.stdout[:200]}")
-            
+
             # Add startup delay to ensure backend is ready
             logger.info("[SERVICE] Waiting for backend to start (5s)...")
             time.sleep(5)
-            
+
             # Log PM2 status to verify backend is running
             pm2_status = subprocess.run(
                 ["pm2", "list"],
@@ -385,7 +405,7 @@ class ServiceManager:
                 text=True
             )
             logger.info(f"[SERVICE] PM2 status after startup:\n{pm2_status.stdout}")
-            
+
             return True
 
         except subprocess.CalledProcessError as e:
@@ -1773,7 +1793,7 @@ class InfrastructureManager:
             return False
 
     def _configure_backend_env(self):
-        """Configure backend .env file with database and ports."""
+        """Configure backend .env file with database and ports for FastAPI."""
         try:
             env_path = self.project_path / "backend" / ".env"
 
@@ -1786,6 +1806,7 @@ class InfrastructureManager:
 
             # Track what we've updated
             updated_vars = set()
+            backend_port = self.ports.get("backend", 8000)
 
             # Update or add database URL
             for line in lines:
@@ -1798,8 +1819,15 @@ class InfrastructureManager:
             if 'DATABASE_URL' not in updated_vars:
                 updated_lines.append(f'DATABASE_URL={self.database_info["database_url"]}')
 
+            # Add FastAPI-specific environment variables
+            if 'BACKEND_HOST' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
+                updated_lines.append(f'BACKEND_HOST=0.0.0.0')
+
+            if 'BACKEND_PORT' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
+                updated_lines.append(f'BACKEND_PORT={backend_port}')
+
             if 'API_PORT' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
-                updated_lines.append(f'API_PORT={self.ports["backend"]}')
+                updated_lines.append(f'API_PORT={backend_port}')
 
             if 'PROJECT_NAME' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
                 updated_lines.append(f'PROJECT_NAME={self.project_name}')
@@ -1807,7 +1835,7 @@ class InfrastructureManager:
             # Write updated .env
             env_path.write_text('\n'.join(updated_lines))
 
-            logger.info(f"✓ Backend .env configured")
+            logger.info(f"✓ Backend .env configured for FastAPI")
 
         except Exception as e:
             logger.error(f"Failed to configure backend env: {e}")
