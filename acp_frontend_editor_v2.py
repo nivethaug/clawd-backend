@@ -711,8 +711,9 @@ class ACPFrontendEditorV2:
                 stdout_thread.start()
                 stderr_thread.start()
                 
-                # Watchdog loop
-                while process.poll() is None:
+                # Watchdog loop - wrapped in try-except for KeyboardInterrupt resilience
+                try:
+                    while process.poll() is None:
                     current_time = time.time()
                     elapsed = current_time - start_time
                     
@@ -745,6 +746,11 @@ class ACPFrontendEditorV2:
                         break
                     
                     time.sleep(0.5)
+                
+                except KeyboardInterrupt:
+                    # Handle external interrupt gracefully
+                    logger.warning("[ACPX] KeyboardInterrupt detected — continuing to wait for process")
+                    pass  # Continue to wait for threads to finish
                 
                 # Wait for reader threads to finish
                 stdout_thread.join(timeout=2)
