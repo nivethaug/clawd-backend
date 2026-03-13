@@ -160,12 +160,20 @@ class DatabaseProvisioner:
         """Sanitize database name by replacing hyphens with underscores."""
         return name.replace("-", "_")
 
-    def _execute_sql(self, sql: str) -> List[Tuple]:
-        """Execute SQL command in PostgreSQL container."""
+    def _execute_sql(self, sql: str, database_name: str = "defaultdb") -> List[Tuple]:
+        """Execute SQL command in PostgreSQL container.
+
+        Args:
+            sql: SQL command to execute
+            database_name: Database to connect to (defaults to "defaultdb")
+
+        Returns:
+            List of tuples with query results
+        """
         try:
             cmd = [
                 "docker", "exec", self.container,
-                "psql", "-U", POSTGRES_USER, "-d", "defaultdb", "-c", sql
+                "psql", "-U", POSTGRES_USER, "-d", database_name, "-c", sql
             ]
 
             result = subprocess.run(
@@ -245,20 +253,21 @@ class DatabaseProvisioner:
 
             logger.info(f"Dropping database: {db_name}")
 
-            # Drop connections first
+            # Drop connections first (connect to project-specific database)
             self._execute_sql(
                 f"SELECT pg_terminate_backend(pg_stat_activity.pid) "
                 f"FROM pg_stat_activity "
                 f"WHERE pg_stat_activity.datname = '{db_name}' "
-                f"AND pid <> pg_backend_pid();"
+                f"AND pid <> pg_backend_pid();",
+                database_name=db_name
             )
 
-            # Drop database (quoted to handle SQL keywords)
-            self._execute_sql(f'DROP DATABASE IF EXISTS "{db_name}";')
+            # Drop database (quoted to handle SQL keywords, connect to project-specific database)
+            self._execute_sql(f'DROP DATABASE IF EXISTS "{db_name}";', database_name=db_name)
             logger.info(f"✓ Database dropped: {db_name}")
 
-            # Drop user (quoted to handle SQL keywords)
-            self._execute_sql(f'DROP USER IF EXISTS "{username}";')
+            # Drop user (quoted to handle SQL keywords, connect to project-specific database)
+            self._execute_sql(f'DROP USER IF EXISTS "{username}";', database_name=db_name)
             logger.info(f"✓ User dropped: {username}")
 
         except Exception as e:
@@ -270,7 +279,8 @@ class DatabaseProvisioner:
             db_name = f"{self._sanitize_db_name(project_name)}_db"
 
             result = self._execute_sql(
-                f'SELECT pg_database_size(\'{db_name}\') AS size;'
+                f'SELECT pg_database_size(\'{db_name}\') AS size;',
+                database_name=db_name
             )
 
             if result and len(result) > 0:
@@ -1455,8 +1465,32 @@ class InfrastructureManager:
             
             # Define paths for cache cleanup
             node_modules_path = frontend_path / "node_modules"
+            vite_temp_path = node_modules_path / ".vite-temp"
+            vite_cache_path = node_modules_path / ".vite"
             
-            # Step 1: Remove corrupted node_modules to ensure clean install
+            # Step 1: Clean Vite caches to prevent corrupted node_modules
+            logger.info("🧹 Cleaning Vite caches to prevent corrupted node_modules...")
+            caches_cleaned = 0
+            
+            if vite_temp_path.exists():
+                try:
+                    shutil.rmtree(vite_temp_path)
+                    logger.info("✓ Cleaned corrupted .vite-temp directory")
+                    caches_cleaned += 1
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not clean .vite-temp: {e}")
+            
+            if vite_cache_path.exists():
+                try:
+                    shutil.rmtree(vite_cache_path)
+                    logger.info("✓ Cleaned Vite cache directory")
+                    caches_cleaned += 1
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not clean .vite cache: {e}")
+            
+            logger.info(f"✓ Cleaned {caches_cleaned} Vite cache directories")
+            
+            # Step 2: Remove existing node_modules for clean install
             logger.info("🧹 Removing existing node_modules for clean install...")
             if node_modules_path.exists():
                 try:
