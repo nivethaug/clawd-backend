@@ -13,6 +13,9 @@ from groq import Groq
 
 logger = logging.getLogger(__name__)
 
+# Track if we've already logged the missing API key error
+_GROQ_API_KEY_LOGGED = False
+
 
 class GroqService:
     """Service for interacting with Groq API."""
@@ -24,12 +27,16 @@ class GroqService:
 
     def __init__(self):
         """Initialize Groq service with environment configuration."""
+        global _GROQ_API_KEY_LOGGED
+        
         self.api_key = os.getenv("GROQ_API_KEY")
         self.model = os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
 
-        # Validate API key exists
+        # Validate API key exists - log only once
         if not self.api_key or self.api_key == "your_key_here":
-            logger.error("GROQ_API_KEY not configured or not set")
+            if not _GROQ_API_KEY_LOGGED:
+                logger.error("GROQ_API_KEY not configured or not set")
+                _GROQ_API_KEY_LOGGED = True
             raise ValueError("GROQ_API_KEY is not configured")
 
         # Initialize Groq client
