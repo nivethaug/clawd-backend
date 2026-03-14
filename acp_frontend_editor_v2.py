@@ -42,24 +42,9 @@ ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 FORBIDDEN_BACKEND = "/root/clawd-backend"
 
 # Allowed directories for ACPX editing (relative to frontend/src - no src/ prefix)
+# Changed to allow-all approach: Everything under src/ is allowed except FORBIDDEN paths
 ALLOWED_EDIT_PATHS = [
-    "pages",
-    "components", 
-    "layouts",
-    "layout",      # Some templates use singular 'layout' folder
-    "hooks",       # Custom React hooks
-    "lib",         # Utility functions
-    "utils",       # Utility functions
-    "types",       # TypeScript type definitions
-    "context",     # React context providers
-    "contexts",    # React context providers (plural variant)
-    "services",    # API service functions
-    "api",         # API functions
-    "store",       # State management
-    "styles",      # CSS/style files
-    "features",    # Feature-based organization
-    "App.tsx",
-    "main.tsx"
+    "*"  # Allow all - actual restriction handled by FORBIDDEN_EDIT_PATHS
 ]
 
 # Forbidden paths that ACPX must NOT modify
@@ -136,16 +121,8 @@ class ACPPathValidator:
         if "components/ui" in rel_path_str:
             return False, f"Forbidden: Cannot modify UI components ({rel_path})"
 
-        # Check 3: Must be in allowed edit paths
-        is_allowed = False
-        for allowed_path in ALLOWED_EDIT_PATHS:
-            if rel_path_str.startswith(allowed_path) or rel_path_str == allowed_path:
-                is_allowed = True
-                break
-        
-        if not is_allowed:
-            return False, f"Forbidden: Path not in allowed edit paths ({rel_path})"
-
+        # Check 3: Allow all except forbidden (simplified approach)
+        # If we reach here, the path is not in forbidden list, so it's allowed
         return True, "Allowed"
 
 
