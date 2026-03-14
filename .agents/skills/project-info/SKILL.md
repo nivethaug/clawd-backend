@@ -147,6 +147,7 @@ The pipeline executes in `openclaw_wrapper.py` via `run_all_phases()`:
 - Runs Frontend Optimizer (rule-based branding)
 - Creates `ACP_README.md` documentation
 
+<<<<<<< HEAD
 **Phase 3.1 — Automatic Routing Fix (Step 10.5)**
 After ACPX completes, `ACPFrontendEditorV2.apply_changes_via_acpx()` automatically fixes common routing issues in `acp_frontend_editor_v2.py` (lines 992-1065):
 
@@ -185,6 +186,8 @@ After ACPX completes, `ACPFrontendEditorV2.apply_changes_via_acpx()` automatical
 > **Note:** This fix ensures users see the main app with navigation, not a blank Welcome page.
 > The default page is determined by `allowed_pages[0]` (first page in manifest), typically Dashboard.
 
+=======
+>>>>>>> origin/main
 **Phase 4 — Database Provisioning**
 - Delegated to `InfrastructureManager`
 - Creates PostgreSQL database: `{project}_db`
@@ -399,9 +402,13 @@ Propagation strategy:
 | `openclaw_wrapper.py` | Infrastructure pipeline (9 phases) |
 | `infrastructure_manager.py` | PM2, nginx, database, DNS, build |
 | `dns_manager.py` | Hostinger DNS API client |
+<<<<<<< HEAD
 | `acp_frontend_editor_v2.py` | AI frontend modification (ACPX) + routing fix (Step 10.5) |
 | `page_manifest.py` | Page manifest management for ACPX |
 | `page_specs.py` | Page specifications for UI quality |
+=======
+| `acp_frontend_editor_v2.py` | AI frontend modification (ACPX) |
+>>>>>>> origin/main
 | `database_adapter.py` | DB abstraction layer |
 | `database_postgres.py` | PostgreSQL connection |
 | `deployment_verifier.py` | Deployment verification |
@@ -620,6 +627,7 @@ Phase numbers don't match function names:
 
 **File:** `openclaw_wrapper.py`
 
+<<<<<<< HEAD
 Phase logging inside individual phase functions shows incorrect totals:
 ```python
 logger.info("📋 Phase 1/8: Analyze Project")      # Should be Phase 1/9
@@ -631,6 +639,14 @@ logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor")  # Should be Phase
 However, `run_all_phases()` uses correct total: `total_phases = 9`
 
 **Impact:** Misleading logs in individual phase functions (main execution shows correct phases)
+=======
+```python
+logger.info("📋 Phase 8/8: AI-Driven Frontend Refinement")
+logger.info("📋 Phase 9/8: ACP Controlled Frontend Editor")  # Wrong!
+```
+
+**Impact:** Misleading logs (should be "Phase 9/9")
+>>>>>>> origin/main
 
 ### 3. Duplicate Exception Handlers
 
@@ -655,8 +671,13 @@ Enum has 6 phases but wrapper has 9 phases. Missing:
 
 **File:** `openclaw_wrapper.py`
 
+<<<<<<< HEAD
 `phase_8_frontend_ai_refinement()` function exists (line 571) but is never called in `run_all_phases()`.
 Phase 8 is explicitly skipped with comment: "Phase 8 skipped - ACPX in Phase 3 handles frontend refinement"
+=======
+`phase_8_frontend_ai_refinement()` exists but is never called.
+Phase 8 is explicitly skipped in `run_all_phases()`.
+>>>>>>> origin/main
 
 **Impact:** Dead code, maintenance confusion
 
@@ -673,6 +694,7 @@ Project Creation (POST /projects)
    ↓
 Template Scaffolding (fast_wrapper.py)
    ↓
+<<<<<<< HEAD
 ACPX AI Frontend Generation (Phase 3: openclaw_wrapper.py → phase_9_acp_frontend_editor)
    ↓
 Routing Fix (Step 10.5: acp_frontend_editor_v2.py lines 992-1065)
@@ -680,6 +702,13 @@ Routing Fix (Step 10.5: acp_frontend_editor_v2.py lines 992-1065)
 Infrastructure Provisioning (Phase 4-7: infrastructure_manager.py)
    ↓
 Deployment Verification (Phase 9: deployment_verifier.py)
+=======
+ACPX AI Frontend Generation (openclaw_wrapper.py Phase 3)
+   ↓
+Infrastructure Provisioning (infrastructure_manager.py)
+   ↓
+Deployment Verification (deployment_verifier.py)
+>>>>>>> origin/main
    ↓
 Live SaaS Application
 ```
