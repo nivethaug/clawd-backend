@@ -663,6 +663,13 @@ class ACPFrontendEditorV2:
                 logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
                 prompt = self._build_acpx_prompt(goal_description)
                 print(f"🔴 ACPX-V2-STEP5-PROMPT-DONE: Prompt built, length={len(prompt)}")
+                print("=" * 60)
+                print("🔴 ACPX_PROMPT_START:")
+                print(prompt[:2000] if len(prompt) > 2000 else prompt)
+                if len(prompt) > 2000:
+                    print(f"... (truncated, total {len(prompt)} chars)")
+                print("🔴 ACPX_PROMPT_END")
+                print("=" * 60)
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP5-PROMPT-ERROR: {type(e).__name__}: {str(e)}")
                 traceback.print_exc()
