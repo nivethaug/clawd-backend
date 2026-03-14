@@ -106,47 +106,31 @@ class OpenClawWrapper:
         """
         Select best template using Groq LLM based on project description.
         Stores template_id, template_repo, template_features.
+        
+        UPDATE: Always use blank template - ACPX will build from scratch.
+        Skips Groq API call and git clone.
         """
         try:
-            from template_selector import TemplateSelector
-
-            selector = TemplateSelector()
-            if not selector.is_available():
-                logger.warning("Template selector not available, using default template")
-                self.template_id = "saas"
-                self.template_repo = "https://github.com/shadcn/ui"
-                self.template_features = ["dashboard", "users", "settings"]
-                return
-
-            # Use async selection
-            import asyncio
-            result = asyncio.run(selector.select_template(
-                project_name=self.project_name,
-                project_description=self.description,
-                project_type="website"
-            ))
-
-            if result.get("success"):
-                template = result.get("template", {})
-                self.template_id = template.get("id", "saas")
-                self.template_repo = template.get("repo", "https://github.com/shadcn/ui")
-                self.template_features = template.get("features", [])
-                logger.info(f"✅ Template selected: {self.template_id}")
-                logger.info(f"   Repo: {self.template_repo}")
-                logger.info(f"   Features: {', '.join(self.template_features)}")
-            else:
-                logger.warning(f"Template selection failed: {result.get('error')}")
-                # Fallback to default
-                self.template_id = "saas"
-                self.template_repo = "https://github.com/shadcn/ui"
-                self.template_features = ["dashboard", "users", "settings"]
+            # Always use blank template - ACPX will transform it
+            logger.info("✅ Using blank template (ACPX will build from scratch)")
+            logger.info("   Skipping Groq template selection")
+            logger.info("   Skipping git clone - using local blank template")
+            
+            # Set blank template configuration
+            self.template_id = "blank"
+            self.template_repo = "file:///root/clawd-backend/templates/blank-template"
+            self.template_features = ["blank", "minimal", "clean-slate"]
+            
+            logger.info(f"✅ Template selected: {self.template_id}")
+            logger.info(f"   Repo: {self.template_repo}")
+            logger.info(f"   Mode: ACPX will transform blank template based on project description")
 
         except Exception as e:
-            logger.error(f"Failed to select template: {e}")
+            logger.error(f"Failed to set blank template: {e}")
             # Fallback to default
-            self.template_id = "saas"
-            self.template_repo = "https://github.com/shadcn/ui"
-            self.template_features = ["dashboard", "users", "settings"]
+            self.template_id = "blank"
+            self.template_repo = "file:///root/clawd-backend/templates/blank-template"
+            self.template_features = ["blank", "minimal", "clean-slate"]
 
     def update_status(self, status: str):
         """Update project status in database with safety guard for 'ready' status."""
@@ -376,34 +360,45 @@ That's all. Execute Phase {phase} now.
         description_parts = [
             f"{self.description}",
             f"",
-            f"Customize this React application for production use.",
+            f"BUILD A COMPLETE PRODUCTION APPLICATION for '{self.project_name}'.",
             f"",
             f"PROJECT DETAILS:",
             f"- Name: {self.project_name}",
             f"- Template: {self.template_id}",
             f"",
-            f"CUSTOMIZATION TASKS:",
-            f"1. Update page titles and meta tags to reflect '{self.project_name}'",
-            f"2. Customize hero section with real branding and purpose",
-            f"3. Update navigation menu to remove demo items",
-            f"4. Replace placeholder text with actual content related to '{self.project_name}'",
-            f"5. Remove any obvious demo/sample content",
+            f"YOUR TASK:",
+            f"You are building a React application from a blank template. Based on the project description above, create a complete, functional application with:",
             f"",
-            f"TEMPLATING GUIDELINES:",
-            f"- Keep changes minimal and focused",
-            f"- Maintain existing functionality",
-            f"- Use the project description as context for content",
-            f"- Make it feel like a real production app, not a template",
+            f"1. PAGES (create as many as needed in src/pages/):",
+            f"   - Create a Home/Dashboard page with hero section and main features",
+            f"   - Create relevant feature pages based on the project description",
+            f"   - Each page should have real content, not placeholder text",
             f"",
-            f"FILES TO FOCUS ON (modify 2-3 max):",
-            f"- src/App.tsx (title, meta tags)",
-            f"- src/pages/Dashboard.tsx or similar (hero section, main content)",
-            f"- src/layouts/*Layout*.tsx (if exists)",
+            f"2. COMPONENTS (create in src/components/):",
+            f"   - Build reusable components for the UI",
+            f"   - Include navigation, cards, forms, etc. as needed",
             f"",
-            f"IMPORTANT:",
-            f"- Only modify files inside src/ directory",
-            f"- Do NOT modify root files like index.html, package.json",
-            f"- Frontend Optimizer already handles root file optimization",
+            f"3. APP STRUCTURE:",
+            f"   - Update App.tsx with proper routing using React Router",
+            f"   - Create a navigation component",
+            f"   - Style with Tailwind CSS (already configured)",
+            f"",
+            f"IMPORTANT GUIDELINES:",
+            f"- Create REAL, FUNCTIONAL pages - not placeholders or demos",
+            f"- Use the project description to determine what pages/features to build",
+            f"- Make it look professional with proper styling",
+            f"- Include meaningful content related to '{self.project_name}'",
+            f"",
+            f"ALLOWED PATHS:",
+            f"- src/pages/ (create new pages here)",
+            f"- src/components/ (create new components here)",
+            f"- src/App.tsx (update routing)",
+            f"- src/main.tsx (if needed)",
+            f"",
+            f"DO NOT MODIFY:",
+            f"- package.json, vite.config.ts, tsconfig.json",
+            f"- src/components/ui/ (shadcn components)",
+            f"- Any files outside src/",
         ]
 
         return "\n".join(description_parts)
@@ -810,15 +805,15 @@ That's all. Execute Phase {phase} now.
 
             try:
                 # Use V2 editor with filesystem diffing (exclusive - no legacy editor)
-                print("🔴 PHASE_9_IMPORT: Importing ACPFrontendEditor")
-                from acp_frontend_editor_v2 import ACPFrontendEditor
+                print("🔴 PHASE_9_IMPORT: Importing ACPFrontendEditorV2")
+                from acp_frontend_editor_v2 import ACPFrontendEditorV2
 
-                print("🔴 PHASE_9_V2_INIT: Initializing ACPFrontendEditor")
-                editor_v2 = ACPFrontendEditor(frontend_src_path, self.project_name)
+                print("🔴 PHASE_9_V2_INIT: Initializing ACPFrontendEditorV2")
+                editor_v2 = ACPFrontendEditorV2(frontend_src_path, self.project_name)
                 logger.info("✓ ACP Frontend Editor V2 initialized")
 
-                print("🔴 PHASE_9_APPLY: Calling generate_and_apply_changes")
-                result = editor_v2.generate_and_apply_changes(goal_description, execution_id)
+                print("🔴 PHASE_9_APPLY: Calling apply_changes_via_acpx (Filesystem Diff Architecture)")
+                result = editor_v2.apply_changes_via_acpx(goal_description, execution_id)
 
                 ai_duration = time.time() - ai_start_time
 

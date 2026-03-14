@@ -610,10 +610,15 @@ class ServiceManager:
         try:
             app_name = f"{project_name}-frontend"
             
-            # Check if project has its own frontend directory
+            # Check if project has its own frontend directory with built dist
             project_frontend_path = project_path / "frontend"
+            project_dist_path = project_frontend_path / "dist"
             
-            if project_frontend_path.exists() and (project_frontend_path / "index.html").exists():
+            # Check for dist directory (built frontend) or frontend source
+            has_frontend = project_frontend_path.exists()
+            has_dist = project_dist_path.exists() and (project_dist_path / "index.html").exists()
+            
+            if has_frontend and (has_dist or (project_frontend_path / "package.json").exists()):
                 # Use project-specific frontend
                 logger.info(f"Using project-specific frontend: {project_frontend_path}")
                 frontend_dist_path = project_frontend_path
@@ -622,7 +627,11 @@ class ServiceManager:
                 package_json = frontend_dist_path / "package.json"
                 dist_dir = frontend_dist_path / "dist"
                 
-                if package_json.exists():
+                # Check if already built
+                if has_dist:
+                    logger.info(f"✓ Frontend already built, using dist: {dist_dir}")
+                    frontend_dist_path = dist_dir
+                elif package_json.exists():
                     logger.info(f"Building frontend for production (correct MIME types)...")
                     try:
                         # Clean Vite cache before build to prevent stale cache issues
@@ -1427,8 +1436,9 @@ class InfrastructureManager:
                 logger.info("PHASE_5_BUILD_COMPLETE: success")
                 logger.info("✓ Frontend build phase completed")
             else:
-                logger.warning("PHASE_5_BUILD_COMPLETE: partial (build had issues)")
-                logger.warning("⚠️ Frontend build had issues, continuing anyway")
+                logger.error("PHASE_5_BUILD_COMPLETE: failed")
+                logger.error("❌ Frontend build failed - stopping pipeline")
+                return False
 
             # Fix permissions on project directory for nginx access
             logger.info("🔧 Fixing permissions for nginx access...")
@@ -1574,6 +1584,91 @@ class InfrastructureManager:
             self._rollback()
             return False
 
+    def _acpx_fix_build_error(self, build_error: str, attempt: int) -> bool:
+        """
+        Use ACPX to automatically fix build errors.
+        
+        Args:
+            build_error: The build error message
+            attempt: Current retry attempt number (1 or 2)
+            
+        Returns:
+            True if fix was applied successfully, False otherwise
+        """
+        try:
+            logger.info(f"🔧 ACPX_AUTO_FIX: Attempt {attempt}/2 - Calling ACPX to fix build error")
+            
+            frontend_src_path = self.project_path / "frontend" / "src"
+            
+            if not frontend_src_path.exists():
+                logger.error("ACPX_AUTO_FIX: Frontend src path not found")
+                return False
+            
+            # Build fix prompt
+            fix_prompt = f"""You are fixing a build error in a React + Vite + TypeScript application.
+
+BUILD ERROR:
+{build_error[:2000]}
+
+YOUR TASK:
+1. Analyze the build error carefully
+2. Fix ALL TypeScript errors, missing imports, and type mismatches
+3. Ensure all components are properly imported and exported
+4. Fix any JSX syntax errors
+5. Do NOT delete or remove functionality - only fix errors
+6. Keep the code production-ready
+
+RULES:
+- Fix ONLY the errors - do not refactor or add features
+- Ensure all imports use correct paths
+- Fix type mismatches (string vs number, etc.)
+- Add missing type definitions if needed
+- Ensure all JSX elements are properly closed
+- Run npm run build after fixes
+
+CRITICAL: Fix the errors and ensure npm run build succeeds."""
+            
+            # Run ACPX with fix prompt
+            cmd = [
+                "acpx",
+                "--cwd", str(frontend_src_path),
+                "--format", "quiet",
+                "claude",
+                "exec",
+                str(fix_prompt)
+            ]
+            
+            logger.info(f"ACPX_AUTO_FIX: Running: acpx --cwd {frontend_src_path} --format quiet claude exec <fix-prompt>")
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=180  # 3 minutes for fix
+            )
+            
+            # Check if ACPX succeeded (tolerant of harmless errors)
+            if result.returncode != 0:
+                stderr = result.stderr or ""
+                # Ignore JSON-RPC notification errors
+                if "session/update" in stderr and "Invalid params" in stderr:
+                    logger.warning("ACPX_AUTO_FIX: Ignoring JSON-RPC notification error")
+                elif result.returncode != 0:
+                    logger.error(f"ACPX_AUTO_FIX: Failed with code {result.returncode}")
+                    logger.error(f"ACPX_AUTO_FIX: stderr: {stderr[:500]}")
+                    return False
+            
+            logger.info(f"ACPX_AUTO_FIX: Attempt {attempt} completed successfully")
+            logger.info(f"ACPX_AUTO_FIX: stdout: {result.stdout[:300] if result.stdout else '(empty)'}")
+            return True
+            
+        except subprocess.TimeoutExpired:
+            logger.error("ACPX_AUTO_FIX: Timeout after 180 seconds")
+            return False
+        except Exception as e:
+            logger.error(f"ACPX_AUTO_FIX: Exception: {type(e).__name__}: {str(e)}")
+            return False
+
     def _phase_5_build(self) -> bool:
         """
         PHASE_5_BUILD: Build frontend only.
@@ -1584,6 +1679,7 @@ class InfrastructureManager:
         - Verify dist directory exists
         - Clean Vite caches to prevent corruption issues
         - Retry with clean reinstall on build failure
+        - Auto-fix with ACPX (max 2 attempts) on build errors
         
         Does NOT:
         - Create PM2 services
@@ -1671,68 +1767,50 @@ class InfrastructureManager:
             else:
                 logger.info("✓ npm install completed (including dev dependencies)")
             
-            # Step 3: npm run build with full environment
-            logger.info(f"[BUILD] Running npm build in {frontend_path}")
-            build_result = subprocess.run(
-                ["npm", "run", "build"],
-                cwd=str(frontend_path),
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=600  # 10 minutes
-            )
+            # Step 3: npm run build with retry logic (max 2 ACPX auto-fix attempts)
+            MAX_ACPX_RETRIES = 2
+            build_attempt = 0
             
-            # Step 4: If build failed, try clean reinstall and retry
-            if build_result.returncode != 0:
-                logger.warning(f"⚠️ Initial build failed: {build_result.stderr[:300]}")
-                logger.info("🔄 Attempting clean reinstall and retry...")
-                logger.info("PHASE_5_BUILD_RETRY: performing clean reinstall")
+            while build_attempt < MAX_ACPX_RETRIES:
+                build_attempt += 1
                 
-                # Remove node_modules entirely
-                if node_modules_path.exists():
-                    try:
-                        shutil.rmtree(node_modules_path)
-                        logger.info("✓ Removed corrupted node_modules")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not remove node_modules: {e}")
-                
-                # Fresh npm install with environment
-                logger.info(f"[BUILD] Running fresh npm install in {frontend_path}")
-                reinstall_result = subprocess.run(
-                    ["npm", "install", "--include=dev", "--legacy-peer-deps"],
-                    cwd=str(frontend_path),
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=600
-                )
-                
-                if reinstall_result.returncode != 0:
-                    logger.error(f"❌ npm install failed on retry: {reinstall_result.stderr[:300]}")
-                    logger.info("PHASE_5_BUILD_FAILED: npm install failed")
-                    return False
-                
-                logger.info("✓ Fresh npm install completed")
-                
-                # Retry build with environment
-                logger.info("🏗️ Retrying npm run build...")
+                logger.info(f"[BUILD] Running npm build (attempt {build_attempt}/{MAX_ACPX_RETRIES + 1}) in {frontend_path}")
                 build_result = subprocess.run(
                     ["npm", "run", "build"],
                     cwd=str(frontend_path),
                     env=env,
                     capture_output=True,
                     text=True,
-                    timeout=600
+                    timeout=600  # 10 minutes
                 )
                 
-                if build_result.returncode != 0:
-                    logger.error(f"❌ Build failed after clean reinstall: {build_result.stderr[:500]}")
-                    logger.info("PHASE_5_BUILD_FAILED: build failed after retry")
-                    return False
+                if build_result.returncode == 0:
+                    logger.info(f"✓ npm run build succeeded on attempt {build_attempt}")
+                    break
                 
-                logger.info("✓ Build succeeded after clean reinstall")
+                # Build failed - check if we can retry with ACPX
+                if build_attempt < MAX_ACPX_RETRIES:
+                    logger.warning(f"⚠️ Build failed (attempt {build_attempt}): {build_result.stderr[:300]}")
+                    logger.info(f"🔧 Calling ACPX to auto-fix build error (attempt {build_attempt}/{MAX_ACPX_RETRIES})")
+                    
+                    # Call ACPX to fix the build error
+                    fix_success = self._acpx_fix_build_error(build_result.stderr, build_attempt)
+                    
+                    if fix_success:
+                        logger.info(f"✓ ACPX auto-fix applied successfully, retrying build...")
+                        # Loop will retry build
+                    else:
+                        logger.error(f"❌ ACPX auto-fix failed, cannot continue")
+                        logger.info("PHASE_5_BUILD_FAILED: ACPX auto-fix failed")
+                        return False
+                else:
+                    # Final attempt failed
+                    logger.error(f"❌ Build failed after {MAX_ACPX_RETRIES} ACPX auto-fix attempts")
+                    logger.error(f"Build error: {build_result.stderr[:500]}")
+                    logger.info("PHASE_5_BUILD_FAILED: max retries exceeded")
+                    return False
             
-            logger.info("✓ npm run build completed")
+            logger.info("✓ npm run build completed successfully")
             
             # Step 5: Verify dist directory exists
             dist_path = frontend_path / "dist"
