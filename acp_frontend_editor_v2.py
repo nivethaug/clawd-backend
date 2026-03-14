@@ -1256,27 +1256,6 @@ Implement complete, production-ready pages now."""
                 traceback.print_exc()
                 logger.warning(f"[ACPX-V2] Empty page check failed but continuing: {str(e)}")
 
-            # Step 14: Cleanup node_modules to save disk space (infrastructure will run npm install)
-            try:
-                print("🔴 ACPX-V2-STEP14: Cleaning up node_modules")
-                logger.info("[ACPX-V2] Step 14: Removing node_modules to save disk space...")
-                
-                node_modules_path = self.frontend_path / "node_modules"
-                
-                if node_modules_path.exists():
-                    import shutil
-                    shutil.rmtree(node_modules_path)
-                    logger.info(f"[ACPX-V2]   ✓ Removed node_modules ({node_modules_path})")
-                    print(f"🔴 ACPX-V2-STEP14-DONE: node_modules removed")
-                else:
-                    logger.info("[ACPX-V2]   node_modules not found, skipping")
-                    print("🔴 ACPX-V2-STEP14-SKIP: node_modules not found")
-                    
-            except Exception as e:
-                print(f"🔴 ACPX-V2-STEP14-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                logger.warning(f"[ACPX-V2] node_modules cleanup failed but continuing: {str(e)}")
-
             # Final result
             result = {
                 "success": True,
