@@ -1339,24 +1339,39 @@ Provide ONLY the JSON list, nothing else."""
 
         desc_lower = goal_description.lower()
 
-        # Step 1: Try to load page manifest (Phase 5 - NEW)
+        # Step 1: Try Groq AI inference first (most reliable)
+        try:
+            from groq_service import GroqService
+            groq = GroqService()
+            import asyncio
+            inferred_pages = asyncio.run(groq.infer_pages(goal_description))
+            if inferred_pages:
+                required_pages.extend(inferred_pages)
+                logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
+        except Exception as e:
+            logger.warning(f"[Planner] Groq inference failed, falling back to keyword matching: {e}")
+
+        # Step 2: Try to load page manifest (Phase 5 - NEW)
         manifest_pages = None
         if hasattr(self, 'manifest_manager') and self.manifest_manager:
             manifest_pages = self.manifest_manager.get_required_pages()
             if manifest_pages:
                 logger.info(f"[Planner] Using manifest pages: {manifest_pages}")
-                required_pages.extend(manifest_pages)
+                # Merge with inferred pages, avoiding duplicates
+                for page in manifest_pages:
+                    if page not in required_pages:
+                        required_pages.append(page)
             else:
-                logger.info("[Planner] No manifest found, will use inference or keywords")
+                logger.info("[Planner] No manifest found")
 
-        # Step 2: Extract explicit page lists (highest priority)
+        # Step 3: Extract explicit page lists (if Groq failed or returned few pages)
         # Matches patterns like: "pages: Dashboard, Documents, Templates"
-        # Or: "with 10 pages: Dashboard, Documents, Templates..."
+        # FIXED: Stop at period to avoid capturing entire description
         import re
-        explicit_list_pattern = r'pages?:\s*(.+)'
+        explicit_list_pattern = r'pages?:\s*([A-Za-z,\s]+?)(?:\.|$)'
         explicit_match = re.search(explicit_list_pattern, goal_description, re.IGNORECASE)
 
-        if explicit_match:
+        if explicit_match and len(required_pages) < 3:
             pages_str = explicit_match.group(1)
             # Normalize and split by comma
             explicit_pages = [p.strip() for p in pages_str.split(',')]
@@ -1372,18 +1387,10 @@ Provide ONLY the JSON list, nothing else."""
 
             logger.info(f"[Planner] Explicit page list detected: {len(required_pages)} pages")
 
-        # Step 3: AI Page Inference (if no explicit pages found) - NEW
-        if not explicit_match:
-            logger.info("[Planner] Triggering AI page inference")
-            logger.info(f"[Planner] Description for inference: {goal_description[:200]}...")
-            inferred_pages = self._ai_infer_pages(goal_description)
-            required_pages.extend(inferred_pages)
-            logger.info(f"[Planner] AI inferred pages: {inferred_pages}")
-
-        # Step 4: Keyword matching (if explicit list not found or incomplete)
+        # Step 4: Keyword matching (if still missing common pages)
         desc_lower = goal_description.lower()
         for page_name, keywords in PAGE_KEYWORDS.items():
-            if page_name not in required_pages:  # Skip if already in explicit list
+            if page_name not in required_pages:  # Skip if already in list
                 if any(keyword in desc_lower for keyword in keywords):
                     required_pages.append(page_name)
 

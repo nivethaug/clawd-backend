@@ -99,3 +99,61 @@ class GroqService:
             True if API key is set and not the placeholder
         """
         return bool(self.api_key and self.api_key != "your_key_here")
+
+    async def infer_pages(self, description: str) -> List[str]:
+        """
+        Use LLM to infer page names from a product description.
+
+        Args:
+            description: Product/project description
+
+        Returns:
+            List of page names (e.g., ["Dashboard", "Documents", "Settings"])
+        """
+        import json
+
+        prompt = f"""Extract page names from this SaaS app description.
+
+Description: {description}
+
+Rules:
+1. Return 5-8 page names that make sense for this app
+2. Common pages: Dashboard, Documents, Templates, Analytics, Settings, Contacts, Team, Billing
+3. Use PascalCase names (e.g., "MyLearning" not "my learning")
+4. Return ONLY a JSON object with no explanation
+
+Response format:
+{{"pages": ["Dashboard", "Documents", "Templates", "Analytics", "Settings"]}}"""
+
+        messages = [{"role": "user", "content": prompt}]
+
+        try:
+            response = await self.generate_chat_completion(messages, max_tokens=200)
+
+            # Parse JSON response
+            # Try to extract JSON from response (handle markdown code blocks)
+            response = response.strip()
+            if "```json" in response:
+                response = response.split("```json")[1].split("```")[0].strip()
+            elif "```" in response:
+                response = response.split("```")[1].split("```")[0].strip()
+
+            data = json.loads(response)
+            pages = data.get("pages", [])
+
+            # Validate and clean page names
+            cleaned = []
+            for page in pages:
+                # Remove special characters, ensure PascalCase
+                clean = "".join(c for c in str(page) if c.isalnum() or c.isspace())
+                clean = "".join(word.capitalize() for word in clean.split())
+                if clean and len(clean) < 30:  # Skip absurdly long names
+                    cleaned.append(clean)
+
+            logger.info(f"[Groq] Inferred pages: {cleaned}")
+            return cleaned
+
+        except Exception as e:
+            logger.error(f"[Groq] Page inference failed: {e}")
+            # Return sensible defaults
+            return ["Dashboard", "Analytics", "Settings"]
