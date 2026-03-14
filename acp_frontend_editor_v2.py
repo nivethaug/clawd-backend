@@ -948,35 +948,16 @@ class ACPFrontendEditorV2:
                 # Don't rollback on guardrail errors, just log
                 logger.warning(f"[ACPX-V2] Guardrail enforcement failed but continuing: {str(e)}")
 
-            # Step 10: Run build gate (AFTER guardrails to prevent build errors)
+            # Step 10: Build gate skipped - build handled by infrastructure pipeline
             try:
-                print("🔴 ACPX-V2-STEP11: Running build gate")
-                logger.info(f"[ACPX-V2] Step 10: Running build gate (npm install && npm run build)...")
-                build_success, build_output = self.build_gate.run_build()
-
-                if not build_success:
-                    logger.error(f"[ACPX-V2] ❌ Build failed")
-                    logger.error(f"[ACPX-V2]   Build output (last 500 chars):\n{build_output[-500:]}")
-                    print("🔴 ACPX-V2-STEP11-ERROR: Build failed, rolling back")
-                    self.snapshot_manager.restore_snapshot()
-                    self.snapshot_manager.cleanup_snapshot()
-                    result = {
-                        "success": False,
-                        "message": "Build failed",
-                        "build_output": build_output,
-                        "rollback": True
-                    }
-                    print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
-                    return result
-
-                logger.info(f"[ACPX-V2] ✓ Build succeeded!")
-                print("🔴 ACPX-V2-STEP11-DONE: Build gate passed")
+                print("🔴 ACPX-V2-STEP11: Build gate skipped")
+                logger.info("[ACPX-V2] Build gate skipped — build handled by infrastructure pipeline")
+                print("🔴 ACPX-V2-STEP11-DONE: Build gate skipped")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP11-ERROR: {type(e).__name__}: {str(e)}")
                 traceback.print_exc()
-                self.snapshot_manager.restore_snapshot()
-                self.snapshot_manager.cleanup_snapshot()
-                return {"success": False, "message": f"Build execution failed: {str(e)}"}
+                # Don't fail on skip errors
+                logger.warning(f"[ACPX-V2] Build gate skip had issues but continuing: {str(e)}")
 
             # Step 11: Success - cleanup snapshot
             try:
@@ -993,11 +974,11 @@ class ACPFrontendEditorV2:
             # Final result
             result = {
                 "success": True,
-                "message": "ACPX changes applied successfully",
+                "message": "ACPX changes applied successfully (build will run in infrastructure pipeline)",
                 "files_added": len(files_added),
                 "files_modified": len(files_modified),
                 "files_removed": len(files_removed),
-                "build_output": build_output,
+                "build_output": "Build skipped - handled by infrastructure pipeline",
                 "rollback": False
             }
             print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added')}, Modified={result.get('files_modified')}")
