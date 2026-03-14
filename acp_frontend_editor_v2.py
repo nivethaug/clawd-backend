@@ -45,6 +45,7 @@ ALLOWED_EDIT_PATHS = [
     "pages",
     "components", 
     "layouts",
+    "layout",      # Some templates use singular 'layout' folder
     "App.tsx",
     "main.tsx"
 ]
