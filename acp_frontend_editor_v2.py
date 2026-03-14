@@ -515,6 +515,10 @@ class ACPFrontendEditorV2:
         self.frontend_path = self.frontend_src_path.parent
         self.project_name = project_name
 
+        print(f"🔴 ACPX-V2-INIT: frontend_src_path = {self.frontend_src_path}")
+        print(f"🔴 ACPX-V2-INIT: frontend_path = {self.frontend_path}")
+        print(f"🔴 ACPX-V2-INIT: project_root = {self.frontend_path.parent}")
+
         # Initialize components
         self.validator = ACPPathValidator(frontend_src_path)
         self.snapshot_manager = ACPSnapshotManager(str(self.frontend_path))
@@ -527,6 +531,7 @@ class ACPFrontendEditorV2:
         # Pass project root path (parent of frontend), not frontend path
         # to avoid path doubling in PageManifest which appends frontend/src/
         self.manifest_manager = PageManifest(str(self.frontend_path.parent))
+        print(f"🔴 ACPX-V2-INIT: manifest_manager.pages_path = {self.manifest_manager.pages_path}")
 
     def apply_changes_via_acpx(
         self,
@@ -610,10 +615,21 @@ class ACPFrontendEditorV2:
                 print("🔴 ACPX-V2-STEP3: Scaffolding pages")
                 logger.info(f"[ACPX-V2] Step 3: Scaffolding pages from manifest...")
 
+                print(f"🔴 ACPX-V2-STEP3-PAGES: Pages to scaffold = {required_pages}")
                 print("🔴 ACPX-V2-STEP3-PRE: Calling scaffold_pages()")
                 scaffold_result = self.manifest_manager.scaffold_pages(required_pages, create_placeholder=True)
                 print(f"🔴 ACPX-V2-STEP3-POST: scaffold_pages() returned")
                 print(f"🔴 ACPX-V2-STEP3-POST-VALUE: {scaffold_result}")
+
+                # Verify files were created
+                print("🔴 ACPX-V2-STEP3-VERIFY: Checking created files...")
+                for page in required_pages:
+                    page_file = self.frontend_src_path / "pages" / f"{page}.tsx"
+                    exists = page_file.exists()
+                    print(f"🔴 ACPX-V2-STEP3-VERIFY: {page}.tsx exists = {exists}")
+                    if exists:
+                        size = page_file.stat().st_size
+                        print(f"🔴 ACPX-V2-STEP3-VERIFY: {page}.tsx size = {size} bytes")
 
                 # Check return value type
                 if isinstance(scaffold_result, bool):
@@ -1192,6 +1208,7 @@ Provide ONLY the JSON list, nothing else."""
             List of required page names
         """
         logger.info("[Planner] Extracting required pages from prompt...")
+        print(f"🔴 PLANNER-INPUT: {goal_description[:200]}...")
 
         required_pages = []
 
@@ -1297,6 +1314,9 @@ Provide ONLY the JSON list, nothing else."""
         # Extract required pages from goal description
         required_pages = self._extract_required_pages_from_prompt(goal_description)
         required_components = []
+
+        print(f"🔴 PLANNER-OUTPUT: Required pages = {required_pages}")
+        print(f"🔴 PLANNER-OUTPUT: Page count = {len(required_pages)}")
 
         # Build required artifacts list
         required_pages_list = required_pages
