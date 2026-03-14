@@ -100,7 +100,14 @@ class ACPPathValidator:
         Returns:
             Tuple of (is_allowed, reason)
         """
-        path = Path(file_path).resolve()
+        # Handle both absolute and relative paths
+        path = Path(file_path)
+        
+        # If path is relative, join with frontend_src_path
+        if not path.is_absolute():
+            path = self.frontend_src_path / path
+        else:
+            path = path.resolve()
         
         # Get relative path from frontend_src_path
         try:
