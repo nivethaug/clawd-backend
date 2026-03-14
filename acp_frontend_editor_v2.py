@@ -1342,6 +1342,9 @@ Provide ONLY the JSON list, nothing else."""
         # Phase 4: Build page specs section (NEW)
         page_specs_section = self._build_page_specs_section(required_pages)
 
+        # Determine which page should be the default route
+        default_page = required_pages_list[0] if required_pages_list else "Dashboard"
+
         return f"""You are editing a React + Vite + TypeScript SaaS application.
 
 Project Name: {self.project_name}
@@ -1350,6 +1353,32 @@ Project Description: {goal_description}
 YOUR TASK
 
 Transform the existing template into a production-ready application based on the project description above.
+
+⚠️ CRITICAL ROUTING FIX - DO NOT IGNORE ⚠️
+
+The default template has a Welcome page as the "/" route. You MUST:
+1. Make "{default_page}" the default route (path="/")
+2. DELETE or REPLACE the existing "/" route for Welcome
+3. NEVER have duplicate routes with the same path
+4. The Welcome page should NOT be used - remove its route entirely
+
+CORRECT App.tsx routing example:
+```tsx
+<Routes>
+  <Route path="/" element={<{default_page} />} />  // <-- This replaces Welcome
+  <Route path="/documents" element={<Documents />} />
+  <Route path="/settings" element={<Settings />} />
+  ...
+</Routes>
+```
+
+WRONG (will cause blank page):
+```tsx
+<Routes>
+  <Route path="/" element={<Welcome />} />    // <-- REMOVE THIS
+  <Route path="/" element={<{default_page} />} />  // <-- DUPLICATE PATH
+</Routes>
+```
 
 PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
 
