@@ -40,13 +40,13 @@ logger = logging.getLogger(__name__)
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 FORBIDDEN_BACKEND = "/root/clawd-backend"
 
-# Allowed directories for ACPX editing (relative to frontend/src)
+# Allowed directories for ACPX editing (relative to frontend/src - no src/ prefix)
 ALLOWED_EDIT_PATHS = [
-    "src/pages",
-    "src/components", 
-    "src/layouts",
-    "src/App.tsx",
-    "src/main.tsx"
+    "pages",
+    "components", 
+    "layouts",
+    "App.tsx",
+    "main.tsx"
 ]
 
 # Forbidden paths that ACPX must NOT modify
@@ -59,9 +59,9 @@ FORBIDDEN_EDIT_PATHS = [
     "tsconfig.json",
     ".env",
     ".env.local",
-    "src/components/ui",
-    "src/lib",
-    "src/utils"
+    "components/ui",
+    "lib",
+    "utils"
 ]
 
 # File limits - Increased for reliable multi-page execution
@@ -121,14 +121,14 @@ class ACPPathValidator:
             if forbidden in rel_path_str or rel_path_str.startswith(forbidden):
                 return False, f"Forbidden: Cannot modify {forbidden} ({rel_path})"
 
-        # Check 2: Specifically block src/components/ui
-        if "src/components/ui" in rel_path_str or "components/ui" in rel_path_str:
+        # Check 2: Specifically block components/ui (UI library components)
+        if "components/ui" in rel_path_str:
             return False, f"Forbidden: Cannot modify UI components ({rel_path})"
 
         # Check 3: Must be in allowed edit paths
         is_allowed = False
         for allowed_path in ALLOWED_EDIT_PATHS:
-            if rel_path_str.startswith(allowed_path) or rel_path_str == allowed_path.replace("src/", ""):
+            if rel_path_str.startswith(allowed_path) or rel_path_str == allowed_path:
                 is_allowed = True
                 break
         
@@ -917,10 +917,12 @@ class ACPFrontendEditorV2:
                     # file_path is already a relative path string from compute_diff
                     # Convert to string in case it's a Path object
                     rel_path = str(file_path) if not isinstance(file_path, str) else file_path
+                    print(f"🔴 ACPX-V2-STEP9-CHECK: Validating '{rel_path}'")
                     allowed, reason = self.validator.is_path_allowed(rel_path)
                     if not allowed:
-                        logger.error(f"[ACPX-V2] ❌ Path validation failed: {reason}")
-                        print(f"🔴 ACPX-V2-STEP9-ERROR: Path validation failed, rolling back")
+                        logger.error(f"[ACPX-V2] ❌ Path validation failed for '{rel_path}': {reason}")
+                        print(f"🔴 ACPX-V2-STEP9-ERROR: Path validation failed for '{rel_path}': {reason}")
+                        print(f"🔴 ACPX-V2-STEP9-ERROR: Rolling back to snapshot")
                         self.snapshot_manager.restore_snapshot()
                         self.snapshot_manager.cleanup_snapshot()
                         result = {
