@@ -1,7 +1,7 @@
 # DreamPilot Backend - Project Knowledge
 
 > **Note:** This documentation reflects the actual codebase implementation.
-> Last verified: 2026-03-13
+> Last verified: 2026-03-14
 
 ---
 
@@ -146,6 +146,43 @@ The pipeline executes in `openclaw_wrapper.py` via `run_all_phases()`:
 - Updates router and navigation
 - Runs Frontend Optimizer (rule-based branding)
 - Creates `ACP_README.md` documentation
+
+**Phase 3.1 — Automatic Routing Fix (Step 10.5)**
+After ACPX completes, the system automatically fixes common routing issues:
+
+| Issue | Symptom | Fix Applied |
+|-------|---------|-------------|
+| Duplicate "/" routes | Blank page (Welcome wins) | Remove ALL routes at "/" |
+| No Layout wrapper | No navigation sidebar | Wrap routes in `<Route element={<Layout />}>` |
+| Dashboard at wrong path | Dashboard unreachable | Move Dashboard to "/" route |
+
+**Routing Fix Logic:**
+1. Remove all duplicate "/" routes (Welcome, Dashboard, etc.)
+2. Remove /dashboard route (consolidated to "/")
+3. Detect if Layout wrapper exists:
+   - ✅ **Has Layout**: Insert Dashboard at "/" inside Layout wrapper
+   - ✅ **No Layout**: Wrap ALL routes with Layout, add Dashboard at "/"
+
+**Before Fix (broken):**
+```tsx
+<Routes>
+  <Route path="/" element={<Welcome />} />     // First match wins = blank
+  <Route path="/" element={<Dashboard />} />   // Never reached
+  <Route path="/team" element={<Team />} />
+</Routes>
+```
+
+**After Fix (working):**
+```tsx
+<Routes>
+  <Route element={<Layout />}>                 // Layout wrapper added
+    <Route path="/" element={<Dashboard />} /> // Dashboard at root
+    <Route path="/team" element={<Team />} />
+  </Route>
+</Routes>
+```
+
+> **Note:** This fix ensures users see the main app with navigation, not a blank Welcome page.
 
 **Phase 4 — Database Provisioning**
 - Delegated to `InfrastructureManager`
