@@ -1363,22 +1363,13 @@ The default template has a Welcome page as the "/" route. You MUST:
 4. The Welcome page should NOT be used - remove its route entirely
 
 CORRECT App.tsx routing example:
-```tsx
-<Routes>
-  <Route path="/" element={<{default_page} />} />  // <-- This replaces Welcome
-  <Route path="/documents" element={<Documents />} />
-  <Route path="/settings" element={<Settings />} />
-  ...
-</Routes>
-```
+- Route path="/" should use element=<Dashboard /> (NOT Welcome)
+- Example: Route path="/" element=<Dashboard />
+- Example: Route path="/documents" element=<Documents />
 
 WRONG (will cause blank page):
-```tsx
-<Routes>
-  <Route path="/" element={<Welcome />} />    // <-- REMOVE THIS
-  <Route path="/" element={<{default_page} />} />  // <-- DUPLICATE PATH
-</Routes>
-```
+- Route path="/" element=<Welcome />    <-- REMOVE THIS
+- Having TWO routes with path="/" causes blank page
 
 PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
 
