@@ -1635,6 +1635,30 @@ Pages should return content that renders inside Layout's <Outlet />, NOT wrap th
 
 DO NOT import or use Layout component in page files!
 
+⚠️ CRITICAL: LINK/NAVIGATION COMPONENTS ⚠️
+
+When creating navigation links, ALWAYS wrap multiple children in a single element:
+
+❌ WRONG - Multiple children cause React.Children.only error:
+```tsx
+<Link to="/dashboard">
+  <Icon />
+  Dashboard
+</Link>
+```
+
+✅ CORRECT - Single wrapper element:
+```tsx
+<Link to="/dashboard">
+  <span className="flex items-center gap-2">
+    <Icon />
+    Dashboard
+  </span>
+</Link>
+```
+
+Same rule applies to: Button, NavLink, and any component expecting single child.
+
 IMPLEMENTATION
 
 Make your changes directly to files.
