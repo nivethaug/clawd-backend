@@ -610,10 +610,15 @@ class ServiceManager:
         try:
             app_name = f"{project_name}-frontend"
             
-            # Check if project has its own frontend directory
+            # Check if project has its own frontend directory with built dist
             project_frontend_path = project_path / "frontend"
+            project_dist_path = project_frontend_path / "dist"
             
-            if project_frontend_path.exists() and (project_frontend_path / "index.html").exists():
+            # Check for dist directory (built frontend) or frontend source
+            has_frontend = project_frontend_path.exists()
+            has_dist = project_dist_path.exists() and (project_dist_path / "index.html").exists()
+            
+            if has_frontend and (has_dist or (project_frontend_path / "package.json").exists()):
                 # Use project-specific frontend
                 logger.info(f"Using project-specific frontend: {project_frontend_path}")
                 frontend_dist_path = project_frontend_path
@@ -622,7 +627,11 @@ class ServiceManager:
                 package_json = frontend_dist_path / "package.json"
                 dist_dir = frontend_dist_path / "dist"
                 
-                if package_json.exists():
+                # Check if already built
+                if has_dist:
+                    logger.info(f"✓ Frontend already built, using dist: {dist_dir}")
+                    frontend_dist_path = dist_dir
+                elif package_json.exists():
                     logger.info(f"Building frontend for production (correct MIME types)...")
                     try:
                         # Clean Vite cache before build to prevent stale cache issues
