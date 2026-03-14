@@ -875,18 +875,21 @@ class ACPFrontendEditorV2:
                 files_modified = diff['modified']
 
                 logger.info(f"[ACPX-V2]   Files added: {len(files_added)}")
+                print(f"🔴 FILES_ADDED: {files_added}")
                 for f in files_added[:10]:
                     logger.info(f"[ACPX-V2]     + {f}")
                 if len(files_added) > 10:
                     logger.info(f"[ACPX-V2]     ... and {len(files_added) - 10} more")
 
                 logger.info(f"[ACPX-V2]   Files removed: {len(files_removed)}")
+                print(f"🔴 FILES_REMOVED: {files_removed}")
                 for f in files_removed[:10]:
                     logger.info(f"[ACPX-V2]     - {f}")
                 if len(files_removed) > 10:
                     logger.info(f"[ACPX-V2]     ... and {len(files_removed) - 10} more")
 
                 logger.info(f"[ACPX-V2]   Files modified: {len(files_modified)}")
+                print(f"🔴 FILES_MODIFIED: {files_modified}")
                 for f in files_modified[:10]:
                     logger.info(f"[ACPX-V2]     ~ {f}")
                 if len(files_modified) > 10:
