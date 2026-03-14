@@ -1427,8 +1427,9 @@ class InfrastructureManager:
                 logger.info("PHASE_5_BUILD_COMPLETE: success")
                 logger.info("✓ Frontend build phase completed")
             else:
-                logger.warning("PHASE_5_BUILD_COMPLETE: partial (build had issues)")
-                logger.warning("⚠️ Frontend build had issues, continuing anyway")
+                logger.error("PHASE_5_BUILD_COMPLETE: failed")
+                logger.error("❌ Frontend build failed - stopping pipeline")
+                return False
 
             # Fix permissions on project directory for nginx access
             logger.info("🔧 Fixing permissions for nginx access...")
