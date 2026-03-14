@@ -985,7 +985,61 @@ class ACPFrontendEditorV2:
                 # Don't rollback on guardrail errors, just log
                 logger.warning(f"[ACPX-V2] Guardrail enforcement failed but continuing: {str(e)}")
 
-            # Step 10: Build gate skipped - build handled by infrastructure pipeline
+            # Step 10.5: FIX ROUTING - Force Dashboard as default route
+            try:
+                print("🔴 ACPX-V2-STEP10B: Fixing routing (programmatic)")
+                logger.info("[ACPX-V2] Step 10.5: Fixing routing programmatically...")
+                
+                # Determine default page
+                default_page = list(self.allowed_pages)[0] if self.allowed_pages else "Dashboard"
+                app_tsx_path = self.frontend_src_path / "App.tsx"
+                
+                if app_tsx_path.exists():
+                    content = app_tsx_path.read_text()
+                    original_content = content
+                    
+                    # Fix 1: Replace Welcome route with Dashboard route at path="/"
+                    # Pattern: <Route path="/" element={<Welcome />} />
+                    import re
+                    
+                    # Replace Welcome route with Dashboard route
+                    content = re.sub(
+                        r'<Route\s+path="/"\s+element=\{<Welcome\s*/>\}\s*/>',
+                        f'<Route path="/" element={{<{default_page} />}} />',
+                        content
+                    )
+                    
+                    # Also handle variations
+                    content = re.sub(
+                        r'path="/"\s+element=\{<Welcome',
+                        f'path="/" element={{<{default_page}',
+                        content
+                    )
+                    
+                    # Fix 2: Remove any /dashboard route (Dashboard should be at "/")
+                    content = re.sub(
+                        r'<Route\s+path="/dashboard"\s+element=\{<Dashboard\s*/>\}\s*/>\s*\n?',
+                        '',
+                        content
+                    )
+                    
+                    if content != original_content:
+                        app_tsx_path.write_text(content)
+                        logger.info(f"[ACPX-V2]   ✓ Fixed routing: {default_page} is now at /")
+                        print(f"🔴 ACPX-V2-STEP10B-DONE: Routing fixed - {default_page} at /")
+                    else:
+                        logger.info("[ACPX-V2]   Routing appears correct")
+                        print("🔴 ACPX-V2-STEP10B-DONE: Routing already correct")
+                else:
+                    logger.warning("[ACPX-V2]   App.tsx not found, skipping routing fix")
+                    print("🔴 ACPX-V2-STEP10B-SKIP: App.tsx not found")
+                    
+            except Exception as e:
+                print(f"🔴 ACPX-V2-STEP10B-ERROR: {type(e).__name__}: {str(e)}")
+                traceback.print_exc()
+                logger.warning(f"[ACPX-V2] Routing fix failed but continuing: {str(e)}")
+
+            # Step 11: Build gate skipped - build handled by infrastructure pipeline
             try:
                 print("🔴 ACPX-V2-STEP11: Build gate skipped")
                 logger.info("[ACPX-V2] Build gate skipped — build handled by infrastructure pipeline")
@@ -996,10 +1050,10 @@ class ACPFrontendEditorV2:
                 # Don't fail on skip errors
                 logger.warning(f"[ACPX-V2] Build gate skip had issues but continuing: {str(e)}")
 
-            # Step 11: Success - cleanup snapshot
+            # Step 12: Success - cleanup snapshot
             try:
                 print("🔴 ACPX-V2-STEP12: Cleaning up snapshot")
-                logger.info(f"[ACPX-V2] Step 10: Cleanup snapshot...")
+                logger.info(f"[ACPX-V2] Step 12: Cleanup snapshot...")
                 self.snapshot_manager.cleanup_snapshot()
                 print("🔴 ACPX-V2-STEP12-DONE: Snapshot cleaned up")
             except Exception as e:
