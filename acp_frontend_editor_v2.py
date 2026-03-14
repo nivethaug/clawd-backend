@@ -1702,7 +1702,7 @@ When creating or modifying Layout components for React Router:
 
 ❌ WRONG - Using children prop (pages won't render):
 ```tsx
-export function Layout({ children }: {{ children: React.ReactNode }}) {{
+export function Layout({{ children }}: {{ children: React.ReactNode }}) {{
   return (
     <div>
       <Sidebar />
