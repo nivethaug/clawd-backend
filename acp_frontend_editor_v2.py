@@ -1069,6 +1069,88 @@ class ACPFrontendEditorV2:
                 traceback.print_exc()
                 logger.warning(f"[ACPX-V2] Routing fix failed but continuing: {str(e)}")
 
+            # Step 10.6: Fix Layout components - Replace {children} with <Outlet />
+            try:
+                print("🔴 ACPX-V2-STEP10C: Fixing Layout components (Outlet)")
+                logger.info("[ACPX-V2] Step 10.6: Fixing Layout components to use Outlet...")
+                
+                # Find all Layout files
+                layout_patterns = [
+                    self.frontend_src_path / "layout" / "Layout.tsx",
+                    self.frontend_src_path / "layouts" / "Layout.tsx",
+                    self.frontend_src_path / "app" / "layouts" / "AppLayout.tsx",
+                ]
+                
+                layout_files = [p for p in layout_patterns if p.exists()]
+                # Also search for any file with "Layout" in the name
+                for layout_dir in ["layout", "layouts", "app/layouts"]:
+                    layout_path = self.frontend_src_path / layout_dir
+                    if layout_path.exists():
+                        layout_files.extend(layout_path.glob("*Layout*.tsx"))
+                
+                layout_files = list(set(layout_files))  # Remove duplicates
+                
+                for layout_file in layout_files:
+                    try:
+                        content = layout_file.read_text()
+                        original = content
+                        
+                        # Fix 1: Add Outlet import if missing
+                        if "Outlet" not in content and "from 'react-router-dom'" in content:
+                            content = re.sub(
+                                r"import\s+\{([^}]+)\}\s+from\s+'react-router-dom'",
+                                r"import {\1, Outlet } from 'react-router-dom'",
+                                content
+                            )
+                        elif "Outlet" not in content:
+                            # Add import at top after other imports
+                            import_line = "import { Outlet } from 'react-router-dom';\n"
+                            # Find last import line
+                            import_match = re.search(r"(^import.*?;[\s]*)+", content, re.MULTILINE)
+                            if import_match:
+                                insert_pos = import_match.end()
+                                content = content[:insert_pos] + import_line + content[insert_pos:]
+                        
+                        # Fix 2: Remove children prop from function signature
+                        content = re.sub(
+                            r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*(?::[^}]+)?\s*\}\s*:\s*[^)]+\)',
+                            r'\1()',
+                            content
+                        )
+                        content = re.sub(
+                            r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*\}\s*:\s*\{\s*children:\s*React\.ReactNode\s*\}\s*\)',
+                            r'\1()',
+                            content
+                        )
+                        
+                        # Fix 3: Remove children interface
+                        content = re.sub(
+                            r'interface\s+\w*LayoutProps\s*\{\s*children\s*(?::\s*React\.ReactNode)?\s*\}\s*\n?',
+                            '',
+                            content,
+                            flags=re.IGNORECASE
+                        )
+                        
+                        # Fix 4: Replace {children} with <Outlet />
+                        content = re.sub(r'\{children\}', '<Outlet />', content)
+                        content = re.sub(r'\{\s*children\s*\}', '<Outlet />', content)
+                        
+                        if content != original:
+                            layout_file.write_text(content)
+                            logger.info(f"[ACPX-V2]   ✓ Fixed {layout_file.name}: replaced {{children}} with <Outlet />")
+                            print(f"🔴 ACPX-V2-STEP10C-FIX: {layout_file.name} - children → Outlet")
+                    
+                    except Exception as e:
+                        logger.warning(f"[ACPX-V2]   Failed to fix {layout_file}: {e}")
+                        print(f"🔴 ACPX-V2-STEP10C-WARN: Failed to fix {layout_file.name}: {e}")
+                
+                print("🔴 ACPX-V2-STEP10C-DONE: Layout components fixed")
+                
+            except Exception as e:
+                print(f"🔴 ACPX-V2-STEP10C-ERROR: {type(e).__name__}: {str(e)}")
+                traceback.print_exc()
+                logger.warning(f"[ACPX-V2] Layout fix failed but continuing: {str(e)}")
+
             # Step 11: Build gate skipped - build handled by infrastructure pipeline
             try:
                 print("🔴 ACPX-V2-STEP11: Build gate skipped")
@@ -1613,6 +1695,43 @@ TECHNICAL REQUIREMENTS
 - Do not introduce placeholder content unless required
 - Follow page templates AND page specifications for professional UI
 - Ensure all UI elements from page specs are implemented
+
+⚠️ CRITICAL: LAYOUT COMPONENT RULES ⚠️
+
+When creating or modifying Layout components for React Router:
+
+❌ WRONG - Using children prop (pages won't render):
+```tsx
+export function Layout({ children }: {{ children: React.ReactNode }}) {{
+  return (
+    <div>
+      <Sidebar />
+      <main>{{children}}</main>
+    </div>
+  );
+}}
+```
+
+✅ CORRECT - Using Outlet for React Router nested routes:
+```tsx
+import {{ Outlet }} from 'react-router-dom';
+
+export function Layout() {{
+  return (
+    <div>
+      <Sidebar />
+      <main><Outlet /></main>  ← Use Outlet, NOT children
+    </div>
+  );
+}}
+```
+
+WHY: React Router nested routes use <Outlet /> to render child routes. The children prop won't work with:
+```tsx
+<Route element={{<Layout />}}>
+  <Route path="/" element={{<Dashboard />}} />  ← Renders at <Outlet />, not {{children}}
+</Route>
+```
 
 ⚠️ CRITICAL: PAGE COMPONENT RULES ⚠️
 
