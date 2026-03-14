@@ -1356,20 +1356,26 @@ Transform the existing template into a production-ready application based on the
 
 ⚠️ CRITICAL ROUTING FIX - DO NOT IGNORE ⚠️
 
-The default template has a Welcome page as the "/" route. You MUST:
-1. Make "{default_page}" the default route (path="/")
-2. DELETE or REPLACE the existing "/" route for Welcome
-3. NEVER have duplicate routes with the same path
-4. The Welcome page should NOT be used - remove its route entirely
+The default template has a Welcome page as the "/" route. You MUST change this:
 
-CORRECT App.tsx routing example:
-- Route path="/" should use element=<Dashboard /> (NOT Welcome)
-- Example: Route path="/" element=<Dashboard />
-- Example: Route path="/documents" element=<Documents />
+BEFORE (current broken state):
+```
+<Route path="/" element={{<Welcome />}} />
+<Route path="/dashboard" element={{<Dashboard />}} />
+```
 
-WRONG (will cause blank page):
-- Route path="/" element=<Welcome />    <-- REMOVE THIS
-- Having TWO routes with path="/" causes blank page
+AFTER (what you must do):
+```
+<Route path="/" element={{<{default_page} />}} />
+```
+
+STEPS:
+1. Find the line with: path="/" element={{<Welcome />}}
+2. CHANGE it to: path="/" element={{<{default_page} />}}
+3. The Welcome import and component can remain, but its route MUST be removed or changed
+4. Dashboard should be at "/" NOT at "/dashboard"
+
+If you fail to do this, users will see a blank page instead of the app.
 
 PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
 
