@@ -998,35 +998,43 @@ class ACPFrontendEditorV2:
                     content = app_tsx_path.read_text()
                     original_content = content
                     
-                    # Fix 1: Replace Welcome route with Dashboard route at path="/"
+                    # Fix 1: Remove the standalone Welcome route at "/" (outside Layout)
                     # Pattern: <Route path="/" element={<Welcome />} />
-                    import re
-                    
-                    # Replace Welcome route with Dashboard route
                     content = re.sub(
-                        r'<Route\s+path="/"\s+element=\{<Welcome\s*/>\}\s*/>',
-                        f'<Route path="/" element={{<{default_page} />}} />',
+                        r'<Route\s+path="/"\s+element=\{<Welcome\s*/>\}\s*/>\s*\n?',
+                        '',
                         content
                     )
                     
-                    # Also handle variations
-                    content = re.sub(
-                        r'path="/"\s+element=\{<Welcome',
-                        f'path="/" element={{<{default_page}',
-                        content
-                    )
+                    # Fix 2: Add "/" route INSIDE the Layout wrapper for default page
+                    # Find the Layout route and add default page as first child
+                    # Pattern: <Route element={<Layout />}>
+                    layout_pattern = r'(<Route\s+element=\{<Layout\s*/>\}>\s*\n)'
+                    layout_match = re.search(layout_pattern, content)
+                    if layout_match:
+                        # Insert default page route after Layout opening tag
+                        insert_pos = layout_match.end()
+                        default_route = f'            <Route path="/" element={{<{default_page} />}} />\n'
+                        content = content[:insert_pos] + default_route + content[insert_pos:]
                     
-                    # Fix 2: Remove any /dashboard route (Dashboard should be at "/")
+                    # Fix 3: Remove any /dashboard route (Dashboard is now at "/")
                     content = re.sub(
                         r'<Route\s+path="/dashboard"\s+element=\{<Dashboard\s*/>\}\s*/>\s*\n?',
                         '',
                         content
                     )
                     
+                    # Fix 4: Also handle variations of Welcome route
+                    content = re.sub(
+                        r'path="/"\s+element=\{<Welcome',
+                        f'path="/" element={{<{default_page}',
+                        content
+                    )
+                    
                     if content != original_content:
                         app_tsx_path.write_text(content)
-                        logger.info(f"[ACPX-V2]   ✓ Fixed routing: {default_page} is now at /")
-                        print(f"🔴 ACPX-V2-STEP10B-DONE: Routing fixed - {default_page} at /")
+                        logger.info(f"[ACPX-V2]   ✓ Fixed routing: {default_page} is now at / inside Layout")
+                        print(f"🔴 ACPX-V2-STEP10B-DONE: Routing fixed - {default_page} at / inside Layout")
                     else:
                         logger.info("[ACPX-V2]   Routing appears correct")
                         print("🔴 ACPX-V2-STEP10B-DONE: Routing already correct")
