@@ -112,23 +112,31 @@ class GroqService:
         """
         import json
 
-        prompt = f"""Extract page names from this SaaS app description.
+        prompt = f"""Extract the EXACT page names mentioned in this SaaS app description.
 
 Description: {description}
 
-Rules:
-1. Return 5-8 page names that make sense for this app
-2. Common pages: Dashboard, Documents, Templates, Analytics, Settings, Contacts, Team, Billing
-3. Use PascalCase names (e.g., "MyLearning" not "my learning")
-4. Return ONLY a JSON object with no explanation
+CRITICAL RULES:
+1. Look for phrases like "with X pages:", "pages:", "main pages:", etc.
+2. Extract ONLY the page names explicitly mentioned in the description
+3. Convert to PascalCase: "Knowledge Base" → "KnowledgeBase", "My Learning" → "MyLearning"
+4. If pages are listed after "pages:", use those EXACT pages
+5. Do NOT add generic pages if specific pages are mentioned
+6. Return 4-8 pages maximum
 
-Response format:
-{{"pages": ["Dashboard", "Documents", "Templates", "Analytics", "Settings"]}}"""
+Examples:
+- "with pages: Dashboard, Tickets, Knowledge Base" → ["Dashboard", "Tickets", "KnowledgeBase"]
+- "four main pages: Dashboard, Courses, My Learning, Certificates" → ["Dashboard", "Courses", "MyLearning", "Certificates"]
+- "Support desk with Tickets, Knowledge Base, Customers" → ["Dashboard", "Tickets", "KnowledgeBase", "Customers"]
+
+Response format (JSON ONLY):
+{{"pages": ["Dashboard", "Tickets", "KnowledgeBase", "Customers"]}}"""
 
         messages = [{"role": "user", "content": prompt}]
 
         try:
             response = await self.generate_chat_completion(messages, max_tokens=200)
+            print(f"🔴 GROQ-RAW-RESPONSE: {response[:500]}")
 
             # Parse JSON response
             # Try to extract JSON from response (handle markdown code blocks)
@@ -151,9 +159,11 @@ Response format:
                     cleaned.append(clean)
 
             logger.info(f"[Groq] Inferred pages: {cleaned}")
+            print(f"🔴 GROQ-CLEANED-PAGES: {cleaned}")
             return cleaned
 
         except Exception as e:
             logger.error(f"[Groq] Page inference failed: {e}")
+            print(f"🔴 GROQ-ERROR: {e}")
             # Return sensible defaults
             return ["Dashboard", "Analytics", "Settings"]

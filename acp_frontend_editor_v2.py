@@ -1349,8 +1349,10 @@ Provide ONLY the JSON list, nothing else."""
             if inferred_pages:
                 required_pages.extend(inferred_pages)
                 logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
+                print(f"🔴 PLANNER-GROQ: Inferred pages = {inferred_pages}")
         except Exception as e:
             logger.warning(f"[Planner] Groq inference failed, falling back to keyword matching: {e}")
+            print(f"🔴 PLANNER-GROQ-ERROR: {e}")
 
         # Step 2: Try to load page manifest (Phase 5 - NEW)
         manifest_pages = None
@@ -1388,12 +1390,19 @@ Provide ONLY the JSON list, nothing else."""
 
             logger.info(f"[Planner] Explicit page list detected: {len(required_pages)} pages")
 
-        # Step 4: Keyword matching (if still missing common pages)
-        desc_lower = goal_description.lower()
-        for page_name, keywords in PAGE_KEYWORDS.items():
-            if page_name not in required_pages:  # Skip if already in list
-                if any(keyword in desc_lower for keyword in keywords):
-                    required_pages.append(page_name)
+        # Step 4: Keyword matching (only if Groq returned fewer than 3 pages)
+        # Use word boundaries to avoid false matches (e.g., "sign" in "design")
+        if len(required_pages) < 3:
+            for page_name, keywords in PAGE_KEYWORDS.items():
+                if page_name not in required_pages:  # Skip if already in list
+                    # Use word boundary matching to avoid partial matches
+                    for keyword in keywords:
+                        pattern = r'\b' + re.escape(keyword) + r'\b'
+                        if re.search(pattern, desc_lower):
+                            required_pages.append(page_name)
+                            break  # Found match, move to next page
+
+        print(f"🔴 PLANNER-AFTER-KEYWORDS: Pages = {required_pages}")
 
         # Step 5: SaaS default fallback (if less than 3 pages detected)
         if len(required_pages) < 3:
@@ -1405,6 +1414,8 @@ Provide ONLY the JSON list, nothing else."""
 
         # Step 6: Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
+
+        print(f"🔴 PLANNER-FINAL: Pages = {required_pages}")
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
