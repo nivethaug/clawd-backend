@@ -998,24 +998,37 @@ class ACPFrontendEditorV2:
                     content = app_tsx_path.read_text()
                     original_content = content
                     
+                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Original content length = {len(content)}")
+                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Looking for routes at '/'")
+                    
+                    # Count routes at "/" before fix
+                    routes_at_root = re.findall(r'<Route\s+path="/"', content)
+                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Found {len(routes_at_root)} routes at '/' before fix")
+                    
                     # Fix 1: Remove ALL routes at "/" (duplicates cause blank page)
-                    # Removes: <Route path="/" element={<Welcome />} />
-                    # Removes: <Route path="/" element={<Dashboard />} />
+                    # Pattern matches: <Route path="/" element={<Welcome />} />
+                    # Also matches: <Route path="/" element={<Dashboard />}/>
+                    # Handles inline routes (multiple on same line)
                     content = re.sub(
-                        r'<Route\s+path="/"\s+element=\{<[^>]+>\s*/>\}\s*/>\s*\n?',
+                        r'<Route\s+path="/"\s+element=\{<[^>]+>\s*/>\s*\}\s*/>',
                         '',
                         content
                     )
                     
+                    # Verify removal
+                    routes_at_root_after = re.findall(r'<Route\s+path="/"', content)
+                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Found {len(routes_at_root_after)} routes at '/' after removal")
+                    
                     # Fix 2: Remove any /dashboard route (will be at "/" instead)
                     content = re.sub(
-                        r'<Route\s+path="/dashboard"\s+element=\{<Dashboard\s*/>\}\s*/>\s*\n?',
+                        r'<Route\s+path="/dashboard"\s+element=\{<Dashboard\s*/>\s*\}\s*/>',
                         '',
                         content
                     )
                     
                     # Fix 3: Check if Layout wrapper exists
                     has_layout = '<Route element={<Layout />' in content or '<Route element={<Layout/>' in content
+                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Layout wrapper exists = {has_layout}")
                     
                     if has_layout:
                         # Insert "/" route inside existing Layout wrapper
@@ -1028,19 +1041,28 @@ class ACPFrontendEditorV2:
                             logger.info(f"[ACPX-V2]   Added {default_page} route inside Layout wrapper")
                     else:
                         # No Layout wrapper - wrap all routes with Layout
-                        # Find the Routes content
-                        routes_pattern = r'(<Routes>\s*\n)(.*?)(\s*</Routes>)'
+                        # Find the Routes content (handles both inline and multiline)
+                        routes_pattern = r'<Routes>(.*?)</Routes>'
                         routes_match = re.search(routes_pattern, content, re.DOTALL)
                         
                         if routes_match:
-                            routes_content = routes_match.group(2)
+                            routes_content = routes_match.group(1).strip()
                             
-                            # Build new routes with Layout wrapper
+                            # Build new routes with Layout wrapper and proper formatting
+                            # Parse individual routes and format them nicely
+                            route_pattern = r'<Route\s+[^>]+/>'
+                            individual_routes = re.findall(route_pattern, routes_content)
+                            
+                            # Format routes with Layout wrapper
+                            formatted_routes = '\n        '.join([f'{r}' for r in individual_routes])
+                            
                             new_routes = f'''<Route element={{<Layout />}}>
           <Route path="/" element={{<{default_page} />}} />
-{routes_content}        </Route>
-'''
-                            content = content[:routes_match.start(2)] + new_routes + content[routes_match.end(2):]
+        {formatted_routes}
+      </Route>'''
+                            
+                            # Replace the entire Routes content
+                            content = content[:routes_match.start(1)] + new_routes + content[routes_match.end(1):]
                             logger.info(f"[ACPX-V2]   Added Layout wrapper with {default_page} at /")
                     
                     if content != original_content:
