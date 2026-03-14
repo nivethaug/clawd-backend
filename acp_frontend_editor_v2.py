@@ -1598,6 +1598,23 @@ TECHNICAL REQUIREMENTS
 - Follow page templates AND page specifications for professional UI
 - Ensure all UI elements from page specs are implemented
 
+⚠️ CRITICAL: PAGE COMPONENT RULES ⚠️
+
+DO NOT wrap page components in Layout:
+- ❌ WRONG: `export default function Dashboard() {{ return <Layout><div>...</div></Layout> }}`
+- ✅ CORRECT: `export default function Dashboard() {{ return <div>...</div> }}`
+
+The Layout is ALREADY provided by the router at App.tsx level:
+```tsx
+<Route element={{<Layout />}}>  ← Layout wrapper here
+  <Route path="/" element={{<Dashboard />}} />  ← Page renders inside Layout's <Outlet />
+</Route>
+```
+
+Pages should return content that renders inside Layout's <Outlet />, NOT wrap themselves in Layout.
+
+DO NOT import or use Layout component in page files!
+
 IMPLEMENTATION
 
 Make your changes directly to files.
