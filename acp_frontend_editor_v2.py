@@ -1450,28 +1450,46 @@ YOUR TASK
 
 Transform the existing template into a production-ready application based on the project description above.
 
-⚠️ CRITICAL ROUTING FIX - DO NOT IGNORE ⚠️
+🚨🚨🚨 CRITICAL ROUTING FIX - MUST DO FIRST 🚨🚨🚨
 
-The default template has a Welcome page as the "/" route. You MUST change this:
+BEFORE YOU DO ANYTHING ELSE, FIX THE ROUTING:
 
-BEFORE (current broken state):
+1. READ src/App.tsx
+2. FIND the Welcome route at path="/"
+3. DELETE or REPLACE it with {default_page} at path="/"
+
+CURRENT STATE (BROKEN - causes blank page):
+```tsx
+<Routes>
+  <Route path="/" element={{<Welcome />}} />           ← DELETE THIS LINE
+  <Route path="/" element={{<{default_page} />}} />    ← DUPLICATE! Also DELETE
+  <Route path="/team" element={{<Team />}} />
+  ...
+</Routes>
 ```
-<Route path="/" element={{<Welcome />}} />
-<Route path="/dashboard" element={{<Dashboard />}} />
+
+REQUIRED STATE (FIXED):
+```tsx
+<Routes>
+  <Route element={{<Layout />}}>
+    <Route path="/" element={{<{default_page} />}} />  ← ONLY ONE route at "/"
+    <Route path="/team" element={{<Team />}} />
+    ...
+  </Route>
+</Routes>
 ```
 
-AFTER (what you must do):
-```
-<Route path="/" element={{<{default_page} />}} />
-```
+⚠️ ROUTING RULES (MANDATORY):
+1. DELETE ALL routes with path="/" (there may be MULTIPLE duplicates)
+2. Keep only ONE route at path="/" for {default_page}
+3. All routes MUST be inside <Route element={{<Layout />}}> wrapper
+4. If no Layout wrapper exists, ADD IT
+5. DO NOT leave Welcome at path="/"
+6. DO NOT create duplicate routes at path="/"
 
-STEPS:
-1. Find the line with: path="/" element={{<Welcome />}}
-2. CHANGE it to: path="/" element={{<{default_page} />}}
-3. The Welcome import and component can remain, but its route MUST be removed or changed
-4. Dashboard should be at "/" NOT at "/dashboard"
+FAILURE TO FIX ROUTING = BROKEN APP (blank page)
 
-If you fail to do this, users will see a blank page instead of the app.
+Verify routing is correct BEFORE creating pages!
 
 PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
 
@@ -1495,6 +1513,8 @@ PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
 
 4. FINAL VERIFICATION CHECKLIST:
    Before marking task complete, verify:
+   - [ ] ROUTING FIXED: Welcome route removed, {default_page} at "/" (ONLY ONE)
+   - [ ] ROUTING FIXED: All routes inside Layout wrapper
    - [ ] ONLY pages from REQUIRED PAGES list exist in src/pages/
    - [ ] NO unauthorized pages were created
    - [ ] All required pages are complete
@@ -1528,9 +1548,10 @@ DO NOT modify:
 
 COMPLETION CHECKLIST
 
+✓ ROUTING FIXED: Welcome route removed, {default_page} at "/" (ONLY ONE route)
+✓ ROUTING FIXED: All routes inside <Route element={{<Layout />}}> wrapper
 ✓ All required pages created in src/pages/ (EXACT file names)
 ✓ All required components created in src/components/
-✓ Routing updated in src/App.tsx
 ✓ Navigation/sidebar updated
 ✓ Responsive design implemented
 ✓ Code is production-ready
@@ -1540,6 +1561,13 @@ WORKING METHODOLOGY
 
 You must work systematically through ALL required pages.
 
+STEP 0: FIX ROUTING FIRST (MANDATORY)
+1. READ src/App.tsx immediately
+2. DELETE ALL routes with path="/" (remove duplicates)
+3. ADD {default_page} at path="/" inside Layout wrapper
+4. VERIFY routing is correct before continuing
+
+STEP 1-N: CREATE PAGES
 1. Read the project description, page templates, and page specifications carefully
 2. Plan your approach using BOTH templates and specs as guidance
 3. Execute step by step following page templates and specifications
@@ -1550,16 +1578,18 @@ You must work systematically through ALL required pages.
 
 EXECUTION RULES
 
-1. Work through pages ONE AT A TIME using page templates
-2. Complete each page fully before moving to the next
-3. Use EXACT page names from REQUIRED PAGES list
-4. Do not skip any required page
-5. Do not stop early - continue until checklist is 100% complete
-6. Only mark task complete when ALL checklist items are done
-7. Use page templates as guidance but adapt to existing code structure
+1. FIX ROUTING FIRST - this is your FIRST task
+2. Work through pages ONE AT A TIME using page templates
+3. Complete each page fully before moving to the next
+4. Use EXACT page names from REQUIRED PAGES list
+5. Do not skip any required page
+6. Do not stop early - continue until checklist is 100% complete
+7. Only mark task complete when ALL checklist items are done
+8. Use page templates as guidance but adapt to existing code structure
 
 TECHNICAL REQUIREMENTS
 
+- Fix routing BEFORE creating pages
 - Keep the code buildable (npm run build must succeed)
 - Use existing UI components from src/components/ui/
 - Follow existing code patterns and style
