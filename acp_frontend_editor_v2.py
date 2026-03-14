@@ -985,7 +985,7 @@ class ACPFrontendEditorV2:
                 # Don't rollback on guardrail errors, just log
                 logger.warning(f"[ACPX-V2] Guardrail enforcement failed but continuing: {str(e)}")
 
-            # Step 10.5: FIX ROUTING - Force Dashboard as default route
+            # Step 10.5: FIX ROUTING - Force Dashboard as default route with Layout wrapper
             try:
                 print("🔴 ACPX-V2-STEP10B: Fixing routing (programmatic)")
                 logger.info("[ACPX-V2] Step 10.5: Fixing routing programmatically...")
@@ -998,43 +998,55 @@ class ACPFrontendEditorV2:
                     content = app_tsx_path.read_text()
                     original_content = content
                     
-                    # Fix 1: Remove the standalone Welcome route at "/" (outside Layout)
-                    # Pattern: <Route path="/" element={<Welcome />} />
+                    # Fix 1: Remove ALL routes at "/" (duplicates cause blank page)
+                    # Removes: <Route path="/" element={<Welcome />} />
+                    # Removes: <Route path="/" element={<Dashboard />} />
                     content = re.sub(
-                        r'<Route\s+path="/"\s+element=\{<Welcome\s*/>\}\s*/>\s*\n?',
+                        r'<Route\s+path="/"\s+element=\{<[^>]+>\s*/>\}\s*/>\s*\n?',
                         '',
                         content
                     )
                     
-                    # Fix 2: Add "/" route INSIDE the Layout wrapper for default page
-                    # Find the Layout route and add default page as first child
-                    # Pattern: <Route element={<Layout />}>
-                    layout_pattern = r'(<Route\s+element=\{<Layout\s*/>\}>\s*\n)'
-                    layout_match = re.search(layout_pattern, content)
-                    if layout_match:
-                        # Insert default page route after Layout opening tag
-                        insert_pos = layout_match.end()
-                        default_route = f'            <Route path="/" element={{<{default_page} />}} />\n'
-                        content = content[:insert_pos] + default_route + content[insert_pos:]
-                    
-                    # Fix 3: Remove any /dashboard route (Dashboard is now at "/")
+                    # Fix 2: Remove any /dashboard route (will be at "/" instead)
                     content = re.sub(
                         r'<Route\s+path="/dashboard"\s+element=\{<Dashboard\s*/>\}\s*/>\s*\n?',
                         '',
                         content
                     )
                     
-                    # Fix 4: Also handle variations of Welcome route
-                    content = re.sub(
-                        r'path="/"\s+element=\{<Welcome',
-                        f'path="/" element={{<{default_page}',
-                        content
-                    )
+                    # Fix 3: Check if Layout wrapper exists
+                    has_layout = '<Route element={<Layout />' in content or '<Route element={<Layout/>' in content
+                    
+                    if has_layout:
+                        # Insert "/" route inside existing Layout wrapper
+                        layout_pattern = r'(<Route\s+element=\{<Layout\s*/>\}>\s*\n)'
+                        layout_match = re.search(layout_pattern, content)
+                        if layout_match:
+                            insert_pos = layout_match.end()
+                            default_route = f'          <Route path="/" element={{<{default_page} />}} />\n'
+                            content = content[:insert_pos] + default_route + content[insert_pos:]
+                            logger.info(f"[ACPX-V2]   Added {default_page} route inside Layout wrapper")
+                    else:
+                        # No Layout wrapper - wrap all routes with Layout
+                        # Find the Routes content
+                        routes_pattern = r'(<Routes>\s*\n)(.*?)(\s*</Routes>)'
+                        routes_match = re.search(routes_pattern, content, re.DOTALL)
+                        
+                        if routes_match:
+                            routes_content = routes_match.group(2)
+                            
+                            # Build new routes with Layout wrapper
+                            new_routes = f'''<Route element={{<Layout />}}>
+          <Route path="/" element={{<{default_page} />}} />
+{routes_content}        </Route>
+'''
+                            content = content[:routes_match.start(2)] + new_routes + content[routes_match.end(2):]
+                            logger.info(f"[ACPX-V2]   Added Layout wrapper with {default_page} at /")
                     
                     if content != original_content:
                         app_tsx_path.write_text(content)
-                        logger.info(f"[ACPX-V2]   ✓ Fixed routing: {default_page} is now at / inside Layout")
-                        print(f"🔴 ACPX-V2-STEP10B-DONE: Routing fixed - {default_page} at / inside Layout")
+                        logger.info(f"[ACPX-V2]   ✓ Fixed routing: {default_page} is now at / with Layout")
+                        print(f"🔴 ACPX-V2-STEP10B-DONE: Routing fixed - {default_page} at / with Layout")
                     else:
                         logger.info("[ACPX-V2]   Routing appears correct")
                         print("🔴 ACPX-V2-STEP10B-DONE: Routing already correct")
