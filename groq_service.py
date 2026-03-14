@@ -13,6 +13,9 @@ from groq import Groq
 
 logger = logging.getLogger(__name__)
 
+# Track if we've already logged the missing API key error
+_GROQ_API_KEY_LOGGED = False
+
 
 class GroqService:
     """Service for interacting with Groq API."""
@@ -24,12 +27,16 @@ class GroqService:
 
     def __init__(self):
         """Initialize Groq service with environment configuration."""
+        global _GROQ_API_KEY_LOGGED
+        
         self.api_key = os.getenv("GROQ_API_KEY")
         self.model = os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
 
-        # Validate API key exists
+        # Validate API key exists - log only once
         if not self.api_key or self.api_key == "your_key_here":
-            logger.error("GROQ_API_KEY not configured or not set")
+            if not _GROQ_API_KEY_LOGGED:
+                logger.error("GROQ_API_KEY not configured or not set")
+                _GROQ_API_KEY_LOGGED = True
             raise ValueError("GROQ_API_KEY is not configured")
 
         # Initialize Groq client
@@ -99,3 +106,71 @@ class GroqService:
             True if API key is set and not the placeholder
         """
         return bool(self.api_key and self.api_key != "your_key_here")
+
+    async def infer_pages(self, description: str) -> List[str]:
+        """
+        Use LLM to infer page names from a product description.
+
+        Args:
+            description: Product/project description
+
+        Returns:
+            List of page names (e.g., ["Dashboard", "Documents", "Settings"])
+        """
+        import json
+
+        prompt = f"""Extract the EXACT page names mentioned in this SaaS app description.
+
+Description: {description}
+
+CRITICAL RULES:
+1. Look for phrases like "with X pages:", "pages:", "main pages:", etc.
+2. Extract ONLY the page names explicitly mentioned in the description
+3. Convert to PascalCase: "Knowledge Base" → "KnowledgeBase", "My Learning" → "MyLearning"
+4. If pages are listed after "pages:", use those EXACT pages
+5. Do NOT add generic pages if specific pages are mentioned
+6. Return 4-8 pages maximum
+
+Examples:
+- "with pages: Dashboard, Tickets, Knowledge Base" → ["Dashboard", "Tickets", "KnowledgeBase"]
+- "four main pages: Dashboard, Courses, My Learning, Certificates" → ["Dashboard", "Courses", "MyLearning", "Certificates"]
+- "Support desk with Tickets, Knowledge Base, Customers" → ["Dashboard", "Tickets", "KnowledgeBase", "Customers"]
+
+Response format (JSON ONLY):
+{{"pages": ["Dashboard", "Tickets", "KnowledgeBase", "Customers"]}}"""
+
+        messages = [{"role": "user", "content": prompt}]
+
+        try:
+            response = await self.generate_chat_completion(messages, max_tokens=200)
+            print(f"🔴 GROQ-RAW-RESPONSE: {response[:500]}")
+
+            # Parse JSON response
+            # Try to extract JSON from response (handle markdown code blocks)
+            response = response.strip()
+            if "```json" in response:
+                response = response.split("```json")[1].split("```")[0].strip()
+            elif "```" in response:
+                response = response.split("```")[1].split("```")[0].strip()
+
+            data = json.loads(response)
+            pages = data.get("pages", [])
+
+            # Validate and clean page names
+            cleaned = []
+            for page in pages:
+                # Remove special characters, ensure PascalCase
+                clean = "".join(c for c in str(page) if c.isalnum() or c.isspace())
+                clean = "".join(word.capitalize() for word in clean.split())
+                if clean and len(clean) < 30:  # Skip absurdly long names
+                    cleaned.append(clean)
+
+            logger.info(f"[Groq] Inferred pages: {cleaned}")
+            print(f"🔴 GROQ-CLEANED-PAGES: {cleaned}")
+            return cleaned
+
+        except Exception as e:
+            logger.error(f"[Groq] Page inference failed: {e}")
+            print(f"🔴 GROQ-ERROR: {e}")
+            # Return sensible defaults
+            return ["Dashboard", "Analytics", "Settings"]

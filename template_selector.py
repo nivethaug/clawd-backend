@@ -14,6 +14,9 @@ from groq_service import GroqService
 
 logger = logging.getLogger(__name__)
 
+# Track if we've already logged the initialization error
+_TEMPLATE_SELECTOR_ERROR_LOGGED = False
+
 
 class TemplateSelector:
     """Service for selecting templates using Groq LLM."""
@@ -45,6 +48,8 @@ Available templates will be provided in the user message with their:
 
     def _initialize(self) -> None:
         """Initialize Groq service and load template registry."""
+        global _TEMPLATE_SELECTOR_ERROR_LOGGED
+        
         try:
             # Initialize Groq
             self.groq_service = GroqService()
@@ -60,7 +65,9 @@ Available templates will be provided in the user message with their:
                 logger.info(f"Template selector: Loaded {len(self.template_registry.get('templates', []))} templates")
 
         except Exception as e:
-            logger.error(f"Failed to initialize template selector: {e}")
+            if not _TEMPLATE_SELECTOR_ERROR_LOGGED:
+                logger.error(f"Failed to initialize template selector: {e}")
+                _TEMPLATE_SELECTOR_ERROR_LOGGED = True
             self.groq_service = None
             self.template_registry = None
 

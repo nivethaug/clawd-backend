@@ -1259,7 +1259,7 @@ class DNSProvisioner:
                 logger.info(f"  Note: DNS propagation takes 5-60 minutes")
                 return True
             else:
-                logger.error(f"Failed to create A record: {result.get("error")}")
+                logger.error(f"Failed to create A record: {result.get('error')}")
                 return False
 
         except Exception as e:
@@ -1845,6 +1845,20 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                     logger.info("✓ Permissions fixed for nginx (755/644)")
             except Exception as perm_error:
                 logger.warning(f"⚠️ Could not fix permissions: {perm_error}")
+                # Don't fail the build, just warn
+            
+            # Step 7: Cleanup node_modules to save disk space
+            logger.info("🧹 Cleaning up node_modules to save disk space...")
+            try:
+                import shutil
+                node_modules_path = frontend_path / "node_modules"
+                if node_modules_path.exists():
+                    shutil.rmtree(node_modules_path)
+                    logger.info(f"✓ Removed node_modules (saved disk space)")
+                else:
+                    logger.info("node_modules not found, skipping cleanup")
+            except Exception as cleanup_error:
+                logger.warning(f"⚠️ Could not remove node_modules: {cleanup_error}")
                 # Don't fail the build, just warn
             
             logger.info("PHASE_5_BUILD_COMPLETE: success")

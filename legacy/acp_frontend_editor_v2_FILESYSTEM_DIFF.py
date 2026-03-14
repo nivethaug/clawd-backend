@@ -13,7 +13,6 @@ This is the correct architecture for tool-using AI agents like Claude.
 """
 
 import os
-import re
 import shutil
 import subprocess
 import logging
@@ -41,10 +40,13 @@ logger = logging.getLogger(__name__)
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 FORBIDDEN_BACKEND = "/root/clawd-backend"
 
-# Allowed directories for ACPX editing (relative to frontend/src - no src/ prefix)
-# Changed to allow-all approach: Everything under src/ is allowed except FORBIDDEN paths
+# Allowed directories for ACPX editing (relative to frontend/src)
 ALLOWED_EDIT_PATHS = [
-    "*"  # Allow all - actual restriction handled by FORBIDDEN_EDIT_PATHS
+    "src/pages",
+    "src/components", 
+    "src/layouts",
+    "src/App.tsx",
+    "src/main.tsx"
 ]
 
 # Forbidden paths that ACPX must NOT modify
@@ -57,7 +59,9 @@ FORBIDDEN_EDIT_PATHS = [
     "tsconfig.json",
     ".env",
     ".env.local",
-    "components/ui"  # UI primitives only - use but don't modify
+    "src/components/ui",
+    "src/lib",
+    "src/utils"
 ]
 
 # File limits - Increased for reliable multi-page execution
@@ -96,14 +100,7 @@ class ACPPathValidator:
         Returns:
             Tuple of (is_allowed, reason)
         """
-        # Handle both absolute and relative paths
-        path = Path(file_path)
-        
-        # If path is relative, join with frontend_src_path
-        if not path.is_absolute():
-            path = self.frontend_src_path / path
-        else:
-            path = path.resolve()
+        path = Path(file_path).resolve()
         
         # Get relative path from frontend_src_path
         try:
@@ -117,12 +114,20 @@ class ACPPathValidator:
             if forbidden in rel_path_str or rel_path_str.startswith(forbidden):
                 return False, f"Forbidden: Cannot modify {forbidden} ({rel_path})"
 
-        # Check 2: Specifically block components/ui (UI library components)
-        if "components/ui" in rel_path_str:
+        # Check 2: Specifically block src/components/ui
+        if "src/components/ui" in rel_path_str or "components/ui" in rel_path_str:
             return False, f"Forbidden: Cannot modify UI components ({rel_path})"
 
-        # Check 3: Allow all except forbidden (simplified approach)
-        # If we reach here, the path is not in forbidden list, so it's allowed
+        # Check 3: Must be in allowed edit paths
+        is_allowed = False
+        for allowed_path in ALLOWED_EDIT_PATHS:
+            if rel_path_str.startswith(allowed_path) or rel_path_str == allowed_path.replace("src/", ""):
+                is_allowed = True
+                break
+        
+        if not is_allowed:
+            return False, f"Forbidden: Path not in allowed edit paths ({rel_path})"
+
         return True, "Allowed"
 
 
@@ -503,10 +508,6 @@ class ACPFrontendEditorV2:
         self.frontend_path = self.frontend_src_path.parent
         self.project_name = project_name
 
-        print(f"🔴 ACPX-V2-INIT: frontend_src_path = {self.frontend_src_path}")
-        print(f"🔴 ACPX-V2-INIT: frontend_path = {self.frontend_path}")
-        print(f"🔴 ACPX-V2-INIT: project_root = {self.frontend_path.parent}")
-
         # Initialize components
         self.validator = ACPPathValidator(frontend_src_path)
         self.snapshot_manager = ACPSnapshotManager(str(self.frontend_path))
@@ -519,7 +520,6 @@ class ACPFrontendEditorV2:
         # Pass project root path (parent of frontend), not frontend path
         # to avoid path doubling in PageManifest which appends frontend/src/
         self.manifest_manager = PageManifest(str(self.frontend_path.parent))
-        print(f"🔴 ACPX-V2-INIT: manifest_manager.pages_path = {self.manifest_manager.pages_path}")
 
     def apply_changes_via_acpx(
         self,
@@ -603,21 +603,10 @@ class ACPFrontendEditorV2:
                 print("🔴 ACPX-V2-STEP3: Scaffolding pages")
                 logger.info(f"[ACPX-V2] Step 3: Scaffolding pages from manifest...")
 
-                print(f"🔴 ACPX-V2-STEP3-PAGES: Pages to scaffold = {required_pages}")
                 print("🔴 ACPX-V2-STEP3-PRE: Calling scaffold_pages()")
                 scaffold_result = self.manifest_manager.scaffold_pages(required_pages, create_placeholder=True)
                 print(f"🔴 ACPX-V2-STEP3-POST: scaffold_pages() returned")
                 print(f"🔴 ACPX-V2-STEP3-POST-VALUE: {scaffold_result}")
-
-                # Verify files were created
-                print("🔴 ACPX-V2-STEP3-VERIFY: Checking created files...")
-                for page in required_pages:
-                    page_file = self.frontend_src_path / "pages" / f"{page}.tsx"
-                    exists = page_file.exists()
-                    print(f"🔴 ACPX-V2-STEP3-VERIFY: {page}.tsx exists = {exists}")
-                    if exists:
-                        size = page_file.stat().st_size
-                        print(f"🔴 ACPX-V2-STEP3-VERIFY: {page}.tsx size = {size} bytes")
 
                 # Check return value type
                 if isinstance(scaffold_result, bool):
@@ -651,13 +640,6 @@ class ACPFrontendEditorV2:
                 logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
                 prompt = self._build_acpx_prompt(goal_description)
                 print(f"🔴 ACPX-V2-STEP5-PROMPT-DONE: Prompt built, length={len(prompt)}")
-                print("=" * 60)
-                print("🔴 ACPX_PROMPT_START:")
-                print(prompt[:2000] if len(prompt) > 2000 else prompt)
-                if len(prompt) > 2000:
-                    print(f"... (truncated, total {len(prompt)} chars)")
-                print("🔴 ACPX_PROMPT_END")
-                print("=" * 60)
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP5-PROMPT-ERROR: {type(e).__name__}: {str(e)}")
                 traceback.print_exc()
@@ -695,7 +677,7 @@ class ACPFrontendEditorV2:
                 import threading
                 
                 HARD_TIMEOUT = 600  # 10 minutes max
-                IDLE_TIMEOUT = 300  # 5 minutes without output (increased from 180s)
+                IDLE_TIMEOUT = 60   # 60 seconds without output
                 
                 process = subprocess.Popen(
                     cmd,
@@ -735,36 +717,36 @@ class ACPFrontendEditorV2:
                     while process.poll() is None:
                         current_time = time.time()
                         elapsed = current_time - start_time
-                        
-                        # Check for new output
-                        if stdout_lines or stderr_lines:
-                            last_output_time = current_time
-                        
-                        idle_time = current_time - last_output_time
-                        
-                        # Hard timeout check
-                        if elapsed > HARD_TIMEOUT:
-                            logger.error(f"[ACPX-V2] 🔴 WATCHDOG: Hard timeout exceeded ({elapsed:.1f}s > {HARD_TIMEOUT}s) — killing process")
-                            print(f"🔴 ACPX-V2-WATCHDOG: Hard timeout exceeded, killing process")
+                    
+                    # Check for new output
+                    if stdout_lines or stderr_lines:
+                        last_output_time = current_time
+                    
+                    idle_time = current_time - last_output_time
+                    
+                    # Hard timeout check
+                    if elapsed > HARD_TIMEOUT:
+                        logger.error(f"[ACPX-V2] 🔴 WATCHDOG: Hard timeout exceeded ({elapsed:.1f}s > {HARD_TIMEOUT}s) — killing process")
+                        print(f"🔴 ACPX-V2-WATCHDOG: Hard timeout exceeded, killing process")
+                        process.kill()
+                        process.wait(timeout=5)
+                        watchdog_killed = True
+                        break
+                    
+                    # Idle timeout check
+                    if idle_time > IDLE_TIMEOUT:
+                        logger.warning(f"[ACPX-V2] ⚠️ WATCHDOG: Idle timeout exceeded ({idle_time:.1f}s > {IDLE_TIMEOUT}s) — terminating process")
+                        print(f"🔴 ACPX-V2-WATCHDOG: Idle timeout exceeded, terminating process")
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
                             process.kill()
                             process.wait(timeout=5)
-                            watchdog_killed = True
-                            break
-                        
-                        # Idle timeout check
-                        if idle_time > IDLE_TIMEOUT:
-                            logger.warning(f"[ACPX-V2] ⚠️ WATCHDOG: Idle timeout exceeded ({idle_time:.1f}s > {IDLE_TIMEOUT}s) — terminating process")
-                            print(f"🔴 ACPX-V2-WATCHDOG: Idle timeout exceeded, terminating process")
-                            process.terminate()
-                            try:
-                                process.wait(timeout=5)
-                            except subprocess.TimeoutExpired:
-                                process.kill()
-                                process.wait(timeout=5)
-                            idle_killed = True
-                            break
-                        
-                        time.sleep(0.5)
+                        idle_killed = True
+                        break
+                    
+                    time.sleep(0.5)
                 
                 except KeyboardInterrupt:
                     # Handle external interrupt gracefully
@@ -797,10 +779,16 @@ class ACPFrontendEditorV2:
                     print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Reason=hard_timeout")
                     return result
                 
-                # Don't immediately rollback on idle timeout - check if files were modified
                 if idle_killed:
-                    logger.warning(f"[ACPX-V2] ⚠️ Idle timeout exceeded ({IDLE_TIMEOUT}s) - checking if edits succeeded...")
-                    print(f"🔴 ACPX-V2-IDLE-TIMEOUT: Checking if files were modified before rolling back")
+                    self.snapshot_manager.restore_snapshot()
+                    self.snapshot_manager.cleanup_snapshot()
+                    result = {
+                        "success": False,
+                        "message": f"ACPX idle timeout exceeded ({IDLE_TIMEOUT}s no output) — process terminated",
+                        "rollback": True
+                    }
+                    print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Reason=idle_timeout")
+                    return result
                 
                 # Tolerant error handling: ignore harmless JSON-RPC notification errors
                 # and handle ACPX idle timeout (returns -6 even when edits succeed)
@@ -808,7 +796,7 @@ class ACPFrontendEditorV2:
                 if "session/update" in stderr_output and "Invalid params" in stderr_output:
                     logger.warning("[ACPX] Ignoring JSON-RPC notification error (session/update Invalid params)")
                     should_fail = False
-                elif return_code == -6 or idle_killed:
+                elif return_code == -6:
                     logger.warning("[ACPX] ACPX idle timeout detected but edits may have succeeded")
                     should_fail = False
 
@@ -870,21 +858,18 @@ class ACPFrontendEditorV2:
                 files_modified = diff['modified']
 
                 logger.info(f"[ACPX-V2]   Files added: {len(files_added)}")
-                print(f"🔴 FILES_ADDED: {files_added}")
                 for f in files_added[:10]:
                     logger.info(f"[ACPX-V2]     + {f}")
                 if len(files_added) > 10:
                     logger.info(f"[ACPX-V2]     ... and {len(files_added) - 10} more")
 
                 logger.info(f"[ACPX-V2]   Files removed: {len(files_removed)}")
-                print(f"🔴 FILES_REMOVED: {files_removed}")
                 for f in files_removed[:10]:
                     logger.info(f"[ACPX-V2]     - {f}")
                 if len(files_removed) > 10:
                     logger.info(f"[ACPX-V2]     ... and {len(files_removed) - 10} more")
 
                 logger.info(f"[ACPX-V2]   Files modified: {len(files_modified)}")
-                print(f"🔴 FILES_MODIFIED: {files_modified}")
                 for f in files_modified[:10]:
                     logger.info(f"[ACPX-V2]     ~ {f}")
                 if len(files_modified) > 10:
@@ -928,15 +913,11 @@ class ACPFrontendEditorV2:
                 print("🔴 ACPX-V2-STEP9: Validating paths")
                 logger.info(f"[ACPX-V2] Step 8: Validating paths...")
                 for file_path in files_added + files_removed:
-                    # file_path is already a relative path string from compute_diff
-                    # Convert to string in case it's a Path object
-                    rel_path = str(file_path) if not isinstance(file_path, str) else file_path
-                    print(f"🔴 ACPX-V2-STEP9-CHECK: Validating '{rel_path}'")
+                    rel_path = str(file_path.relative_to(self.frontend_src_path))
                     allowed, reason = self.validator.is_path_allowed(rel_path)
                     if not allowed:
-                        logger.error(f"[ACPX-V2] ❌ Path validation failed for '{rel_path}': {reason}")
-                        print(f"🔴 ACPX-V2-STEP9-ERROR: Path validation failed for '{rel_path}': {reason}")
-                        print(f"🔴 ACPX-V2-STEP9-ERROR: Rolling back to snapshot")
+                        logger.error(f"[ACPX-V2] ❌ Path validation failed: {reason}")
+                        print(f"🔴 ACPX-V2-STEP9-ERROR: Path validation failed, rolling back")
                         self.snapshot_manager.restore_snapshot()
                         self.snapshot_manager.cleanup_snapshot()
                         result = {
@@ -973,199 +954,40 @@ class ACPFrontendEditorV2:
                 # Don't rollback on guardrail errors, just log
                 logger.warning(f"[ACPX-V2] Guardrail enforcement failed but continuing: {str(e)}")
 
-            # Step 10.5: FIX ROUTING - Force Dashboard as default route with Layout wrapper
+            # Step 10: Run build gate (AFTER guardrails to prevent build errors)
             try:
-                print("🔴 ACPX-V2-STEP10B: Fixing routing (programmatic)")
-                logger.info("[ACPX-V2] Step 10.5: Fixing routing programmatically...")
-                
-                # Determine default page
-                default_page = list(self.allowed_pages)[0] if self.allowed_pages else "Dashboard"
-                app_tsx_path = self.frontend_src_path / "App.tsx"
-                
-                if app_tsx_path.exists():
-                    content = app_tsx_path.read_text()
-                    original_content = content
-                    
-                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Original content length = {len(content)}")
-                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Looking for routes at '/'")
-                    
-                    # Count routes at "/" before fix
-                    routes_at_root = re.findall(r'<Route\s+path="/"', content)
-                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Found {len(routes_at_root)} routes at '/' before fix")
-                    
-                    # Fix 1: Remove ALL routes at "/" (duplicates cause blank page)
-                    # Pattern matches: <Route path="/" element={<Welcome />} />
-                    # Also matches: <Route path="/" element={<Dashboard />}/>
-                    # Handles inline routes (multiple on same line)
-                    content = re.sub(
-                        r'<Route\s+path="/"\s+element=\{<[^>]+>\s*/>\s*\}\s*/>',
-                        '',
-                        content
-                    )
-                    
-                    # Verify removal
-                    routes_at_root_after = re.findall(r'<Route\s+path="/"', content)
-                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Found {len(routes_at_root_after)} routes at '/' after removal")
-                    
-                    # Fix 2: Remove any /dashboard route (will be at "/" instead)
-                    content = re.sub(
-                        r'<Route\s+path="/dashboard"\s+element=\{<Dashboard\s*/>\s*\}\s*/>',
-                        '',
-                        content
-                    )
-                    
-                    # Fix 3: Check if Layout wrapper exists
-                    has_layout = '<Route element={<Layout />' in content or '<Route element={<Layout/>' in content
-                    print(f"🔴 ACPX-V2-STEP10B-DEBUG: Layout wrapper exists = {has_layout}")
-                    
-                    if has_layout:
-                        # Insert "/" route inside existing Layout wrapper
-                        layout_pattern = r'(<Route\s+element=\{<Layout\s*/>\}>\s*\n)'
-                        layout_match = re.search(layout_pattern, content)
-                        if layout_match:
-                            insert_pos = layout_match.end()
-                            default_route = f'          <Route path="/" element={{<{default_page} />}} />\n'
-                            content = content[:insert_pos] + default_route + content[insert_pos:]
-                            logger.info(f"[ACPX-V2]   Added {default_page} route inside Layout wrapper")
-                    else:
-                        # No Layout wrapper - wrap all routes with Layout
-                        # Find the Routes content (handles both inline and multiline)
-                        routes_pattern = r'<Routes>(.*?)</Routes>'
-                        routes_match = re.search(routes_pattern, content, re.DOTALL)
-                        
-                        if routes_match:
-                            routes_content = routes_match.group(1).strip()
-                            
-                            # Build new routes with Layout wrapper and proper formatting
-                            # Parse individual routes and format them nicely
-                            route_pattern = r'<Route\s+[^>]+/>'
-                            individual_routes = re.findall(route_pattern, routes_content)
-                            
-                            # Format routes with Layout wrapper
-                            formatted_routes = '\n        '.join([f'{r}' for r in individual_routes])
-                            
-                            new_routes = f'''<Route element={{<Layout />}}>
-          <Route path="/" element={{<{default_page} />}} />
-        {formatted_routes}
-      </Route>'''
-                            
-                            # Replace the entire Routes content
-                            content = content[:routes_match.start(1)] + new_routes + content[routes_match.end(1):]
-                            logger.info(f"[ACPX-V2]   Added Layout wrapper with {default_page} at /")
-                    
-                    if content != original_content:
-                        app_tsx_path.write_text(content)
-                        logger.info(f"[ACPX-V2]   ✓ Fixed routing: {default_page} is now at / with Layout")
-                        print(f"🔴 ACPX-V2-STEP10B-DONE: Routing fixed - {default_page} at / with Layout")
-                    else:
-                        logger.info("[ACPX-V2]   Routing appears correct")
-                        print("🔴 ACPX-V2-STEP10B-DONE: Routing already correct")
-                else:
-                    logger.warning("[ACPX-V2]   App.tsx not found, skipping routing fix")
-                    print("🔴 ACPX-V2-STEP10B-SKIP: App.tsx not found")
-                    
-            except Exception as e:
-                print(f"🔴 ACPX-V2-STEP10B-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                logger.warning(f"[ACPX-V2] Routing fix failed but continuing: {str(e)}")
+                print("🔴 ACPX-V2-STEP11: Running build gate")
+                logger.info(f"[ACPX-V2] Step 10: Running build gate (npm install && npm run build)...")
+                build_success, build_output = self.build_gate.run_build()
 
-            # Step 10.6: Fix Layout components - Replace {children} with <Outlet />
-            try:
-                print("🔴 ACPX-V2-STEP10C: Fixing Layout components (Outlet)")
-                logger.info("[ACPX-V2] Step 10.6: Fixing Layout components to use Outlet...")
-                
-                # Find all Layout files
-                layout_patterns = [
-                    self.frontend_src_path / "layout" / "Layout.tsx",
-                    self.frontend_src_path / "layouts" / "Layout.tsx",
-                    self.frontend_src_path / "app" / "layouts" / "AppLayout.tsx",
-                ]
-                
-                layout_files = [p for p in layout_patterns if p.exists()]
-                # Also search for any file with "Layout" in the name
-                for layout_dir in ["layout", "layouts", "app/layouts"]:
-                    layout_path = self.frontend_src_path / layout_dir
-                    if layout_path.exists():
-                        layout_files.extend(layout_path.glob("*Layout*.tsx"))
-                
-                layout_files = list(set(layout_files))  # Remove duplicates
-                
-                for layout_file in layout_files:
-                    try:
-                        content = layout_file.read_text()
-                        original = content
-                        
-                        # Fix 1: Add Outlet import if missing
-                        if "Outlet" not in content and "from 'react-router-dom'" in content:
-                            content = re.sub(
-                                r"import\s+\{([^}]+)\}\s+from\s+'react-router-dom'",
-                                r"import {\1, Outlet } from 'react-router-dom'",
-                                content
-                            )
-                        elif "Outlet" not in content:
-                            # Add import at top after other imports
-                            import_line = "import { Outlet } from 'react-router-dom';\n"
-                            # Find last import line
-                            import_match = re.search(r"(^import.*?;[\s]*)+", content, re.MULTILINE)
-                            if import_match:
-                                insert_pos = import_match.end()
-                                content = content[:insert_pos] + import_line + content[insert_pos:]
-                        
-                        # Fix 2: Remove children prop from function signature
-                        content = re.sub(
-                            r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*(?::[^}]+)?\s*\}\s*:\s*[^)]+\)',
-                            r'\1()',
-                            content
-                        )
-                        content = re.sub(
-                            r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*\}\s*:\s*\{\s*children:\s*React\.ReactNode\s*\}\s*\)',
-                            r'\1()',
-                            content
-                        )
-                        
-                        # Fix 3: Remove children interface
-                        content = re.sub(
-                            r'interface\s+\w*LayoutProps\s*\{\s*children\s*(?::\s*React\.ReactNode)?\s*\}\s*\n?',
-                            '',
-                            content,
-                            flags=re.IGNORECASE
-                        )
-                        
-                        # Fix 4: Replace {children} with <Outlet />
-                        content = re.sub(r'\{children\}', '<Outlet />', content)
-                        content = re.sub(r'\{\s*children\s*\}', '<Outlet />', content)
-                        
-                        if content != original:
-                            layout_file.write_text(content)
-                            logger.info(f"[ACPX-V2]   ✓ Fixed {layout_file.name}: replaced {{children}} with <Outlet />")
-                            print(f"🔴 ACPX-V2-STEP10C-FIX: {layout_file.name} - children → Outlet")
-                    
-                    except Exception as e:
-                        logger.warning(f"[ACPX-V2]   Failed to fix {layout_file}: {e}")
-                        print(f"🔴 ACPX-V2-STEP10C-WARN: Failed to fix {layout_file.name}: {e}")
-                
-                print("🔴 ACPX-V2-STEP10C-DONE: Layout components fixed")
-                
-            except Exception as e:
-                print(f"🔴 ACPX-V2-STEP10C-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                logger.warning(f"[ACPX-V2] Layout fix failed but continuing: {str(e)}")
+                if not build_success:
+                    logger.error(f"[ACPX-V2] ❌ Build failed")
+                    logger.error(f"[ACPX-V2]   Build output (last 500 chars):\n{build_output[-500:]}")
+                    print("🔴 ACPX-V2-STEP11-ERROR: Build failed, rolling back")
+                    self.snapshot_manager.restore_snapshot()
+                    self.snapshot_manager.cleanup_snapshot()
+                    result = {
+                        "success": False,
+                        "message": "Build failed",
+                        "build_output": build_output,
+                        "rollback": True
+                    }
+                    print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
+                    return result
 
-            # Step 11: Build gate skipped - build handled by infrastructure pipeline
-            try:
-                print("🔴 ACPX-V2-STEP11: Build gate skipped")
-                logger.info("[ACPX-V2] Build gate skipped — build handled by infrastructure pipeline")
-                print("🔴 ACPX-V2-STEP11-DONE: Build gate skipped")
+                logger.info(f"[ACPX-V2] ✓ Build succeeded!")
+                print("🔴 ACPX-V2-STEP11-DONE: Build gate passed")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP11-ERROR: {type(e).__name__}: {str(e)}")
                 traceback.print_exc()
-                # Don't fail on skip errors
-                logger.warning(f"[ACPX-V2] Build gate skip had issues but continuing: {str(e)}")
+                self.snapshot_manager.restore_snapshot()
+                self.snapshot_manager.cleanup_snapshot()
+                return {"success": False, "message": f"Build execution failed: {str(e)}"}
 
-            # Step 12: Success - cleanup snapshot
+            # Step 11: Success - cleanup snapshot
             try:
                 print("🔴 ACPX-V2-STEP12: Cleaning up snapshot")
-                logger.info(f"[ACPX-V2] Step 12: Cleanup snapshot...")
+                logger.info(f"[ACPX-V2] Step 10: Cleanup snapshot...")
                 self.snapshot_manager.cleanup_snapshot()
                 print("🔴 ACPX-V2-STEP12-DONE: Snapshot cleaned up")
             except Exception as e:
@@ -1174,96 +996,14 @@ class ACPFrontendEditorV2:
                 # Don't fail on cleanup errors
                 logger.warning(f"[ACPX-V2] Snapshot cleanup failed but returning success: {str(e)}")
 
-            # Step 13: Post-process - Detect and populate empty/placeholder pages
-            try:
-                print("🔴 ACPX-V2-STEP13: Checking for empty pages")
-                logger.info("[ACPX-V2] Step 13: Checking for empty/placeholder pages...")
-                
-                empty_pages = []
-                pages_dir = self.frontend_src_path / "pages"
-                
-                if pages_dir.exists():
-                    for page_file in pages_dir.glob("*.tsx"):
-                        content = page_file.read_text()
-                        
-                        # Check for placeholder content
-                        is_empty = (
-                            len(content) < 500 or  # Very short file
-                            "Page content will be generated by AI" in content or
-                            "placeholder" in content.lower() or
-                            content.strip().endswith("return <div></div>;") or
-                            content.strip().endswith("return null;")
-                        )
-                        
-                        if is_empty:
-                            page_name = page_file.stem
-                            empty_pages.append(page_name)
-                            logger.warning(f"[ACPX-V2]   Empty/placeholder page detected: {page_name}")
-                            print(f"🔴 ACPX-V2-STEP13-EMPTY: {page_name}.tsx is empty/placeholder")
-                
-                if empty_pages:
-                    logger.warning(f"[ACPX-V2]   Found {len(empty_pages)} empty pages: {empty_pages}")
-                    print(f"🔴 ACPX-V2-STEP13-EMPTY-COUNT: {len(empty_pages)} empty pages detected")
-                    
-                    # Re-run ACPX to populate empty pages
-                    logger.info("[ACPX-V2]   Re-running ACPX to populate empty pages...")
-                    print("🔴 ACPX-V2-STEP13-RERUN: Re-running ACPX for empty pages")
-                    
-                    empty_pages_prompt = f"""Complete the following empty pages with full content:
-
-EMPTY PAGES TO POPULATE:
-{chr(10).join([f"- {page}" for page in empty_pages])}
-
-CRITICAL: Each page must have:
-1. Full component implementation with real content
-2. Proper imports (lucide-react icons, UI components, etc.)
-3. Mock data for realistic UI
-4. Responsive design with Tailwind classes
-5. Loading states and error handling
-
-DO NOT leave placeholder text like "Page content will be generated by AI".
-DO NOT create empty components.
-
-Implement complete, production-ready pages now."""
-                    
-                    # Run ACPX again with shorter timeout for empty pages
-                    cmd = [
-                        "acpx",
-                        "--cwd", str(self.frontend_src_path),
-                        "--format", "quiet",
-                        "claude",
-                        "exec",
-                        str(empty_pages_prompt)
-                    ]
-                    
-                    logger.info(f"[ACPX-V2]   Re-running ACPX for {len(empty_pages)} empty pages")
-                    
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=180  # 3 minutes for empty pages
-                    )
-                    
-                    logger.info(f"[ACPX-V2]   ACPX re-run completed (code {result.returncode})")
-                    print(f"🔴 ACPX-V2-STEP13-RERUN-DONE: ACPX completed for empty pages")
-                else:
-                    logger.info("[ACPX-V2]   ✓ All pages have content")
-                    print("🔴 ACPX-V2-STEP13-DONE: All pages have content")
-                    
-            except Exception as e:
-                print(f"🔴 ACPX-V2-STEP13-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                logger.warning(f"[ACPX-V2] Empty page check failed but continuing: {str(e)}")
-
             # Final result
             result = {
                 "success": True,
-                "message": "ACPX changes applied successfully (build will run in infrastructure pipeline)",
+                "message": "ACPX changes applied successfully",
                 "files_added": len(files_added),
                 "files_modified": len(files_modified),
                 "files_removed": len(files_removed),
-                "build_output": "Build skipped - handled by infrastructure pipeline",
+                "build_output": build_output,
                 "rollback": False
             }
             print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added')}, Modified={result.get('files_modified')}")
@@ -1466,7 +1206,6 @@ Provide ONLY the JSON list, nothing else."""
             List of required page names
         """
         logger.info("[Planner] Extracting required pages from prompt...")
-        print(f"🔴 PLANNER-INPUT: {goal_description[:200]}...")
 
         required_pages = []
 
@@ -1490,57 +1229,30 @@ Provide ONLY the JSON list, nothing else."""
 
         desc_lower = goal_description.lower()
 
-        # Step 1: Try Groq AI inference first (most reliable)
-        try:
-            from groq_service import GroqService
-            groq = GroqService()
-            import asyncio
-            inferred_pages = asyncio.run(groq.infer_pages(goal_description))
-            if inferred_pages:
-                required_pages.extend(inferred_pages)
-                logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
-                print(f"🔴 PLANNER-GROQ: Inferred pages = {inferred_pages}")
-        except Exception as e:
-            logger.warning(f"[Planner] Groq inference failed, falling back to keyword matching: {e}")
-            print(f"🔴 PLANNER-GROQ-ERROR: {e}")
-
-        # Step 2: Try to load page manifest (Phase 5 - NEW)
+        # Step 1: Try to load page manifest (Phase 5 - NEW)
         manifest_pages = None
         if hasattr(self, 'manifest_manager') and self.manifest_manager:
             manifest_pages = self.manifest_manager.get_required_pages()
             if manifest_pages:
                 logger.info(f"[Planner] Using manifest pages: {manifest_pages}")
-                # Merge with inferred pages, avoiding duplicates
-                for page in manifest_pages:
-                    if page not in required_pages:
-                        required_pages.append(page)
+                required_pages.extend(manifest_pages)
             else:
-                logger.info("[Planner] No manifest found")
+                logger.info("[Planner] No manifest found, will use inference or keywords")
 
-        # Step 3: Extract explicit page lists (if Groq failed or returned few pages)
+        # Step 2: Extract explicit page lists (highest priority)
         # Matches patterns like: "pages: Dashboard, Documents, Templates"
-        # FIXED: Stop at period to avoid capturing entire description
+        # Or: "with 10 pages: Dashboard, Documents, Templates..."
         import re
-        explicit_list_pattern = r'pages?:\s*([A-Za-z,\s]+?)(?:\.|$)'
+        explicit_list_pattern = r'pages?:\s*(.+)'
         explicit_match = re.search(explicit_list_pattern, goal_description, re.IGNORECASE)
 
-        if explicit_match and len(required_pages) < 3:
+        if explicit_match:
             pages_str = explicit_match.group(1)
             # Normalize and split by comma
             explicit_pages = [p.strip() for p in pages_str.split(',')]
 
-            # Conjunctions to strip from page names
-            conjunctions = ['and', 'or', '&']
-
             # Normalize page names: "Document Editor" → "DocumentEditor"
             for page in explicit_pages:
-                # Strip leading conjunctions (e.g., "and Audience" → "Audience")
-                page_clean = page.strip().lower()
-                for conj in conjunctions:
-                    if page_clean.startswith(conj + ' '):
-                        page = page[len(conj):].strip()
-                        break
-
                 # Remove leading/trailing whitespace and special chars
                 normalized = re.sub(r'\s+', '', page.strip().title())
                 # Skip empty strings or strings with only special chars
@@ -1550,19 +1262,20 @@ Provide ONLY the JSON list, nothing else."""
 
             logger.info(f"[Planner] Explicit page list detected: {len(required_pages)} pages")
 
-        # Step 4: Keyword matching (only if Groq returned fewer than 3 pages)
-        # Use word boundaries to avoid false matches (e.g., "sign" in "design")
-        if len(required_pages) < 3:
-            for page_name, keywords in PAGE_KEYWORDS.items():
-                if page_name not in required_pages:  # Skip if already in list
-                    # Use word boundary matching to avoid partial matches
-                    for keyword in keywords:
-                        pattern = r'\b' + re.escape(keyword) + r'\b'
-                        if re.search(pattern, desc_lower):
-                            required_pages.append(page_name)
-                            break  # Found match, move to next page
+        # Step 3: AI Page Inference (if no explicit pages found) - NEW
+        if not explicit_match:
+            logger.info("[Planner] Triggering AI page inference")
+            logger.info(f"[Planner] Description for inference: {goal_description[:200]}...")
+            inferred_pages = self._ai_infer_pages(goal_description)
+            required_pages.extend(inferred_pages)
+            logger.info(f"[Planner] AI inferred pages: {inferred_pages}")
 
-        print(f"🔴 PLANNER-AFTER-KEYWORDS: Pages = {required_pages}")
+        # Step 4: Keyword matching (if explicit list not found or incomplete)
+        desc_lower = goal_description.lower()
+        for page_name, keywords in PAGE_KEYWORDS.items():
+            if page_name not in required_pages:  # Skip if already in explicit list
+                if any(keyword in desc_lower for keyword in keywords):
+                    required_pages.append(page_name)
 
         # Step 5: SaaS default fallback (if less than 3 pages detected)
         if len(required_pages) < 3:
@@ -1574,8 +1287,6 @@ Provide ONLY the JSON list, nothing else."""
 
         # Step 6: Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
-
-        print(f"🔴 PLANNER-FINAL: Pages = {required_pages}")
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
@@ -1601,9 +1312,6 @@ Provide ONLY the JSON list, nothing else."""
         required_pages = self._extract_required_pages_from_prompt(goal_description)
         required_components = []
 
-        print(f"🔴 PLANNER-OUTPUT: Required pages = {required_pages}")
-        print(f"🔴 PLANNER-OUTPUT: Page count = {len(required_pages)}")
-
         # Build required artifacts list
         required_pages_list = required_pages
         required_components_list = list(set(required_components))
@@ -1618,9 +1326,6 @@ Provide ONLY the JSON list, nothing else."""
         # Phase 4: Build page specs section (NEW)
         page_specs_section = self._build_page_specs_section(required_pages)
 
-        # Determine which page should be the default route
-        default_page = required_pages_list[0] if required_pages_list else "Dashboard"
-
         return f"""You are editing a React + Vite + TypeScript SaaS application.
 
 Project Name: {self.project_name}
@@ -1629,47 +1334,6 @@ Project Description: {goal_description}
 YOUR TASK
 
 Transform the existing template into a production-ready application based on the project description above.
-
-🚨🚨🚨 CRITICAL ROUTING FIX - MUST DO FIRST 🚨🚨🚨
-
-BEFORE YOU DO ANYTHING ELSE, FIX THE ROUTING:
-
-1. READ src/App.tsx
-2. FIND the Welcome route at path="/"
-3. DELETE or REPLACE it with {default_page} at path="/"
-
-CURRENT STATE (BROKEN - causes blank page):
-```tsx
-<Routes>
-  <Route path="/" element={{<Welcome />}} />           ← DELETE THIS LINE
-  <Route path="/" element={{<{default_page} />}} />    ← DUPLICATE! Also DELETE
-  <Route path="/team" element={{<Team />}} />
-  ...
-</Routes>
-```
-
-REQUIRED STATE (FIXED):
-```tsx
-<Routes>
-  <Route element={{<Layout />}}>
-    <Route path="/" element={{<{default_page} />}} />  ← ONLY ONE route at "/"
-    <Route path="/team" element={{<Team />}} />
-    ...
-  </Route>
-</Routes>
-```
-
-⚠️ ROUTING RULES (MANDATORY):
-1. DELETE ALL routes with path="/" (there may be MULTIPLE duplicates)
-2. Keep only ONE route at path="/" for {default_page}
-3. All routes MUST be inside <Route element={{<Layout />}}> wrapper
-4. If no Layout wrapper exists, ADD IT
-5. DO NOT leave Welcome at path="/"
-6. DO NOT create duplicate routes at path="/"
-
-FAILURE TO FIX ROUTING = BROKEN APP (blank page)
-
-Verify routing is correct BEFORE creating pages!
 
 PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
 
@@ -1693,8 +1357,6 @@ PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
 
 4. FINAL VERIFICATION CHECKLIST:
    Before marking task complete, verify:
-   - [ ] ROUTING FIXED: Welcome route removed, {default_page} at "/" (ONLY ONE)
-   - [ ] ROUTING FIXED: All routes inside Layout wrapper
    - [ ] ONLY pages from REQUIRED PAGES list exist in src/pages/
    - [ ] NO unauthorized pages were created
    - [ ] All required pages are complete
@@ -1728,10 +1390,9 @@ DO NOT modify:
 
 COMPLETION CHECKLIST
 
-✓ ROUTING FIXED: Welcome route removed, {default_page} at "/" (ONLY ONE route)
-✓ ROUTING FIXED: All routes inside <Route element={{<Layout />}}> wrapper
 ✓ All required pages created in src/pages/ (EXACT file names)
 ✓ All required components created in src/components/
+✓ Routing updated in src/App.tsx
 ✓ Navigation/sidebar updated
 ✓ Responsive design implemented
 ✓ Code is production-ready
@@ -1741,13 +1402,6 @@ WORKING METHODOLOGY
 
 You must work systematically through ALL required pages.
 
-STEP 0: FIX ROUTING FIRST (MANDATORY)
-1. READ src/App.tsx immediately
-2. DELETE ALL routes with path="/" (remove duplicates)
-3. ADD {default_page} at path="/" inside Layout wrapper
-4. VERIFY routing is correct before continuing
-
-STEP 1-N: CREATE PAGES
 1. Read the project description, page templates, and page specifications carefully
 2. Plan your approach using BOTH templates and specs as guidance
 3. Execute step by step following page templates and specifications
@@ -1758,18 +1412,16 @@ STEP 1-N: CREATE PAGES
 
 EXECUTION RULES
 
-1. FIX ROUTING FIRST - this is your FIRST task
-2. Work through pages ONE AT A TIME using page templates
-3. Complete each page fully before moving to the next
-4. Use EXACT page names from REQUIRED PAGES list
-5. Do not skip any required page
-6. Do not stop early - continue until checklist is 100% complete
-7. Only mark task complete when ALL checklist items are done
-8. Use page templates as guidance but adapt to existing code structure
+1. Work through pages ONE AT A TIME using page templates
+2. Complete each page fully before moving to the next
+3. Use EXACT page names from REQUIRED PAGES list
+4. Do not skip any required page
+5. Do not stop early - continue until checklist is 100% complete
+6. Only mark task complete when ALL checklist items are done
+7. Use page templates as guidance but adapt to existing code structure
 
 TECHNICAL REQUIREMENTS
 
-- Fix routing BEFORE creating pages
 - Keep the code buildable (npm run build must succeed)
 - Use existing UI components from src/components/ui/
 - Follow existing code patterns and style
@@ -1777,84 +1429,6 @@ TECHNICAL REQUIREMENTS
 - Do not introduce placeholder content unless required
 - Follow page templates AND page specifications for professional UI
 - Ensure all UI elements from page specs are implemented
-
-⚠️ CRITICAL: LAYOUT COMPONENT RULES ⚠️
-
-When creating or modifying Layout components for React Router:
-
-❌ WRONG - Using children prop (pages won't render):
-```tsx
-export function Layout({{ children }}: {{ children: React.ReactNode }}) {{
-  return (
-    <div>
-      <Sidebar />
-      <main>{{children}}</main>
-    </div>
-  );
-}}
-```
-
-✅ CORRECT - Using Outlet for React Router nested routes:
-```tsx
-import {{ Outlet }} from 'react-router-dom';
-
-export function Layout() {{
-  return (
-    <div>
-      <Sidebar />
-      <main><Outlet /></main>  ← Use Outlet, NOT children
-    </div>
-  );
-}}
-```
-
-WHY: React Router nested routes use <Outlet /> to render child routes. The children prop won't work with:
-```tsx
-<Route element={{<Layout />}}>
-  <Route path="/" element={{<Dashboard />}} />  ← Renders at <Outlet />, not {{children}}
-</Route>
-```
-
-⚠️ CRITICAL: PAGE COMPONENT RULES ⚠️
-
-DO NOT wrap page components in Layout:
-- ❌ WRONG: `export default function Dashboard() {{ return <Layout><div>...</div></Layout> }}`
-- ✅ CORRECT: `export default function Dashboard() {{ return <div>...</div> }}`
-
-The Layout is ALREADY provided by the router at App.tsx level:
-```tsx
-<Route element={{<Layout />}}>  ← Layout wrapper here
-  <Route path="/" element={{<Dashboard />}} />  ← Page renders inside Layout's <Outlet />
-</Route>
-```
-
-Pages should return content that renders inside Layout's <Outlet />, NOT wrap themselves in Layout.
-
-DO NOT import or use Layout component in page files!
-
-⚠️ CRITICAL: LINK/NAVIGATION COMPONENTS ⚠️
-
-When creating navigation links, ALWAYS wrap multiple children in a single element:
-
-❌ WRONG - Multiple children cause React.Children.only error:
-```tsx
-<Link to="/dashboard">
-  <Icon />
-  Dashboard
-</Link>
-```
-
-✅ CORRECT - Single wrapper element:
-```tsx
-<Link to="/dashboard">
-  <span className="flex items-center gap-2">
-    <Icon />
-    Dashboard
-  </span>
-</Link>
-```
-
-Same rule applies to: Button, NavLink, and any component expecting single child.
 
 IMPLEMENTATION
 
@@ -1931,17 +1505,6 @@ Just implement the changes using your available tools.
 
             # Skip always-allowed pages
             if page_name in always_allowed:
-                continue
-
-            # Remove pages starting with conjunctions (e.g., "AndAudience", "OrSettings")
-            conjunctions = ['And', 'Or', '&']
-            if any(page_name.startswith(conj) for conj in conjunctions):
-                logger.warning(f"[Guardrail] Removing page with leading conjunction: {page_name}")
-                try:
-                    page_file.unlink()
-                    unauthorized_removed += 1
-                except Exception as e:
-                    logger.error(f"[Guardrail] Failed to remove {page_name}: {e}")
                 continue
 
             # Check if page is in allowed whitelist
