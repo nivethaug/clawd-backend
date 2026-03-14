@@ -13,6 +13,7 @@ This is the correct architecture for tool-using AI agents like Claude.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import logging
