@@ -1379,8 +1379,18 @@ Provide ONLY the JSON list, nothing else."""
             # Normalize and split by comma
             explicit_pages = [p.strip() for p in pages_str.split(',')]
 
+            # Conjunctions to strip from page names
+            conjunctions = ['and', 'or', '&']
+
             # Normalize page names: "Document Editor" → "DocumentEditor"
             for page in explicit_pages:
+                # Strip leading conjunctions (e.g., "and Audience" → "Audience")
+                page_clean = page.strip().lower()
+                for conj in conjunctions:
+                    if page_clean.startswith(conj + ' '):
+                        page = page[len(conj):].strip()
+                        break
+
                 # Remove leading/trailing whitespace and special chars
                 normalized = re.sub(r'\s+', '', page.strip().title())
                 # Skip empty strings or strings with only special chars
@@ -1734,6 +1744,17 @@ Just implement the changes using your available tools.
 
             # Skip always-allowed pages
             if page_name in always_allowed:
+                continue
+
+            # Remove pages starting with conjunctions (e.g., "AndAudience", "OrSettings")
+            conjunctions = ['And', 'Or', '&']
+            if any(page_name.startswith(conj) for conj in conjunctions):
+                logger.warning(f"[Guardrail] Removing page with leading conjunction: {page_name}")
+                try:
+                    page_file.unlink()
+                    unauthorized_removed += 1
+                except Exception as e:
+                    logger.error(f"[Guardrail] Failed to remove {page_name}: {e}")
                 continue
 
             # Check if page is in allowed whitelist
