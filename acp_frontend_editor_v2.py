@@ -47,6 +47,17 @@ ALLOWED_EDIT_PATHS = [
     "components", 
     "layouts",
     "layout",      # Some templates use singular 'layout' folder
+    "hooks",       # Custom React hooks
+    "lib",         # Utility functions
+    "utils",       # Utility functions
+    "types",       # TypeScript type definitions
+    "context",     # React context providers
+    "contexts",    # React context providers (plural variant)
+    "services",    # API service functions
+    "api",         # API functions
+    "store",       # State management
+    "styles",      # CSS/style files
+    "features",    # Feature-based organization
     "App.tsx",
     "main.tsx"
 ]
@@ -61,9 +72,7 @@ FORBIDDEN_EDIT_PATHS = [
     "tsconfig.json",
     ".env",
     ".env.local",
-    "components/ui",
-    "lib",
-    "utils"
+    "components/ui"  # UI primitives only - use but don't modify
 ]
 
 # File limits - Increased for reliable multi-page execution
