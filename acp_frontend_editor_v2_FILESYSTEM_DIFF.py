@@ -1047,31 +1047,41 @@ class ACPFrontendEditorV2:
 
         logger.info(f"[Planner] Running AI page inference for: {goal_description[:100]}...")
 
-        # Build inference prompt
-        inference_prompt = f"""You are planning the page structure for a SaaS application.
+        # Build inference prompt - Prioritize EXPLICIT page extraction
+        inference_prompt = f"""You are extracting page names from a SaaS application description.
 
 Product description:
 {goal_description}
 
-Your task:
-Return a list of 5-10 pages that would be appropriate for this application.
+CRITICAL TASK: Extract EXPLICITLY mentioned pages FIRST
 
-Rules:
-1. Consider the product type (CRM, analytics, document management, etc.)
-2. Think about standard SaaS pages (Dashboard, Settings, etc.)
-3. Be specific with page names (not generic like "MainPage")
-4. Return ONLY a JSON list of page names
-5. Do NOT include explanations or extra text
+Step 1: Look for explicit page mentions
+- Scan for phrases like "pages: X, Y, Z" or "main pages: X, Y, Z"
+- Extract page names EXACTLY as written (preserve capitalization)
+- If description says "four main pages: Dashboard, Tickets, Assets, and Requests" → extract exactly those 4 pages
+
+Step 2: Only if NO explicit pages found, then infer
+- Consider product type (CRM, analytics, document management, etc.)
+- Think about standard SaaS pages (Dashboard, Settings, etc.)
+- Be specific with page names (not generic like "MainPage")
+
+RULES:
+1. EXPLICIT PAGES: If description mentions specific pages, extract ONLY those (do not add generic pages)
+2. NO EXPLICIT PAGES: If no pages mentioned, infer 5-10 appropriate pages
+3. Return ONLY a JSON object with "pages" key
+4. Do NOT include explanations or extra text
+5. Preserve exact capitalization from description
 
 Response format (JSON ONLY):
-{{"pages": ["Dashboard", "Contacts", "Analytics", "Settings", "Documents"]}}
+{{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
 
 EXAMPLES:
-CRM app → {{"pages": ["Dashboard", "Contacts", "Deals", "Reports", "Tasks", "Settings"]}}
-Document management → {{"pages": ["Dashboard", "Documents", "Templates", "Editor", "Analytics", "Settings"]}}
-Analytics dashboard → {{"pages": ["Dashboard", "Reports", "Analytics", "Settings"]}}
+"ServiceDesk has four main pages: Dashboard, Tickets, Assets, and Requests" → {{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
+"CRM app with contacts and deals" → {{"pages": ["Dashboard", "Contacts", "Deals", "Reports", "Tasks", "Settings"]}}
+"Document management platform" → {{"pages": ["Dashboard", "Documents", "Templates", "Editor", "Analytics", "Settings"]}}
+"Analytics dashboard" → {{"pages": ["Dashboard", "Reports", "Analytics", "Settings"]}}
 
-Provide ONLY the JSON list, nothing else."""
+Provide ONLY the JSON object, nothing else."""
 
         try:
             # Call LLM for page inference using ACPX CLI
@@ -1241,10 +1251,19 @@ Provide ONLY the JSON list, nothing else."""
 
         # Step 2: Extract explicit page lists (highest priority)
         # Matches patterns like: "pages: Dashboard, Documents, Templates"
+        # Or: "four main pages: Dashboard, Tickets, Assets, and Requests"
         # Or: "with 10 pages: Dashboard, Documents, Templates..."
         import re
-        explicit_list_pattern = r'pages?:\s*(.+)'
-        explicit_match = re.search(explicit_list_pattern, goal_description, re.IGNORECASE)
+        explicit_list_patterns = [
+            r'(?:\w+\s+)?pages?:\s*([A-Z][a-zA-Z,\s]+)',  # "four main pages: Dashboard, Tickets, Assets"
+            r'pages?:\s*(.+)',  # "pages: Dashboard, Documents, Templates"
+        ]
+        
+        explicit_match = None
+        for pattern in explicit_list_patterns:
+            explicit_match = re.search(pattern, goal_description, re.IGNORECASE)
+            if explicit_match:
+                break
 
         if explicit_match:
             pages_str = explicit_match.group(1)
