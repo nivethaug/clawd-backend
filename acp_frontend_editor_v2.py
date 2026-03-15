@@ -1269,16 +1269,40 @@ Implement a complete, production-ready {page_name} page now."""
                                 print(f"🔴 ACPX-V2-STEP13-BATCH-SUCCESS: {page_name} populated")
                                 return True, None
                             else:
+                                # Enhanced error diagnostics
+                                error_type = "return_code"
+                                error_details = f"code {result.returncode}"
+                                
+                                # Special handling for common error codes
+                                if result.returncode == -6:
+                                    error_type = "sigabrt"
+                                    error_details = "SIGABRT (-6): Process aborted/crashed (likely Claude API error or rate limit)"
+                                elif result.returncode == -9:
+                                    error_type = "sigkill"
+                                    error_details = "SIGKILL (-9): Process killed (likely OOM or timeout)"
+                                elif result.returncode == 1:
+                                    error_type = "general_error"
+                                    error_details = "General error (check stderr)"
+                                
                                 error_info = {
                                     "page": page_name,
                                     "attempt": attempt,
-                                    "error_type": "return_code",
+                                    "error_type": error_type,
                                     "return_code": result.returncode,
-                                    "stderr": result.stderr[:500] if result.stderr else None,
-                                    "stdout": result.stdout[:500] if result.stdout else None
+                                    "error_details": error_details,
+                                    "stderr": result.stderr[:1000] if result.stderr else None,
+                                    "stdout": result.stdout[:1000] if result.stdout else None,
+                                    "command": ' '.join(cmd)
                                 }
-                                logger.warning(f"[ACPX-V2]   ✗ Failed to populate {page_name} (code {result.returncode})")
-                                print(f"🔴 ACPX-V2-STEP13-BATCH-FAIL: {page_name} failed (code {result.returncode})")
+                                logger.warning(f"[ACPX-V2]   ✗ Failed to populate {page_name}: {error_details}")
+                                print(f"🔴 ACPX-V2-STEP13-BATCH-FAIL: {page_name} - {error_details}")
+                                
+                                # Log stderr/stdout for debugging
+                                if result.stderr:
+                                    logger.debug(f"[ACPX-V2]   Stderr: {result.stderr[:500]}")
+                                if result.stdout:
+                                    logger.debug(f"[ACPX-V2]   Stdout: {result.stdout[:500]}")
+                                
                                 return False, error_info
                                 
                         except subprocess.TimeoutExpired as e:
@@ -1353,8 +1377,23 @@ Implement a complete, production-ready {page_name} page now."""
                     if failure_reports:
                         logger.warning(f"[ACPX-V2]   Failure reports collected: {len(failure_reports)}")
                         print(f"🔴 ACPX-V2-STEP13-FAILURE-REPORTS: {len(failure_reports)} failures logged")
-                        for report in failure_reports:
-                            logger.debug(f"[ACPX-V2]     Failure: {report}")
+                        
+                        # Log detailed failure reports
+                        for i, report in enumerate(failure_reports, 1):
+                            logger.warning(f"[ACPX-V2]   FAILURE REPORT #{i}:")
+                            logger.warning(f"[ACPX-V2]     Page: {report.get('page')}")
+                            logger.warning(f"[ACPX-V2]     Attempt: {report.get('attempt')}")
+                            logger.warning(f"[ACPX-V2]     Error Type: {report.get('error_type')}")
+                            if report.get('error_details'):
+                                logger.warning(f"[ACPX-V2]     Details: {report.get('error_details')}")
+                            if report.get('return_code'):
+                                logger.warning(f"[ACPX-V2]     Return Code: {report.get('return_code')}")
+                            if report.get('stderr'):
+                                logger.warning(f"[ACPX-V2]     Stderr: {report.get('stderr')[:200]}")
+                            if report.get('stdout'):
+                                logger.warning(f"[ACPX-V2]     Stdout: {report.get('stdout')[:200]}")
+                            
+                            print(f"🔴 FAILURE-REPORT-{i}: {report.get('page')} - {report.get('error_type')} - {report.get('error_details', 'N/A')}")
                 else:
                     logger.info("[ACPX-V2]   ✓ All pages have content")
                     print("🔴 ACPX-V2-STEP13-DONE: All pages have content")
