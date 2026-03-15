@@ -647,6 +647,15 @@ class ACPFrontendEditorV2:
 
             # Step 5: Build ACPX prompt using manifest pages
             try:
+                # 🎯 FINALIZED PAGES - Clear PM2 log visibility
+                print("=" * 80)
+                print("🎯 FINALIZED PAGES FOR AI EDITING:")
+                for i, page in enumerate(required_pages, 1):
+                    print(f"   {i}. {page}.tsx")
+                print(f"   Total: {len(required_pages)} pages")
+                print("=" * 80)
+                logger.info(f"[ACPX-V2] 🎯 FINALIZED PAGES: {required_pages}")
+                
                 print("🔴 ACPX-V2-STEP5-PROMPT: Building ACPX prompt")
                 logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
                 prompt = self._build_acpx_prompt(goal_description)
