@@ -1,7 +1,73 @@
 # DreamPilot Backend - Project Knowledge
 
-> **Note:** This documentation reflects the actual codebase implementation.
-> Last verified: 2026-03-14 (updated with infrastructure stabilization fixes)
+> **Table of Contents with Code References**
+> Last verified: 2026-03-15
+
+---
+
+## 📑 Quick Navigation
+
+### Project Creation Pipeline
+
+| Component | File | Lines | Description |
+|-----------|------|-------|-------------|
+| **API Endpoint** | `app.py` | 1-100 | `POST /projects` entry point |
+| **Background Worker** | `claude_code_worker.py` | 1-150 | Project worker thread |
+| **Fast Scaffolding** | `fast_wrapper.py` | 1-200 | Initial project setup (5 tasks) |
+| **Pipeline Orchestrator** | `openclaw_wrapper.py` | 1-100 | `run_all_phases()` main loop |
+
+### Phase Implementations
+
+| Phase | Function | File | Lines | Description |
+|-------|----------|------|-------|-------------|
+| 1 | `phase_1_analyze_project()` | `openclaw_wrapper.py` | ~200-250 | Analyze project requirements |
+| 2 | `phase_2_template_setup()` | `openclaw_wrapper.py` | ~250-300 | Verify directories |
+| 3 | `phase_9_acp_frontend_editor()` | `openclaw_wrapper.py` | ~300-400 | ACPX frontend customization |
+| 4 | `phase_3_database_provisioning()` | `infrastructure_manager.py` | ~200-300 | Database setup |
+| 5 | `phase_4_port_allocation()` | `infrastructure_manager.py` | ~300-400 | Port allocation |
+| 6 | `phase_5_service_setup()` | `infrastructure_manager.py` | ~400-600 | PM2 + build |
+| 7 | `phase_6_nginx_routing()` | `infrastructure_manager.py` | ~600-800 | Nginx config |
+| 9 | `phase_7_verification()` | `deployment_verifier.py` | 1-200 | Deployment verification |
+
+### ACPX Frontend Editor
+
+| Step | File | Lines | Description |
+|------|------|-------|-------------|
+| Core Class | `acp_frontend_editor_v2.py` | 1-100 | `ACPFrontendEditorV2` class |
+| Path Validation | `acp_frontend_editor_v2.py` | 48-100 | `ACPPathValidator.is_path_allowed()` |
+| Conjunction Stripping | `acp_frontend_editor_v2.py` | 1532-1541 | Strip `and`, `or`, `&` from page names |
+| Page Extraction | `acp_frontend_editor_v2.py` | 1456-1600 | `_extract_required_pages_from_prompt()` |
+| ACPX Execution | `acp_frontend_editor_v2.py` | 600-850 | `apply_changes_via_acpx()` |
+| **Step 10.5** Routing Fix | `acp_frontend_editor_v2.py` | 992-1065 | Fix duplicate "/" routes |
+| **Step 10.6** Layout Outlet | `acp_frontend_editor_v2.py` | 1072-1118 | Replace `{children}` → `<Outlet />` |
+| **Step 13** Empty Pages | `acp_frontend_editor_v2.py` | 1177-1240 | Detect and repopulate empty pages |
+
+### Infrastructure Manager
+
+| Component | File | Lines | Description |
+|-----------|------|-------|-------------|
+| Port Allocator | `infrastructure_manager.py` | 100-200 | `PortAllocator` class |
+| Service Manager | `infrastructure_manager.py` | 400-600 | `ServiceManager` class |
+| Build Frontend | `infrastructure_manager.py` | 1700-1860 | `build_frontend()` method |
+| node_modules Cleanup | `infrastructure_manager.py` | 1850-1860 | Remove after build |
+| DNS Manager | `dns_manager.py` | 1-150 | Hostinger API client |
+
+### Services
+
+| Service | File | Lines | Description |
+|---------|------|-------|-------------|
+| Groq AI | `groq_service.py` | 1-100 | `GroqService` class |
+| Template Selection | `template_selector.py` | 1-100 | `TemplateSelector` class |
+| Page Manifest | `page_manifest.py` | 1-200 | `PageManifest` class |
+| Deployment Verifier | `deployment_verifier.py` | 1-200 | `DeploymentVerifier` class |
+
+### Database
+
+| Component | File | Lines | Description |
+|-----------|------|-------|-------------|
+| PostgreSQL Connection | `database_postgres.py` | 1-100 | Connection pooling |
+| DB Adapter | `database_adapter.py` | 1-100 | Abstraction layer |
+| Projects Schema | `projects_schema.sql` | 1-50 | Table definitions |
 
 ---
 
