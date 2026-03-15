@@ -53,6 +53,28 @@ def verify_dist():
 
 
 def cleanup_node_modules():
+    """Remove node_modules to save space after build"""
+    print("\n" + "="*50)
+    print("CLEANUP NODE_MODULES")
+    print("="*50)
+    
+    node_modules = Path("node_modules")
+    if not node_modules.exists():
+        print("⚠ node_modules not found, skipping cleanup")
+        return True
+    
+    # Calculate size before deletion
+    total_size = sum(f.stat().st_size for f in node_modules.rglob("*") if f.is_file())
+    size_mb = total_size / (1024 * 1024)
+    
+    # Remove node_modules
+    if run("rm -rf node_modules"):
+        print(f"✓ Freed {size_mb:.1f} MB")
+        return True
+    return False
+
+
+def cleanup_node_modules():
     """Remove node_modules to save space"""
     print("\n" + "="*50)
     print("CLEANUP NODE_MODULES")
