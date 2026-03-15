@@ -1,27 +1,44 @@
-# Project Creation API
+# Project Creation - Complete Reference
 
 > [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
 
 ---
 
-## Endpoints
+## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/projects` | POST | Create new project |
-| `/projects` | GET | List all projects |
-| `/projects/{project_id}` | GET | Get project details |
-| `/projects/{project_id}` | PUT | Update project |
+| Endpoint | Method | File | Lines | Description |
+|----------|--------|------|-------|-------------|
+| `/projects` | POST | `app.py` | 283-350 | Create new project |
+| `/projects` | GET | `app.py` | 241-280 | List all projects |
+| `/projects/{id}` | GET | `app.py` | 355-380 | Get project details |
+| `/projects/{id}` | PUT | `app.py` | 1357-1430 | Update project |
+| `/projects/{id}` | DELETE | `app.py` | 1204-1355 | Delete project |
+| `/projects/{id}/status` | GET | `app.py` | 1624-1655 | Get pipeline status |
+| `/projects/{id}/ai-status` | GET | `app.py` | 1657-1815 | Get AI refinement status |
+| `/projects/{id}/claude-session` | GET | `app.py` | 1819-1880 | Get Claude session info |
+| `/projects/{id}/publish/frontend` | POST | `app.py` | 1436-1530 | Build & publish frontend |
+| `/projects/{id}/publish/backend` | POST | `app.py` | 1534-1620 | Build & publish backend |
+| `/projects/{id}/sessions` | GET | `app.py` | 1882-1900 | List project sessions |
+| `/projects/{id}/sessions` | POST | `app.py` | 1903-1945 | Create session |
+| `/projects/{id}/sessions/{sid}` | DELETE | `app.py` | 1957-1975 | Delete session |
+| `/projects/{id}/files` | GET | `app.py` | 2154-2185 | List project files |
+| `/projects/{id}/files/{path}` | GET | `app.py` | 2187-2225 | Get file content |
+| `/projects/{id}/files/{path}` | PUT | `app.py` | 2227-2265 | Save file content |
+| `/project-types` | GET | `app.py` | 515-528 | List project types |
+| `/templates` | GET | `app.py` | 574-600 | List templates |
+| `/templates/select` | POST | `app.py` | 530-572 | Select template |
+| `/chat` | POST | `app.py` | 2081-2150 | Chat completion |
+| `/chat/stream` | POST | `app.py` | 2038-2078 | Streaming chat |
+| `/ai/completion` | POST | `app.py` | 2420-2500 | AI completion |
+| `/health` | GET | `app.py` | 2269-2278 | Health check |
 
 ---
 
-## Create Project
+## POST /projects - Create Project
 
-```
-POST /projects
-```
+**File:** `app.py:283-350`
 
-**Request Body:**
+**Request:**
 ```json
 {
   "name": "my-project",
@@ -48,81 +65,159 @@ POST /projects
 }
 ```
 
-**File:** `app.py:283-350`
+---
+
+## Project Creation Pipeline
+
+### Entry Point Flow
+
+| Step | File | Lines | Description |
+|------|------|-------|-------------|
+| 1. API Request | `app.py` | 50-70 | Validate project name, template, user_id |
+| 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
+| 3. Template Selection | `app.py` | 96-105 | Call `TemplateSelector.select_template()` |
+| 4. Worker Trigger | `claude_code_worker.py` | 50-80 | Start background `run_claude_code_background()` |
+| 5. Fast Scaffolding | `fast_wrapper.py` | 50-240 | Create project structure |
+
+### Fast Scaffolding Tasks (`fast_wrapper.py`)
+
+| Task | Lines | Description |
+|------|-------|-------------|
+| Task 1 | 50-80 | Select template (skip if provided) |
+| Task 2 | 85-120 | Git clone or copy blank template |
+| Task 3 | 125-160 | Create backend skeleton (`main.py`) |
+| Task 4 | 165-200 | Create database setup (`init.sql`) |
+| Task 5 | 205-240 | Create `.env` config file |
 
 ---
 
-## List Projects
+## Pipeline Phases
 
-```
-GET /projects?user_id=1
-```
-
-**Query Params:**
-- `user_id` (optional): Filter by user
-
-**Response:**
-```json
-[
-  {
-    "id": 1,
-    "name": "my-project",
-    "domain": "myproject",
-    "status": "ready",
-    ...
-  }
-]
-```
-
-**File:** `app.py:241-280`
+| Phase | Function | File | Lines | Description |
+|-------|----------|------|-------|-------------|
+| 1 | `phase_1_analyze_project()` | `openclaw_wrapper.py` | 200-250 | Analyze project requirements, detect tech stack |
+| 2 | `phase_2_template_setup()` | `openclaw_wrapper.py` | 255-300 | Verify frontend/backend directories exist |
+| 3 | `phase_9_acp_frontend_editor()` | `openclaw_wrapper.py` | 305-450 | Run ACPX frontend customization |
+| 4 | `phase_3_database_provisioning()` | `infrastructure_manager.py` | 200-280 | Create database, run migrations |
+| 5 | `phase_4_port_allocation()` | `infrastructure_manager.py` | 285-350 | Allocate ports for frontend/backend |
+| 6 | `phase_5_service_setup()` | `infrastructure_manager.py` | 355-500 | PM2 setup, build, infrastructure |
+| 7 | `phase_6_nginx_routing()` | `infrastructure_manager.py` | 505-650 | Configure nginx reverse proxy |
+| 8 | *(skipped)* | - | - | Legacy AI refinement phase |
+| 9 | `phase_7_verification()` | `deployment_verifier.py` | 50-200 | Verify deployment health |
 
 ---
 
-## Get Project
+## ACPX Frontend Editor (`acp_frontend_editor_v2.py`)
 
-```
-GET /projects/{project_id}
-```
+### Core Components
 
-**Response:** Project object
+| Component | Lines | Description |
+|-----------|-------|-------------|
+| Main Class | 80-200 | `ACPFrontendEditorV2` class definition |
+| Path Validator | 48-100 | `ACPPathValidator.is_path_allowed()` security check |
+| Snapshot System | 250-350 | Before/after filesystem snapshots |
+| Change Detection | 355-450 | Compare snapshots for file changes |
 
-**File:** `app.py:355-380`
+### Page Detection
 
----
+| Component | Lines | Description |
+|-----------|-------|-------------|
+| Page Extraction | 1456-1600 | `_extract_required_pages_from_prompt()` |
+| Conjunction Stripping | 1532-1541 | Strip `and`, `or`, `&` from page names |
+| Groq Inference | 1470-1510 | AI-based page name inference |
+| Keyword Matching | 1520-1560 | Fallback keyword detection |
 
-## Update Project
+### ACPX Execution
 
-```
-PUT /projects/{project_id}
-```
+| Component | Lines | Description |
+|-----------|-------|-------------|
+| Main Execution | 600-850 | `apply_changes_via_acpx()` main loop |
+| Watchdog Timer | 698-800 | Idle timeout monitoring (300s max) |
+| Build Gate | 850-950 | Verify build success before applying |
+| Error Recovery | 960-990 | Handle build failures, retry logic |
 
-**Request Body:**
-```json
-{
-  "name": "new-name",
-  "description": "Updated description"
-}
-```
+### Post-Processing Fixes
 
-**File:** `app.py:1357-1410`
-
----
-
-## Pipeline Flow
-
-| Step | File | Description |
-|------|------|-------------|
-| 1 | `app.py` | Validate request, insert DB |
-| 2 | `template_selector.py` | Select template |
-| 3 | `fast_wrapper.py` | Scaffold project structure |
-| 4 | `openclaw_wrapper.py` | Run pipeline phases |
-| 5 | `infrastructure_manager.py` | Setup infrastructure |
+| Step | Lines | Description |
+|------|-------|-------------|
+| **10.5** Routing Fix | 992-1065 | Fix duplicate "/" routes, add Layout wrapper |
+| **10.6** Layout Outlet | 1072-1118 | Replace `{children}` → `<Outlet />` |
+| **11** Import Cleanup | 1120-1170 | Remove unused imports |
+| **13** Empty Pages | 1177-1240 | Detect and repopulate empty page components |
 
 ---
 
-## Related
+## Infrastructure Manager (`infrastructure_manager.py`)
 
-- [Project Status](project_status.md)
-- [Project Deletion](project_deletion.md)
-- [Publish Frontend](publish_frontend.md)
-- [Publish Backend](publish_backend.md)
+### Core Components
+
+| Component | Lines | Description |
+|-----------|-------|-------------|
+| Port Allocator | 100-180 | `PortAllocator` - manage port assignments |
+| Service Manager | 350-500 | `ServiceManager` - PM2 process control |
+| DNS Manager | `dns_manager.py:1-150` | Hostinger API DNS client |
+| Nginx Config | 505-650 | Generate nginx site configs |
+
+### Build Process
+
+| Step | Lines | Description |
+|------|-------|-------------|
+| Clean Caches | 1710-1730 | Remove `.vite`, `node_modules/.cache` |
+| npm install | 1755-1780 | Install dependencies with npm |
+| npm run build | 1785-1810 | Build production bundle |
+| Verify dist | 1815-1835 | Check `dist/index.html` exists |
+| Cleanup | 1850-1860 | Remove `node_modules/` to save space |
+
+---
+
+## Services
+
+| Service | File | Lines | Description |
+|---------|------|-------|-------------|
+| Groq AI | `groq_service.py` | 15-100 | `GroqService` - AI completions |
+| Template Selector | `template_selector.py` | 20-100 | `TemplateSelector` - match templates |
+| Page Manifest | `page_manifest.py` | 1-200 | `PageManifest` - track pages |
+| Deployment Verifier | `deployment_verifier.py` | 50-200 | `DeploymentVerifier` - health checks |
+| DNS Manager | `dns_manager.py` | 1-150 | Hostinger DNS API |
+| Context Injector | `context_injector.py` | 1-100 | Inject project context |
+
+---
+
+## Database
+
+| Component | File | Lines | Description |
+|-----------|------|-------|-------------|
+| PostgreSQL Connection | `database_postgres.py` | 20-100 | Connection pooling, queries |
+| DB Adapter | `database_adapter.py` | 1-100 | Abstraction layer for DB ops |
+| Schema | `projects_schema.sql` | 1-50 | Table definitions |
+
+---
+
+## Common Modifications
+
+### Add New Page Type
+
+1. Update keyword mapping: `acp_frontend_editor_v2.py:1460-1490`
+2. Add page spec: `page_specs.py`
+3. Update template files in `templates/`
+
+### Modify Build Process
+
+1. Edit build method: `infrastructure_manager.py:1700-1860`
+2. Update verification: `deployment_verifier.py:100-150`
+
+### Add New Pipeline Phase
+
+1. Create phase function in `openclaw_wrapper.py`
+2. Add to `run_all_phases()` loop
+3. Update `pipeline_status.py` enum
+
+### Fix Routing Issues
+
+1. Update Step 10.5: `acp_frontend_editor_v2.py:992-1065`
+2. Update Step 10.6: `acp_frontend_editor_v2.py:1072-1118`
+
+### Modify DNS/Domain Handling
+
+1. DNS Manager: `dns_manager.py:1-150`
+2. Nginx config: `infrastructure_manager.py:505-650`

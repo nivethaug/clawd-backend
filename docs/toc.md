@@ -10,7 +10,7 @@
 | Document | Purpose |
 |----------|---------|
 | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Agent skill reference |
-| [project_info_toc.md](./project_info_toc.md) | Pipeline & infrastructure details |
+| [project_creation.md](./project_creation.md) | Complete pipeline & infrastructure reference |
 
 ---
 
@@ -67,17 +67,17 @@
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/projects/{id}/files` | GET | `app.py:2154-2185` | [project_info_toc.md](./project_info_toc.md) |
-| `/projects/{id}/files/{path}` | GET | `app.py:2187-2225` | [project_info_toc.md](./project_info_toc.md) |
-| `/projects/{id}/files/{path}` | PUT | `app.py:2227-2265` | [project_info_toc.md](./project_info_toc.md) |
+| `/projects/{id}/files` | GET | `app.py:2154-2185` | [project_creation.md](./project_creation.md) |
+| `/projects/{id}/files/{path}` | GET | `app.py:2187-2225` | [project_creation.md](./project_creation.md) |
+| `/projects/{id}/files/{path}` | PUT | `app.py:2227-2265` | [project_creation.md](./project_creation.md) |
 
 ### Templates & Types
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/project-types` | GET | `app.py:515-528` | [project_info_toc.md](./project_info_toc.md) |
-| `/templates` | GET | `app.py:574-600` | [project_info_toc.md](./project_info_toc.md) |
-| `/templates/select` | POST | `app.py:530-572` | [project_info_toc.md](./project_info_toc.md) |
+| `/project-types` | GET | `app.py:515-528` | [project_creation.md](./project_creation.md) |
+| `/templates` | GET | `app.py:574-600` | [project_creation.md](./project_creation.md) |
+| `/templates/select` | POST | `app.py:530-572` | [project_creation.md](./project_creation.md) |
 
 ### System
 
@@ -91,7 +91,7 @@
 
 | File | Description |
 |------|-------------|
-| [project_creation.md](./project_creation.md) | Create/list projects |
+| [project_creation.md](./project_creation.md) | Complete reference: API, pipeline, ACPX, infrastructure |
 | [project_status.md](./project_status.md) | Status & AI status endpoints |
 | [project_deletion.md](./project_deletion.md) | Delete/update projects |
 | [project_sessions.md](./project_sessions.md) | Session management |
