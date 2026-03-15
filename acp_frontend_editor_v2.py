@@ -1722,40 +1722,45 @@ TECHNICAL REQUIREMENTS
 
 ⚠️ CRITICAL: LAYOUT COMPONENT RULES ⚠️
 
-When creating or modifying Layout components for React Router:
+The project uses a Layout component with React Router nested routes:
 
-❌ WRONG - Using children prop (pages won't render):
-```tsx
-export function Layout({{ children }}: {{ children: React.ReactNode }}) {{
-  return (
-    <div>
-      <Sidebar />
-      <main>{{children}}</main>
-    </div>
-  );
-}}
-```
-
-✅ CORRECT - Using Outlet for React Router nested routes:
+Layout component structure (src/layout/Layout.tsx):
 ```tsx
 import {{ Outlet }} from 'react-router-dom';
 
-export function Layout() {{
+const Layout = () => {{
   return (
-    <div>
-      <Sidebar />
-      <main><Outlet /></main>  ← Use Outlet, NOT children
+    <div className="flex h-screen w-full overflow-hidden">
+      {/* Future: Sidebar can be added here */}}
+      <div className="flex flex-col flex-1">
+        {/* Future: Header can be added here */}}
+        <main className="flex-1 overflow-y-auto p-6">
+          <Outlet />  ← Pages render here
+        </main>
+      </div>
     </div>
   );
-}}
+}};
+
+export default Layout;
 ```
 
-WHY: React Router nested routes use <Outlet /> to render child routes. The children prop won't work with:
+App.tsx routing structure:
 ```tsx
-<Route element={{<Layout />}}>
-  <Route path="/" element={{<Dashboard />}} />  ← Renders at <Outlet />, not {{children}}
-</Route>
+<Routes>
+  <Route element={{<Layout />}}>
+    <Route path="/" element={{<Dashboard />}} />
+    <Route path="/settings" element={{<Settings />}} />
+    <Route path="*" element={{<NotFound />}} />
+  </Route>
+</Routes>
 ```
+
+CRITICAL RULES:
+1. Layout MUST use <Outlet />, NOT children prop
+2. All page routes MUST be nested inside <Route element={{<Layout />}}>
+3. Pages render at <Outlet />, not via children prop
+4. Layout uses flex for full-screen layout with overflow handling
 
 ⚠️ CRITICAL: PAGE COMPONENT RULES ⚠️
 
@@ -1773,6 +1778,12 @@ The Layout is ALREADY provided by the router at App.tsx level:
 Pages should return content that renders inside Layout's <Outlet />, NOT wrap themselves in Layout.
 
 DO NOT import or use Layout component in page files!
+
+Page content area:
+- Pages render inside <main className="flex-1 overflow-y-auto p-6">
+- Pages have automatic padding (p-6 = 24px)
+- Content area is scrollable (overflow-y-auto)
+- Full height is handled by Layout (h-screen)
 
 ⚠️ CRITICAL: LINK/NAVIGATION COMPONENTS ⚠️
 
