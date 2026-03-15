@@ -1379,6 +1379,36 @@ class ACPFrontendEditorV2:
 Project Name: {self.project_name}
 Project Description: {goal_description}
 
+🎨 UI/UX DESIGN REFERENCE - FOLLOW THESE STANDARDS 🎨
+
+For ALL UI/UX design decisions, use the ui-ux-pro-max skill:
+📖 Skill Name: ui-ux-pro-max
+🔗 GitHub: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
+💡 Invoke with: /ui-ux-pro-max [your request]
+
+Examples:
+- /ui-ux-pro-max review my dashboard component
+- /ui-ux-pro-max create a glassmorphism button
+- /ui-ux-pro-max improve the accessibility of my form
+
+This skill provides expert guidance on:
+- Modern UI component patterns
+- Responsive design best practices
+- Accessibility standards (WCAG 2.1)
+- Color theory and typography
+- Layout composition and spacing
+- Interactive states and micro-interactions
+- Mobile-first design approach
+- Professional UI polish techniques
+
+Before implementing ANY UI component:
+1. Consider the UI/UX Pro Max principles
+2. Apply modern design patterns (not outdated Bootstrap-style layouts)
+3. Ensure mobile-responsive implementation
+4. Use proper visual hierarchy and spacing
+5. Implement smooth transitions and micro-interactions
+6. Follow accessibility best practices
+
 YOUR TASK
 
 Transform the existing template into a production-ready application based on the project description above.
