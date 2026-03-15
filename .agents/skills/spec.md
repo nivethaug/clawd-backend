@@ -1,167 +1,245 @@
-# Rule: Reverse-Engineering a PRD from Existing Code
+# Documentation Standards - Complete Reference
 
-## Role
-Act as a **Senior Technical Architect** who can read code and translate implementation details into clear, user-centric product requirements.
-
-## Goal
-To analyze an existing ("brownfield") codebase and produce a **concise, product-focused** Product Requirements Document (PRD) through a **multi-turn conversation**.
-
-This PRD serves as a **baseline document** that captures the current state of the system. It is intended to be used alongside a Technical Specification Document (TSD) as context for planning future enhancements, bug fixes, or refactors—not for identifying problems to fix in the current implementation.
-
-> **Note:** For existing systems, technical constraints often dictate product behavior (e.g., "reports update daily" due to batch jobs). These constraints **should** be captured if they impact the user experience.
-
-## Process
-
-1.  **Map & Analyze:** Explore the codebase structure. Extract a structured summary of *implemented* behavior.
-2.  **Confidence Check:** Categorize findings by documentation confidence. Identify what needs user confirmation before documenting.
-3.  **Ask Clarifying Questions:** Present targeted questions to ensure the documentation is accurate. **STOP and wait for answers.**
-4.  **Generate PRD:** After receiving user answers, produce the final PRD document.
-
-**Important:** This is a multi-turn workflow. Steps 1-3 happen in the first response. Step 4 happens only after the user responds.
+> Updated: 2026-03-15
 
 ---
 
-## Step 1: Analyze the Codebase
+## Table of Contents
 
-Examine project artifacts. If the workspace is large, use file listing tools to understand the structure before deep-diving into specific files.
-
-Look for:
--   Source code (Controllers/API definitions reveal *what* users can do; Models/Services reveal *rules*).
--   Configuration files (`.env`, `yaml`) for timeouts, limits, and feature flags.
--   Tests (Integration tests often describe the "happy path" better than code).
--   Database schemas (constraints often map to business rules).
-
-Extract a structured summary covering:
-
-### 1.1 Features & Capabilities
--   What the system *actually* does today.
--   Key workflows (start to finish).
--   User roles (inferred from auth middleware or permissions logic).
-
-### 1.2 Business Logic & Constraints
--   Domain rules embedded in code (e.g., "Order total must be > $0").
--   **User-Facing Technical Constraints:** (e.g., "Data syncs every 24h" or "Max file upload is 10MB").
--   State transitions (e.g., Pending -> Approved -> Shipped).
-
-### 1.3 Integration Points
--   External APIs called (identifies dependencies).
--   Webhooks or events handled.
-
-### 1.4 Observations
--   Code comments indicating business context.
--   Hardcoded values (magic numbers) that represent business rules.
--   Feature flags that control behavior.
+| Section | Lines | Description |
+|---------|-------|-------------|
+| [Role & Goal](#role--goal) | 9-22 | Purpose and objective |
+| [Required Structure](#required-structure) | 24-33 | File organization rules |
+| [TOC Format](#toc-format) | 35-50 | Table of contents template |
+| [Backend Rules](#backend-documentation-rules) | 52-90 | API endpoint documentation |
+| [Frontend Rules](#frontend-documentation-rules) | 92-120 | Component documentation |
+| [Example Files](#example-files) | 122-140 | Reference examples |
+| [PRD Workflow](#prd-workflow) | 142-180 | Reverse-engineering process |
+| [Output](#output) | 182-188 | File format & location |
 
 ---
 
-## Step 2: Confidence Check
+## Role & Goal
 
-Before documenting, categorize your findings by confidence level:
+### Role
 
-| Category | Description | Action |
-|----------|-------------|--------|
-| **Verified** | Clearly confirmed by code, tests, or config. | Document directly. |
-| **Needs Confirmation** | Code exists, but intent or scope is unclear. | Ask a clarifying question. |
-| **Assumed** | Cannot determine from code; will use reasonable assumption. | State assumption; ask user to correct if wrong. |
+| Aspect | Description |
+|--------|-------------|
+| **Title** | Senior Technical Architect |
+| **Task** | Read code and translate to user-centric requirements |
+| **Output** | Product Requirements Document (PRD) |
 
-The purpose of this step is to ensure the PRD accurately reflects the system—not to identify problems or gaps to fix.
+### Goal
+
+| Objective | Description |
+|-----------|-------------|
+| **Target** | Brownfield codebase (existing system) |
+| **Process** | Multi-turn conversation |
+| **Purpose** | Baseline document for enhancements/fixes/refactors |
+| **Companion** | Technical Specification Document (TSD) |
+
+> **Note:** Technical constraints often dictate product behavior (e.g., "reports update daily"). These **should** be captured if they impact user experience.
 
 ---
 
-## Step 3: Ask Clarifying Questions
+## Required Structure
 
-Ask questions to ensure documentation accuracy. Focus on **scope and intent**, not on identifying issues.
+| Project Type | Required Files | Format |
+|--------------|----------------|--------|
+| **Any** | `toc.md` | Table of contents with line numbers |
+| **Backend** | `docs/{endpoint}.md` | One MD per endpoint group |
+| **Frontend** | `docs/{component}.md` | One MD per component/page |
 
-### Question Categories
+### File Naming Convention
 
-| Category | Focus |
-|----------|-------|
-| **A. Scope** | "Should I document feature X?" "Is this workflow in scope for the baseline?" |
-| **B. Intent** | "Is this limit a business rule or a technical default?" "Is this the intended behavior?" |
-| **C. Accuracy** | "The code does X. Is this correct, or should I document it differently?" |
+| Type | Pattern | Example |
+|------|---------|---------|
+| Endpoint | `{resource}_{action}.md` | `project_creation.md`, `chat_stream.md` |
+| Component | `{ComponentName}.md` | `LoginForm.md`, `Dashboard.md` |
+| TOC | `toc.md` | Always `toc.md` |
 
-### Formatting Requirements
--   **Number all questions.**
--   **Provide multiple-choice options** based on patterns found in code.
--   **Reference specific files** to give context.
+---
 
-### Example Format
+## TOC Format
+
+Every documentation file MUST include a TOC at the top:
 
 ```markdown
-Based on my analysis, I need to confirm the following before documenting:
+## Table of Contents
 
-### A. Scope
+| Section | Lines | Description |
+|---------|-------|-------------|
+| [Section Name](#section-name) | 10-25 | Brief description |
+```
 
-1. **Multiple Versions:** I see both `/api/v1/orders` and `/api/v2/orders`. For this baseline PRD:
-   A. Document only v2 (current primary version).
-   B. Document both as they are both actively supported.
-   C. Other (please specify).
+### TOC Requirements
 
-2. **Feature Flags:** The code checks for `ENABLE_BETA_DASHBOARD`. Should the PRD:
-   A. Document only the stable dashboard.
-   B. Document the Beta dashboard as the primary interface.
-   C. Document both, noting the feature flag.
+| Requirement | Description |
+|-------------|-------------|
+| **Line numbers** | Always include Lines column |
+| **Anchors** | Use lowercase, hyphen-separated anchors |
+| **Description** | Brief, action-oriented description |
 
-### B. Intent
+---
 
-3. **Export Limit:** I found a hardcoded limit of `5000` records in `ExportService.ts`. For documentation:
-   A. This is a business rule (document as a system constraint).
-   B. This is a technical default (document as a limitation).
-   C. This should not be documented (internal implementation detail).
+## Backend Documentation Rules
 
-4. **Retry Behavior:** In `PaymentGateway.js`, failed charges retry 3 times with backoff. Is this:
-   A. The standard behavior for all payments (document as a feature).
-   B. Specific to this gateway only (document with that context).
-   C. An implementation detail (do not document).
+| Rule | Description | Example |
+|------|-------------|---------|
+| **Endpoint-based files** | One MD file per endpoint group | `chat.md`, `project_status.md` |
+| **Traverse to end** | Find actual handler method, not just route | Follow `@router` → function → implementation |
+| **Include line numbers** | Always use `File:Lines` format | `app.py:1436-1530` |
+| **API Endpoints table** | Required at top of each file | See template below |
 
-### C. Accuracy
+### Backend File Template
 
-5. **User Roles:** Based on `AuthMiddleware.ts`, I identified three roles: Admin, Manager, User. Is this complete, or are there additional roles I should document?
-   A. Complete—document these three.
-   B. Incomplete—there are additional roles: _______.
+```markdown
+# {Resource} - Complete Reference
+
+> [TOC](toc.md) | Updated: YYYY-MM-DD
+
+---
+
+## API Endpoints
+
+| Endpoint | Method | File | Lines | Description |
+|----------|--------|------|-------|-------------|
+| `/resource` | POST | `app.py` | 100-150 | Create resource |
+
+---
+
+## POST /resource
+
+**File:** `app.py:100-150`
+
+**Request:**
+```json
+{ ... }
+```
+
+**Response:**
+```json
+{ ... }
+```
+```
+
+### How to Find Line Numbers
+
+| Step | Action | Tool |
+|------|--------|------|
+| 1 | Find route decorator | Search `@router.post("/endpoint")` |
+| 2 | Find handler function | Look for `async def handler_name()` |
+| 3 | Find end of function | Next route decorator or class definition |
+| 4 | Record line range | `start_line-end_line` |
+
+---
+
+## Frontend Documentation Rules
+
+| Rule | Description |
+|------|-------------|
+| **Component-based files** | One MD file per component or page |
+| **Include line numbers** | Reference specific component functions |
+| **TOC with anchors** | Always include navigable table of contents |
+
+### Frontend File Template
+
+```markdown
+# {ComponentName} - Complete Reference
+
+> [TOC](toc.md) | Updated: YYYY-MM-DD
+
+---
+
+## Table of Contents
+
+| Section | Lines | Description |
+|---------|-------|-------------|
+| [Props](#props) | 15-25 | Component properties |
+| [State](#state) | 27-35 | Component state |
+| [Methods](#methods) | 37-80 | Component methods |
+
+---
+
+## Props
+
+**File:** `src/components/{ComponentName}.tsx:15-25`
+
+| Prop | Type | Required | Description |
+|------|------|----------|-------------|
+| `id` | string | Yes | Unique identifier |
 ```
 
 ---
 
-## Step 4: Generate PRD
+## Example Files
 
-After receiving answers, generate the PRD.
+### Backend Example: `docs/chat.md`
+
+| Section | Lines | Content |
+|---------|-------|---------|
+| Title | 1-3 | `# Chat - Complete Reference` |
+| Links | 5 | TOC/SKILL links |
+| Endpoints Table | 9-12 | API Endpoints table |
+| Endpoint Details | 14-40 | POST /chat with Request/Response |
+
+### Frontend Example: `docs/LoginForm.md`
+
+| Section | Lines | Content |
+|---------|-------|---------|
+| Title | 1-3 | `# LoginForm - Complete Reference` |
+| TOC | 5-10 | Table of Contents |
+| Props | 12-25 | Props table with types |
+| State | 27-35 | State variables |
+| Methods | 37-60 | Event handlers |
+
+---
+
+## PRD Workflow
+
+### When to Use
+
+Use this workflow when reverse-engineering a PRD from existing code.
+
+### Process
+
+| Step | Name | Description |
+|------|------|-------------|
+| 1 | Map & Analyze | Explore codebase, extract implemented behavior |
+| 2 | Confidence Check | Categorize findings (Verified/Needs Confirmation/Assumed) |
+| 3 | Ask Questions | Present targeted questions, **STOP and wait** |
+| 4 | Generate PRD | Produce final document after answers |
+
+### Confidence Categories
+
+| Category | Description | Action |
+|----------|-------------|--------|
+| **Verified** | Confirmed by code/tests | Document directly |
+| **Needs Confirmation** | Code exists, intent unclear | Ask question |
+| **Assumed** | Cannot determine | State assumption |
 
 ### PRD Structure
 
-1.  **System Summary** — What the system is and its primary purpose.
-2.  **User Roles & Permissions** — Who uses the system and what they can do.
-3.  **Functional Requirements** — Grouped by feature area, numbered for reference.
-4.  **Business Rules** — Domain rules and validation logic.
-5.  **System Constraints** — Technical limitations that affect user experience.
-6.  **Edge Cases & Error Handling** — How the system handles boundaries and failures.
-7.  **Assumptions** — Stated assumptions made during documentation.
-
-### Guidelines
--   **Be Explicit:** "Users cannot delete admins" is better than "Manage permissions."
--   **Cite Sources:** (Optional) Reference files for key rules (e.g., "See `AuthMiddleware.ts`").
--   **Describe Behavior, Not Code:** Good: "System validates email format." Bad: "UserUtil.validate() uses regex."
--   **State the Baseline:** This PRD documents *current* behavior, not ideal or future state.
+| Section | Content |
+|---------|---------|
+| **System Summary** | What the system is and its purpose |
+| **User Roles** | Who uses the system |
+| **Functional Requirements** | Grouped by feature, numbered |
+| **Business Rules** | Domain rules and validation |
+| **System Constraints** | Technical limitations |
+| **Edge Cases** | Boundary handling |
+| **Assumptions** | Stated assumptions |
 
 ---
 
 ## Output
 
--   **Format:** Markdown (`.md`)
--   **Filename:** `PRD-[service-name].md`
--   **Location:** Same directory as the companion TSD.
+| Property | Value |
+|----------|-------|
+| **Format** | Markdown (`.md`) |
+| **Filename** | `{resource}.md` or `PRD-{service}.md` |
+| **Location** | `docs/` directory |
 
 ---
 
-## Final Instructions
-
-1.  **DO NOT** generate the PRD until you have asked clarifying questions AND received answers.
-2.  **Start** by mapping the repo if it is large or unfamiliar.
-3.  **ALWAYS** present analysis summary (Step 1) and confidence check (Step 2) in your first response.
-4.  **ALWAYS** end your first response with clarifying questions (Step 3).
-5.  **AFTER** receiving answers, generate the complete PRD (Step 4).
-6.  If the user says "skip questions", proceed directly to Step 4, stating your assumptions.
-
----
-
-# End of reverse-spec.md
+## End of spec.md
