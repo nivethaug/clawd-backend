@@ -9,6 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator, Any, Optional, Dict
 from contextlib import contextmanager
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.responses import JSONResponse, StreamingResponse

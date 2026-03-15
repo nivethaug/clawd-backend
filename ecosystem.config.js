@@ -17,7 +17,8 @@ module.exports = {
         DB_NAME: 'dreampilot',
         DB_USER: 'admin',
         DB_PASSWORD: 'StrongAdminPass123',
-        HOSTINGER_API_TOKEN: 'XQUih086lM7wqN6qXKZfTQ1zD9eK5yP5rG8wH3vM7bL2qJ8cN9kP2rV5xK8zN3b'
+        HOSTINGER_API_TOKEN: 'XQUih086lM7wqN6qXKZfTQ1zD9eK5yP5rG8wH3vM7bL2qJ8cN9kP2rV5xK8zN3b',
+        GROQ_API_KEY: 'YOUR_GROQ_API_KEY_HERE'
       },
       error_file: './logs/backend-error.log',
       out_file: './logs/backend-out.log',
