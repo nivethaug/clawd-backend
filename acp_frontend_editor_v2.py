@@ -1307,8 +1307,7 @@ class ACPFrontendEditorV2:
         try:
             from groq_service import GroqService
             groq = GroqService()
-            import asyncio
-            inferred_pages = asyncio.run(groq.infer_pages(goal_description))
+            inferred_pages = groq.infer_pages(goal_description)
             if inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
                 logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")

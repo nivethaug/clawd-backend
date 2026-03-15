@@ -40,9 +40,9 @@ class GroqService:
             raise ValueError("GROQ_API_KEY is not configured")
 
         # Initialize Groq client
-        self.client = Groq(api_key=self.api_key)
+        self.client = Groq(api_key=self.api_key, timeout=self.TIMEOUT_SECONDS)
 
-    async def generate_chat_completion(
+    def generate_chat_completion(
         self,
         messages: List[dict],
         temperature: Optional[float] = None,
@@ -60,12 +60,8 @@ class GroqService:
             Generated text response from the assistant
 
         Raises:
-            ValueError: If API key is not configured
             RuntimeError: If Groq API call fails
         """
-        if not self.api_key or self.api_key == "your_key_here":
-            raise ValueError("GROQ_API_KEY is not configured")
-
         try:
             # Use Groq SDK to create completion
             completion = self.client.chat.completions.create(
@@ -107,7 +103,7 @@ class GroqService:
         """
         return bool(self.api_key and self.api_key != "your_key_here")
 
-    async def infer_pages(self, description: str) -> List[str]:
+    def infer_pages(self, description: str) -> List[str]:
         """
         Use LLM to infer page names from a product description.
 
@@ -142,7 +138,7 @@ Response format (JSON ONLY):
         messages = [{"role": "user", "content": prompt}]
 
         try:
-            response = await self.generate_chat_completion(messages, max_tokens=200)
+            response = self.generate_chat_completion(messages, max_tokens=200)
             print(f"🔴 GROQ-RAW-RESPONSE: {response[:500]}")
 
             # Parse JSON response
@@ -169,8 +165,11 @@ Response format (JSON ONLY):
             print(f"🔴 GROQ-CLEANED-PAGES: {cleaned}")
             return cleaned
 
+        except json.JSONDecodeError as e:
+            logger.error(f"[Groq] JSON parse failed: {e}. Raw response: {response[:500]}")
+            return ["Dashboard", "Analytics", "Settings"]
         except Exception as e:
-            logger.error(f"[Groq] Page inference failed: {e}")
+            logger.error(f"[Groq] Page inference failed: {type(e).__name__}: {e}")
             print(f"🔴 GROQ-ERROR: {e}")
             # Return sensible defaults
             return ["Dashboard", "Analytics", "Settings"]
