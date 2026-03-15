@@ -45,7 +45,7 @@ def get_connection_pool() -> pool.ThreadedConnectionPool:
         
         connection_pool = pool.ThreadedConnectionPool(
             minconn=5,
-            maxconn=20,
+            maxconn=50,  # Increased from 20 to handle concurrent operations
             host=DB_HOST,
             port=DB_PORT,
             database=DB_NAME,
@@ -54,7 +54,7 @@ def get_connection_pool() -> pool.ThreadedConnectionPool:
             cursor_factory=cursor_factory,
             connect_timeout=5  # Prevent hanging on unreachable database
         )
-        logger.info(f"✓ Connection pool created (host={DB_HOST}, db={DB_NAME})")
+        logger.info(f"✓ Connection pool created (host={DB_HOST}, db={DB_NAME}, pool_size=50)")
 
     return connection_pool
 
