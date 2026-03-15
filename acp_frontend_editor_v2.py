@@ -1321,7 +1321,12 @@ class ACPFrontendEditorV2:
             from groq_service import GroqService
             # print("🔴 PLANNER-STEP1: Attempting Groq AI inference...")
             groq = GroqService()
-            inferred_pages = groq.infer_pages(goal_description)
+            
+            # Extract ONLY the product description (first paragraph before "Customize")
+            # to avoid confusing the AI with ACPX instructions
+            product_description = goal_description.split("Customize this React application")[0].strip()
+            
+            inferred_pages = groq.infer_pages(product_description)
             # print(f"🔴 PLANNER-GROQ-RAW: Inferred pages = {inferred_pages}")
             if inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
