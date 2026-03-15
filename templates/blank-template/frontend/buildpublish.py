@@ -2,12 +2,22 @@
 """
 Frontend Build & Publish Script
 Run from frontend directory: python buildpublish.py [--skip-install] [--skip-build] [--restart]
+
+Matches infrastructure_manager.py build_frontend() process:
+1. Clean Vite caches
+2. Remove existing node_modules
+3. npm install --include=dev --legacy-peer-deps
+4. npm run build
+5. Verify dist
+6. Fix permissions
+7. Cleanup node_modules
 """
 
 import subprocess
 import sys
 import os
 import argparse
+import shutil
 from pathlib import Path
 
 
@@ -22,12 +32,76 @@ def run(cmd: str, cwd: str = None) -> bool:
     return True
 
 
+def clean_vite_caches():
+    """Clean Vite caches to prevent corrupted builds"""
+    print("\n" + "="*50)
+    print("CLEAN VITE CACHES")
+    print("="*50)
+    
+    caches_cleaned = 0
+    node_modules = Path("node_modules")
+    
+    vite_temp = node_modules / ".vite-temp"
+    vite_cache = node_modules / ".vite"
+    
+    if vite_temp.exists():
+        try:
+            shutil.rmtree(vite_temp)
+            print("✓ Cleaned .vite-temp")
+            caches_cleaned += 1
+        except Exception as e:
+            print(f"⚠ Could not clean .vite-temp: {e}")
+    
+    if vite_cache.exists():
+        try:
+            shutil.rmtree(vite_cache)
+            print("✓ Cleaned .vite cache")
+            caches_cleaned += 1
+        except Exception as e:
+            print(f"⚠ Could not clean .vite: {e}")
+    
+    print(f"✓ Cleaned {caches_cleaned} cache directories")
+    return True
+
+
+def remove_node_modules():
+    """Remove existing node_modules for clean install"""
+    print("\n" + "="*50)
+    print("REMOVE NODE_MODULES")
+    print("="*50)
+    
+    node_modules = Path("node_modules")
+    if node_modules.exists():
+        try:
+            shutil.rmtree(node_modules)
+            print("✓ Removed existing node_modules")
+        except Exception as e:
+            print(f"⚠ Could not remove node_modules: {e}")
+    else:
+        print("⚠ node_modules not found, skipping")
+    return True
+
+
 def npm_install():
-    """Install npm dependencies"""
+    """Install npm dependencies with dev deps and legacy peer deps"""
     print("\n" + "="*50)
     print("NPM INSTALL")
     print("="*50)
-    return run("npm install")
+    
+    # Match infrastructure_manager.py flags
+    result = subprocess.run(
+        ["npm", "install", "--include=dev", "--legacy-peer-deps"],
+        capture_output=True,
+        text=True,
+        timeout=600
+    )
+    
+    if result.returncode != 0:
+        print(f"✗ npm install failed: {result.stderr[:300]}")
+        return False
+    
+    print("✓ npm install completed (including dev dependencies)")
+    return True
 
 
 def npm_build():
@@ -35,20 +109,65 @@ def npm_build():
     print("\n" + "="*50)
     print("NPM RUN BUILD")
     print("="*50)
-    return run("npm run build")
+    
+    result = subprocess.run(
+        ["npm", "run", "build"],
+        capture_output=True,
+        text=True,
+        timeout=600
+    )
+    
+    if result.returncode != 0:
+        print(f"✗ npm run build failed: {result.stderr[:500]}")
+        return False
+    
+    print("✓ npm run build completed")
+    return True
 
 
 def verify_dist():
-    """Verify dist folder exists"""
+    """Verify dist folder exists and has content"""
+    print("\n" + "="*50)
+    print("VERIFY DIST")
+    print("="*50)
+    
     dist_path = Path("dist")
     if not dist_path.exists():
         print("✗ dist/ folder not found - build may have failed")
         return False
+    
     index = dist_path / "index.html"
     if not index.exists():
         print("✗ dist/index.html not found")
         return False
-    print(f"✓ Build verified: {index.stat().st_size} bytes")
+    
+    dist_contents = list(dist_path.iterdir())
+    print(f"✓ Dist verified: {len(dist_contents)} items, index.html: {index.stat().st_size} bytes")
+    return True
+
+
+def fix_permissions():
+    """Fix permissions for nginx access (755 dirs, 644 files)"""
+    print("\n" + "="*50)
+    print("FIX PERMISSIONS")
+    print("="*50)
+    
+    dist_path = Path("dist")
+    if not dist_path.exists():
+        print("⚠ dist/ not found, skipping permissions")
+        return True
+    
+    try:
+        os.chmod(dist_path, 0o755)
+        for item in dist_path.rglob("*"):
+            if item.is_file():
+                os.chmod(item, 0o644)
+            elif item.is_dir():
+                os.chmod(item, 0o755)
+        print("✓ Permissions fixed (755/644)")
+    except Exception as e:
+        print(f"⚠ Could not fix permissions: {e}")
+    
     return True
 
 
@@ -64,35 +183,19 @@ def cleanup_node_modules():
         return True
     
     # Calculate size before deletion
-    total_size = sum(f.stat().st_size for f in node_modules.rglob("*") if f.is_file())
-    size_mb = total_size / (1024 * 1024)
+    try:
+        total_size = sum(f.stat().st_size for f in node_modules.rglob("*") if f.is_file())
+        size_mb = total_size / (1024 * 1024)
+    except:
+        size_mb = 0
     
-    # Remove node_modules
-    if run("rm -rf node_modules"):
-        print(f"✓ Freed {size_mb:.1f} MB")
-        return True
-    return False
-
-
-def cleanup_node_modules():
-    """Remove node_modules to save space"""
-    print("\n" + "="*50)
-    print("CLEANUP NODE_MODULES")
-    print("="*50)
+    try:
+        shutil.rmtree(node_modules)
+        print(f"✓ Removed node_modules (freed {size_mb:.1f} MB)")
+    except Exception as e:
+        print(f"⚠ Could not remove node_modules: {e}")
     
-    node_modules = Path("node_modules")
-    if not node_modules.exists():
-        print("⚠ node_modules not found, skipping cleanup")
-        return True
-    
-    # Get size before deletion
-    total_size = sum(f.stat().st_size for f in node_modules.rglob("*") if f.is_file())
-    size_mb = total_size / (1024 * 1024)
-    
-    if run("rm -rf node_modules"):
-        print(f"✓ Freed {size_mb:.1f} MB")
-        return True
-    return False
+    return True
 
 
 def restart_pm2(project_name: str = None):
@@ -104,7 +207,6 @@ def restart_pm2(project_name: str = None):
     if project_name:
         return run(f"pm2 restart {project_name}-frontend")
     else:
-        # Try to detect from package.json
         return run("pm2 restart all")
 
 
@@ -131,26 +233,37 @@ def main():
     
     success = True
     
-    # Step 1: npm install
+    # Step 1: Clean Vite caches
+    clean_vite_caches()
+    
+    # Step 2: Remove existing node_modules for clean install
+    if not args.skip_install:
+        remove_node_modules()
+    
+    # Step 3: npm install
     if not args.skip_install:
         if not npm_install():
             success = False
     
-    # Step 2: npm run build
+    # Step 4: npm run build
     if not args.skip_build and success:
         if not npm_build():
             success = False
     
-    # Step 3: Verify build
+    # Step 5: Verify build
     if not args.skip_build and success:
         if not verify_dist():
             success = False
     
-    # Step 4: Cleanup node_modules (always after successful build)
+    # Step 6: Fix permissions
+    if success:
+        fix_permissions()
+    
+    # Step 7: Cleanup node_modules
     if success:
         cleanup_node_modules()
     
-    # Step 5: Restart services (optional)
+    # Step 8: Restart services (optional)
     if args.restart and success:
         restart_pm2(args.project_name)
         reload_nginx()
