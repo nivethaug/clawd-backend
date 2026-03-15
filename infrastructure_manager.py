@@ -661,6 +661,7 @@ class ServiceManager:
                             logger.warning(f"npm install warnings: {install_result.stderr}")
                         else:
                             # logger.info(f"✓ npm install completed")  # Commented for cleaner logs
+                            pass  # npm install completed
                         
                         # Build the app
                         build_result = subprocess.run(
