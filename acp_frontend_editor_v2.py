@@ -1459,6 +1459,73 @@ PAGE TEMPLATES
 PAGE SPECIFICATIONS (Phase 4 - Enhanced UI Quality)
 {page_specs_section}
 
+⚠️ CRITICAL: NAVIGATION MENU REQUIREMENTS ⚠️
+
+YOU MUST CREATE OR UPDATE A NAVIGATION MENU THAT IS MOBILE RESPONSIVE:
+
+1. CREATE/UPDATE src/layout/Navbar.tsx or src/components/Navbar.tsx with:
+   - Desktop view: Horizontal menu with links to all required pages
+   - Mobile view: Hamburger menu (☰) that toggles navigation
+   - Use React state for mobile menu toggle: `const [isOpen, setIsOpen] = useState(false)`
+   - Include links to: {', '.join(required_pages_list)}
+   - Use Lucide icons for menu icons: Menu, X, Home, Settings, etc.
+
+2. MOBILE RESPONSIVE REQUIREMENTS:
+   - Use Tailwind responsive classes: `hidden md:flex` for desktop menu
+   - Hamburger button visible on mobile: `md:hidden`
+   - Mobile menu with full-screen overlay or slide-in sidebar
+   - Touch-friendly tap targets (min 44px height)
+   - Smooth transitions for menu open/close
+
+3. INTEGRATE WITH LAYOUT:
+   - Import Navbar in Layout.tsx
+   - Place Navbar in Layout header section
+   - Ensure Navbar works with existing Layout structure
+
+4. NAVIGATION LINKS MUST INCLUDE:
+   - All required pages: {', '.join(required_pages_list)}
+   - Active link highlighting (use NavLink from react-router-dom)
+   - Proper routing to each page
+
+EXAMPLE NAVBAR STRUCTURE:
+```tsx
+import {{ useState }} from 'react';
+import {{ NavLink }} from 'react-router-dom';
+import {{ Menu, X }} from 'lucide-react';
+
+export default function Navbar() {{
+  const [isOpen, setIsOpen] = useState(false);
+  
+  const links = [
+    {{ to: '/', label: '{required_pages_list[0] if required_pages_list else 'Dashboard'}', icon: Home }},
+    // ... add other page links
+  ];
+
+  return (
+    <nav className="bg-white border-b">
+      {{/* Desktop Menu */}}
+      <div className="hidden md:flex">
+        {{links.map(link => <NavLink key={{link.to}} to={{link.to}}>...)}}
+      </div>
+      
+      {{/* Mobile Hamburger */}}
+      <button className="md:hidden" onClick={{() => setIsOpen(!isOpen)}}>
+        {{isOpen ? <X /> : <Menu />}}
+      </button>
+      
+      {{/* Mobile Menu Overlay */}}
+      {{isOpen && (
+        <div className="md:hidden fixed inset-0 bg-white z-50">
+          {{/* Mobile menu links */}}
+        </div>
+      )}}
+    </nav>
+  );
+}}
+```
+
+⚠️ NAVIGATION IS NOT OPTIONAL - Every app MUST have a working mobile-responsive menu!
+
 SCOPE LIMITATION (CRITICAL - Reduces AI scanning time)
 
 ONLY modify files in these directories:
@@ -1483,10 +1550,12 @@ COMPLETION CHECKLIST
 
 ✓ ROUTING FIXED: Welcome route removed, {default_page} at "/" (ONLY ONE route)
 ✓ ROUTING FIXED: All routes inside <Route element={{<Layout />}}> wrapper
+✓ NAVIGATION MENU CREATED: Mobile-responsive Navbar with hamburger menu
+✓ NAVIGATION INTEGRATED: Navbar added to Layout component
 ✓ All required pages created in src/pages/ (EXACT file names)
 ✓ All required components created in src/components/
 ✓ Navigation/sidebar updated
-✓ Responsive design implemented
+✓ Responsive design implemented (mobile + desktop)
 ✓ Code is production-ready
 ✓ npm run build succeeds
 
@@ -1500,25 +1569,28 @@ STEP 0: FIX ROUTING FIRST (MANDATORY)
 3. ADD {default_page} at path="/" inside Layout wrapper
 4. VERIFY routing is correct before continuing
 
-STEP 1-N: CREATE PAGES
+STEP 1-N: CREATE PAGES AND NAVIGATION
 1. Read the project description, page templates, and page specifications carefully
 2. Plan your approach using BOTH templates and specs as guidance
-3. Execute step by step following page templates and specifications
-4. DO NOT STOP until ALL required pages are created
-5. After completing a page, move to the next page
-6. Continue until the entire checklist is complete
-7. Run npm run build after all pages are created
+3. CREATE NAVIGATION MENU (Navbar.tsx) with mobile-responsive hamburger menu
+4. INTEGRATE Navbar into Layout component
+5. Create pages ONE AT A TIME using page templates and specifications
+6. DO NOT STOP until ALL required pages are created
+7. After completing a page, move to the next page
+8. Continue until the entire checklist is complete
+9. Run npm run build after all pages are created
 
 EXECUTION RULES
 
 1. FIX ROUTING FIRST - this is your FIRST task
-2. Work through pages ONE AT A TIME using page templates
-3. Complete each page fully before moving to the next
-4. Use EXACT page names from REQUIRED PAGES list
-5. Do not skip any required page
-6. Do not stop early - continue until checklist is 100% complete
-7. Only mark task complete when ALL checklist items are done
-8. Use page templates as guidance but adapt to existing code structure
+2. CREATE NAVIGATION MENU - mobile-responsive with hamburger menu
+3. Work through pages ONE AT A TIME using page templates
+4. Complete each page fully before moving to the next
+5. Use EXACT page names from REQUIRED PAGES list
+6. Do not skip any required page
+7. Do not stop early - continue until checklist is 100% complete
+8. Only mark task complete when ALL checklist items are done
+9. Use page templates as guidance but adapt to existing code structure
 
 TECHNICAL REQUIREMENTS
 
