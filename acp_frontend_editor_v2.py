@@ -1457,9 +1457,9 @@ Provide ONLY the JSON list, nothing else."""
 
     def _extract_required_pages_from_prompt(self, goal_description: str) -> List[str]:
         """
-        Extract required pages from goal description using improved planner logic.
+        Extract required pages from goal description using AI inference.
 
-        Detection priority: explicit pages → manifest → Groq AI → keywords → SaaS defaults
+        Detection priority: Groq AI → ACPX AI → Default pages
 
         Args:
             goal_description: Goal for changes
@@ -1471,124 +1471,40 @@ Provide ONLY the JSON list, nothing else."""
         print(f"🔴 PLANNER-INPUT: {goal_description[:200]}...")
 
         required_pages = []
-        import re
 
-        # Page keyword mappings for improved detection
-        PAGE_KEYWORDS = {
-            "Dashboard": ["dashboard", "overview"],
-            "Documents": ["document", "docflow", "panda", "agreement", "contract"],
-            "Templates": ["template"],
-            "DocumentEditor": ["document editor", "doc editor", "editor"],
-            "Signing": ["sign", "signature", "esign", "electronically sign"],
-            "Analytics": ["analytics", "metrics", "statistics", "charts", "graphs"],
-            "Reports": ["reports", "reporting"],  # Separated from Analytics
-            "Contacts": ["contacts", "crm", "customer", "customers", "lead", "leads"],
-            "Team": ["team", "members", "users", "staff"],
-            "Billing": ["billing", "subscription", "payments", "invoice", "pricing"],
-            "Notifications": ["notifications", "alerts", "messages", "notification"],
-            "Tasks": ["task", "todo", "project", "kanban"],
-            "Settings": ["setting", "settings", "config", "preference", "preferences"],
-            "Posts": ["post", "posts", "article", "articles", "blog"],
-            "Create": ["create", "write", "compose"],
-            # Financial/Fintech pages
-            "Accounts": ["accounts", "bank accounts", "financial sources", "account management"],
-            "Transactions": ["transactions", "income", "expense", "expenses", "records", "payment history"],
-            "Invoices": ["invoice", "invoices", "billing"],
-            # E-commerce pages
-            "Products": ["products", "inventory", "items"],
-            "Orders": ["orders", "order management"],
-            "Customers": ["customers", "clients"],
-        }
+        # Step 1: Try Groq AI inference
+        try:
+            from groq_service import GroqService
+            groq = GroqService()
+            import asyncio
+            inferred_pages = asyncio.run(groq.infer_pages(goal_description))
+            if inferred_pages and len(inferred_pages) >= 3:
+                required_pages = inferred_pages
+                logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
+                print(f"🔴 PLANNER-GROQ: Inferred pages = {inferred_pages}")
+        except Exception as e:
+            logger.warning(f"[Planner] Groq inference failed: {e}")
+            print(f"🔴 PLANNER-GROQ-ERROR: {e}")
 
-        desc_lower = goal_description.lower()
-
-        # Step 1: Extract explicit page lists (HIGHEST PRIORITY)
-        # Matches patterns like: "pages: Dashboard, Documents, Templates"
-        # Or: "four main pages: Dashboard, Accounts, Transactions, and Reports"
-        # FIXED: Stop at period to avoid capturing entire description
-        explicit_list_pattern = r'(?:with\s+)?(?:\d+\s+)?(?:main\s+)?pages?:\s*([A-Za-z,\s]+?)(?:\.|$)'
-        explicit_match = re.search(explicit_list_pattern, goal_description, re.IGNORECASE)
-
-        if explicit_match:
-            pages_str = explicit_match.group(1)
-            # Normalize and split by comma
-            explicit_pages = [p.strip() for p in pages_str.split(',')]
-
-            # Conjunctions to strip from page names
-            conjunctions = ['and', 'or', '&']
-
-            # Normalize page names: "Document Editor" → "DocumentEditor"
-            for page in explicit_pages:
-                # Strip leading conjunctions (e.g., "and Audience" → "Audience")
-                page_stripped = page.strip()
-                page_lower = page_stripped.lower()
-                for conj in conjunctions:
-                    if page_lower.startswith(conj + ' '):
-                        # Strip conjunction from the original (preserving case)
-                        page_stripped = page_stripped[len(conj):].strip()
-                        break
-
-                # Remove leading/trailing whitespace and special chars
-                normalized = re.sub(r'\s+', '', page_stripped.title())
-                # Skip empty strings or strings with only special chars
-                if normalized and len(normalized) > 0 and any(c.isalpha() for c in normalized):
-                    required_pages.append(normalized)
-                    logger.info(f"[Planner] Explicit page detected: {page} → {normalized}")
-
-            logger.info(f"[Planner] Explicit page list detected: {len(required_pages)} pages")
-
-        # Step 2: Try to load page manifest (Phase 5 - NEW)
-        if len(required_pages) < 3:
-            if hasattr(self, 'manifest_manager') and self.manifest_manager:
-                manifest_pages = self.manifest_manager.get_required_pages()
-                if manifest_pages:
-                    logger.info(f"[Planner] Using manifest pages: {manifest_pages}")
-                    for page in manifest_pages:
-                        if page not in required_pages:
-                            required_pages.append(page)
-                else:
-                    logger.info("[Planner] No manifest found")
-
-        # Step 3: Try Groq AI inference (if no explicit pages found)
+        # Step 2: If Groq failed, try ACPX AI inference
         if len(required_pages) < 3:
             try:
-                from groq_service import GroqService
-                groq = GroqService()
-                import asyncio
-                inferred_pages = asyncio.run(groq.infer_pages(goal_description))
-                if inferred_pages:
-                    for page in inferred_pages:
-                        if page not in required_pages:
-                            required_pages.append(page)
-                    logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
-                    print(f"🔴 PLANNER-GROQ: Inferred pages = {inferred_pages}")
+                inferred_pages = self._ai_infer_pages(goal_description)
+                if inferred_pages and len(inferred_pages) >= 3:
+                    required_pages = inferred_pages
+                    logger.info(f"[Planner] ACPX inferred pages: {inferred_pages}")
+                    print(f"🔴 PLANNER-ACPX: Inferred pages = {inferred_pages}")
             except Exception as e:
-                logger.warning(f"[Planner] Groq inference failed, falling back to keyword matching: {e}")
-                print(f"🔴 PLANNER-GROQ-ERROR: {e}")
+                logger.warning(f"[Planner] ACPX inference failed: {e}")
+                print(f"🔴 PLANNER-ACPX-ERROR: {e}")
 
-        # Step 4: Keyword matching (only if fewer than 3 pages detected)
-        # Use word boundaries to avoid false matches (e.g., "sign" in "design")
+        # Step 3: Fallback to default pages
         if len(required_pages) < 3:
-            for page_name, keywords in PAGE_KEYWORDS.items():
-                if page_name not in required_pages:  # Skip if already in list
-                    # Use word boundary matching to avoid partial matches
-                    for keyword in keywords:
-                        pattern = r'\b' + re.escape(keyword) + r'\b'
-                        if re.search(pattern, desc_lower):
-                            required_pages.append(page_name)
-                            break  # Found match, move to next page
+            required_pages = ["Dashboard", "Settings", "Overview"]
+            logger.info(f"[Planner] Using default pages: {required_pages}")
+            print(f"🔴 PLANNER-DEFAULT: Using default pages = {required_pages}")
 
-        print(f"🔴 PLANNER-AFTER-KEYWORDS: Pages = {required_pages}")
-
-        # Step 5: SaaS default fallback (if less than 3 pages detected)
-        if len(required_pages) < 3:
-            logger.info(f"[Planner] Fewer than 3 pages detected ({len(required_pages)}), adding SaaS defaults")
-            saas_defaults = ["Dashboard", "Analytics", "Contacts", "Settings"]
-            for default_page in saas_defaults:
-                if default_page not in required_pages:
-                    required_pages.append(default_page)
-
-        # Step 6: Remove duplicates while preserving order
+        # Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
 
         print(f"🔴 PLANNER-FINAL: Pages = {required_pages}")
