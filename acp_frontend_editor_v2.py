@@ -1459,7 +1459,7 @@ Provide ONLY the JSON list, nothing else."""
         """
         Extract required pages from goal description using improved planner logic.
 
-        Detection priority: manifest → explicit → AI inference → keywords → SaaS defaults
+        Detection priority: explicit pages → manifest → Groq AI → keywords → SaaS defaults
 
         Args:
             goal_description: Goal for changes
@@ -1471,6 +1471,7 @@ Provide ONLY the JSON list, nothing else."""
         print(f"🔴 PLANNER-INPUT: {goal_description[:200]}...")
 
         required_pages = []
+        import re
 
         # Page keyword mappings for improved detection
         PAGE_KEYWORDS = {
@@ -1479,7 +1480,8 @@ Provide ONLY the JSON list, nothing else."""
             "Templates": ["template"],
             "DocumentEditor": ["document editor", "doc editor", "editor"],
             "Signing": ["sign", "signature", "esign", "electronically sign"],
-            "Analytics": ["analytics", "metrics", "reports", "statistics"],
+            "Analytics": ["analytics", "metrics", "statistics", "charts", "graphs"],
+            "Reports": ["reports", "reporting"],  # Separated from Analytics
             "Contacts": ["contacts", "crm", "customer", "customers", "lead", "leads"],
             "Team": ["team", "members", "users", "staff"],
             "Billing": ["billing", "subscription", "payments", "invoice", "pricing"],
@@ -1487,46 +1489,27 @@ Provide ONLY the JSON list, nothing else."""
             "Tasks": ["task", "todo", "project", "kanban"],
             "Settings": ["setting", "settings", "config", "preference", "preferences"],
             "Posts": ["post", "posts", "article", "articles", "blog"],
-            "Create": ["create", "write", "compose"]
+            "Create": ["create", "write", "compose"],
+            # Financial/Fintech pages
+            "Accounts": ["accounts", "bank accounts", "financial sources", "account management"],
+            "Transactions": ["transactions", "income", "expense", "expenses", "records", "payment history"],
+            "Invoices": ["invoice", "invoices", "billing"],
+            # E-commerce pages
+            "Products": ["products", "inventory", "items"],
+            "Orders": ["orders", "order management"],
+            "Customers": ["customers", "clients"],
         }
 
         desc_lower = goal_description.lower()
 
-        # Step 1: Try Groq AI inference first (most reliable)
-        try:
-            from groq_service import GroqService
-            groq = GroqService()
-            import asyncio
-            inferred_pages = asyncio.run(groq.infer_pages(goal_description))
-            if inferred_pages:
-                required_pages.extend(inferred_pages)
-                logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
-                print(f"🔴 PLANNER-GROQ: Inferred pages = {inferred_pages}")
-        except Exception as e:
-            logger.warning(f"[Planner] Groq inference failed, falling back to keyword matching: {e}")
-            print(f"🔴 PLANNER-GROQ-ERROR: {e}")
-
-        # Step 2: Try to load page manifest (Phase 5 - NEW)
-        manifest_pages = None
-        if hasattr(self, 'manifest_manager') and self.manifest_manager:
-            manifest_pages = self.manifest_manager.get_required_pages()
-            if manifest_pages:
-                logger.info(f"[Planner] Using manifest pages: {manifest_pages}")
-                # Merge with inferred pages, avoiding duplicates
-                for page in manifest_pages:
-                    if page not in required_pages:
-                        required_pages.append(page)
-            else:
-                logger.info("[Planner] No manifest found")
-
-        # Step 3: Extract explicit page lists (if Groq failed or returned few pages)
+        # Step 1: Extract explicit page lists (HIGHEST PRIORITY)
         # Matches patterns like: "pages: Dashboard, Documents, Templates"
+        # Or: "four main pages: Dashboard, Accounts, Transactions, and Reports"
         # FIXED: Stop at period to avoid capturing entire description
-        import re
-        explicit_list_pattern = r'pages?:\s*([A-Za-z,\s]+?)(?:\.|$)'
+        explicit_list_pattern = r'(?:with\s+)?(?:\d+\s+)?(?:main\s+)?pages?:\s*([A-Za-z,\s]+?)(?:\.|$)'
         explicit_match = re.search(explicit_list_pattern, goal_description, re.IGNORECASE)
 
-        if explicit_match and len(required_pages) < 3:
+        if explicit_match:
             pages_str = explicit_match.group(1)
             # Normalize and split by comma
             explicit_pages = [p.strip() for p in pages_str.split(',')]
@@ -1552,7 +1535,36 @@ Provide ONLY the JSON list, nothing else."""
 
             logger.info(f"[Planner] Explicit page list detected: {len(required_pages)} pages")
 
-        # Step 4: Keyword matching (only if Groq returned fewer than 3 pages)
+        # Step 2: Try to load page manifest (Phase 5 - NEW)
+        if len(required_pages) < 3:
+            if hasattr(self, 'manifest_manager') and self.manifest_manager:
+                manifest_pages = self.manifest_manager.get_required_pages()
+                if manifest_pages:
+                    logger.info(f"[Planner] Using manifest pages: {manifest_pages}")
+                    for page in manifest_pages:
+                        if page not in required_pages:
+                            required_pages.append(page)
+                else:
+                    logger.info("[Planner] No manifest found")
+
+        # Step 3: Try Groq AI inference (if no explicit pages found)
+        if len(required_pages) < 3:
+            try:
+                from groq_service import GroqService
+                groq = GroqService()
+                import asyncio
+                inferred_pages = asyncio.run(groq.infer_pages(goal_description))
+                if inferred_pages:
+                    for page in inferred_pages:
+                        if page not in required_pages:
+                            required_pages.append(page)
+                    logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
+                    print(f"🔴 PLANNER-GROQ: Inferred pages = {inferred_pages}")
+            except Exception as e:
+                logger.warning(f"[Planner] Groq inference failed, falling back to keyword matching: {e}")
+                print(f"🔴 PLANNER-GROQ-ERROR: {e}")
+
+        # Step 4: Keyword matching (only if fewer than 3 pages detected)
         # Use word boundaries to avoid false matches (e.g., "sign" in "design")
         if len(required_pages) < 3:
             for page_name, keywords in PAGE_KEYWORDS.items():
