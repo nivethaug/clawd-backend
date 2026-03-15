@@ -20,33 +20,33 @@
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/projects` | POST | `app.py:283-350` | [project_creation.md](./project_creation.md) |
+| `/projects` | POST | `app.py:283-510` | [project_creation.md](./project_creation.md) |
 | `/projects` | GET | `app.py:241-280` | [project_creation.md](./project_creation.md) |
-| `/projects/{id}` | PUT | `app.py:1357-1430` | [project_deletion.md](./project_deletion.md) |
-| `/projects/{id}` | DELETE | `app.py:1204-1355` | [project_deletion.md](./project_deletion.md) |
+| `/projects/{id}` | PUT | `app.py:1357-1436` | [project_deletion.md](./project_deletion.md) |
+| `/projects/{id}` | DELETE | `app.py:1204-1357` | [project_deletion.md](./project_deletion.md) |
 
 ### Project Status
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/projects/{id}/status` | GET | `app.py:1624-1655` | [project_status.md](./project_status.md) |
-| `/projects/{id}/ai-status` | GET | `app.py:1657-1815` | [project_status.md](./project_status.md) |
+| `/projects/{id}/status` | GET | `app.py:1624-1657` | [project_status.md](./project_status.md) |
+| `/projects/{id}/ai-status` | GET | `app.py:1657-1813` | [project_status.md](./project_status.md) |
 | `/projects/{id}/claude-session` | GET | `app.py:1819-1880` | [project_status.md](./project_status.md) |
 
 ### Project Publish
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/projects/{id}/publish/frontend` | POST | `app.py:1436-1530` | [publish_frontend.md](./publish_frontend.md) |
-| `/projects/{id}/publish/backend` | POST | `app.py:1534-1620` | [publish_backend.md](./publish_backend.md) |
+| `/projects/{id}/publish/frontend` | POST | `app.py:1436-1534` | [publish_frontend.md](./publish_frontend.md) |
+| `/projects/{id}/publish/backend` | POST | `app.py:1534-1624` | [publish_backend.md](./publish_backend.md) |
 
 ### Project Sessions
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/projects/{id}/sessions` | GET | `app.py:1882-1900` | [project_sessions.md](./project_sessions.md) |
-| `/projects/{id}/sessions` | POST | `app.py:1903-1945` | [project_sessions.md](./project_sessions.md) |
-| `/projects/{id}/sessions/{sid}` | DELETE | `app.py:1957-1975` | [project_sessions.md](./project_sessions.md) |
+| `/projects/{id}/sessions` | GET | `app.py:1882-1903` | [project_sessions.md](./project_sessions.md) |
+| `/projects/{id}/sessions` | POST | `app.py:1905-1945` | [project_sessions.md](./project_sessions.md) |
+| `/projects/{id}/sessions/{sid}` | DELETE | `app.py:1956-2020` | [project_sessions.md](./project_sessions.md) |
 | `/sessions/{sid}/messages` | GET | `app.py:2019-2035` | [project_sessions.md](./project_sessions.md) |
 | `/sessions/details` | GET | `app.py:2302-2415` | [project_sessions.md](./project_sessions.md) |
 
@@ -54,14 +54,14 @@
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/chat` | POST | `app.py:2081-2150` | [chat.md](./chat.md) |
-| `/chat/stream` | POST | `app.py:2038-2078` | [chat_stream.md](./chat_stream.md) |
+| `/chat` | POST | `app.py:2081-2155` | [chat.md](./chat.md) |
+| `/chat/stream` | POST | `app.py:2038-2081` | [chat_stream.md](./chat_stream.md) |
 
 ### AI Completion
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/ai/completion` | POST | `app.py:2420-2500` | [ai_completion.md](./ai_completion.md) |
+| `/ai/completion` | POST | `app.py:2420-2480` | [ai_completion.md](./ai_completion.md) |
 
 ### Project Files
 

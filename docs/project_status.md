@@ -1,83 +1,86 @@
-# Project Status API
+# Project Status - Complete Reference
 
 > [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
 
 ---
 
-## Endpoints
+## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/projects/{project_id}/status` | GET | Get pipeline status |
-| `/projects/{project_id}/ai-status` | GET | Get AI refinement status |
-| `/projects/{project_id}/claude-session` | GET | Get Claude session info |
+| Endpoint | Method | File | Lines | Description |
+|----------|--------|------|-------|-------------|
+| `/projects/{id}/status` | GET | `app.py` | 1624-1657 | Get pipeline status |
+| `/projects/{id}/ai-status` | GET | `app.py` | 1657-1813 | Get AI refinement status |
+| `/projects/{id}/claude-session` | GET | `app.py` | 1819-1880 | Get Claude session info |
 
 ---
 
-## Get Project Status
+## GET /projects/{id}/status
 
-```
-GET /projects/{project_id}/status
-```
+**File:** `app.py:1624-1657`
+
+Get project creation pipeline status.
 
 **Response:**
 ```json
 {
-  "status": "creating" | "ready" | "failed"
+  "status": "creating"
 }
 ```
 
 **Status Values:**
-- `creating` - Pipeline is running
-- `ready` - Project deployed successfully
-- `failed` - Pipeline failed
 
-**File:** `app.py:1417-1450`
+| Status | Description |
+|--------|-------------|
+| `creating` | OpenClaw pipeline is running |
+| `ready` | Pipeline completed successfully |
+| `failed` | Pipeline failed |
 
 ---
 
-## Get AI Status
+## GET /projects/{id}/ai-status
 
-```
-GET /projects/{project_id}/ai-status
-```
+**File:** `app.py:1657-1813`
+
+Get detailed AI refinement status (Phase 8 monitoring).
 
 **Response:**
 ```json
 {
-  "running": true,
+  "project_id": 123,
+  "project_name": "my-project",
+  "project_path": "/var/www/projects/my-project",
+  "frontend_path": "/var/www/projects/my-project/frontend",
+  "process_running": true,
   "pid": 12345,
   "elapsed_seconds": 120,
-  "recent_modifications": ["src/App.tsx", "src/pages/Home.tsx"],
-  "project_path": "/root/clawd-projects/my-project",
-  "frontend_path": "/root/clawd-projects/my-project/frontend"
+  "recent_modifications": [
+    {"file": "src/pages/Home.tsx", "time": "2026-03-15T10:05:00"}
+  ],
+  "status": "running"
 }
 ```
 
-**File:** `app.py:1450-1610`
-
 ---
 
-## Get Claude Session
+## GET /projects/{id}/claude-session
 
-```
-GET /projects/{project_id}/claude-session
-```
+**File:** `app.py:1819-1880`
+
+Get Claude Code session information.
 
 **Response:**
 ```json
 {
-  "session_name": "my-project-session",
-  "session_path": "/root/.claude/sessions/my-project-session",
-  "exists": true
+  "session_name": "project-123-session",
+  "session_path": "/root/.claude/projects/project-123",
+  "exists": true,
+  "files": ["CLAUDE.md", "context.json"]
 }
 ```
-
-**File:** `app.py:1612-1670`
 
 ---
 
 ## Related
 
 - [Project Creation](project_creation.md)
-- [Project Session](project_session.md)
+- [Project Deletion](project_deletion.md)

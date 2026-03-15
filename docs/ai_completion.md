@@ -1,46 +1,62 @@
-# AI Completion API
+# AI Completion - Complete Reference
 
 > [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
 
 ---
 
-## Endpoint
+## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/ai/completion` | POST | AI completion for project context |
+| Endpoint | Method | File | Lines | Description |
+|----------|--------|------|-------|-------------|
+| `/ai/completion` | POST | `app.py` | 2420-2480 | AI completion for project tasks |
 
 ---
 
-## Completion Request
+## POST /ai/completion
 
-```
-POST /ai/completion
-```
+**File:** `app.py:2420-2480`
 
-**Request Body:**
+Get AI completion for project-related tasks.
+
+**Request:**
 ```json
 {
   "projectType": "website",
   "mode": "create",
   "messages": [
-    {"role": "user", "content": "Create a blog page"}
+    {"role": "user", "content": "Create a landing page"}
   ]
 }
 ```
+
+**Request Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `projectType` | string | Type: `website`, `telegrambot`, `discordbot`, `tradingbot`, `scheduler`, `custom` |
+| `mode` | string | Mode: `create` or `modify` |
+| `messages` | array | Array of chat messages (conversation history) |
 
 **Response:**
 ```json
 {
   "success": true,
   "message": {
-    "content": "I'll create a blog page for you...",
-    "actions": ["create_file", "update_route"]
-  }
+    "content": "I'll help you create a landing page...",
+    "suggestions": [...]
+  },
+  "error": null
 }
 ```
 
-**File:** `app.py:1100-1200`
+**Error Response:**
+```json
+{
+  "success": false,
+  "message": null,
+  "error": "Invalid project type"
+}
+```
 
 ---
 
@@ -48,12 +64,12 @@ POST /ai/completion
 
 | Type | Description |
 |------|-------------|
-| `website` | Web application |
+| `website` | Web application with frontend/backend |
 | `telegrambot` | Telegram bot |
 | `discordbot` | Discord bot |
-| `tradingbot` | Trading bot |
-| `scheduler` | Job scheduler |
-| `custom` | Custom project |
+| `tradingbot` | Trading automation |
+| `scheduler` | Scheduled task runner |
+| `custom` | Custom project type |
 
 ---
 
@@ -61,22 +77,8 @@ POST /ai/completion
 
 | Mode | Description |
 |------|-------------|
-| `create` | Create new features |
-| `modify` | Modify existing code |
-
----
-
-## Completion Service
-
-```python
-# completion_service.py
-class CompletionService:
-    def complete(self, project_type, mode, messages):
-        """Generate AI completion"""
-        ...
-```
-
-**File:** `completion_service.py:1-200`
+| `create` | Creating new features |
+| `modify` | Modifying existing code |
 
 ---
 

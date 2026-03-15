@@ -1,30 +1,29 @@
-# Project Sessions API
+# Project Sessions - Complete Reference
 
-> [TOC](toc.md) | Updated: 2026-03-15
-
----
-
-## Endpoints
-
-| Endpoint | Method | File | Lines |
-|----------|--------|------|-------|
-| `/projects/{project_id}/sessions` | GET | `app.py` | 1882-1900 |
-| `/projects/{project_id}/sessions` | POST | `app.py` | 1903-1945 |
-| `/projects/{project_id}/sessions/{session_id}` | DELETE | `app.py` | 1957-1975 |
-| `/sessions/{session_id}` | DELETE | `app.py` | 1948-1955 |
-| `/sessions/{session_id}/messages` | GET | `app.py` | 2019-2035 |
-| `/sessions/details` | GET | `app.py` | 2302-2415 |
+> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
 
 ---
 
-## GET /projects/{project_id}/sessions
+## API Endpoints
 
-**File:** `app.py:1882-1900`
+| Endpoint | Method | File | Lines | Description |
+|----------|--------|------|-------|-------------|
+| `/projects/{id}/sessions` | GET | `app.py` | 1882-1903 | List project sessions |
+| `/projects/{id}/sessions` | POST | `app.py` | 1905-1945 | Create session |
+| `/projects/{id}/sessions/{sid}` | DELETE | `app.py` | 1956-2020 | Delete session |
+| `/sessions/{sid}` | DELETE | `app.py` | 1948-1954 | Delete session (alt) |
+| `/sessions/{sid}/messages` | GET | `app.py` | 2019-2035 | Get session messages |
+| `/sessions/details` | GET | `app.py` | 2302-2415 | Get session details |
+
+---
+
+## GET /projects/{id}/sessions
+
+**File:** `app.py:1882-1903`
 
 List all sessions for a project.
 
-### Response
-
+**Response:**
 ```json
 [
   {
@@ -42,22 +41,20 @@ List all sessions for a project.
 
 ---
 
-## POST /projects/{project_id}/sessions
+## POST /projects/{id}/sessions
 
-**File:** `app.py:1903-1945`
+**File:** `app.py:1905-1945`
 
 Create a new session.
 
-### Request Body
-
+**Request:**
 ```json
 {
   "label": "My Session"
 }
 ```
 
-### Response
-
+**Response:**
 ```json
 {
   "id": 2,
@@ -70,14 +67,13 @@ Create a new session.
 
 ---
 
-## DELETE /projects/{project_id}/sessions/{session_id}
+## DELETE /projects/{id}/sessions/{sid}
 
 **File:** `app.py:1957-1975`
 
 Delete a session.
 
-### Response
-
+**Response:**
 ```json
 {
   "success": true,
@@ -87,14 +83,13 @@ Delete a session.
 
 ---
 
-## GET /sessions/{session_id}/messages
+## GET /sessions/{sid}/messages
 
 **File:** `app.py:2019-2035`
 
 Get all messages in a session.
 
-### Response
-
+**Response:**
 ```json
 [
   {
@@ -120,14 +115,13 @@ Get all messages in a session.
 
 Get detailed session information.
 
-### Query Parameters
+**Query Parameters:**
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `session_key` | string | Session key to look up |
 
-### Response
-
+**Response:**
 ```json
 {
   "session": {...},
@@ -140,5 +134,5 @@ Get detailed session information.
 
 ## Related
 
-- [Chat API](chat.md)
-- [Chat Stream API](chat_stream.md)
+- [Chat](chat.md)
+- [Chat Stream](chat_stream.md)

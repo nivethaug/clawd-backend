@@ -1,25 +1,29 @@
-# Project Deletion API
+# Project Deletion - Complete Reference
 
 > [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
 
 ---
 
-## Endpoint
+## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/projects/{project_id}` | DELETE | Delete project with cleanup |
+| Endpoint | Method | File | Lines | Description |
+|----------|--------|------|-------|-------------|
+| `/projects/{id}` | DELETE | `app.py` | 1204-1357 | Delete project with cleanup |
+| `/projects/{id}` | PUT | `app.py` | 1357-1436 | Update project metadata |
 
 ---
 
-## Delete Project
+## DELETE /projects/{id}
 
-```
-DELETE /projects/{project_id}?force=false
-```
+**File:** `app.py:1204-1357`
 
-**Query Params:**
-- `force` (bool, optional): Force deletion even if validation fails (DANGEROUS)
+Delete a project with full infrastructure cleanup.
+
+**Query Parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `force` | bool | Force deletion even if validation fails (DANGEROUS) |
 
 **Response:**
 ```json
@@ -27,39 +31,65 @@ DELETE /projects/{project_id}?force=false
   "success": true,
   "message": "Project deleted successfully",
   "cleanup_results": {
-    "project_path_removed": true,
+    "database_dropped": true,
     "pm2_stopped": true,
     "nginx_removed": true,
-    "database_dropped": true
+    "files_removed": true,
+    "dns_removed": true
   }
 }
 ```
 
-**File:** `app.py:1204-1355`
-
----
-
-## Cleanup Steps
+**Cleanup Steps:**
 
 | Step | Description |
 |------|-------------|
-| 1 | Stop PM2 processes |
-| 2 | Remove nginx config |
-| 3 | Drop project database |
-| 4 | Remove project directory |
-| 5 | Delete DB record |
+| 1 | Get project info from database |
+| 2 | Validate not deleting master database |
+| 3 | Stop PM2 processes |
+| 4 | Remove nginx config |
+| 5 | Drop project database |
+| 6 | Remove DNS records |
+| 7 | Delete project files |
+| 8 | Delete database record |
+
+**Security:**
+- Master database deletion is blocked
+- Validates project database name pattern
+- Force flag logged as warning
 
 ---
 
-## Safety Checks
+## PUT /projects/{id}
 
-- Validates project exists
-- Blocks master database deletion
-- Validates database name pattern
-- Force flag required for unsafe deletions
+**File:** `app.py:1357-1436`
+
+Update project metadata.
+
+**Request:**
+```json
+{
+  "name": "new-name",
+  "domain": "new-domain",
+  "description": "Updated description",
+  "status": "ready"
+}
+```
+
+**Response:**
+```json
+{
+  "id": 123,
+  "name": "new-name",
+  "domain": "new-domain",
+  "status": "ready",
+  "updated_at": "2026-03-15T10:30:00"
+}
+```
 
 ---
 
 ## Related
 
 - [Project Creation](project_creation.md)
+- [Project Status](project_status.md)

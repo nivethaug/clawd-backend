@@ -1,66 +1,66 @@
-# Chat API
+# Chat - Complete Reference
 
 > [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
 
 ---
 
-## Endpoint
+## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/chat` | POST | Chat completion (non-streaming) |
+| Endpoint | Method | File | Lines | Description |
+|----------|--------|------|-------|-------------|
+| `/chat` | POST | `app.py` | 2081-2155 | Chat completion (non-streaming) |
 
 ---
 
-## Chat Request
+## POST /chat
 
-```
-POST /chat
-```
+**File:** `app.py:2081-2155`
 
-**Request Body:**
+Send a chat message and get a response (non-streaming).
+
+**Request:**
 ```json
 {
   "session_key": "abc123",
   "messages": [
-    {"role": "user", "content": "Hello"}
+    {"role": "user", "content": "Hello, how are you?"}
   ],
   "stream": false,
   "image": null
 }
 ```
 
+**Request Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_key` | string | Session identifier |
+| `messages` | array | Array of message objects |
+| `stream` | bool | Set to `false` for non-streaming |
+| `image` | string | Optional base64-encoded image |
+
 **Response:**
 ```json
 {
-  "id": 1,
+  "id": 123,
   "role": "assistant",
-  "content": "Hello! How can I help you?",
-  "created_at": "2026-03-15T10:00:00"
+  "content": "I'm doing well, thank you for asking!",
+  "created_at": "2026-03-15T10:00:05"
 }
 ```
 
-**File:** `app.py:800-950`
-
 ---
 
-## Handler Functions
+## Flow
 
-| Function | File | Lines |
-|----------|------|-------|
-| `generate_sse_stream()` | `chat_handlers.py` | 50-200 |
-| `generate_sse_stream_with_db_save()` | `chat_handlers.py` | 200-350 |
-| `handle_chat_with_image()` | `chat_handlers.py` | 350-450 |
-| `handle_chat_text_only()` | `chat_handlers.py` | 450-550 |
-
----
-
-## Models Used
-
-| Model | Type | Description |
-|-------|------|-------------|
-| `zai/glm-4.6v` | IMAGE_MODEL | Vision model for image input |
-| `agent:main` | TEXT_MODEL | Text completion model |
+| Step | Description |
+|------|-------------|
+| 1 | Validate session exists |
+| 2 | Check for image in request |
+| 3 | If image: use `handle_chat_with_image()` |
+| 4 | If text only: use `handle_chat_text_only()` |
+| 5 | Save message to database |
+| 6 | Return response |
 
 ---
 
@@ -68,4 +68,4 @@ POST /chat
 
 - [Chat Stream](chat_stream.md)
 - [AI Completion](ai_completion.md)
-- [Project Session](project_session.md)
+- [Project Sessions](project_sessions.md)

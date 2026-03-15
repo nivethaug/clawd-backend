@@ -1,24 +1,24 @@
-# Publish Frontend API
+# Publish Frontend - Complete Reference
 
 > [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
 
 ---
 
-## Endpoint
+## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/projects/{project_id}/publish/frontend` | POST | Build & publish frontend |
+| Endpoint | Method | File | Lines | Description |
+|----------|--------|------|-------|-------------|
+| `/projects/{id}/publish/frontend` | POST | `app.py` | 1436-1534 | Build & publish frontend |
 
 ---
 
-## Publish Request
+## POST /projects/{id}/publish/frontend
 
-```
-POST /projects/{project_id}/publish/frontend
-```
+**File:** `app.py:1436-1534`
 
-**Request Body:**
+Build and publish frontend for a project.
+
+**Request:**
 ```json
 {
   "project_path": "/path/to/project",
@@ -29,16 +29,35 @@ POST /projects/{project_id}/publish/frontend
 }
 ```
 
+**Request Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `project_path` | string | Absolute path to project (optional, uses DB if omitted) |
+| `project_name` | string | Project name for PM2 restart (optional) |
+| `skip_install` | bool | Skip npm install |
+| `skip_build` | bool | Skip npm build |
+| `restart` | bool | Restart PM2 and nginx after build |
+
 **Response:**
 ```json
 {
   "success": true,
   "message": "Frontend build and publish completed successfully",
-  "output": "..."
+  "output": "...",
+  "error": null
 }
 ```
 
-**File:** `app.py:1420-1500`
+**Error Response:**
+```json
+{
+  "success": false,
+  "message": "Frontend build failed",
+  "output": "...",
+  "error": "Build error details..."
+}
+```
 
 ---
 
@@ -46,29 +65,26 @@ POST /projects/{project_id}/publish/frontend
 
 | Step | Description |
 |------|-------------|
-| 1 | Clean Vite caches |
-| 2 | Remove node_modules |
-| 3 | npm install --include=dev --legacy-peer-deps |
-| 4 | npm run build |
-| 5 | Verify dist/ |
+| 1 | Clean Vite caches (`.vite-temp`, `.vite`) |
+| 2 | Remove existing `node_modules` |
+| 3 | `npm install --include=dev --legacy-peer-deps` |
+| 4 | `npm run build` |
+| 5 | Verify `dist/index.html` |
 | 6 | Fix permissions (755/644) |
-| 7 | Cleanup node_modules |
-| 8 | Restart PM2/nginx (optional) |
+| 7 | Cleanup `node_modules` |
+| 8 | Restart PM2/nginx (if `restart: true`) |
 
 ---
 
-## Script
+## Script Location
 
-**File:** `templates/blank-template/frontend/buildpublish.py`
-
-**Usage:**
-```bash
-python buildpublish.py [--skip-install] [--skip-build] [--restart] [--project-name NAME]
-```
+| File | Lines | Description |
+|------|-------|-------------|
+| `templates/blank-template/frontend/buildpublish.py` | 1-250 | Frontend build script |
 
 ---
 
 ## Related
 
 - [Publish Backend](publish_backend.md)
-- [Project Status](project_status.md)
+- [Project Creation](project_creation.md)
