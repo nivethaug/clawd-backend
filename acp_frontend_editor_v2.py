@@ -1520,14 +1520,16 @@ Provide ONLY the JSON list, nothing else."""
             # Normalize page names: "Document Editor" → "DocumentEditor"
             for page in explicit_pages:
                 # Strip leading conjunctions (e.g., "and Audience" → "Audience")
-                page_clean = page.strip().lower()
+                page_stripped = page.strip()
+                page_lower = page_stripped.lower()
                 for conj in conjunctions:
-                    if page_clean.startswith(conj + ' '):
-                        page = page[len(conj):].strip()
+                    if page_lower.startswith(conj + ' '):
+                        # Strip conjunction from the original (preserving case)
+                        page_stripped = page_stripped[len(conj):].strip()
                         break
 
                 # Remove leading/trailing whitespace and special chars
-                normalized = re.sub(r'\s+', '', page.strip().title())
+                normalized = re.sub(r'\s+', '', page_stripped.title())
                 # Skip empty strings or strings with only special chars
                 if normalized and len(normalized) > 0 and any(c.isalpha() for c in normalized):
                     required_pages.append(normalized)
