@@ -1573,7 +1573,7 @@ TECHNICAL REQUIREMENTS
 - Follow existing code patterns and style
 - Write clean, production-ready code
 - Do not introduce placeholder content unless required
-- Follow page templates AND page specifications for professional UI
+- Follow page specifications for professional UI
 - Ensure all UI elements from page specs are implemented
 
 ⚠️ CRITICAL: LAYOUT COMPONENT RULES ⚠️
