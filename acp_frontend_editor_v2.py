@@ -1277,6 +1277,19 @@ Implement a complete, production-ready {page_name} page now."""
                                 if result.returncode == -6:
                                     error_type = "sigabrt"
                                     error_details = "SIGABRT (-6): Process aborted/crashed (likely Claude API error or rate limit)"
+                                    
+                                    # Check for rate limit in stderr and retry with backoff
+                                    if result.stderr and ("rate limit" in result.stderr.lower() or "429" in result.stderr):
+                                        logger.warning(f"[ACPX-V2]   Rate limit detected for {page_name}, waiting 60s before retry...")
+                                        print(f"🔴 ACPX-V2-STEP13-RATE-LIMIT: {page_name} hit rate limit, waiting 60s")
+                                        import time
+                                        time.sleep(60)  # Wait for rate limit window
+                                        
+                                        # Retry once after waiting
+                                        if attempt == 1:
+                                            logger.info(f"[ACPX-V2]   Retrying {page_name} after rate limit wait...")
+                                            print(f"🔴 ACPX-V2-STEP13-RATE-LIMIT-RETRY: Retrying {page_name}")
+                                            return populate_page(page_name, attempt=2)
                                 elif result.returncode == -9:
                                     error_type = "sigkill"
                                     error_details = "SIGKILL (-9): Process killed (likely OOM or timeout)"
@@ -1330,7 +1343,8 @@ Implement a complete, production-ready {page_name} page now."""
                     
                     # First pass: Try to populate all empty pages
                     print("🔴 ACPX-V2-STEP13-CYCLE-1: First pass - attempting all empty pages")
-                    for page_name in empty_pages:
+                    import time
+                    for i, page_name in enumerate(empty_pages):
                         success, error_info = populate_page(page_name, attempt=1)
                         if success:
                             populated_count += 1
@@ -1338,6 +1352,12 @@ Implement a complete, production-ready {page_name} page now."""
                             failed_pages.append(page_name)
                             if error_info:
                                 failure_reports.append(error_info)
+                        
+                        # Add delay between pages to avoid rate limits (except for last page)
+                        if i < len(empty_pages) - 1:
+                            delay = 5  # 5 seconds between pages
+                            logger.info(f"[ACPX-V2]   Waiting {delay}s before next page to avoid rate limits...")
+                            time.sleep(delay)
                     
                     # Second pass: Retry failed pages once (like Replit/Lovable)
                     if failed_pages:
