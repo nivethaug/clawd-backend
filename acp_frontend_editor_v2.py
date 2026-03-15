@@ -1299,6 +1299,9 @@ class ACPFrontendEditorV2:
             return self._cached_pages
 
         logger.info("[Planner] Extracting required pages from prompt...")
+        print("\n" + "="*60)
+        print("🔍 PAGE INFERENCE START")
+        print("="*60)
         print(f"🔴 PLANNER-INPUT: {goal_description[:200]}...")
 
         required_pages = []
@@ -1306,30 +1309,39 @@ class ACPFrontendEditorV2:
         # Step 1: Try Groq AI inference
         try:
             from groq_service import GroqService
+            print("🔴 PLANNER-STEP1: Attempting Groq AI inference...")
             groq = GroqService()
             inferred_pages = groq.infer_pages(goal_description)
+            print(f"🔴 PLANNER-GROQ-RAW: Inferred pages = {inferred_pages}")
             if inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
                 logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
-                print(f"🔴 PLANNER-GROQ: Inferred pages = {inferred_pages}")
+                print(f"✅ PLANNER-GROQ-SUCCESS: Using {len(inferred_pages)} pages: {inferred_pages}")
+            else:
+                print(f"⚠️  PLANNER-GROQ-INSUFFICIENT: Got {len(inferred_pages) if inferred_pages else 0} pages, need >= 3")
         except Exception as e:
             logger.warning(f"[Planner] Groq inference failed: {e}")
-            print(f"🔴 PLANNER-GROQ-ERROR: {e}")
+            print(f"❌ PLANNER-GROQ-ERROR: {type(e).__name__}: {str(e)}")
 
         # Step 2: Fallback to default pages
         if len(required_pages) < 3:
             required_pages = ["Dashboard", "Settings", "Overview"]
             logger.info(f"[Planner] Using default pages: {required_pages}")
-            print(f"🔴 PLANNER-DEFAULT: Using default pages = {required_pages}")
+            print(f"⚠️  PLANNER-DEFAULT: Using default pages = {required_pages}")
 
         # Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
 
-        print(f"🔴 PLANNER-FINAL: Pages = {required_pages}")
+        print(f"🎯 PLANNER-FINAL: Pages = {required_pages}")
+        print(f"📊 PLANNER-COUNT: {len(required_pages)} pages detected")
+        print("="*60)
+        print("🔍 PAGE INFERENCE COMPLETE")
+        print("="*60 + "\n")
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
         logger.info(f"[Phase9] Allowed pages: {required_pages}")
+        print(f"🔴 PHASE9-ALLOWED: Whitelist set to: {sorted(self.allowed_pages)}")
 
         # Planner logging
         logger.info(f"[Planner] Description: {goal_description}")
