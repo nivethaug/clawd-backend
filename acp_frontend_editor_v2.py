@@ -112,13 +112,14 @@ class ACPPathValidator:
         except ValueError:
             return False, f"Forbidden: Path outside frontend/src ({path})"
 
-        # Check 1: Forbidden paths (node_modules, package.json, vite.config.ts, etc.)
+        # Check 1: Forbidden paths (exact path segment matching)
+        path_parts = Path(rel_path).parts
         for forbidden in FORBIDDEN_EDIT_PATHS:
-            if forbidden in rel_path_str or rel_path_str.startswith(forbidden):
+            if forbidden in path_parts:
                 return False, f"Forbidden: Cannot modify {forbidden} ({rel_path})"
 
-        # Check 2: Specifically block components/ui (UI library components)
-        if "components/ui" in rel_path_str:
+        # Check 2: Specifically block components/ui (exact path segment)
+        if "ui" in path_parts and "components" in path_parts:
             return False, f"Forbidden: Cannot modify UI components ({rel_path})"
 
         # Check 3: Allow all except forbidden (simplified approach)
@@ -132,18 +133,16 @@ class ACPPathValidator:
 
 def _file_hash(file_path: Path) -> str:
     """
-    Compute SHA1 hash of a file.
+    Compute lightweight file signature using metadata.
 
     Args:
         file_path: Path to file
 
     Returns:
-        Hex digest string
+        Signature string (size-mtime)
     """
-    h = hashlib.sha1()
-    with open(file_path, 'rb') as f:
-        h.update(f.read())
-    return h.hexdigest()
+    stat = file_path.stat()
+    return f"{stat.st_size}-{stat.st_mtime}"
 
 class FilesystemSnapshot:
     """Captures and compares filesystem state using file hashes."""
@@ -723,6 +722,10 @@ class ACPFrontendEditorV2:
                 watchdog_killed = False
                 idle_killed = False
                 
+                # Track previous lengths for idle detection
+                prev_stdout_len = 0
+                prev_stderr_len = 0
+                
                 def read_stream(stream, lines_list):
                     """Read from stream line by line."""
                     try:
@@ -746,8 +749,11 @@ class ACPFrontendEditorV2:
                         current_time = time.time()
                         elapsed = current_time - start_time
                         
-                        # Check for new output
-                        if stdout_lines or stderr_lines:
+                        # Check for NEW output (length changed)
+                        current_stdout_len = len(stdout_lines)
+                        current_stderr_len = len(stderr_lines)
+                        
+                        if current_stdout_len > prev_stdout_len or current_stderr_len > prev_stderr_len:
                             last_output_time = current_time
                         
                         idle_time = current_time - last_output_time
@@ -1186,7 +1192,7 @@ class ACPFrontendEditorV2:
                 # Don't fail on cleanup errors
                 logger.warning(f"[ACPX-V2] Snapshot cleanup failed but returning success: {str(e)}")
 
-            # Step 13: Post-process - Detect and populate empty/placeholder pages
+            # Step 13: Post-process - Detect empty/placeholder pages (logging only)
             try:
                 print("🔴 ACPX-V2-STEP13: Checking for empty pages")
                 logger.info("[ACPX-V2] Step 13: Checking for empty/placeholder pages...")
@@ -1216,204 +1222,7 @@ class ACPFrontendEditorV2:
                 if empty_pages:
                     logger.warning(f"[ACPX-V2]   Found {len(empty_pages)} empty pages: {empty_pages}")
                     print(f"🔴 ACPX-V2-STEP13-EMPTY-COUNT: {len(empty_pages)} empty pages detected")
-                    
-                    # Populate pages one at a time to avoid timeout
-                    logger.info("[ACPX-V2]   Populating empty pages in batches (one at a time)...")
-                    print("🔴 ACPX-V2-STEP13-BATCH: Populating pages in batches")
-                    
-                    populated_count = 0
-                    failed_pages = []
-                    failure_reports = []  # Collect detailed failure info
-                    
-                    def populate_page(page_name, attempt=1):
-                        """Populate a single page with detailed error tracking."""
-                        try:
-                            print(f"🔴 ACPX-V2-STEP13-BATCH-START: Populating {page_name} (attempt {attempt})")
-                            logger.info(f"[ACPX-V2]   Populating page: {page_name} (attempt {attempt})")
-                            
-                            # Create specific prompt for this page
-                            page_prompt = f"""Complete the {page_name} page with full content:
-
-CRITICAL REQUIREMENTS:
-1. Full component implementation with real content (not placeholder text)
-2. Proper imports (lucide-react icons, UI components, etc.)
-3. Mock data for realistic UI (at least 3-5 data items)
-4. Responsive design with Tailwind classes
-5. Loading states and error handling
-6. Aim for ~150 lines of clean, production-ready code (quality over quantity)
-
-DO NOT leave placeholder text like "Page content will be generated by AI".
-DO NOT create empty components with just <div></div>.
-
-Implement a complete, production-ready {page_name} page now."""
-                            
-                            # Run ACPX for this single page
-                            cmd = [
-                                "acpx",
-                                "--cwd", str(self.frontend_src_path),
-                                "--format", "quiet",
-                                "claude",
-                                "exec",
-                                str(page_prompt)
-                            ]
-                            
-                            result = subprocess.run(
-                                cmd,
-                                capture_output=True,
-                                text=True,
-                                timeout=150  # 2.5 minutes per page with grace time
-                            )
-                            
-                            if result.returncode == 0:
-                                logger.info(f"[ACPX-V2]   ✓ Successfully populated {page_name}")
-                                print(f"🔴 ACPX-V2-STEP13-BATCH-SUCCESS: {page_name} populated")
-                                return True, None
-                            else:
-                                # Enhanced error diagnostics
-                                error_type = "return_code"
-                                error_details = f"code {result.returncode}"
-                                
-                                # Special handling for common error codes
-                                if result.returncode == -6:
-                                    error_type = "sigabrt"
-                                    error_details = "SIGABRT (-6): Process aborted/crashed (likely Claude API error or rate limit)"
-                                    
-                                    # Check for rate limit in stderr and retry with backoff
-                                    if result.stderr and ("rate limit" in result.stderr.lower() or "429" in result.stderr):
-                                        logger.warning(f"[ACPX-V2]   Rate limit detected for {page_name}, waiting 60s before retry...")
-                                        print(f"🔴 ACPX-V2-STEP13-RATE-LIMIT: {page_name} hit rate limit, waiting 60s")
-                                        import time
-                                        time.sleep(60)  # Wait for rate limit window
-                                        
-                                        # Retry once after waiting
-                                        if attempt == 1:
-                                            logger.info(f"[ACPX-V2]   Retrying {page_name} after rate limit wait...")
-                                            print(f"🔴 ACPX-V2-STEP13-RATE-LIMIT-RETRY: Retrying {page_name}")
-                                            return populate_page(page_name, attempt=2)
-                                elif result.returncode == -9:
-                                    error_type = "sigkill"
-                                    error_details = "SIGKILL (-9): Process killed (likely OOM or timeout)"
-                                elif result.returncode == 1:
-                                    error_type = "general_error"
-                                    error_details = "General error (check stderr)"
-                                
-                                error_info = {
-                                    "page": page_name,
-                                    "attempt": attempt,
-                                    "error_type": error_type,
-                                    "return_code": result.returncode,
-                                    "error_details": error_details,
-                                    "stderr": result.stderr[:1000] if result.stderr else None,
-                                    "stdout": result.stdout[:1000] if result.stdout else None,
-                                    "command": ' '.join(cmd)
-                                }
-                                logger.warning(f"[ACPX-V2]   ✗ Failed to populate {page_name}: {error_details}")
-                                print(f"🔴 ACPX-V2-STEP13-BATCH-FAIL: {page_name} - {error_details}")
-                                
-                                # Log stderr/stdout for debugging
-                                if result.stderr:
-                                    logger.debug(f"[ACPX-V2]   Stderr: {result.stderr[:500]}")
-                                if result.stdout:
-                                    logger.debug(f"[ACPX-V2]   Stdout: {result.stdout[:500]}")
-                                
-                                return False, error_info
-                                
-                        except subprocess.TimeoutExpired as e:
-                            error_info = {
-                                "page": page_name,
-                                "attempt": attempt,
-                                "error_type": "timeout",
-                                "timeout_seconds": 150,
-                                "command": str(e.cmd) if hasattr(e, 'cmd') else None
-                            }
-                            logger.warning(f"[ACPX-V2]   ✗ Timeout populating {page_name}")
-                            print(f"🔴 ACPX-V2-STEP13-BATCH-TIMEOUT: {page_name} timed out (150s)")
-                            return False, error_info
-                        except Exception as e:
-                            error_info = {
-                                "page": page_name,
-                                "attempt": attempt,
-                                "error_type": "exception",
-                                "exception_type": type(e).__name__,
-                                "exception_message": str(e)
-                            }
-                            logger.error(f"[ACPX-V2]   ✗ Error populating {page_name}: {str(e)}")
-                            print(f"🔴 ACPX-V2-STEP13-BATCH-ERROR: {page_name} - {type(e).__name__}: {str(e)}")
-                            return False, error_info
-                    
-                    # First pass: Try to populate all empty pages
-                    print("🔴 ACPX-V2-STEP13-CYCLE-1: First pass - attempting all empty pages")
-                    import time
-                    for i, page_name in enumerate(empty_pages):
-                        success, error_info = populate_page(page_name, attempt=1)
-                        if success:
-                            populated_count += 1
-                        else:
-                            failed_pages.append(page_name)
-                            if error_info:
-                                failure_reports.append(error_info)
-                        
-                        # Add delay between pages to avoid rate limits (except for last page)
-                        if i < len(empty_pages) - 1:
-                            delay = 5  # 5 seconds between pages
-                            logger.info(f"[ACPX-V2]   Waiting {delay}s before next page to avoid rate limits...")
-                            time.sleep(delay)
-                    
-                    # Second pass: Retry failed pages once (like Replit/Lovable)
-                    if failed_pages:
-                        logger.info(f"[ACPX-V2]   Retrying {len(failed_pages)} failed pages...")
-                        print(f"🔴 ACPX-V2-STEP13-CYCLE-2: Retrying {len(failed_pages)} failed pages")
-                        
-                        retry_success_count = 0
-                        still_failed = []
-                        
-                        for page_name in failed_pages:
-                            success, error_info = populate_page(page_name, attempt=2)
-                            if success:
-                                retry_success_count += 1
-                                populated_count += 1
-                                # Remove from failure reports since it succeeded on retry
-                                failure_reports = [r for r in failure_reports if r['page'] != page_name]
-                            else:
-                                still_failed.append(page_name)
-                                if error_info:
-                                    # Update failure report with retry attempt
-                                    failure_reports.append(error_info)
-                        
-                        if retry_success_count > 0:
-                            logger.info(f"[ACPX-V2]   ✓ Retry successful for {retry_success_count} pages")
-                            print(f"🔴 ACPX-V2-STEP13-RETRY-SUCCESS: {retry_success_count} pages recovered")
-                        
-                        failed_pages = still_failed
-                    
-                    # Summary
-                    logger.info(f"[ACPX-V2]   Batch population complete: {populated_count}/{len(empty_pages)} pages populated")
-                    print(f"🔴 ACPX-V2-STEP13-BATCH-DONE: Populated {populated_count}/{len(empty_pages)} pages")
-                    
-                    if failed_pages:
-                        logger.warning(f"[ACPX-V2]   Failed pages after retry: {failed_pages}")
-                        print(f"🔴 ACPX-V2-STEP13-BATCH-FAILED: {failed_pages} (after retry)")
-                    
-                    if failure_reports:
-                        logger.warning(f"[ACPX-V2]   Failure reports collected: {len(failure_reports)}")
-                        print(f"🔴 ACPX-V2-STEP13-FAILURE-REPORTS: {len(failure_reports)} failures logged")
-                        
-                        # Log detailed failure reports
-                        for i, report in enumerate(failure_reports, 1):
-                            logger.warning(f"[ACPX-V2]   FAILURE REPORT #{i}:")
-                            logger.warning(f"[ACPX-V2]     Page: {report.get('page')}")
-                            logger.warning(f"[ACPX-V2]     Attempt: {report.get('attempt')}")
-                            logger.warning(f"[ACPX-V2]     Error Type: {report.get('error_type')}")
-                            if report.get('error_details'):
-                                logger.warning(f"[ACPX-V2]     Details: {report.get('error_details')}")
-                            if report.get('return_code'):
-                                logger.warning(f"[ACPX-V2]     Return Code: {report.get('return_code')}")
-                            if report.get('stderr'):
-                                logger.warning(f"[ACPX-V2]     Stderr: {report.get('stderr')[:200]}")
-                            if report.get('stdout'):
-                                logger.warning(f"[ACPX-V2]     Stdout: {report.get('stdout')[:200]}")
-                            
-                            print(f"🔴 FAILURE-REPORT-{i}: {report.get('page')} - {report.get('error_type')} - {report.get('error_details', 'N/A')}")
+                    logger.warning(f"[ACPX-V2]   Empty pages should be populated by ACPX in single execution mode")
                 else:
                     logger.info("[ACPX-V2]   ✓ All pages have content")
                     print("🔴 ACPX-V2-STEP13-DONE: All pages have content")
