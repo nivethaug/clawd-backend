@@ -14,6 +14,8 @@
 | `/projects/{id}` | DELETE | `app.py` | 185-210 | `delete_project()` |
 | `/projects/{id}/status` | GET | `app.py` | 215-240 | `get_project_status()` |
 | `/projects/{id}/deploy` | POST | `app.py` | 245-280 | `trigger_deploy()` |
+| `/projects/{id}/publish/frontend` | POST | `app.py` | 1420-1500 | `publish_frontend()` |
+| `/projects/{id}/publish/backend` | POST | `app.py` | 1505-1570 | `publish_backend()` |
 
 ---
 

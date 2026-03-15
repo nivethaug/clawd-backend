@@ -25,6 +25,8 @@
 | `/projects/{id}` | DELETE | Delete project | [project_info_toc.md](./project_info_toc.md) |
 | `/projects/{id}/status` | GET | Get pipeline status | [project_info_toc.md](./project_info_toc.md) |
 | `/projects/{id}/deploy` | POST | Trigger deployment | [project_info_toc.md](./project_info_toc.md) |
+| `/projects/{id}/publish/frontend` | POST | Build & publish frontend | [project_info_toc.md](./project_info_toc.md) |
+| `/projects/{id}/publish/backend` | POST | Build & publish backend | [project_info_toc.md](./project_info_toc.md) |
 
 ### Future Endpoints (To be documented)
 
