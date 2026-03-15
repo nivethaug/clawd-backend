@@ -5,7 +5,16 @@
 
 ---
 
-## 📑 Quick Navigation
+## � Related Documentation
+
+| Document | Path | Purpose |
+|----------|------|---------|
+| **API Index** | [docs/toc.md](../../docs/toc.md) | Master API endpoint index |
+| **Project API** | [docs/project_info_toc.md](../../docs/project_info_toc.md) | `/projects` endpoint details |
+
+---
+
+## �📑 Quick Navigation
 
 ### Project Creation Pipeline
 

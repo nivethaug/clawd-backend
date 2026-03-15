@@ -5,6 +5,14 @@
 
 ---
 
+## 🔗 Quick Links
+
+| Document | Path | Purpose |
+|----------|------|---------|
+| **Agent Skill** | [.agents/skills/project-info/SKILL.md](../.agents/skills/project-info/SKILL.md) | Full project knowledge for AI agents |
+
+---
+
 ## API Endpoints Index
 
 ### Project Management
