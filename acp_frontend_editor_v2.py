@@ -1731,9 +1731,9 @@ import {{ Outlet }} from 'react-router-dom';
 const Layout = () => {{
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      {/* Future: Sidebar can be added here */}}
+      {{/* Sidebar can be added here */}}
       <div className="flex flex-col flex-1">
-        {/* Future: Header can be added here */}}
+        {{/* Header can be added here */}}
         <main className="flex-1 overflow-y-auto p-6">
           <Outlet />  ← Pages render here
         </main>
