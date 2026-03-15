@@ -1414,6 +1414,213 @@ async def update_project(project_id: int, request: UpdateProjectRequest):
 
     return ProjectResponse(**dict(updated_project))
 
+# ============================================================================
+# Build & Publish Endpoints
+# ============================================================================
+
+class BuildPublishRequest(BaseModel):
+    """Request model for build & publish operations"""
+    project_path: str = Field(..., description="Absolute path to project directory")
+    project_name: Optional[str] = Field(None, description="Project name for PM2 restart")
+    skip_install: bool = Field(False, description="Skip npm/pip install")
+    skip_build: bool = Field(False, description="Skip build step")
+    restart: bool = Field(True, description="Restart PM2 and nginx after build")
+
+class BuildPublishResponse(BaseModel):
+    """Response model for build & publish operations"""
+    success: bool
+    message: str
+    output: Optional[str] = None
+    error: Optional[str] = None
+
+@app.post("/projects/{project_id}/publish/frontend", response_model=BuildPublishResponse)
+async def publish_frontend(project_id: int, request: BuildPublishRequest):
+    """
+    Build and publish frontend for a project.
+    
+    Steps:
+    1. Clean Vite caches
+    2. Remove node_modules
+    3. npm install --include=dev --legacy-peer-deps
+    4. npm run build
+    5. Verify dist/
+    6. Fix permissions
+    7. Cleanup node_modules
+    8. Restart PM2/nginx (optional)
+    
+    Args:
+        project_id: Project ID
+        request: Build configuration
+    
+    Returns:
+        Build status and output
+    """
+    import threading
+    
+    # Validate project exists
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, name, project_path, status FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    
+    # Use project_path from DB if not provided in request
+    project_path = request.project_path or project["project_path"]
+    frontend_path = Path(project_path) / "frontend"
+    
+    if not frontend_path.exists():
+        raise HTTPException(status_code=400, detail=f"Frontend directory not found: {frontend_path}")
+    
+    if not (frontend_path / "package.json").exists():
+        raise HTTPException(status_code=400, detail=f"package.json not found in {frontend_path}")
+    
+    # Build command args
+    cmd_args = ["python", "buildpublish.py"]
+    if request.skip_install:
+        cmd_args.append("--skip-install")
+    if request.skip_build:
+        cmd_args.append("--skip-build")
+    if request.restart:
+        cmd_args.append("--restart")
+    if request.project_name:
+        cmd_args.extend(["--project-name", request.project_name])
+    else:
+        cmd_args.extend(["--project-name", project["name"]])
+    
+    logger.info(f"📦 Starting frontend build for project {project_id}: {' '.join(cmd_args)}")
+    
+    try:
+        result = subprocess.run(
+            cmd_args,
+            cwd=str(frontend_path),
+            capture_output=True,
+            text=True,
+            timeout=900  # 15 minutes
+        )
+        
+        if result.returncode == 0:
+            logger.info(f"✅ Frontend build completed for project {project_id}")
+            return BuildPublishResponse(
+                success=True,
+                message="Frontend build and publish completed successfully",
+                output=result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout
+            )
+        else:
+            logger.error(f"❌ Frontend build failed for project {project_id}: {result.stderr}")
+            return BuildPublishResponse(
+                success=False,
+                message="Frontend build failed",
+                error=result.stderr[-1000:] if len(result.stderr) > 1000 else result.stderr,
+                output=result.stdout[-1000:] if len(result.stdout) > 1000 else result.stdout
+            )
+    
+    except subprocess.TimeoutExpired:
+        logger.error(f"⏱️ Frontend build timeout for project {project_id}")
+        return BuildPublishResponse(
+            success=False,
+            message="Frontend build timed out (15 min limit)"
+        )
+    except Exception as e:
+        logger.error(f"❌ Frontend build error for project {project_id}: {e}")
+        return BuildPublishResponse(
+            success=False,
+            message=f"Frontend build error: {str(e)}"
+        )
+
+
+@app.post("/projects/{project_id}/publish/backend", response_model=BuildPublishResponse)
+async def publish_backend(project_id: int, request: BuildPublishRequest):
+    """
+    Build and publish backend for a project.
+    
+    Steps:
+    1. pip install -r requirements.txt
+    2. Verify main.py
+    3. Run migrations (if alembic configured)
+    4. Restart PM2/nginx (optional)
+    
+    Args:
+        project_id: Project ID
+        request: Build configuration
+    
+    Returns:
+        Build status and output
+    """
+    # Validate project exists
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, name, project_path, status FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    
+    # Use project_path from DB if not provided in request
+    project_path = request.project_path or project["project_path"]
+    backend_path = Path(project_path) / "backend"
+    
+    if not backend_path.exists():
+        raise HTTPException(status_code=400, detail=f"Backend directory not found: {backend_path}")
+    
+    if not (backend_path / "main.py").exists():
+        raise HTTPException(status_code=400, detail=f"main.py not found in {backend_path}")
+    
+    # Build command args
+    cmd_args = ["python", "buildpublish.py"]
+    if request.skip_install:
+        cmd_args.append("--skip-deps")
+    if request.restart:
+        cmd_args.append("--restart")
+    if request.project_name:
+        cmd_args.extend(["--project-name", request.project_name])
+    else:
+        cmd_args.extend(["--project-name", project["name"]])
+    
+    logger.info(f"🔧 Starting backend build for project {project_id}: {' '.join(cmd_args)}")
+    
+    try:
+        result = subprocess.run(
+            cmd_args,
+            cwd=str(backend_path),
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minutes
+        )
+        
+        if result.returncode == 0:
+            logger.info(f"✅ Backend build completed for project {project_id}")
+            return BuildPublishResponse(
+                success=True,
+                message="Backend build and publish completed successfully",
+                output=result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout
+            )
+        else:
+            logger.error(f"❌ Backend build failed for project {project_id}: {result.stderr}")
+            return BuildPublishResponse(
+                success=False,
+                message="Backend build failed",
+                error=result.stderr[-1000:] if len(result.stderr) > 1000 else result.stderr,
+                output=result.stdout[-1000:] if len(result.stdout) > 1000 else result.stdout
+            )
+    
+    except subprocess.TimeoutExpired:
+        logger.error(f"⏱️ Backend build timeout for project {project_id}")
+        return BuildPublishResponse(
+            success=False,
+            message="Backend build timed out (10 min limit)"
+        )
+    except Exception as e:
+        logger.error(f"❌ Backend build error for project {project_id}: {e}")
+        return BuildPublishResponse(
+            success=False,
+            message=f"Backend build error: {str(e)}"
+        )
+
+
 @app.get("/projects/{project_id}/status", response_model=ProjectStatusResponse)
 async def get_project_status(project_id: int):
     """
