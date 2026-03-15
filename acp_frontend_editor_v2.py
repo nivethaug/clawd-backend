@@ -560,6 +560,10 @@ class ACPFrontendEditorV2:
         print(f"🔴 ACPX-V2-METHOD-START: Goal: {goal_description[:100]}")
         print(f"🔴 ACPX-V2-METHOD-START: Execution ID: {execution_id}")
 
+        # Clear cache for each new execution to ensure fresh page inference
+        self._cached_pages = None
+        print("🔴 ACPX-V2-CACHE-CLEAR: Cleared cached pages for fresh inference")
+
         try:
             print("🔴 ACPX-V2-TRY-BLOCK: Starting main logic")
             logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Starting Phase 9 (Filesystem Diff Architecture)")
@@ -1296,7 +1300,10 @@ class ACPFrontendEditorV2:
         # Return cached pages if available (prevents double LLM calls)
         if self._cached_pages is not None:
             logger.info("[Planner] Returning cached page inference")
+            print(f"🔴 PLANNER-CACHE-HIT: Returning cached pages = {self._cached_pages}")
             return self._cached_pages
+        
+        print("🔴 PLANNER-CACHE-MISS: No cached pages, performing fresh inference")
 
         logger.info("[Planner] Extracting required pages from prompt...")
         print("\n" + "="*60)
