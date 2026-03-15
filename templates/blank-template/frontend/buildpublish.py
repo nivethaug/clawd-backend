@@ -52,6 +52,27 @@ def verify_dist():
     return True
 
 
+def cleanup_node_modules():
+    """Remove node_modules to save space"""
+    print("\n" + "="*50)
+    print("CLEANUP NODE_MODULES")
+    print("="*50)
+    
+    node_modules = Path("node_modules")
+    if not node_modules.exists():
+        print("⚠ node_modules not found, skipping cleanup")
+        return True
+    
+    # Get size before deletion
+    total_size = sum(f.stat().st_size for f in node_modules.rglob("*") if f.is_file())
+    size_mb = total_size / (1024 * 1024)
+    
+    if run("rm -rf node_modules"):
+        print(f"✓ Freed {size_mb:.1f} MB")
+        return True
+    return False
+
+
 def restart_pm2(project_name: str = None):
     """Restart PM2 process"""
     print("\n" + "="*50)
@@ -103,7 +124,11 @@ def main():
         if not verify_dist():
             success = False
     
-    # Step 4: Restart services (optional)
+    # Step 4: Cleanup node_modules (always after successful build)
+    if success:
+        cleanup_node_modules()
+    
+    # Step 5: Restart services (optional)
     if args.restart and success:
         restart_pm2(args.project_name)
         reload_nginx()
