@@ -7,6 +7,7 @@ Uses official Groq Python SDK.
 
 import os
 import logging
+import asyncio
 from typing import Optional, List
 
 from groq import Groq
@@ -42,14 +43,14 @@ class GroqService:
         # Initialize Groq client
         self.client = Groq(api_key=self.api_key, timeout=self.TIMEOUT_SECONDS)
 
-    def generate_chat_completion(
+    async def generate_chat_completion(
         self,
         messages: List[dict],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> str:
         """
-        Generate a chat completion using Groq API via SDK.
+        Generate a chat completion using Groq API via SDK (async).
 
         Args:
             messages: Array of message dicts with 'role' and 'content'
@@ -63,12 +64,16 @@ class GroqService:
             RuntimeError: If Groq API call fails
         """
         try:
-            # Use Groq SDK to create completion
-            completion = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=temperature or self.DEFAULT_TEMPERATURE,
-                max_tokens=max_tokens or self.DEFAULT_MAX_TOKENS,
+            # Use Groq SDK to create completion (run in executor for async compatibility)
+            loop = asyncio.get_event_loop()
+            completion = await loop.run_in_executor(
+                None,
+                lambda: self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature or self.DEFAULT_TEMPERATURE,
+                    max_tokens=max_tokens or self.DEFAULT_MAX_TOKENS,
+                )
             )
 
             # Return the assistant's message content
