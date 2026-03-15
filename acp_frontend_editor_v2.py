@@ -1259,7 +1259,7 @@ Implement a complete, production-ready {page_name} page now."""
                                 cmd,
                                 capture_output=True,
                                 text=True,
-                                timeout=90  # 90 seconds per page (more reasonable)
+                                timeout=120  # 2 minutes per page
                             )
                             
                             if result.returncode == 0:
