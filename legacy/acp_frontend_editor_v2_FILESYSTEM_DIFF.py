@@ -252,7 +252,7 @@ class ACPSnapshotManager:
             else:
                 (self.backup_dir / "frontend").mkdir(parents=True)
 
-            logger.info(f"[Snapshot] ✓ Snapshot created successfully")
+            # logger.info(f"[Snapshot] ✓ Snapshot created successfully")  # Commented for cleaner logs
             return True, str(self.backup_dir)
 
         except Exception as e:
@@ -280,7 +280,7 @@ class ACPSnapshotManager:
 
             shutil.copytree(backup_frontend, self.frontend_path)
 
-            logger.info(f"[Snapshot] ✓ Restored snapshot from {self.backup_dir}")
+            # logger.info(f"[Snapshot] ✓ Restored snapshot from {self.backup_dir}")  # Commented for cleaner logs
             return True, "Snapshot restored successfully"
 
         except Exception as e:
@@ -297,7 +297,7 @@ class ACPSnapshotManager:
         try:
             if self.backup_dir.exists():
                 shutil.rmtree(self.backup_dir)
-                logger.info(f"[Snapshot] ✓ Cleaned up snapshot at {self.backup_dir}")
+                # logger.info(f"[Snapshot] ✓ Cleaned up snapshot at {self.backup_dir}")  # Commented for cleaner logs
             return True
         except Exception as e:
             logger.error(f"[Snapshot] ❌ Failed to cleanup snapshot: {e}")
@@ -718,35 +718,35 @@ class ACPFrontendEditorV2:
                         current_time = time.time()
                         elapsed = current_time - start_time
                     
-                    # Check for new output
-                    if stdout_lines or stderr_lines:
-                        last_output_time = current_time
-                    
-                    idle_time = current_time - last_output_time
-                    
-                    # Hard timeout check
-                    if elapsed > HARD_TIMEOUT:
-                        logger.error(f"[ACPX-V2] 🔴 WATCHDOG: Hard timeout exceeded ({elapsed:.1f}s > {HARD_TIMEOUT}s) — killing process")
-                        print(f"🔴 ACPX-V2-WATCHDOG: Hard timeout exceeded, killing process")
-                        process.kill()
-                        process.wait(timeout=5)
-                        watchdog_killed = True
-                        break
-                    
-                    # Idle timeout check
-                    if idle_time > IDLE_TIMEOUT:
-                        logger.warning(f"[ACPX-V2] ⚠️ WATCHDOG: Idle timeout exceeded ({idle_time:.1f}s > {IDLE_TIMEOUT}s) — terminating process")
-                        print(f"🔴 ACPX-V2-WATCHDOG: Idle timeout exceeded, terminating process")
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
+                        # Check for new output
+                        if stdout_lines or stderr_lines:
+                            last_output_time = current_time
+                        
+                        idle_time = current_time - last_output_time
+                        
+                        # Hard timeout check
+                        if elapsed > HARD_TIMEOUT:
+                            logger.error(f"[ACPX-V2] 🔴 WATCHDOG: Hard timeout exceeded ({elapsed:.1f}s > {HARD_TIMEOUT}s) — killing process")
+                            print(f"🔴 ACPX-V2-WATCHDOG: Hard timeout exceeded, killing process")
                             process.kill()
                             process.wait(timeout=5)
-                        idle_killed = True
-                        break
-                    
-                    time.sleep(0.5)
+                            watchdog_killed = True
+                            break
+                        
+                        # Idle timeout check
+                        if idle_time > IDLE_TIMEOUT:
+                            logger.warning(f"[ACPX-V2] ⚠️ WATCHDOG: Idle timeout exceeded ({idle_time:.1f}s > {IDLE_TIMEOUT}s) — terminating process")
+                            print(f"🔴 ACPX-V2-WATCHDOG: Idle timeout exceeded, terminating process")
+                            process.terminate()
+                            try:
+                                process.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.wait(timeout=5)
+                            idle_killed = True
+                            break
+                        
+                        time.sleep(0.5)
                 
                 except KeyboardInterrupt:
                     # Handle external interrupt gracefully
@@ -811,7 +811,7 @@ class ACPFrontendEditorV2:
                     logger.error("[ACPX] ACPX produced no edits - no .tsx files found")
                     raise RuntimeError("ACPX produced no edits")
 
-                logger.info(f"[ACPX-V2] ACPX subprocess completed successfully")
+                # logger.info(f"[ACPX-V2] ACPX subprocess completed successfully")  # Commented for cleaner logs
                 logger.info(f"[ACPX-V2]   Return code: {return_code}")
                 logger.info(f"[ACPX-V2]   Edited files: {len(edited_files)}")
                 logger.info(f"[ACPX-V2]   Stdout length: {len(stdout_output)} chars")
@@ -899,7 +899,7 @@ class ACPFrontendEditorV2:
                     }
                     print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
                     return result
-                logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{MAX_NEW_FILES})")
+                # logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{MAX_NEW_FILES})")  # Commented for cleaner logs
                 print("🔴 ACPX-V2-STEP8-DONE: File limits validated")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP8-ERROR: {type(e).__name__}: {str(e)}")
@@ -927,7 +927,7 @@ class ACPFrontendEditorV2:
                         }
                         print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
                         return result
-                logger.info(f"[ACPX-V2]   ✓ All paths valid")
+                # logger.info(f"[ACPX-V2]   ✓ All paths valid")  # Commented for cleaner logs
                 print("🔴 ACPX-V2-STEP9-DONE: All paths validated")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP9-ERROR: {type(e).__name__}: {str(e)}")
@@ -946,7 +946,8 @@ class ACPFrontendEditorV2:
                     logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
                     print(f"🔴 ACPX-V2-STEP10-INFO: Removed {unauthorized_removed} unauthorized pages")
                 else:
-                    logger.info(f"[ACPX-V2]   ✓ All pages authorized")
+                    # logger.info(f"[ACPX-V2]   ✓ All pages authorized")  # Commented for cleaner logs
+                    pass  # All pages authorized
                 print("🔴 ACPX-V2-STEP10-DONE: Page guardrails enforced")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP10-ERROR: {type(e).__name__}: {str(e)}")
@@ -975,7 +976,7 @@ class ACPFrontendEditorV2:
                     print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
                     return result
 
-                logger.info(f"[ACPX-V2] ✓ Build succeeded!")
+                # logger.info(f"[ACPX-V2] ✓ Build succeeded!")  # Commented for cleaner logs
                 print("🔴 ACPX-V2-STEP11-DONE: Build gate passed")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP11-ERROR: {type(e).__name__}: {str(e)}")
@@ -1047,31 +1048,44 @@ class ACPFrontendEditorV2:
 
         logger.info(f"[Planner] Running AI page inference for: {goal_description[:100]}...")
 
-        # Build inference prompt
-        inference_prompt = f"""You are planning the page structure for a SaaS application.
+        # Build inference prompt - Prioritize EXPLICIT page extraction
+        inference_prompt = f"""You are extracting page names from a SaaS application description.
 
 Product description:
 {goal_description}
 
-Your task:
-Return a list of 5-10 pages that would be appropriate for this application.
+CRITICAL TASK: Extract EXPLICITLY mentioned pages FIRST
 
-Rules:
-1. Consider the product type (CRM, analytics, document management, etc.)
-2. Think about standard SaaS pages (Dashboard, Settings, etc.)
-3. Be specific with page names (not generic like "MainPage")
-4. Return ONLY a JSON list of page names
+Step 1: Look for explicit page mentions
+- Scan for phrases like "pages: X, Y, Z" or "main pages: X, Y, Z"
+- Extract page names EXACTLY as written (preserve capitalization)
+- If description says "four main pages: Dashboard, Tickets, Assets, and Requests" → extract exactly those 4 pages
+
+Step 2: Only if NO explicit pages found, then infer CONTEXTUALLY
+- Identify product type: analytics platform, CRM, document management, monitoring, e-commerce, etc.
+- Generate SPECIFIC pages relevant to that product type (NOT generic)
+- Be creative and specific with page names
+
+RULES:
+1. EXPLICIT PAGES: If description mentions specific pages, extract ONLY those (do not add generic pages)
+2. NO EXPLICIT PAGES: If no pages mentioned, infer 5-10 SPECIFIC pages based on product type
+3. AVOID GENERIC PAGES: Do NOT default to "Dashboard", "Analytics", "Settings" unless truly relevant
+4. Return ONLY a JSON object with "pages" key
 5. Do NOT include explanations or extra text
+6. Preserve exact capitalization from description
 
 Response format (JSON ONLY):
-{{"pages": ["Dashboard", "Contacts", "Analytics", "Settings", "Documents"]}}
+{{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
 
 EXAMPLES:
-CRM app → {{"pages": ["Dashboard", "Contacts", "Deals", "Reports", "Tasks", "Settings"]}}
-Document management → {{"pages": ["Dashboard", "Documents", "Templates", "Editor", "Analytics", "Settings"]}}
-Analytics dashboard → {{"pages": ["Dashboard", "Reports", "Analytics", "Settings"]}}
+"ServiceDesk has four main pages: Dashboard, Tickets, Assets, and Requests" → {{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
+"Analytics and operations platform for monitoring activity, exploring data, managing workflows" → {{"pages": ["ActivityMonitor", "DataExplorer", "Workflows", "Metrics", "Alerts", "Integrations", "TeamSettings"]}}
+"E-commerce platform with product catalog and order management" → {{"pages": ["Products", "Orders", "Customers", "Inventory", "Reports", "StoreSettings"]}}
+"CRM app with contacts and deals" → {{"pages": ["Dashboard", "Contacts", "Deals", "Reports", "Tasks", "Settings"]}}
+"Document management platform" → {{"pages": ["Dashboard", "Documents", "Templates", "Editor", "Analytics", "Settings"]}}
+"Analytics dashboard" → {{"pages": ["Dashboard", "Reports", "Analytics", "Settings"]}}
 
-Provide ONLY the JSON list, nothing else."""
+Provide ONLY the JSON object, nothing else."""
 
         try:
             # Call LLM for page inference using ACPX CLI
@@ -1115,6 +1129,10 @@ Provide ONLY the JSON list, nothing else."""
 
             # Parse LLM response
             response_text = result.stdout.strip()
+            
+            # Debug: Log the raw response
+            logger.info(f"[Planner] 🔍 AI inference raw response: {response_text[:500]}")
+            print(f"🔍 AI_INFERENCE_RESPONSE: {response_text[:500]}")
 
             # Extract JSON from response - More flexible parsing
             import re
@@ -1148,15 +1166,19 @@ Provide ONLY the JSON list, nothing else."""
                         if isinstance(inferred_data, dict):
                             # Object format: {"pages": [...]}
                             pages = inferred_data.get("pages", [])
-                            logger.info(f"[Planner] AI inference successful (object format): {len(pages)} pages")
+                            # logger.info(f"[Planner] AI inference successful (object format): {len(pages)} pages")  # Commented for cleaner logs
+                            print(f"✅ AI_INFERENCE_SUCCESS (object): {pages}")
                         elif isinstance(inferred_data, list):
                             # Array format: [...]
                             pages = inferred_data
-                            logger.info(f"[Planner] AI inference successful (array format): {len(pages)} pages")
+                            # logger.info(f"[Planner] AI inference successful (array format): {len(pages)} pages")  # Commented for cleaner logs
+                            print(f"✅ AI_INFERENCE_SUCCESS (array): {pages}")
                         else:
                             logger.warning(f"[Planner] Unexpected JSON type: {type(inferred_data)}")
+                            print(f"⚠️ AI_INFERENCE_UNEXPECTED_TYPE: {type(inferred_data)}")
                         
                         logger.info(f"[Planner] Inferred: {pages}")
+                        print(f"📋 AI_INFERENCE_FINAL: {pages}")
                         return pages
 
                     except json.JSONDecodeError as e:
@@ -1171,7 +1193,7 @@ Provide ONLY the JSON list, nothing else."""
                     # Extract unique page names
                     found_pages = list(set([p.strip() for p in list_match.group(0).split(',') if p.strip()]))
                     inferred_pages = found_pages
-                    logger.info(f"[Planner] AI inference successful (list pattern): {len(inferred_pages)} pages")
+                    # logger.info(f"[Planner] AI inference successful (list pattern): {len(inferred_pages)} pages")  # Commented for cleaner logs
                     logger.info(f"[Planner] Inferred: {inferred_pages}")
                     return inferred_pages
 
@@ -1241,10 +1263,19 @@ Provide ONLY the JSON list, nothing else."""
 
         # Step 2: Extract explicit page lists (highest priority)
         # Matches patterns like: "pages: Dashboard, Documents, Templates"
+        # Or: "four main pages: Dashboard, Tickets, Assets, and Requests"
         # Or: "with 10 pages: Dashboard, Documents, Templates..."
         import re
-        explicit_list_pattern = r'pages?:\s*(.+)'
-        explicit_match = re.search(explicit_list_pattern, goal_description, re.IGNORECASE)
+        explicit_list_patterns = [
+            r'(?:\w+\s+)?pages?:\s*([A-Z][a-zA-Z,\s]+)',  # "four main pages: Dashboard, Tickets, Assets"
+            r'pages?:\s*(.+)',  # "pages: Dashboard, Documents, Templates"
+        ]
+        
+        explicit_match = None
+        for pattern in explicit_list_patterns:
+            explicit_match = re.search(pattern, goal_description, re.IGNORECASE)
+            if explicit_match:
+                break
 
         if explicit_match:
             pages_str = explicit_match.group(1)
@@ -1280,10 +1311,15 @@ Provide ONLY the JSON list, nothing else."""
         # Step 5: SaaS default fallback (if less than 3 pages detected)
         if len(required_pages) < 3:
             logger.info(f"[Planner] Fewer than 3 pages detected ({len(required_pages)}), adding SaaS defaults")
+            print(f"⚠️ FALLBACK_TRIGGERED: Only {len(required_pages)} pages detected, adding defaults")
+            print(f"⚠️ PAGES_BEFORE_FALLBACK: {required_pages}")
             saas_defaults = ["Dashboard", "Analytics", "Contacts", "Settings"]
             for default_page in saas_defaults:
                 if default_page not in required_pages:
                     required_pages.append(default_page)
+            print(f"⚠️ PAGES_AFTER_FALLBACK: {required_pages}")
+        else:
+            print(f"✅ SUFFICIENT_PAGES: {len(required_pages)} pages detected, no fallback needed")
 
         # Step 6: Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
@@ -1520,7 +1556,8 @@ Just implement the changes using your available tools.
             logger.info(f"[Guardrail] Removed {unauthorized_removed} unauthorized page(s)")
             logger.info(f"[Guardrail] Remaining allowed pages: {sorted(self.allowed_pages)}")
         else:
-            logger.info(f"[Guardrail] ✓ All pages are authorized")
+            # logger.info(f"[Guardrail] ✓ All pages are authorized")  # Commented for cleaner logs
+            pass  # All pages authorized
 
         logger.info(f"[Phase9] Final validated pages: {sorted(self.allowed_pages)}")
 
