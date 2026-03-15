@@ -334,6 +334,7 @@ class HostingerDNSAPI:
 def get_api_token() -> str:
     """Get Hostinger API token from environment variable."""
     api_token = os.getenv("HOSTINGER_API_TOKEN")
+    
     if not api_token or api_token == "your_token_here":
         raise ValueError("HOSTINGER_API_TOKEN not set. Set in .env file.")
     return api_token

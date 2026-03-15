@@ -252,7 +252,7 @@ class ACPSnapshotManager:
             else:
                 (self.backup_dir / "frontend").mkdir(parents=True)
 
-            logger.info(f"[Snapshot] ✓ Snapshot created successfully")
+            # logger.info(f"[Snapshot] ✓ Snapshot created successfully")  # Commented for cleaner logs
             return True, str(self.backup_dir)
 
         except Exception as e:
@@ -280,7 +280,7 @@ class ACPSnapshotManager:
 
             shutil.copytree(backup_frontend, self.frontend_path)
 
-            logger.info(f"[Snapshot] ✓ Restored snapshot from {self.backup_dir}")
+            # logger.info(f"[Snapshot] ✓ Restored snapshot from {self.backup_dir}")  # Commented for cleaner logs
             return True, "Snapshot restored successfully"
 
         except Exception as e:
@@ -297,7 +297,7 @@ class ACPSnapshotManager:
         try:
             if self.backup_dir.exists():
                 shutil.rmtree(self.backup_dir)
-                logger.info(f"[Snapshot] ✓ Cleaned up snapshot at {self.backup_dir}")
+                # logger.info(f"[Snapshot] ✓ Cleaned up snapshot at {self.backup_dir}")  # Commented for cleaner logs
             return True
         except Exception as e:
             logger.error(f"[Snapshot] ❌ Failed to cleanup snapshot: {e}")
@@ -811,7 +811,7 @@ class ACPFrontendEditorV2:
                     logger.error("[ACPX] ACPX produced no edits - no .tsx files found")
                     raise RuntimeError("ACPX produced no edits")
 
-                logger.info(f"[ACPX-V2] ACPX subprocess completed successfully")
+                # logger.info(f"[ACPX-V2] ACPX subprocess completed successfully")  # Commented for cleaner logs
                 logger.info(f"[ACPX-V2]   Return code: {return_code}")
                 logger.info(f"[ACPX-V2]   Edited files: {len(edited_files)}")
                 logger.info(f"[ACPX-V2]   Stdout length: {len(stdout_output)} chars")
@@ -899,7 +899,7 @@ class ACPFrontendEditorV2:
                     }
                     print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
                     return result
-                logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{MAX_NEW_FILES})")
+                # logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{MAX_NEW_FILES})")  # Commented for cleaner logs
                 print("🔴 ACPX-V2-STEP8-DONE: File limits validated")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP8-ERROR: {type(e).__name__}: {str(e)}")
@@ -927,7 +927,7 @@ class ACPFrontendEditorV2:
                         }
                         print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
                         return result
-                logger.info(f"[ACPX-V2]   ✓ All paths valid")
+                # logger.info(f"[ACPX-V2]   ✓ All paths valid")  # Commented for cleaner logs
                 print("🔴 ACPX-V2-STEP9-DONE: All paths validated")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP9-ERROR: {type(e).__name__}: {str(e)}")
@@ -946,7 +946,7 @@ class ACPFrontendEditorV2:
                     logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
                     print(f"🔴 ACPX-V2-STEP10-INFO: Removed {unauthorized_removed} unauthorized pages")
                 else:
-                    logger.info(f"[ACPX-V2]   ✓ All pages authorized")
+                    # logger.info(f"[ACPX-V2]   ✓ All pages authorized")  # Commented for cleaner logs
                 print("🔴 ACPX-V2-STEP10-DONE: Page guardrails enforced")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP10-ERROR: {type(e).__name__}: {str(e)}")
@@ -975,7 +975,7 @@ class ACPFrontendEditorV2:
                     print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
                     return result
 
-                logger.info(f"[ACPX-V2] ✓ Build succeeded!")
+                # logger.info(f"[ACPX-V2] ✓ Build succeeded!")  # Commented for cleaner logs
                 print("🔴 ACPX-V2-STEP11-DONE: Build gate passed")
             except Exception as e:
                 print(f"🔴 ACPX-V2-STEP11-ERROR: {type(e).__name__}: {str(e)}")
@@ -1158,11 +1158,11 @@ Provide ONLY the JSON object, nothing else."""
                         if isinstance(inferred_data, dict):
                             # Object format: {"pages": [...]}
                             pages = inferred_data.get("pages", [])
-                            logger.info(f"[Planner] AI inference successful (object format): {len(pages)} pages")
+                            # logger.info(f"[Planner] AI inference successful (object format): {len(pages)} pages")  # Commented for cleaner logs
                         elif isinstance(inferred_data, list):
                             # Array format: [...]
                             pages = inferred_data
-                            logger.info(f"[Planner] AI inference successful (array format): {len(pages)} pages")
+                            # logger.info(f"[Planner] AI inference successful (array format): {len(pages)} pages")  # Commented for cleaner logs
                         else:
                             logger.warning(f"[Planner] Unexpected JSON type: {type(inferred_data)}")
                         
@@ -1181,7 +1181,7 @@ Provide ONLY the JSON object, nothing else."""
                     # Extract unique page names
                     found_pages = list(set([p.strip() for p in list_match.group(0).split(',') if p.strip()]))
                     inferred_pages = found_pages
-                    logger.info(f"[Planner] AI inference successful (list pattern): {len(inferred_pages)} pages")
+                    # logger.info(f"[Planner] AI inference successful (list pattern): {len(inferred_pages)} pages")  # Commented for cleaner logs
                     logger.info(f"[Planner] Inferred: {inferred_pages}")
                     return inferred_pages
 
@@ -1539,7 +1539,7 @@ Just implement the changes using your available tools.
             logger.info(f"[Guardrail] Removed {unauthorized_removed} unauthorized page(s)")
             logger.info(f"[Guardrail] Remaining allowed pages: {sorted(self.allowed_pages)}")
         else:
-            logger.info(f"[Guardrail] ✓ All pages are authorized")
+            # logger.info(f"[Guardrail] ✓ All pages are authorized")  # Commented for cleaner logs
 
         logger.info(f"[Phase9] Final validated pages: {sorted(self.allowed_pages)}")
 

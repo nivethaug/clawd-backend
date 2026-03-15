@@ -224,19 +224,19 @@ class DatabaseProvisioner:
 
             # Create database (quoted to handle SQL keywords)
             self._execute_sql(f'CREATE DATABASE "{db_name}";')
-            logger.info(f"✓ Database created: {db_name}")
+            # logger.info(f"✓ Database created: {db_name}")  # Commented for cleaner logs
 
             # Create user (quoted to handle SQL keywords)
             self._execute_sql(
                 f'CREATE USER "{username}" WITH PASSWORD \'{password}\';'
             )
-            logger.info(f"✓ User created: {username}")
+            # logger.info(f"✓ User created: {username}")  # Commented for cleaner logs
 
             # Grant privileges
             self._execute_sql(
                 f'GRANT ALL PRIVILEGES ON DATABASE "{db_name}" TO "{username}";'
             )
-            logger.info(f"✓ Privileges granted to {username}")
+            # logger.info(f"✓ Privileges granted to {username}")  # Commented for cleaner logs
 
             return {
                 "database_name": db_name,
@@ -268,11 +268,11 @@ class DatabaseProvisioner:
 
             # Drop database (quoted to handle SQL keywords, connect to project-specific database)
             self._execute_sql(f'DROP DATABASE IF EXISTS "{db_name}";', database_name=db_name)
-            logger.info(f"✓ Database dropped: {db_name}")
+            # logger.info(f"✓ Database dropped: {db_name}")  # Commented for cleaner logs
 
             # Drop user (quoted to handle SQL keywords, connect to project-specific database)
             self._execute_sql(f'DROP USER IF EXISTS "{username}";', database_name=db_name)
-            logger.info(f"✓ User dropped: {username}")
+            # logger.info(f"✓ User dropped: {username}")  # Commented for cleaner logs
 
         except Exception as e:
             logger.error(f"Failed to drop database/user: {e}")
@@ -336,7 +336,7 @@ class ServiceManager:
             ecosystem_path = backend_path / "ecosystem.config.json"
             ecosystem_path.write_text(ecosystem)
 
-            logger.info(f"✓ PM2 config created: {app_name}")
+            # logger.info(f"✓ PM2 config created: {app_name}")  # Commented for cleaner logs
             return app_name
 
         except Exception as e:
@@ -363,7 +363,7 @@ class ServiceManager:
                         text=True,
                         timeout=300  # 5 minutes
                     )
-                    logger.info("[SERVICE] ✓ Python dependencies installed successfully")
+                    # logger.info("[SERVICE] ✓ Python dependencies installed successfully")  # Commented for cleaner logs
                 except subprocess.CalledProcessError as e:
                     logger.error(f"[SERVICE] Failed to install dependencies: {e}")
                     logger.error(f"[SERVICE] Install stderr: {e.stderr[:500]}")
@@ -414,7 +414,7 @@ class ServiceManager:
                 timeout=30
             )
 
-            logger.info(f"[SERVICE] Backend service started successfully: {app_name}")
+            # logger.info(f"[SERVICE] Backend service started successfully: {app_name}")  # Commented for cleaner logs
             logger.info(f"[SERVICE] Backend stdout: {result.stdout[:200]}")
 
             # Add startup delay to ensure backend is ready
@@ -452,7 +452,7 @@ class ServiceManager:
             )
 
             if result.returncode == 0:
-                logger.info(f"✓ Service stopped: {app_name}")
+                # logger.info(f"✓ Service stopped: {app_name}")  # Commented for cleaner logs
                 return True
             else:
                 logger.error(f"Failed to stop service: {result.stderr}")
@@ -475,7 +475,7 @@ class ServiceManager:
             )
 
             if result.returncode == 0:
-                logger.info(f"✓ Service deleted: {app_name}")
+                # logger.info(f"✓ Service deleted: {app_name}")  # Commented for cleaner logs
                 return True
             else:
                 logger.error(f"Failed to delete service: {result.stderr}")
@@ -520,7 +520,7 @@ class ServiceManager:
                     try:
                         import shutil
                         shutil.rmtree(str(cache_path))
-                        logger.info(f"[BUILD] ✓ Cleaned Vite cache: {cache_path.name}")
+                        # logger.info(f"[BUILD] ✓ Cleaned Vite cache: {cache_path.name}")  # Commented for cleaner logs
                         caches_cleaned += 1
                     except Exception as cache_err:
                         logger.warning(f"[BUILD] ⚠️ Could not clean cache {cache_path.name}: {cache_err}")
@@ -544,7 +544,7 @@ class ServiceManager:
                 logger.info("PHASE_5_BUILD_FAILED: npm install failed")
                 return False
             
-            logger.info("[BUILD] ✓ npm install completed successfully")
+            # logger.info("[BUILD] ✓ npm install completed successfully")  # Commented for cleaner logs
             
             # Build the app
             logger.info("[BUILD] Building frontend with Vite...")
@@ -582,9 +582,9 @@ class ServiceManager:
                 logger.info("PHASE_5_BUILD_FAILED: index.html missing")
                 return False
             
-            logger.info(f"[BUILD] ✓ Frontend built successfully")
-            logger.info(f"[BUILD] ✓ Dist directory created: {dist_path}")
-            logger.info("[BUILD] ✓ index.html verified")
+            # logger.info(f"[BUILD] ✓ Frontend built successfully")  # Commented for cleaner logs
+            # logger.info(f"[BUILD] ✓ Dist directory created: {dist_path}")  # Commented for cleaner logs
+            # logger.info("[BUILD] ✓ index.html verified")  # Commented for cleaner logs
             logger.info("PHASE_5_BUILD_COMPLETE: success")
             return True
 
@@ -629,7 +629,7 @@ class ServiceManager:
                 
                 # Check if already built
                 if has_dist:
-                    logger.info(f"✓ Frontend already built, using dist: {dist_dir}")
+                    # logger.info(f"✓ Frontend already built, using dist: {dist_dir}")  # Commented for cleaner logs
                     frontend_dist_path = dist_dir
                 elif package_json.exists():
                     logger.info(f"Building frontend for production (correct MIME types)...")
@@ -643,7 +643,7 @@ class ServiceManager:
                                 try:
                                     import shutil
                                     shutil.rmtree(str(cache_path))
-                                    logger.info(f"✓ Cleaned Vite cache: {cache_path.name}")
+                                    # logger.info(f"✓ Cleaned Vite cache: {cache_path.name}")  # Commented for cleaner logs
                                 except Exception as cache_err:
                                     logger.warning(f"⚠️ Could not clean cache {cache_path}: {cache_err}")
                         
@@ -660,7 +660,7 @@ class ServiceManager:
                         if install_result.returncode != 0:
                             logger.warning(f"npm install warnings: {install_result.stderr}")
                         else:
-                            logger.info(f"✓ npm install completed")
+                            # logger.info(f"✓ npm install completed")  # Commented for cleaner logs
                         
                         # Build the app
                         build_result = subprocess.run(
@@ -676,7 +676,7 @@ class ServiceManager:
                             logger.error(f"Frontend build failed: {build_result.stderr}")
                             raise Exception(f"Frontend build failed: {build_result.stderr}")
                         else:
-                            logger.info(f"✓ Frontend built successfully")
+                            # logger.info(f"✓ Frontend built successfully")  # Commented for cleaner logs
                             frontend_dist_path = dist_dir
                     except subprocess.TimeoutExpired:
                         logger.error("Frontend build timed out")
@@ -689,7 +689,7 @@ class ServiceManager:
                     capture_output=True,
                     timeout=30
                 )
-                logger.info(f"✓ Frontend PM2 service started with SPA routing: {app_name}")
+                # logger.info(f"✓ Frontend PM2 service started with SPA routing: {app_name}")  # Commented for cleaner logs
             else:
                 # Use shared frontend (fallback)
                 logger.info(f"Using shared frontend: {CLAWD_UI_DIST}")
