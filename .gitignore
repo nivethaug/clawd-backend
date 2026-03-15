@@ -8,6 +8,9 @@ __pycache__/
 venv/
 .env
 
+# PM2 ecosystem config (contains sensitive API keys)
+ecosystem.config.js
+
 # Build / dist
 dist/
 build/
