@@ -1352,21 +1352,14 @@ class ACPFrontendEditorV2:
         """
         # Extract required pages from goal description
         required_pages = self._extract_required_pages_from_prompt(goal_description)
-        required_components = []
 
         print(f"🔴 PLANNER-OUTPUT: Required pages = {required_pages}")
         print(f"🔴 PLANNER-OUTPUT: Page count = {len(required_pages)}")
 
         # Build required artifacts list
         required_pages_list = required_pages
-        required_components_list = list(set(required_components))
 
         required_pages_str = "\n".join([f"- src/pages/{page}.tsx" for page in required_pages_list])
-        required_components_str = "\n".join([f"- src/components/{comp}.tsx" for comp in required_components_list])
-
-        # Phase 9: Build page templates section - DISABLED (causing NameError: get_page_template_for_prompt not defined)
-        # page_templates_section = self._build_page_templates_section(required_pages, goal_description)
-        page_templates_section = "Page templates section disabled - using page specifications only"
 
         # Phase 4: Build page specs section (NEW)
         page_specs_section = self._build_page_specs_section(required_pages)
@@ -1421,16 +1414,6 @@ BEFORE YOU DO ANYTHING ELSE, FIX THE ROUTING:
 2. FIND the Welcome route at path="/"
 3. DELETE or REPLACE it with {default_page} at path="/"
 
-CURRENT STATE (BROKEN - causes blank page):
-```tsx
-<Routes>
-  <Route path="/" element={{<Welcome />}} />           ← DELETE THIS LINE
-  <Route path="/" element={{<{default_page} />}} />    ← DUPLICATE! Also DELETE
-  <Route path="/team" element={{<Team />}} />
-  ...
-</Routes>
-```
-
 REQUIRED STATE (FIXED):
 ```tsx
 <Routes>
@@ -1482,9 +1465,6 @@ PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
    - [ ] NO unauthorized pages were created
    - [ ] All required pages are complete
    - [ ] File names match exactly with REQUIRED PAGES list
-
-PAGE TEMPLATES
-{page_templates_section}
 
 PAGE SPECIFICATIONS (Phase 4 - Enhanced UI Quality)
 {page_specs_section}
@@ -1556,6 +1536,15 @@ export default function Navbar() {{
 
 ⚠️ NAVIGATION IS NOT OPTIONAL - Every app MUST have a working mobile-responsive menu!
 
+CHECKLIST (complete in order)
+1. Fix routing — remove Welcome at "/", single {default_page} route at "/" inside Layout wrapper
+2. Create src/layout/Navbar.tsx — mobile hamburger menu, NavLink to all required pages
+3. Integrate Navbar into Layout.tsx header
+4. Create each required page one at a time (exact filenames):
+{required_pages_str}
+5. Verify no unauthorized pages exist in src/pages/
+6. Run npm run build and confirm it succeeds
+
 SCOPE LIMITATION (CRITICAL - Reduces AI scanning time)
 
 ONLY modify files in these directories:
@@ -1576,52 +1565,6 @@ DO NOT modify:
 - backend files, .env files
 - Do NOT change project architecture
 
-COMPLETION CHECKLIST
-
-✓ ROUTING FIXED: Welcome route removed, {default_page} at "/" (ONLY ONE route)
-✓ ROUTING FIXED: All routes inside <Route element={{<Layout />}}> wrapper
-✓ NAVIGATION MENU CREATED: Mobile-responsive Navbar with hamburger menu
-✓ NAVIGATION INTEGRATED: Navbar added to Layout component
-✓ All required pages created in src/pages/ (EXACT file names)
-✓ All required components created in src/components/
-✓ Navigation/sidebar updated
-✓ Responsive design implemented (mobile + desktop)
-✓ Code is production-ready
-✓ npm run build succeeds
-
-WORKING METHODOLOGY
-
-You must work systematically through ALL required pages.
-
-STEP 0: FIX ROUTING FIRST (MANDATORY)
-1. READ src/App.tsx immediately
-2. DELETE ALL routes with path="/" (remove duplicates)
-3. ADD {default_page} at path="/" inside Layout wrapper
-4. VERIFY routing is correct before continuing
-
-STEP 1-N: CREATE PAGES AND NAVIGATION
-1. Read the project description, page templates, and page specifications carefully
-2. Plan your approach using BOTH templates and specs as guidance
-3. CREATE NAVIGATION MENU (Navbar.tsx) with mobile-responsive hamburger menu
-4. INTEGRATE Navbar into Layout component
-5. Create pages ONE AT A TIME using page templates and specifications
-6. DO NOT STOP until ALL required pages are created
-7. After completing a page, move to the next page
-8. Continue until the entire checklist is complete
-9. Run npm run build after all pages are created
-
-EXECUTION RULES
-
-1. FIX ROUTING FIRST - this is your FIRST task
-2. CREATE NAVIGATION MENU - mobile-responsive with hamburger menu
-3. Work through pages ONE AT A TIME using page templates
-4. Complete each page fully before moving to the next
-5. Use EXACT page names from REQUIRED PAGES list
-6. Do not skip any required page
-7. Do not stop early - continue until checklist is 100% complete
-8. Only mark task complete when ALL checklist items are done
-9. Use page templates as guidance but adapt to existing code structure
-
 TECHNICAL REQUIREMENTS
 
 - Fix routing BEFORE creating pages
@@ -1635,28 +1578,7 @@ TECHNICAL REQUIREMENTS
 
 ⚠️ CRITICAL: LAYOUT COMPONENT RULES ⚠️
 
-The project uses a Layout component with React Router nested routes:
-
-Layout component structure (src/layout/Layout.tsx):
-```tsx
-import {{ Outlet }} from 'react-router-dom';
-
-const Layout = () => {{
-  return (
-    <div className="flex h-screen w-full overflow-hidden">
-      {{/* Sidebar can be added here */}}
-      <div className="flex flex-col flex-1">
-        {{/* Header can be added here */}}
-        <main className="flex-1 overflow-y-auto p-6">
-          <Outlet />  ← Pages render here
-        </main>
-      </div>
-    </div>
-  );
-}};
-
-export default Layout;
-```
+The project uses a Layout component with React Router nested routes.
 
 App.tsx routing structure:
 ```tsx
@@ -1674,29 +1596,6 @@ CRITICAL RULES:
 2. All page routes MUST be nested inside <Route element={{<Layout />}}>
 3. Pages render at <Outlet />, not via children prop
 4. Layout uses flex for full-screen layout with overflow handling
-
-⚠️ CRITICAL: PAGE COMPONENT RULES ⚠️
-
-DO NOT wrap page components in Layout:
-- ❌ WRONG: `export default function Dashboard() {{ return <Layout><div>...</div></Layout> }}`
-- ✅ CORRECT: `export default function Dashboard() {{ return <div>...</div> }}`
-
-The Layout is ALREADY provided by the router at App.tsx level:
-```tsx
-<Route element={{<Layout />}}>  ← Layout wrapper here
-  <Route path="/" element={{<Dashboard />}} />  ← Page renders inside Layout's <Outlet />
-</Route>
-```
-
-Pages should return content that renders inside Layout's <Outlet />, NOT wrap themselves in Layout.
-
-DO NOT import or use Layout component in page files!
-
-Page content area:
-- Pages render inside <main className="flex-1 overflow-y-auto p-6">
-- Pages have automatic padding (p-6 = 24px)
-- Content area is scrollable (overflow-y-auto)
-- Full height is handled by Layout (h-screen)
 
 ⚠️ CRITICAL: LINK/NAVIGATION COMPONENTS ⚠️
 
