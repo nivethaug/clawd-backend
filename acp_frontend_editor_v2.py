@@ -61,7 +61,7 @@ FORBIDDEN_EDIT_PATHS = [
 ]
 
 # File limits - Increased for reliable multi-page execution
-MAX_NEW_FILES = 50  # Allow enough pages without early termination
+MAX_NEW_FILES = 15  # Maximum new files per execution
 
 # Build settings
 BUILD_TIMEOUT = 1800  # 30 minutes
