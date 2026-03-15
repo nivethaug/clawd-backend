@@ -667,8 +667,8 @@ class ACPFrontendEditorV2:
             try:
                 print("=" * 60)
                 print("PHASE_9_APPLY")
-                print("🔴 ACPX-V2-STEP5: Running ACPX CLI with watchdog")
-                logger.info(f"[ACPX-V2] Step 6: Running ACPX with watchdog protection...")
+                print("🔴 ACPX-V2-STEP5B-EXEC: Running ACPX CLI with watchdog")
+                logger.info(f"[ACPX-V2] Step 5b: Running ACPX with watchdog protection...")
                 
                 # Build command: acpx --cwd <dir> --format quiet claude exec "<prompt>"
                 # Ensure all args are strings to avoid TypeError with PosixPath
@@ -829,26 +829,20 @@ class ACPFrontendEditorV2:
                 logger.info(f"[ACPX-V2]   Stdout length: {len(stdout_output)} chars")
                 logger.info(f"[ACPX-V2]   Stderr length: {len(stderr_output)} chars")
 
-                print("🔴 ACPX-V2-STEP5-DONE: ACPX CLI completed")
+                print("🔴 ACPX-V2-STEP5B-EXEC-DONE: ACPX CLI completed")
 
             except Exception as e:
-                print(f"🔴 ACPX-V2-STEP5-ERROR: {type(e).__name__}: {str(e)}")
+                print(f"🔴 ACPX-V2-STEP5B-EXEC-ERROR: {type(e).__name__}: {str(e)}")
                 logger.error(f"[ACPX-V2] ACPX execution error: {type(e).__name__}: {str(e)}")
                 traceback.print_exc()
                 self.snapshot_manager.restore_snapshot()
                 self.snapshot_manager.cleanup_snapshot()
                 return {"success": False, "message": f"ACPX execution failed: {str(e)}"}
-            except Exception as e:
-                print(f"🔴 ACPX-V2-STEP5-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                self.snapshot_manager.restore_snapshot()
-                self.snapshot_manager.cleanup_snapshot()
-                return {"success": False, "message": f"ACPX execution failed: {str(e)}"}
 
-            # Step 5: Capture filesystem state AFTER ACPX
+            # Step 6: Capture filesystem state AFTER ACPX
             try:
                 print("🔴 ACPX-V2-STEP6: Capturing filesystem state after ACPX")
-                logger.info(f"[ACPX-V2] Step 5: Capturing filesystem state after ACPX...")
+                logger.info(f"[ACPX-V2] Step 6: Capturing filesystem state after ACPX...")
                 hashes_after = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
                 logger.info(f"[ACPX-V2]   Found {len(hashes_after)} files after ACPX")
                 print("🔴 ACPX-V2-STEP6-DONE: Filesystem state captured after ACPX")
@@ -859,10 +853,10 @@ class ACPFrontendEditorV2:
                 self.snapshot_manager.cleanup_snapshot()
                 return {"success": False, "message": f"Failed to capture post-ACPX state: {str(e)}"}
 
-            # Step 6: Compute changes (filesystem diff)
+            # Step 7: Compute changes (filesystem diff)
             try:
                 print("🔴 ACPX-V2-STEP7: Computing filesystem diff")
-                logger.info(f"[ACPX-V2] Step 6: Computing filesystem diff...")
+                logger.info(f"[ACPX-V2] Step 7: Computing filesystem diff...")
                 diff = FilesystemSnapshot.compute_diff(hashes_before, hashes_after)
 
                 files_added = diff['added']
@@ -898,10 +892,10 @@ class ACPFrontendEditorV2:
                 self.snapshot_manager.cleanup_snapshot()
                 return {"success": False, "message": f"Failed to compute diff: {str(e)}"}
 
-            # Step 7: Validate file limits
+            # Step 8: Validate file limits
             try:
                 print("🔴 ACPX-V2-STEP8: Validating file limits")
-                logger.info(f"[ACPX-V2] Step 7: Validating file limits...")
+                logger.info(f"[ACPX-V2] Step 8: Validating file limits...")
                 if len(files_added) > MAX_NEW_FILES:
                     logger.error(f"[ACPX-V2] ❌ File limit exceeded: {len(files_added)} > {MAX_NEW_FILES}")
                     print("🔴 ACPX-V2-STEP8-ERROR: File limit exceeded, rolling back")
@@ -923,10 +917,10 @@ class ACPFrontendEditorV2:
                 self.snapshot_manager.cleanup_snapshot()
                 return {"success": False, "message": f"File limit validation failed: {str(e)}"}
 
-            # Step 8: Validate paths
+            # Step 9: Validate paths
             try:
                 print("🔴 ACPX-V2-STEP9: Validating paths")
-                logger.info(f"[ACPX-V2] Step 8: Validating paths...")
+                logger.info(f"[ACPX-V2] Step 9: Validating paths...")
                 for file_path in files_added + files_removed:
                     # file_path is already a relative path string from compute_diff
                     # Convert to string in case it's a Path object
@@ -955,10 +949,10 @@ class ACPFrontendEditorV2:
                 self.snapshot_manager.cleanup_snapshot()
                 return {"success": False, "message": f"Path validation failed: {str(e)}"}
 
-            # Step 9: Enforce page guardrails (BEFORE build to prevent routing issues)
+            # Step 10: Enforce page guardrails (BEFORE build to prevent routing issues)
             try:
                 print("🔴 ACPX-V2-STEP10: Enforcing page guardrails")
-                logger.info(f"[ACPX-V2] Step 9: Enforcing page guardrails (BEFORE build)...")
+                logger.info(f"[ACPX-V2] Step 10: Enforcing page guardrails (BEFORE build)...")
                 unauthorized_removed = self._enforce_page_guardrails()
 
                 if unauthorized_removed > 0:
@@ -997,8 +991,15 @@ class ACPFrontendEditorV2:
                     # Pattern matches: <Route path="/" element={<Welcome />} />
                     # Also matches: <Route path="/" element={<Dashboard />}/>
                     # Handles inline routes (multiple on same line)
+                    # IMPROVED: Handle more variations including self-closing elements
                     content = re.sub(
-                        r'<Route\s+path="/"\s+element=\{<[^>]+>\s*/>\s*\}\s*/>',
+                        r'<Route\s+path="/"\s+element=\{<[A-Za-z]+\s*/?>\s*\}\s*/>',
+                        '',
+                        content
+                    )
+                    # Also handle routes with multi-word components like <DocumentEditor />
+                    content = re.sub(
+                        r'<Route\s+path="/"\s+element=\{<[A-Za-z]+\s*/?\s*\}\s*/?>',
                         '',
                         content
                     )
@@ -1008,8 +1009,9 @@ class ACPFrontendEditorV2:
                     print(f"🔴 ACPX-V2-STEP10B-DEBUG: Found {len(routes_at_root_after)} routes at '/' after removal")
                     
                     # Fix 2: Remove any /dashboard route (will be at "/" instead)
+                    # IMPROVED: Handle more variations
                     content = re.sub(
-                        r'<Route\s+path="/dashboard"\s+element=\{<Dashboard\s*/>\s*\}\s*/>',
+                        r'<Route\s+path="/dashboard"\s+element=\{<[A-Za-z]+\s*/?\s*\}\s*/?>',
                         '',
                         content
                     )
