@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 # Track if we've already logged the initialization error
 _TEMPLATE_SELECTOR_ERROR_LOGGED = False
 
+# Singleton instance
+_TEMPLATE_SELECTOR_INSTANCE: Optional['TemplateSelector'] = None
+
 
 class TemplateSelector:
     """Service for selecting templates using Groq LLM."""
@@ -40,11 +43,21 @@ Available templates will be provided in the user message with their:
 - keywords: relevant search terms
 - features: included features"""
 
+    def __new__(cls):
+        """Return singleton instance."""
+        global _TEMPLATE_SELECTOR_INSTANCE
+        
+        if _TEMPLATE_SELECTOR_INSTANCE is None:
+            _TEMPLATE_SELECTOR_INSTANCE = super().__new__(cls)
+            _TEMPLATE_SELECTOR_INSTANCE.groq_service = None
+            _TEMPLATE_SELECTOR_INSTANCE.template_registry = None
+            _TEMPLATE_SELECTOR_INSTANCE._initialize()
+        
+        return _TEMPLATE_SELECTOR_INSTANCE
+
     def __init__(self):
-        """Initialize template selector."""
-        self.groq_service: Optional[GroqService] = None
-        self.template_registry: Optional[Dict[str, Any]] = None
-        self._initialize()
+        """Initialize is handled in __new__ for singleton pattern."""
+        pass
 
     def _initialize(self) -> None:
         """Initialize Groq service and load template registry."""
