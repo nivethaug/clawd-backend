@@ -1061,23 +1061,26 @@ Step 1: Look for explicit page mentions
 - Extract page names EXACTLY as written (preserve capitalization)
 - If description says "four main pages: Dashboard, Tickets, Assets, and Requests" → extract exactly those 4 pages
 
-Step 2: Only if NO explicit pages found, then infer
-- Consider product type (CRM, analytics, document management, etc.)
-- Think about standard SaaS pages (Dashboard, Settings, etc.)
-- Be specific with page names (not generic like "MainPage")
+Step 2: Only if NO explicit pages found, then infer CONTEXTUALLY
+- Identify product type: analytics platform, CRM, document management, monitoring, e-commerce, etc.
+- Generate SPECIFIC pages relevant to that product type (NOT generic)
+- Be creative and specific with page names
 
 RULES:
 1. EXPLICIT PAGES: If description mentions specific pages, extract ONLY those (do not add generic pages)
-2. NO EXPLICIT PAGES: If no pages mentioned, infer 5-10 appropriate pages
-3. Return ONLY a JSON object with "pages" key
-4. Do NOT include explanations or extra text
-5. Preserve exact capitalization from description
+2. NO EXPLICIT PAGES: If no pages mentioned, infer 5-10 SPECIFIC pages based on product type
+3. AVOID GENERIC PAGES: Do NOT default to "Dashboard", "Analytics", "Settings" unless truly relevant
+4. Return ONLY a JSON object with "pages" key
+5. Do NOT include explanations or extra text
+6. Preserve exact capitalization from description
 
 Response format (JSON ONLY):
 {{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
 
 EXAMPLES:
 "ServiceDesk has four main pages: Dashboard, Tickets, Assets, and Requests" → {{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
+"Analytics and operations platform for monitoring activity, exploring data, managing workflows" → {{"pages": ["ActivityMonitor", "DataExplorer", "Workflows", "Metrics", "Alerts", "Integrations", "TeamSettings"]}}
+"E-commerce platform with product catalog and order management" → {{"pages": ["Products", "Orders", "Customers", "Inventory", "Reports", "StoreSettings"]}}
 "CRM app with contacts and deals" → {{"pages": ["Dashboard", "Contacts", "Deals", "Reports", "Tasks", "Settings"]}}
 "Document management platform" → {{"pages": ["Dashboard", "Documents", "Templates", "Editor", "Analytics", "Settings"]}}
 "Analytics dashboard" → {{"pages": ["Dashboard", "Reports", "Analytics", "Settings"]}}
@@ -1308,10 +1311,15 @@ Provide ONLY the JSON object, nothing else."""
         # Step 5: SaaS default fallback (if less than 3 pages detected)
         if len(required_pages) < 3:
             logger.info(f"[Planner] Fewer than 3 pages detected ({len(required_pages)}), adding SaaS defaults")
+            print(f"⚠️ FALLBACK_TRIGGERED: Only {len(required_pages)} pages detected, adding defaults")
+            print(f"⚠️ PAGES_BEFORE_FALLBACK: {required_pages}")
             saas_defaults = ["Dashboard", "Analytics", "Contacts", "Settings"]
             for default_page in saas_defaults:
                 if default_page not in required_pages:
                     required_pages.append(default_page)
+            print(f"⚠️ PAGES_AFTER_FALLBACK: {required_pages}")
+        else:
+            print(f"✅ SUFFICIENT_PAGES: {len(required_pages)} pages detected, no fallback needed")
 
         # Step 6: Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
