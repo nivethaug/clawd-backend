@@ -1268,172 +1268,11 @@ class ACPFrontendEditorV2:
                 "rollback": False
             }
 
-    def _ai_infer_pages(self, goal_description: str) -> List[str]:
-        """
-        Use AI to infer reasonable page structure from product description.
-
-        Args:
-            goal_description: Product description text
-
-        Returns:
-            List of inferred page names
-        """
-        import json
-        import subprocess
-
-        logger.info(f"[Planner] Running AI page inference for: {goal_description[:100]}...")
-
-        # Build inference prompt
-        inference_prompt = f"""You are planning the page structure for a SaaS application.
-
-Product description:
-{goal_description}
-
-Your task:
-Return a list of 5-10 pages that would be appropriate for this application.
-
-Rules:
-1. Consider the product type (CRM, analytics, document management, etc.)
-2. Think about standard SaaS pages (Dashboard, Settings, etc.)
-3. Be specific with page names (not generic like "MainPage")
-4. Return ONLY a JSON list of page names
-5. Do NOT include explanations or extra text
-
-Response format (JSON ONLY):
-{{"pages": ["Dashboard", "Contacts", "Analytics", "Settings", "Documents"]}}
-
-EXAMPLES:
-CRM app → {{"pages": ["Dashboard", "Contacts", "Deals", "Reports", "Tasks", "Settings"]}}
-Document management → {{"pages": ["Dashboard", "Documents", "Templates", "Editor", "Analytics", "Settings"]}}
-Analytics dashboard → {{"pages": ["Dashboard", "Reports", "Analytics", "Settings"]}}
-
-Provide ONLY the JSON list, nothing else."""
-
-        try:
-            # Call LLM for page inference using ACPX CLI
-            # Ensure all args are strings to avoid TypeError
-            cmd = [
-                "acpx",
-                "--cwd", "/tmp",
-                "--format", "quiet",
-                "claude",
-                "exec",
-                str(inference_prompt)
-            ]
-            
-            # Robust debug logging
-            print("ACPX CMD:", " ".join(cmd[:6]) + " <prompt>")
-            print("[ACPX] cwd: /tmp")
-            print("[ACPX] running: acpx --format quiet claude exec (page inference)")
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            
-            # Robust debug logging after execution
-            print("ACPX RETURN CODE:", result.returncode)
-            print("ACPX STDOUT:", result.stdout)
-            print("ACPX STDERR:", result.stderr)
-            
-            # Tolerant error handling: ignore harmless JSON-RPC notification errors
-            stderr = result.stderr or ""
-            should_fail = True
-            if "session/update" in stderr and "Invalid params" in stderr:
-                logger.warning("[ACPX] Page inference: ignoring JSON-RPC notification error")
-                should_fail = False
-
-            if result.returncode != 0 and should_fail:
-                logger.error(f"[ACPX] Page inference failed (code {result.returncode})")
-                raise RuntimeError(f"ACPX page inference failed: {stderr}")
-
-            # Parse LLM response
-            response_text = result.stdout.strip()
-
-            # Extract JSON from response - More flexible parsing
-            import re
-            # Try multiple JSON patterns
-            json_patterns = [
-                r'\[\s*{[^}]+\}\s*\]',  # [ { "pages": [...] } ]
-                r'{\s*"pages"\s*:\s*\[.*?\]',  # {"pages": [...]}
-                r'pages"\s*:\s*\[',  # pages": [ (simplified)
-            ]
-
-            inferred_pages = []
-            for pattern in json_patterns:
-                match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
-                if match:
-                    try:
-                        json_str = match.group(0)
-                        # Try to extract just the JSON part
-                        if '[' in json_str:
-                            json_str = json_str[json_str.find('['):]
-                        
-                        # Parse JSON - handle both object and array
-                        try:
-                            inferred_data = json.loads(json_str)
-                        except json.JSONDecodeError as e:
-                            logger.error(f"[Planner] JSON parse error: {e}")
-                            logger.error(f"[Planner] JSON string was: {json_str[:500]}")
-                            raise
-                        
-                        # Extract pages from response (handle both object and array)
-                        pages = []
-                        if isinstance(inferred_data, dict):
-                            # Object format: {"pages": [...]}
-                            pages = inferred_data.get("pages", [])
-                            logger.info(f"[Planner] AI inference successful (object format): {len(pages)} pages")
-                        elif isinstance(inferred_data, list):
-                            # Array format: [...]
-                            pages = inferred_data
-                            logger.info(f"[Planner] AI inference successful (array format): {len(pages)} pages")
-                        else:
-                            logger.warning(f"[Planner] Unexpected JSON type: {type(inferred_data)}")
-                        
-                        logger.info(f"[Planner] Inferred: {pages}")
-                        return pages
-
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"[Planner] AI inference JSON parse error with pattern: {pattern}, {e}")
-                        continue
-
-            # If all patterns fail, try to find list-like structures
-            if not inferred_pages:
-                # Look for comma-separated lists of page names
-                list_match = re.search(r'(?:Dashboard|Documents|Templates|Editor|Signing|Contacts|Analytics|Settings|Reports|Tasks|Team|Billing|Notifications|Posts|Create)[,\s]*(?:Dashboard|Documents|Templates|Editor|Signing|Contacts|Analytics|Settings|Reports|Tasks|Team|Billing|Notifications|Posts|Create)', response_text, re.IGNORECASE)
-                if list_match:
-                    # Extract unique page names
-                    found_pages = list(set([p.strip() for p in list_match.group(0).split(',') if p.strip()]))
-                    inferred_pages = found_pages
-                    logger.info(f"[Planner] AI inference successful (list pattern): {len(inferred_pages)} pages")
-                    logger.info(f"[Planner] Inferred: {inferred_pages}")
-                    return inferred_pages
-
-            # Final fallback
-            if not inferred_pages:
-                logger.warning(f"[Planner] AI inference: No valid JSON/list found in response, using keywords")
-            else:
-                logger.info(f"[Planner] Final AI inference result: {inferred_pages}")
-
-            return inferred_pages if inferred_pages else []
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"[Planner] AI inference timeout after 60s")
-            return []
-        except json.JSONDecodeError as e:
-            logger.error(f"[Planner] AI inference JSON decode error: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"[Planner] AI inference error: {type(e).__name__}: {e}")
-            return []
-
     def _extract_required_pages_from_prompt(self, goal_description: str) -> List[str]:
         """
         Extract required pages from goal description using AI inference.
 
-        Detection priority: Groq AI → ACPX AI → Default pages
+        Detection priority: Groq AI → Default pages
 
         Args:
             goal_description: Goal for changes
@@ -1460,19 +1299,7 @@ Provide ONLY the JSON list, nothing else."""
             logger.warning(f"[Planner] Groq inference failed: {e}")
             print(f"🔴 PLANNER-GROQ-ERROR: {e}")
 
-        # Step 2: If Groq failed, try ACPX AI inference
-        if len(required_pages) < 3:
-            try:
-                inferred_pages = self._ai_infer_pages(goal_description)
-                if inferred_pages and len(inferred_pages) >= 3:
-                    required_pages = inferred_pages
-                    logger.info(f"[Planner] ACPX inferred pages: {inferred_pages}")
-                    print(f"🔴 PLANNER-ACPX: Inferred pages = {inferred_pages}")
-            except Exception as e:
-                logger.warning(f"[Planner] ACPX inference failed: {e}")
-                print(f"🔴 PLANNER-ACPX-ERROR: {e}")
-
-        # Step 3: Fallback to default pages
+        # Step 2: Fallback to default pages
         if len(required_pages) < 3:
             required_pages = ["Dashboard", "Settings", "Overview"]
             logger.info(f"[Planner] Using default pages: {required_pages}")
