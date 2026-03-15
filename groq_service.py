@@ -120,31 +120,53 @@ class GroqService:
         """
         import json
 
-        prompt = f"""Extract the EXACT page names mentioned in this SaaS app description.
+        prompt = f"""You are extracting page names from a SaaS application description.
 
-Description: {description}
+Product description:
+{description}
 
-CRITICAL RULES:
-1. Look for phrases like "with X pages:", "pages:", "main pages:", etc.
-2. Extract ONLY the page names explicitly mentioned in the description
-3. Convert to PascalCase: "Knowledge Base" → "KnowledgeBase", "My Learning" → "MyLearning"
-4. If pages are listed after "pages:", use those EXACT pages
-5. Do NOT add generic pages if specific pages are mentioned
-6. Return 4-8 pages maximum
+CRITICAL TASK: Extract EXPLICITLY mentioned pages FIRST, then infer context-specific pages
 
-Examples:
-- "with pages: Dashboard, Tickets, Knowledge Base" → ["Dashboard", "Tickets", "KnowledgeBase"]
-- "four main pages: Dashboard, Courses, My Learning, Certificates" → ["Dashboard", "Courses", "MyLearning", "Certificates"]
-- "Support desk with Tickets, Knowledge Base, Customers" → ["Dashboard", "Tickets", "KnowledgeBase", "Customers"]
+Step 1: Look for explicit page mentions
+- Scan for phrases like "pages: X, Y, Z" or "main pages: X, Y, Z"
+- Extract page names EXACTLY as written (preserve capitalization)
+- If description says "four main pages: Dashboard, Tickets, Assets, and Requests" → extract exactly those 4 pages
+
+Step 2: Only if NO explicit pages found, then infer CONTEXTUALLY
+- Identify product type: analytics platform, CRM, document management, monitoring, e-commerce, etc.
+- Generate SPECIFIC pages relevant to that product type (NOT generic)
+- Be creative and specific with page names
+
+RULES:
+1. EXPLICIT PAGES: If description mentions specific pages, extract ONLY those (do not add generic pages)
+2. NO EXPLICIT PAGES: If no pages mentioned, infer 5-8 SPECIFIC pages based on product type
+3. AVOID GENERIC PAGES: Do NOT default to "Dashboard", "Analytics", "Settings" unless truly relevant
+4. Convert to PascalCase: "Knowledge Base" → "KnowledgeBase", "My Learning" → "MyLearning"
+5. Return ONLY a JSON object with "pages" key
+6. Do NOT include explanations or extra text
+7. Preserve exact capitalization from description
 
 Response format (JSON ONLY):
-{{"pages": ["Dashboard", "Tickets", "KnowledgeBase", "Customers"]}}"""
+{{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
+
+EXAMPLES:
+"ServiceDesk has four main pages: Dashboard, Tickets, Assets, and Requests" → {{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
+"Analytics and operations platform for monitoring activity, exploring data, managing workflows" → {{"pages": ["ActivityMonitor", "DataExplorer", "Workflows", "Metrics", "Alerts", "Integrations", "TeamSettings"]}}
+"E-commerce platform with product catalog and order management" → {{"pages": ["Products", "Orders", "Customers", "Inventory", "Reports", "StoreSettings"]}}
+"Learning management system" → {{"pages": ["Courses", "MyLearning", "Certificates", "Progress", "Instructors", "Settings"]}}"""
 
         messages = [{"role": "user", "content": prompt}]
 
         try:
+            logger.info("🔍 GROQ_INVOKE: Starting page inference...")
+            logger.info(f"🔍 GROQ_INVOKE: Description: {description[:200]}...")
+            print("\n" + "="*60)
+            print("🔍 GROQ PAGE INFERENCE START")
+            print("="*60)
+            
             response = self.generate_chat_completion(messages, max_tokens=200)
-            print(f"🔴 GROQ-RAW-RESPONSE: {response[:500]}")
+            print(f"🔍 GROQ_RAW_RESPONSE: {response[:500]}")
+            logger.info(f"🔍 GROQ_RAW_RESPONSE: {response[:500]}")
 
             # Parse JSON response
             # Try to extract JSON from response (handle markdown code blocks)
@@ -156,6 +178,8 @@ Response format (JSON ONLY):
 
             data = json.loads(response)
             pages = data.get("pages", [])
+            print(f"✅ GROQ_PARSED_PAGES: {pages}")
+            logger.info(f"✅ GROQ_PARSED_PAGES: {pages}")
 
             # Validate and clean page names
             cleaned = []
@@ -166,15 +190,25 @@ Response format (JSON ONLY):
                 if clean and len(clean) < 30:  # Skip absurdly long names
                     cleaned.append(clean)
 
+            print(f"✅ GROQ_CLEANED_PAGES: {cleaned}")
+            print(f"📊 GROQ_PAGE_COUNT: {len(cleaned)} pages")
+            print("="*60)
+            print("🔍 GROQ PAGE INFERENCE COMPLETE")
+            print("="*60 + "\n")
             logger.info(f"[Groq] Inferred pages: {cleaned}")
-            print(f"🔴 GROQ-CLEANED-PAGES: {cleaned}")
             return cleaned
 
         except json.JSONDecodeError as e:
             logger.error(f"[Groq] JSON parse failed: {e}. Raw response: {response[:500]}")
+            print(f"❌ GROQ_JSON_ERROR: {e}")
+            print(f"❌ GROQ_RAW_FAILED: {response[:500]}")
+            print(f"⚠️  GROQ_FALLBACK: Using generic defaults")
+            print("="*60 + "\n")
             return ["Dashboard", "Analytics", "Settings"]
         except Exception as e:
             logger.error(f"[Groq] Page inference failed: {type(e).__name__}: {e}")
-            print(f"🔴 GROQ-ERROR: {e}")
+            print(f"❌ GROQ_ERROR: {type(e).__name__}: {e}")
+            print(f"⚠️  GROQ_FALLBACK: Using generic defaults")
+            print("="*60 + "\n")
             # Return sensible defaults
             return ["Dashboard", "Analytics", "Settings"]
