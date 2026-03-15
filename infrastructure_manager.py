@@ -1584,31 +1584,48 @@ class InfrastructureManager:
             self._rollback()
             return False
 
-    def _acpx_fix_build_error(self, build_error: str, attempt: int) -> bool:
+    def _acpx_fix_build_error(self, build_error: str, attempt: int, max_attempts: int = 3) -> bool:
         """
         Use ACPX to automatically fix build errors.
         
         Args:
             build_error: The build error message
-            attempt: Current retry attempt number (1 or 2)
+            attempt: Current retry attempt number (1, 2, or 3)
+            max_attempts: Maximum number of fix attempts (default 3)
             
         Returns:
             True if fix was applied successfully, False otherwise
         """
         try:
-            logger.info(f"🔧 ACPX_AUTO_FIX: Attempt {attempt}/2 - Calling ACPX to fix build error")
+            logger.info(f"🔧 ACPX_AUTO_FIX: Attempt {attempt}/{max_attempts} - Calling ACPX to fix build error")
+            print(f"🔴 ACPX_AUTO_FIX: Attempt {attempt}/{max_attempts} - Analyzing build errors...")
             
             frontend_src_path = self.project_path / "frontend" / "src"
             
             if not frontend_src_path.exists():
                 logger.error("ACPX_AUTO_FIX: Frontend src path not found")
+                print("🔴 ACPX_AUTO_FIX-ERROR: Frontend src path not found")
                 return False
             
-            # Build fix prompt
+            # Enhanced error extraction - get more context
+            error_lines = build_error.split('\n')
+            critical_errors = []
+            for line in error_lines:
+                # Extract lines with actual errors (TypeScript, JSX, import errors)
+                if any(keyword in line for keyword in ['error TS', 'Error:', 'Failed to compile', 'Cannot find', 'Type error']):
+                    critical_errors.append(line)
+            
+            # Use critical errors if found, otherwise use full error (truncated to 4000 chars)
+            error_context = '\n'.join(critical_errors[-20:]) if critical_errors else build_error[-4000:]
+            
+            logger.info(f"🔧 ACPX_AUTO_FIX: Extracted {len(critical_errors)} critical error lines")
+            print(f"🔴 ACPX_AUTO_FIX: Found {len(critical_errors)} critical errors to fix")
+            
+            # Build fix prompt with enhanced error context
             fix_prompt = f"""You are fixing a build error in a React + Vite + TypeScript application.
 
 BUILD ERROR:
-{build_error[:2000]}
+{error_context}
 
 YOUR TASK:
 1. Analyze the build error carefully
@@ -1658,15 +1675,18 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                     logger.error(f"ACPX_AUTO_FIX: stderr: {stderr[:500]}")
                     return False
             
-            logger.info(f"ACPX_AUTO_FIX: Attempt {attempt} completed successfully")
+            logger.info(f"✓ ACPX_AUTO_FIX: Attempt {attempt}/{max_attempts} completed successfully")
             logger.info(f"ACPX_AUTO_FIX: stdout: {result.stdout[:300] if result.stdout else '(empty)'}")
+            print(f"🔴 ACPX_AUTO_FIX-SUCCESS: AI has analyzed and fixed build errors")
             return True
             
         except subprocess.TimeoutExpired:
             logger.error("ACPX_AUTO_FIX: Timeout after 180 seconds")
+            print("🔴 ACPX_AUTO_FIX-ERROR: AI fix timeout after 180 seconds")
             return False
         except Exception as e:
             logger.error(f"ACPX_AUTO_FIX: Exception: {type(e).__name__}: {str(e)}")
+            print(f"🔴 ACPX_AUTO_FIX-ERROR: Exception - {type(e).__name__}: {str(e)}")
             return False
 
     def _phase_5_build(self) -> bool:
@@ -1767,14 +1787,21 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             else:
                 logger.info("✓ npm install completed (including dev dependencies)")
             
-            # Step 3: npm run build with retry logic (max 2 ACPX auto-fix attempts)
-            MAX_ACPX_RETRIES = 2
+            # Step 3: npm run build with retry logic (max 3 ACPX auto-fix attempts)
+            MAX_ACPX_RETRIES = 3
             build_attempt = 0
+            
+            logger.info("🔧 Starting autonomous fix loop (max 3 AI fix attempts)")
+            print("=" * 80)
+            print("🔧 AUTONOMOUS FIX LOOP: Starting build with AI auto-fix capability")
+            print(f"   Max AI fix attempts: {MAX_ACPX_RETRIES}")
+            print("=" * 80)
             
             while build_attempt < MAX_ACPX_RETRIES:
                 build_attempt += 1
                 
-                logger.info(f"[BUILD] Running npm build (attempt {build_attempt}/{MAX_ACPX_RETRIES + 1}) in {frontend_path}")
+                logger.info(f"[BUILD] Running npm build (attempt {build_attempt}/{MAX_ACPX_RETRIES}) in {frontend_path}")
+                print(f"🔴 BUILD-ATTEMPT: {build_attempt}/{MAX_ACPX_RETRIES}")
                 build_result = subprocess.run(
                     ["npm", "run", "build"],
                     cwd=str(frontend_path),
@@ -1786,27 +1813,35 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 
                 if build_result.returncode == 0:
                     logger.info(f"✓ npm run build succeeded on attempt {build_attempt}")
+                    print(f"🔴 BUILD-SUCCESS: Build succeeded on attempt {build_attempt}/{MAX_ACPX_RETRIES}")
+                    if build_attempt > 1:
+                        print(f"🔴 AUTONOMOUS-FIX-LOOP: AI successfully fixed build errors after {build_attempt - 1} attempt(s)")
                     break
                 
                 # Build failed - check if we can retry with ACPX
                 if build_attempt < MAX_ACPX_RETRIES:
                     logger.warning(f"⚠️ Build failed (attempt {build_attempt}): {build_result.stderr[:300]}")
                     logger.info(f"🔧 Calling ACPX to auto-fix build error (attempt {build_attempt}/{MAX_ACPX_RETRIES})")
+                    print(f"🔴 BUILD-FAILED: Attempt {build_attempt} failed, calling AI to fix...")
                     
                     # Call ACPX to fix the build error
-                    fix_success = self._acpx_fix_build_error(build_result.stderr, build_attempt)
+                    fix_success = self._acpx_fix_build_error(build_result.stderr, build_attempt, MAX_ACPX_RETRIES)
                     
                     if fix_success:
                         logger.info(f"✓ ACPX auto-fix applied successfully, retrying build...")
+                        print(f"🔴 AUTONOMOUS-FIX-LOOP: AI fix applied, retrying build...")
                         # Loop will retry build
                     else:
                         logger.error(f"❌ ACPX auto-fix failed, cannot continue")
+                        print(f"🔴 AUTONOMOUS-FIX-ERROR: AI fix attempt {build_attempt} failed")
                         logger.info("PHASE_5_BUILD_FAILED: ACPX auto-fix failed")
                         return False
                 else:
                     # Final attempt failed
                     logger.error(f"❌ Build failed after {MAX_ACPX_RETRIES} ACPX auto-fix attempts")
                     logger.error(f"Build error: {build_result.stderr[:500]}")
+                    print(f"🔴 AUTONOMOUS-FIX-FAILED: Build failed after {MAX_ACPX_RETRIES} AI fix attempts")
+                    print("=" * 80)
                     logger.info("PHASE_5_BUILD_FAILED: max retries exceeded")
                     return False
             
