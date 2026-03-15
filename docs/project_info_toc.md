@@ -6,16 +6,31 @@
 
 ## API Endpoints
 
-| Endpoint | Method | File | Lines | Handler |
-|----------|--------|------|-------|---------|
-| `/projects` | POST | `app.py` | 50-120 | `create_project()` |
-| `/projects` | GET | `app.py` | 125-150 | `list_projects()` |
-| `/projects/{id}` | GET | `app.py` | 155-180 | `get_project()` |
-| `/projects/{id}` | DELETE | `app.py` | 185-210 | `delete_project()` |
-| `/projects/{id}/status` | GET | `app.py` | 215-240 | `get_project_status()` |
-| `/projects/{id}/deploy` | POST | `app.py` | 245-280 | `trigger_deploy()` |
-| `/projects/{id}/publish/frontend` | POST | `app.py` | 1420-1500 | `publish_frontend()` |
-| `/projects/{id}/publish/backend` | POST | `app.py` | 1505-1570 | `publish_backend()` |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/projects` | POST | Create new project |
+| `/projects` | GET | List all projects |
+| `/projects/{project_id}` | GET | Get project details |
+| `/projects/{project_id}` | PUT | Update project |
+| `/projects/{project_id}` | DELETE | Delete project |
+| `/projects/{project_id}/status` | GET | Get pipeline status |
+| `/projects/{project_id}/ai-status` | GET | Get AI refinement status |
+| `/projects/{project_id}/claude-session` | GET | Get Claude session info |
+| `/projects/{project_id}/publish/frontend` | POST | Build & publish frontend |
+| `/projects/{project_id}/publish/backend` | POST | Build & publish backend |
+| `/projects/{project_id}/sessions` | GET | List project sessions |
+| `/projects/{project_id}/sessions` | POST | Create session |
+| `/projects/{project_id}/sessions/{session_id}` | DELETE | Delete session |
+| `/projects/{project_id}/files` | GET | List project files |
+| `/projects/{project_id}/files/{path}` | GET | Get file content |
+| `/projects/{project_id}/files/{path}` | PUT | Save file content |
+| `/project-types` | GET | List project types |
+| `/templates` | GET | List templates |
+| `/templates/select` | POST | Select template |
+| `/chat` | POST | Chat completion |
+| `/chat/stream` | POST | Streaming chat |
+| `/ai/completion` | POST | AI completion |
+| `/health` | GET | Health check |
 
 ---
 

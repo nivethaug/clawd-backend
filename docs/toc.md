@@ -7,57 +7,99 @@
 
 ## 🔗 Quick Links
 
-| Document | Path | Purpose |
-|----------|------|---------|
-| **Agent Skill** | [.agents/skills/project-info/SKILL.md](../.agents/skills/project-info/SKILL.md) | Full project knowledge for AI agents |
+| Document | Purpose |
+|----------|---------|
+| [SKILL.md](../.agents/skills/project-info/SKILL.md) | Agent skill reference |
+| [project_info_toc.md](./project_info_toc.md) | Pipeline & infrastructure details |
 
 ---
 
-## API Endpoints Index
+## API Endpoints
 
-### Project Management
+### Project Creation & Management
 
-| Endpoint | Method | Description | Documentation |
-|----------|--------|-------------|---------------|
-| `/projects` | POST | Create new project | [project_info_toc.md](./project_info_toc.md) |
-| `/projects` | GET | List all projects | [project_info_toc.md](./project_info_toc.md) |
-| `/projects/{id}` | GET | Get project details | [project_info_toc.md](./project_info_toc.md) |
-| `/projects/{id}` | DELETE | Delete project | [project_info_toc.md](./project_info_toc.md) |
-| `/projects/{id}/status` | GET | Get pipeline status | [project_info_toc.md](./project_info_toc.md) |
-| `/projects/{id}/deploy` | POST | Trigger deployment | [project_info_toc.md](./project_info_toc.md) |
-| `/projects/{id}/publish/frontend` | POST | Build & publish frontend | [project_info_toc.md](./project_info_toc.md) |
-| `/projects/{id}/publish/backend` | POST | Build & publish backend | [project_info_toc.md](./project_info_toc.md) |
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/projects` | POST | `app.py:283-350` | [project_creation.md](./project_creation.md) |
+| `/projects` | GET | `app.py:241-280` | [project_creation.md](./project_creation.md) |
+| `/projects/{id}` | PUT | `app.py:1357-1430` | [project_deletion.md](./project_deletion.md) |
+| `/projects/{id}` | DELETE | `app.py:1204-1355` | [project_deletion.md](./project_deletion.md) |
 
-### Future Endpoints (To be documented)
+### Project Status
 
-<!--
-Template for future API documentation:
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/projects/{id}/status` | GET | `app.py:1624-1655` | [project_status.md](./project_status.md) |
+| `/projects/{id}/ai-status` | GET | `app.py:1657-1815` | [project_status.md](./project_status.md) |
+| `/projects/{id}/claude-session` | GET | `app.py:1819-1880` | [project_status.md](./project_status.md) |
 
-### User Management
+### Project Publish
 
-| Endpoint | Method | Description | Documentation |
-|----------|--------|-------------|---------------|
-| `/users` | POST | Create user | [user_toc.md](./user_toc.md) |
-| `/users` | GET | List users | [user_toc.md](./user_toc.md) |
-| `/users/{id}` | GET | Get user | [user_toc.md](./user_toc.md) |
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/projects/{id}/publish/frontend` | POST | `app.py:1436-1530` | [publish_frontend.md](./publish_frontend.md) |
+| `/projects/{id}/publish/backend` | POST | `app.py:1534-1620` | [publish_backend.md](./publish_backend.md) |
 
-### Authentication
+### Project Sessions
 
-| Endpoint | Method | Description | Documentation |
-|----------|--------|-------------|---------------|
-| `/auth/login` | POST | User login | [auth_toc.md](./auth_toc.md) |
-| `/auth/logout` | POST | User logout | [auth_toc.md](./auth_toc.md) |
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/projects/{id}/sessions` | GET | `app.py:1882-1900` | [project_sessions.md](./project_sessions.md) |
+| `/projects/{id}/sessions` | POST | `app.py:1903-1945` | [project_sessions.md](./project_sessions.md) |
+| `/projects/{id}/sessions/{sid}` | DELETE | `app.py:1957-1975` | [project_sessions.md](./project_sessions.md) |
+| `/sessions/{sid}/messages` | GET | `app.py:2019-2035` | [project_sessions.md](./project_sessions.md) |
+| `/sessions/details` | GET | `app.py:2302-2415` | [project_sessions.md](./project_sessions.md) |
 
--->
+### Chat
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/chat` | POST | `app.py:2081-2150` | [chat.md](./chat.md) |
+| `/chat/stream` | POST | `app.py:2038-2078` | [chat_stream.md](./chat_stream.md) |
+
+### AI Completion
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/ai/completion` | POST | `app.py:2420-2500` | [ai_completion.md](./ai_completion.md) |
+
+### Project Files
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/projects/{id}/files` | GET | `app.py:2154-2185` | [project_info_toc.md](./project_info_toc.md) |
+| `/projects/{id}/files/{path}` | GET | `app.py:2187-2225` | [project_info_toc.md](./project_info_toc.md) |
+| `/projects/{id}/files/{path}` | PUT | `app.py:2227-2265` | [project_info_toc.md](./project_info_toc.md) |
+
+### Templates & Types
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/project-types` | GET | `app.py:515-528` | [project_info_toc.md](./project_info_toc.md) |
+| `/templates` | GET | `app.py:574-600` | [project_info_toc.md](./project_info_toc.md) |
+| `/templates/select` | POST | `app.py:530-572` | [project_info_toc.md](./project_info_toc.md) |
+
+### System
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/health` | GET | `app.py:2269-2278` | - |
 
 ---
 
-## How to Use This Documentation
+## Documentation Files
 
-### For AI Agents
-
-1. **Identify the endpoint** you need to modify
-2. **Click the documentation link** in the table
+| File | Description |
+|------|-------------|
+| [project_creation.md](./project_creation.md) | Create/list projects |
+| [project_status.md](./project_status.md) | Status & AI status endpoints |
+| [project_deletion.md](./project_deletion.md) | Delete/update projects |
+| [project_sessions.md](./project_sessions.md) | Session management |
+| [chat.md](./chat.md) | Non-streaming chat |
+| [chat_stream.md](./chat_stream.md) | Streaming chat (SSE) |
+| [ai_completion.md](./ai_completion.md) | AI completion endpoint |
+| [publish_frontend.md](./publish_frontend.md) | Frontend build & publish |
+| [publish_backend.md](./publish_backend.md) | Backend build & publish |
 3. **Find the exact file and line numbers** for the code you need
 4. **Make targeted changes** using the line references
 
