@@ -48,7 +48,7 @@ POSTGRES_USER = "admin"
 POSTGRES_PASSWORD = "StrongAdminPass123"  # TODO: Load from secure config
 
 # Port ranges
-FRONTEND_PORT_MIN = 3000
+FRONTEND_PORT_MIN = 3010
 FRONTEND_PORT_MAX = 4000
 BACKEND_PORT_MIN = 8010
 BACKEND_PORT_MAX = 9000
@@ -125,14 +125,14 @@ class PortAllocator:
             logger.warning(f"Could not scan for ports in use: {e}")
 
     def allocate_frontend_port(self) -> int:
-        """Allocate a free frontend port (3000-4000)."""
+        """Allocate a free frontend port (3010-4000)."""
         for port in range(FRONTEND_PORT_MIN, FRONTEND_PORT_MAX):
             if port not in self.used_ports:
                 self.used_ports.add(port)
                 logger.info(f"Allocated frontend port: {port}")
                 return port
 
-        raise RuntimeError("No available frontend ports (3000-4000)")
+        raise RuntimeError("No available frontend ports (3010-4000)")
 
     def allocate_backend_port(self) -> int:
         """Allocate a free backend port (8010-9000)."""
