@@ -1126,6 +1126,10 @@ Provide ONLY the JSON object, nothing else."""
 
             # Parse LLM response
             response_text = result.stdout.strip()
+            
+            # Debug: Log the raw response
+            logger.info(f"[Planner] 🔍 AI inference raw response: {response_text[:500]}")
+            print(f"🔍 AI_INFERENCE_RESPONSE: {response_text[:500]}")
 
             # Extract JSON from response - More flexible parsing
             import re
@@ -1160,14 +1164,18 @@ Provide ONLY the JSON object, nothing else."""
                             # Object format: {"pages": [...]}
                             pages = inferred_data.get("pages", [])
                             # logger.info(f"[Planner] AI inference successful (object format): {len(pages)} pages")  # Commented for cleaner logs
+                            print(f"✅ AI_INFERENCE_SUCCESS (object): {pages}")
                         elif isinstance(inferred_data, list):
                             # Array format: [...]
                             pages = inferred_data
                             # logger.info(f"[Planner] AI inference successful (array format): {len(pages)} pages")  # Commented for cleaner logs
+                            print(f"✅ AI_INFERENCE_SUCCESS (array): {pages}")
                         else:
                             logger.warning(f"[Planner] Unexpected JSON type: {type(inferred_data)}")
+                            print(f"⚠️ AI_INFERENCE_UNEXPECTED_TYPE: {type(inferred_data)}")
                         
                         logger.info(f"[Planner] Inferred: {pages}")
+                        print(f"📋 AI_INFERENCE_FINAL: {pages}")
                         return pages
 
                     except json.JSONDecodeError as e:
