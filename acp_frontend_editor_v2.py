@@ -825,6 +825,17 @@ class ACPFrontendEditorV2:
                                 stderr_lines.append(stderr_remain or '')
                         except (ProcessLookupError, OSError, AttributeError) as e:
                             logger.warning(f"[ACPX-V2] Process group kill failed: {e}")
+                        
+                        # Verify process actually died
+                        try:
+                            # Check if process still exists
+                            os.kill(process.pid, 0)  # Doesn't actually kill, just checks
+                            logger.warning(f"[ACPX-V2] Process {process.pid} still alive after kill, using aggressive cleanup")
+                            self._kill_process_tree(process.pid)
+                        except (ProcessLookupError, OSError):
+                            # Process is dead, good
+                            pass
+                        
                         idle_timeout_killed = True
                         break
                     
@@ -846,6 +857,8 @@ class ACPFrontendEditorV2:
                 
                 # Handle HARD timeout kills (STRICT FAILURE - always rollback)
                 if hard_timeout_killed:
+                    # Aggressive cleanup: Kill any remaining child processes
+                    self._kill_process_tree(process.pid)
                     self.snapshot_manager.rollback_and_cleanup()
                     result = {
                         "success": False,
@@ -1916,6 +1929,68 @@ Just implement the changes using your available tools.
         # logger.info(f"[Phase9] Final validated pages: {sorted(self.allowed_pages)}")
 
         return unauthorized_removed
+
+    def _kill_process_tree(self, pid: int):
+        """
+        Kill a process and all its children aggressively.
+        Handles npx child processes that may be in different process groups.
+        
+        Args:
+            pid: Process ID to kill (will also kill all children)
+        """
+        import signal
+        
+        try:
+            # Step 1: Get all child PIDs
+            child_pids = []
+            try:
+                # Use pgrep to find child processes
+                result = subprocess.run(
+                    ["pgrep", "-P", str(pid)],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                if result.returncode == 0:
+                    child_pids = [int(p.strip()) for p in result.stdout.strip().split('\n') if p.strip()]
+                    logger.info(f"[ACPX-V2] Found {len(child_pids)} child processes to kill")
+            except Exception as e:
+                logger.warning(f"[ACPX-V2] Failed to get child PIDs: {e}")
+            
+            # Step 2: Kill all children first (SIGKILL)
+            for child_pid in child_pids:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                    logger.info(f"[ACPX-V2] Killed child process {child_pid}")
+                except (ProcessLookupError, OSError) as e:
+                    logger.debug(f"[ACPX-V2] Child process {child_pid} already dead: {e}")
+            
+            # Step 3: Kill main process (SIGKILL)
+            try:
+                os.kill(pid, signal.SIGKILL)
+                logger.info(f"[ACPX-V2] Killed main process {pid}")
+            except (ProcessLookupError, OSError) as e:
+                logger.debug(f"[ACPX-V2] Main process {pid} already dead: {e}")
+            
+            # Step 4: Kill process group (belt and suspenders)
+            try:
+                os.killpg(pid, signal.SIGKILL)
+                logger.info(f"[ACPX-V2] Killed process group {pid}")
+            except (ProcessLookupError, OSError, AttributeError) as e:
+                logger.debug(f"[ACPX-V2] Process group kill skipped: {e}")
+            
+            # Step 5: Verify all processes are dead
+            time.sleep(0.5)
+            all_pids = [pid] + child_pids
+            for check_pid in all_pids:
+                try:
+                    os.kill(check_pid, 0)  # Check if process exists
+                    logger.error(f"[ACPX-V2] ⚠️  Process {check_pid} STILL ALIVE after SIGKILL!")
+                except (ProcessLookupError, OSError):
+                    logger.debug(f"[ACPX-V2] ✓ Process {check_pid} confirmed dead")
+            
+        except Exception as e:
+            logger.error(f"[ACPX-V2] Failed to kill process tree: {e}")
 
 
 
