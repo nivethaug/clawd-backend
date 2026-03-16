@@ -1268,10 +1268,15 @@ async def delete_project(project_id: int, force: bool = False):
         ).fetchall()
         session_keys = [row['session_key'] for row in sessions_to_delete]
 
-    # Step 2: Mark project as "deleting" for frontend feedback
+    # Step 2: DELETE FROM DATABASE FIRST (so UI shows correct count immediately)
     with get_db() as conn:
-        conn.execute("UPDATE projects SET status = 'deleting' WHERE id = ?", (project_id,))
+        # Delete messages first (foreign key dependency)
+        conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))
+        conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         conn.commit()
+    
+    logger.info(f"✓ Deleted project {project_id} from database (infrastructure cleanup in background)")
     
     # Step 3: Start infrastructure cleanup in BACKGROUND (async)
     import asyncio
@@ -1285,14 +1290,7 @@ async def delete_project(project_id: int, force: bool = False):
             # Run cleanup in threadpool to avoid blocking
             cleanup_result = await run_in_threadpool(cleanup_infrastructure, project_path)
             
-            # Step 4: Delete messages first (foreign key dependency)
-            with get_db() as conn:
-                conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))
-                conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
-                conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-                conn.commit()
-            
-            # Step 5: Delete OpenClaw sessions (moved to background)
+            # Delete OpenClaw sessions
             sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
             if os.path.exists(sessions_json_path):
                 try:
@@ -1329,21 +1327,15 @@ async def delete_project(project_id: int, force: bool = False):
             return cleanup_result
         except Exception as e:
             logger.error(f"[BG] ❌ Cleanup failed for project {project_id}: {e}")
-            # Still delete from database even if cleanup fails
-            with get_db() as conn:
-                conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))
-                conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
-                conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-                conn.commit()
             return {"error": str(e)}
     
     # Start background task
     asyncio.create_task(cleanup_task())
     
-    # IMMEDIATE RESPONSE (don't wait for cleanup)
+    # IMMEDIATE RESPONSE - project already deleted from DB
     return {
-        "status": "deleting",
-        "message": "Project deletion started (cleanup running in background)",
+        "status": "deleted",
+        "message": "Project deleted successfully (infrastructure cleanup running in background)",
         "project_id": project_id,
         "project_name": project_name,
         "cleanup": "running"
