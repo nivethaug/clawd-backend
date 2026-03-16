@@ -884,15 +884,19 @@ class NginxConfigurator:
             logger.error(f"Failed to generate SSL certificates: {e}")
             return False
 
-    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = False, project_path: str = None) -> Tuple[str, str]:
+    # Wildcard SSL certificate paths for *.dreambigwithai.com
+    WILDCARD_SSL_CERT = "/etc/letsencrypt/live/dreambigwithai.com/fullchain.pem"
+    WILDCARD_SSL_KEY = "/etc/letsencrypt/live/dreambigwithai.com/privkey.pem"
+
+    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = True, project_path: str = None) -> Tuple[str, str]:
         """
-        Generate nginx configuration for project.
+        Generate nginx configuration for project with wildcard SSL.
 
         Args:
             domain: Domain name (e.g., "ecommerce22")
             frontend_port: Frontend service port
             backend_port: Backend service port
-            enable_ssl: Whether to generate SSL config (default: False)
+            enable_ssl: Whether to generate SSL config (default: True, uses wildcard cert)
             project_path: Actual project folder path (e.g., "686_test_20260313_142220"). 
                           If not provided, falls back to domain name.
 
@@ -908,78 +912,30 @@ class NginxConfigurator:
             # but domain is like "test778786-7hbrzr"
             website_folder = project_path if project_path else domain
 
-            if enable_ssl:
-                # Generate HTTPS configuration with SSL and SPA routing
-                config = f"""# Frontend: {frontend_domain}
+            # Always use wildcard SSL certificate for *.dreambigwithai.com
+            config = f"""# Frontend: {frontend_domain}
+# HTTP -> HTTPS redirect
 server {{
     listen 80;
     server_name {frontend_domain};
     return 301 https://$host$request_uri;
 }}
 
+# HTTPS with wildcard SSL
 server {{
     listen 443 ssl;
     server_name {frontend_domain};
 
-    ssl_certificate /etc/letsencrypt/live/{frontend_domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/{frontend_domain}/privkey.pem;
+    # Wildcard SSL certificate for *.dreambigwithai.com
+    ssl_certificate {self.WILDCARD_SSL_CERT};
+    ssl_certificate_key {self.WILDCARD_SSL_KEY};
 
-    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
-    index index.html;
-
-    # SPA routing - serve index.html for all routes
-    location / {{
-        try_files $uri $uri/ /index.html;
-    }}
-
-    # API proxy
-    # API proxy (trailing slash strips /api prefix)
-    location /api/ {{
-        proxy_pass http://127.0.0.1:{backend_port}/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-    }}
-}}
-
-# Backend: {backend_domain}
-server {{
-    listen 80;
-    server_name {backend_domain};
-    return 301 https://$host$request_uri;
-}}
-
-server {{
-    listen 443 ssl;
-    server_name {backend_domain};
-
-    ssl_certificate /etc/letsencrypt/live/{backend_domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/{backend_domain}/privkey.pem;
-
-    location / {{
-        proxy_pass http://127.0.0.1:{backend_port};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-    }}
-}}
-"""
-            else:
-                # Generate HTTP-only configuration with SPA routing
-                config = f"""# Frontend: {frontend_domain}
-server {{
-    listen 80;
-    server_name {frontend_domain};
+    # SSL optimization
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
 
     root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
     index index.html;
@@ -998,14 +954,33 @@ server {{
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto https;
     }}
 }}
 
 # Backend: {backend_domain}
+# HTTP -> HTTPS redirect
 server {{
     listen 80;
     server_name {backend_domain};
+    return 301 https://$host$request_uri;
+}}
+
+# HTTPS with wildcard SSL
+server {{
+    listen 443 ssl;
+    server_name {backend_domain};
+
+    # Wildcard SSL certificate for *.dreambigwithai.com
+    ssl_certificate {self.WILDCARD_SSL_CERT};
+    ssl_certificate_key {self.WILDCARD_SSL_KEY};
+
+    # SSL optimization
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
 
     location / {{
         proxy_pass http://127.0.0.1:{backend_port};
@@ -1015,14 +990,14 @@ server {{
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Port $server_port;
     }}
 }}
 """
 
-            logger.info(f"✓ Nginx config generated for {domain} (SSL: {enable_ssl})")
+            logger.info(f"✓ Nginx config generated for {domain} (SSL: wildcard *.dreambigwithai.com)")
             return (frontend_domain, backend_domain, config)
 
         except Exception as e:
