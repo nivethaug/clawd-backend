@@ -713,8 +713,8 @@ class ACPFrontendEditorV2:
                     str(prompt)
                 ]
                 
-                HARD_TIMEOUT = 600  # 10 minutes max (strict failure)
-                IDLE_TIMEOUT = 300  # 5 minutes without output (tolerant - check edits)
+                HARD_TIMEOUT = 900  # 15 minutes max (strict failure)
+                IDLE_TIMEOUT = 450  # 7.5 minutes without output (tolerant - check edits)
 
                 logger.info(f"[ACPX-V2]   Command: acpx --format quiet claude exec <prompt>")
                 logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
