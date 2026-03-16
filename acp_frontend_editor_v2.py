@@ -744,13 +744,18 @@ class ACPFrontendEditorV2:
                     # Use communicate with timeout for clean output capture
                     stdout_output, stderr_output = process.communicate(timeout=HARD_TIMEOUT)
                 except subprocess.TimeoutExpired:
-                    # Kill entire process group (not just parent PID)
-                    logger.error(f"[ACPX-V2] 🔴 TIMEOUT: Hard timeout exceeded ({HARD_TIMEOUT}s) — killing process group")
-                    print(f"🔴 ACPX-V2-TIMEOUT: Killing process group {process.pid}")
+                    # Kill entire process group (Unix) or just process (Windows)
+                    logger.error(f"[ACPX-V2] 🔴 TIMEOUT: Hard timeout exceeded ({HARD_TIMEOUT}s) — killing process")
+                    print(f"🔴 ACPX-V2-TIMEOUT: Killing process {process.pid}")
                     try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except (ProcessLookupError, OSError):
-                        pass  # Process already dead
+                        if os.name == 'nt':
+                            # Windows: just kill the process
+                            process.kill()
+                        else:
+                            # Unix: kill the entire process group
+                            os.killpg(process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, OSError, AttributeError):
+                        pass  # Process already dead or killpg not available
                     # Drain pipes after kill
                     stdout_output, stderr_output = process.communicate()
                     watchdog_killed = True
