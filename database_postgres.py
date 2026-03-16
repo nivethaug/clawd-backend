@@ -381,11 +381,20 @@ def delete_project_database(project_name: str, force: bool = False) -> Dict[str,
     if force:
         logger.warning(f"⚠️ FORCE deletion requested for database: {db_name}")
     
+    conn = None
     try:
         pool = get_connection_pool()
+        
+        # Log pool status before getting connection
+        logger.debug(f"Pool status before getconn: used={len(pool._used)}, idle={len(pool._pool)}")
+        
         conn = pool.getconn()
         
         with conn.cursor() as cur:
+            # Set statement timeout (60 seconds) to prevent hanging on DROP DATABASE
+            cur.execute("SET statement_timeout = 60000")
+            logger.debug(f"✓ Set statement timeout: 60s")
+            
             # Drop user (if exists)
             try:
                 cur.execute(sql.SQL(f"DROP USER IF EXISTS {sql.Identifier(db_user)}"))
@@ -397,6 +406,9 @@ def delete_project_database(project_name: str, force: bool = False) -> Dict[str,
             cur.execute(sql.SQL(f"DROP DATABASE IF EXISTS {sql.Identifier(db_name)}"))
             logger.info(f"✓ Dropped database: {db_name}")
             conn.commit()
+            
+            # Log pool status after operation
+            logger.debug(f"Pool status after DROP: used={len(pool._used)}, idle={len(pool._pool)}")
                 
             return {
                 "success": True,
@@ -411,6 +423,39 @@ def delete_project_database(project_name: str, force: bool = False) -> Dict[str,
             "success": False,
             "error": str(e),
             "database": db_name
+        }
+    finally:
+        # CRITICAL: Always return connection to pool to prevent leaks
+        if conn:
+            try:
+                pool.putconn(conn)
+                logger.debug(f"✓ Connection returned to pool (pool status: used={len(pool._used)}, idle={len(pool._pool)})")
+            except Exception as e:
+                logger.error(f"❌ Failed to return connection to pool: {e}")
+
+
+def get_pool_status() -> Dict[str, Any]:
+    """
+    Get connection pool status for monitoring.
+    
+    Returns:
+        Dict with pool statistics
+    """
+    try:
+        pool = get_connection_pool()
+        return {
+            "status": "ok",
+            "pool_size": 50,
+            "used_connections": len(pool._used),
+            "idle_connections": len(pool._pool),
+            "available": len(pool._pool),
+            "utilization": f"{(len(pool._used) / 50) * 100:.1f}%"
+        }
+    except Exception as e:
+        logger.error(f"Failed to get pool status: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
         }
 
 
