@@ -697,40 +697,37 @@ class ACPFrontendEditorV2:
                 traceback.print_exc()
                 return {"success": False, "message": f"Failed to build ACPX prompt: {str(e)}"}
 
-            # Step 6: Run ACPX with Watchdog Protection
+            # Step 6: Run ACPX with timeout protection
             try:
                 print("=" * 60)
                 print("PHASE_9_APPLY")
-                # print("🔴 ACPX-V2-STEP5B-EXEC: Running ACPX CLI with watchdog")
-                logger.info(f"[ACPX-V2] Step 5b: Running ACPX with watchdog protection...")
+                logger.info(f"[ACPX-V2] Step 5b: Running ACPX with timeout protection...")
                 
-                # Build command: acpx --cwd <dir> --format quiet claude exec "<prompt>"
-                # Ensure all args are strings to avoid TypeError with PosixPath
+                # Build command: acpx --format quiet claude exec "<prompt>"
+                # cwd is set in Popen, not in command args
                 cmd = [
                     "acpx",
-                    "--cwd", str(self.frontend_src_path),
                     "--format", "quiet",
                     "claude",
                     "exec",
                     str(prompt)
                 ]
                 
-                logger.info(f"[ACPX-V2]   Command: acpx --cwd {self.frontend_src_path} --format quiet claude exec <prompt>")
+                HARD_TIMEOUT = 600  # 10 minutes max
+
+                logger.info(f"[ACPX-V2]   Command: acpx --format quiet claude exec <prompt>")
                 logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
-                logger.info(f"[ACPX-V2]   Hard timeout: 600 seconds, Idle timeout: 60 seconds")
+                logger.info(f"[ACPX-V2]   Hard timeout: {HARD_TIMEOUT} seconds")
 
                 # Robust debug logging
-                print("ACPX CMD:", " ".join(cmd[:6]) + " <prompt>")
+                print("ACPX CMD:", " ".join(cmd[:4]) + " <prompt>")
                 print("[ACPX] cwd:", str(self.frontend_src_path))
-                print("[ACPX] running: acpx --format quiet claude exec (with watchdog)")
+                print("[ACPX] running: acpx --format quiet claude exec (with timeout)")
 
-                # Use Popen for streaming with watchdog protection
-                import time
-                import threading
+                import os
+                import signal
                 
-                HARD_TIMEOUT = 600  # 10 minutes max
-                IDLE_TIMEOUT = 300  # 5 minutes without output (increased from 180s)
-                
+                # Use Popen with process group for clean timeout handling
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -738,96 +735,34 @@ class ACPFrontendEditorV2:
                     stdin=subprocess.DEVNULL,
                     text=True,
                     cwd=str(self.frontend_src_path),
-                     start_new_session=True, # new process group
+                    start_new_session=True  # new process group
                 )
                 
-                stdout_lines = []
-                stderr_lines = []
-                last_output_time = time.time()
-                start_time = time.time()
                 watchdog_killed = False
-                idle_killed = False
                 
-                # Track previous lengths for idle detection
-                prev_stdout_len = 0
-                prev_stderr_len = 0
-                
-                def read_stream(stream, lines_list):
-                    """Read from stream line by line."""
-                    try:
-                        for line in iter(stream.readline, ''):
-                            if line:
-                                lines_list.append(line)
-                        stream.close()
-                    except:
-                        pass
-                
-                # Start reader threads for stdout and stderr
-                stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, stdout_lines), daemon=True)
-                stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, stderr_lines), daemon=True)
-                stdout_thread.start()
-                stderr_thread.start()
-                
-                # Watchdog loop - wrapped in try-except for KeyboardInterrupt resilience
                 try:
-                    # Watchdog loop for process monitoring
-                    while process.poll() is None:
-                        current_time = time.time()
-                        elapsed = current_time - start_time
-                        
-                        # Check for NEW output (length changed)
-                        current_stdout_len = len(stdout_lines)
-                        current_stderr_len = len(stderr_lines)
-                        
-                        if current_stdout_len > prev_stdout_len or current_stderr_len > prev_stderr_len:
-                            last_output_time = current_time
-                        
-                        idle_time = current_time - last_output_time
-                        
-                        # Hard timeout check
-                        if elapsed > HARD_TIMEOUT:
-                            logger.error(f"[ACPX-V2] 🔴 WATCHDOG: Hard timeout exceeded ({elapsed:.1f}s > {HARD_TIMEOUT}s) — killing process")
-                            # print(f"🔴 ACPX-V2-WATCHDOG: Hard timeout exceeded, killing process")
-                            process.kill()
-                            process.wait(timeout=5)
-                            watchdog_killed = True
-                            break
-                        
-                        # Idle timeout check
-                        if idle_time > IDLE_TIMEOUT:
-                            logger.warning(f"[ACPX-V2] ⚠️ WATCHDOG: Idle timeout exceeded ({idle_time:.1f}s > {IDLE_TIMEOUT}s) — terminating process")
-                            # print(f"🔴 ACPX-V2-WATCHDOG: Idle timeout exceeded, terminating process")
-                            process.terminate()
-                            try:
-                                process.wait(timeout=5)
-                            except subprocess.TimeoutExpired:
-                                process.kill()
-                                process.wait(timeout=5)
-                            idle_killed = True
-                            break
-                        
-                        time.sleep(0.5)
+                    # Use communicate with timeout for clean output capture
+                    stdout_output, stderr_output = process.communicate(timeout=HARD_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    # Kill entire process group (not just parent PID)
+                    logger.error(f"[ACPX-V2] 🔴 TIMEOUT: Hard timeout exceeded ({HARD_TIMEOUT}s) — killing process group")
+                    print(f"🔴 ACPX-V2-TIMEOUT: Killing process group {process.pid}")
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, OSError):
+                        pass  # Process already dead
+                    # Drain pipes after kill
+                    stdout_output, stderr_output = process.communicate()
+                    watchdog_killed = True
                 
-                except KeyboardInterrupt:
-                    # Handle external interrupt gracefully
-                    logger.warning("[ACPX] KeyboardInterrupt detected — continuing to wait for process")
-                    pass  # Continue to wait for threads to finish
-                
-                # Wait for reader threads to finish
-                stdout_thread.join(timeout=2)
-                stderr_thread.join(timeout=2)
-                
-                # Collect output
-                stdout_output = ''.join(stdout_lines)
-                stderr_output = ''.join(stderr_lines)
                 return_code = process.returncode
-                
+
                 # Robust debug logging after execution
                 print("ACPX RETURN CODE:", return_code)
                 print("ACPX STDOUT:", stdout_output[:500] if stdout_output else "(empty)")
                 print("ACPX STDERR:", stderr_output[:500] if stderr_output else "(empty)")
                 
-                # Handle watchdog kills
+                # Handle timeout kills
                 if watchdog_killed:
                     self.snapshot_manager.rollback_and_cleanup()
                     result = {
@@ -835,22 +770,12 @@ class ACPFrontendEditorV2:
                         "message": f"ACPX hard timeout exceeded ({HARD_TIMEOUT}s) — process killed",
                         "rollback": True
                     }
-                    # print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Reason=hard_timeout")
                     return result
-                
-                # Don't immediately rollback on idle timeout - check if files were modified
-                if idle_killed:
-                    logger.warning(f"[ACPX-V2] ⚠️ Idle timeout exceeded ({IDLE_TIMEOUT}s) - checking if edits succeeded...")
-                    # print(f"🔴 ACPX-V2-IDLE-TIMEOUT: Checking if files were modified before rolling back")
-                
+
                 # Tolerant error handling: ignore harmless JSON-RPC notification errors
-                # and handle ACPX idle timeout (returns -6 even when edits succeed)
                 should_fail = True
                 if "session/update" in stderr_output and "Invalid params" in stderr_output:
                     logger.warning("[ACPX] Ignoring JSON-RPC notification error (session/update Invalid params)")
-                    should_fail = False
-                elif return_code == -6 or idle_killed:
-                    logger.warning("[ACPX] ACPX idle timeout detected but edits may have succeeded")
                     should_fail = False
 
                 if return_code != 0 and should_fail:
