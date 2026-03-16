@@ -153,7 +153,7 @@ class HostingerDNSAPI:
 
     def delete_a_record(self, domain: str, subdomain: str) -> dict:
         """
-        Delete a subdomain's DNS records.
+        Delete a subdomain's DNS records using DELETE with filters.
 
         Args:
             domain: Base domain (e.g., "dreambigwithai.com")
@@ -163,80 +163,53 @@ class HostingerDNSAPI:
             Dict with success status and message
         """
         try:
-            url = f"{self.base_url}/zones/{domain}"
+            import http.client
+            import json as json_module
+            
             full_domain = f"{subdomain}.{domain}"
-
-            # First, get all current records
-            get_response = self.session.get(url, timeout=30)
-            if get_response.status_code != 200:
-                return {
-                    "success": False,
-                    "error": f"Failed to fetch current DNS records: HTTP {get_response.status_code}"
-                }
-
-            current_records = get_response.json()
-
-            # Filter out the subdomain record we want to delete
-            # Keep all records except those matching subdomain name
-            updated_records = [r for r in current_records if r.get("name", "").lower() != subdomain.lower()]
-
-            # PUT the updated records back (wrapped in zone array with overwrite)
-            record_data = {
-                "overwrite": True,
-                "zone": updated_records
-            }
-
-            put_response = self.session.put(url, json=record_data, timeout=30)
-
-            if put_response.status_code == 200:
+            
+            # Use DELETE method with filters (works reliably)
+            conn = http.client.HTTPSConnection("developers.hostinger.com")
+            payload = json_module.dumps({"filters": [{"name": subdomain, "type": "A"}]})
+            
+            conn.request("DELETE", f"/api/dns/v1/zones/{domain}", payload, {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_token}"
+            })
+            
+            response = conn.getresponse()
+            data = response.read()
+            
+            if response.status == 200:
                 return {
                     "success": True,
-                    "message": f"DNS record deleted: {full_domain}",
-                    "records_count": len(updated_records)
+                    "message": f"DNS record deleted: {full_domain}"
                 }
-            elif put_response.status_code == 400:
-                error_msg = put_response.json().get("error", "Invalid parameters")
-                return {
-                    "success": False,
-                    "error": f"Bad request: {error_msg}",
-                    "status_code": 400
-                }
-            elif put_response.status_code == 401:
+            elif response.status == 401:
                 return {
                     "success": False,
                     "error": "Invalid or expired API token",
                     "status_code": 401
                 }
-            elif put_response.status_code == 404:
+            elif response.status == 404:
                 return {
                     "success": False,
                     "error": f"Domain '{domain}' not found in your account",
                     "status_code": 404
                 }
-            elif put_response.status_code == 422:
-                error_msg = put_response.json().get("error", "Validation failed")
-                return {
-                    "success": False,
-                    "error": f"Validation error: {error_msg}",
-                    "status_code": 422
-                }
-            elif put_response.status_code == 423:
+            elif response.status == 423:
                 return {
                     "success": False,
                     "error": f"Rate limit exceeded. Wait 15-60 minutes.",
                     "status_code": 423
                 }
             else:
+                error_msg = data.decode('utf-8')[:200] if data else f"HTTP {response.status}"
                 return {
                     "success": False,
-                    "error": f"API error: HTTP {put_response.status_code}",
-                    "status_code": put_response.status_code
+                    "error": error_msg,
+                    "status_code": response.status
                 }
-        except requests.exceptions.Timeout:
-            return {
-                "success": False,
-                "error": "Request timeout (30s)"
-            }
         except Exception as e:
             return {
                 "success": False,
