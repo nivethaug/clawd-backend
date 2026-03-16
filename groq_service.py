@@ -141,7 +141,7 @@ Example:
 "ServiceDesk has four main pages: Dashboard, Tickets, Assets, and Requests"
 
 Output:
-{"pages": ["Dashboard","Tickets","Assets","Requests"]}
+{{"pages": ["Dashboard","Tickets","Assets","Requests"]}}
 
 Step 2 — Contextual Inference
 If NO explicit pages are mentioned:
@@ -197,7 +197,7 @@ RULES
 
 Response format:
 
-{"pages": ["PageOne","PageTwo","PageThree","PageFour"]}"""
+{{"pages": ["PageOne","PageTwo","PageThree","PageFour"]}}"""
 
         messages = [{"role": "user", "content": prompt}]
 
