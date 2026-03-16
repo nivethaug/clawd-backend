@@ -1138,10 +1138,13 @@ Phase 9 is complete! ACP is integrated as the final step of project creation.
 
             # Add routes for missing pages
             new_routes = []
+            # First page gets the "/" route (default/home page)
+            first_page = pages[0] if pages else None
             for page in pages:
                 if page not in existing_route_pages:
                     # Create path from page name (lowercase)
-                    if page.lower() == "dashboard":
+                    # First page gets "/" route, others get "/pagename"
+                    if page == first_page:
                         path = "/"
                     elif page.lower() == "login" or page.lower() == "signup":
                         path = f"/{page.lower()}"
@@ -1232,6 +1235,8 @@ Phase 9 is complete! ACP is integrated as the final step of project creation.
             system_pages = {"Settings", "Notifications", "Account", "Billing"}
             new_main_nav_items = []
             new_system_nav_items = []
+            # First page gets the "/" route (default/home page)
+            first_page = pages[0] if pages else None
 
             for page in pages:
                 if page in system_pages:
@@ -1243,7 +1248,8 @@ Phase 9 is complete! ACP is integrated as the final step of project creation.
                 else:
                     if page not in existing_main_nav and page not in ["Login", "Signup"]:
                         icon = ICON_MAPPINGS.get(page, "LayoutDashboard")
-                        path = "/" if page.lower() == "dashboard" else f"/{page.lower()}"
+                        # First page gets "/" route, others get "/pagename"
+                        path = "/" if page == first_page else f"/{page.lower()}"
                         new_main_nav_items.append(f'  {{ name: \'{page}\', href: \'{path}\', icon: {icon} }}')
                         logger.info(f"   Adding to mainNavItems: {page}")
 
