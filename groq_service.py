@@ -125,35 +125,79 @@ class GroqService:
 Product description:
 {description}
 
-CRITICAL TASK: Extract EXPLICITLY mentioned pages FIRST, then infer context-specific pages
+TASK:
+Determine the main application pages.
 
-Step 1: Look for explicit page mentions
-- Scan for phrases like "pages: X, Y, Z" or "main pages: X, Y, Z"
-- Extract page names EXACTLY as written (preserve capitalization)
-- If description says "four main pages: Dashboard, Tickets, Assets, and Requests" → extract exactly those 4 pages
+Step 1 — Extract Explicit Pages
+Look for phrases like:
+- "main pages"
+- "pages:"
+- "sections:"
+- "modules:"
 
-Step 2: Only if NO explicit pages found, then infer CONTEXTUALLY
-- Identify product type: analytics platform, CRM, document management, monitoring, e-commerce, etc.
-- Generate SPECIFIC pages relevant to that product type (NOT generic)
-- Be creative and specific with page names
+If explicit pages are mentioned, extract them EXACTLY as written.
 
-RULES:
-1. EXPLICIT PAGES: If description mentions specific pages, extract ONLY those (do not add generic pages)
-2. NO EXPLICIT PAGES: If no pages mentioned, infer 5-8 SPECIFIC pages based on product type
-3. AVOID GENERIC PAGES: Do NOT default to "Dashboard", "Analytics", "Settings" unless truly relevant
-4. Convert to PascalCase: "Knowledge Base" → "KnowledgeBase", "My Learning" → "MyLearning"
-5. Return ONLY a JSON object with "pages" key
-6. Do NOT include explanations or extra text
-7. Preserve exact capitalization from description
+Example:
+"ServiceDesk has four main pages: Dashboard, Tickets, Assets, and Requests"
 
-Response format (JSON ONLY):
-{{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
+Output:
+{"pages": ["Dashboard","Tickets","Assets","Requests"]}
 
-EXAMPLES:
-"ServiceDesk has four main pages: Dashboard, Tickets, Assets, and Requests" → {{"pages": ["Dashboard", "Tickets", "Assets", "Requests"]}}
-"Analytics and operations platform for monitoring activity, exploring data, managing workflows" → {{"pages": ["ActivityMonitor", "DataExplorer", "Workflows", "Metrics", "Alerts", "Integrations", "TeamSettings"]}}
-"E-commerce platform with product catalog and order management" → {{"pages": ["Products", "Orders", "Customers", "Inventory", "Reports", "StoreSettings"]}}
-"Learning management system" → {{"pages": ["Courses", "MyLearning", "Certificates", "Progress", "Instructors", "Settings"]}}"""
+Step 2 — Contextual Inference
+If NO explicit pages are mentioned:
+
+1. Identify the product type:
+- analytics platform
+- CRM
+- project management
+- document system
+- monitoring tool
+- e-commerce platform
+- knowledge base
+- learning platform
+
+2. Generate realistic pages for that product.
+
+Example:
+
+Analytics platform →
+ActivityMonitor
+DataExplorer
+Metrics
+Reports
+Alerts
+Integrations
+
+CRM →
+Contacts
+Leads
+Deals
+Accounts
+Reports
+Settings
+
+E-commerce →
+Products
+Orders
+Customers
+Inventory
+Analytics
+StoreSettings
+
+RULES
+
+1. If explicit pages exist → return ONLY those pages.
+2. If no explicit pages exist → infer context-specific pages.
+3. Do NOT return generic pages unless they clearly fit the product.
+4. Convert all page names to PascalCase.
+5. Page names must be 1-3 words.
+6. The "pages" array MUST contain at least 4 items and at most 8 items.
+7. Never return an empty array.
+8. Return ONLY JSON.
+
+Response format:
+
+{"pages": ["PageOne","PageTwo","PageThree","PageFour"]}"""
 
         messages = [{"role": "user", "content": prompt}]
 
