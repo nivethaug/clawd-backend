@@ -691,7 +691,7 @@ That's all. Execute Phase {phase} now.
             self.completed_phases.append("AI Frontend Refinement (Failed)")
             return True
 
-    def phase_9_acp_frontend_editor(self) -> bool:
+    async def phase_9_acp_frontend_editor(self) -> bool:
         """
         Phase 9: ACP Controlled Frontend Editor
 
@@ -802,7 +802,7 @@ That's all. Execute Phase {phase} now.
                 logger.info("✓ ACP Frontend Editor V2 initialized")
 
                 print("🔴 PHASE_9_APPLY: Calling apply_changes_via_acpx (Filesystem Diff Architecture)")
-                result = editor_v2.apply_changes_via_acpx(goal_description, execution_id)
+                result = await editor_v2.apply_changes_via_acpx(goal_description, execution_id)
 
                 ai_duration = time.time() - ai_start_time
 
@@ -1518,7 +1518,8 @@ Execute the refinement now and make this template production-ready for: {self.pr
             
             print("PIPELINE TRACE: entering Phase 9 (ACPX Frontend Refinement)")
             try:
-                result_phase9 = self.phase_9_acp_frontend_editor()
+                import asyncio
+                result_phase9 = asyncio.run(self.phase_9_acp_frontend_editor())
                 print("PIPELINE TRACE: exiting Phase 9")
                 print("PIPELINE TRACE: Phase 9 result =", result_phase9)
             except Exception as e:

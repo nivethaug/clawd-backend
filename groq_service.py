@@ -108,7 +108,7 @@ class GroqService:
         """
         return bool(self.api_key and self.api_key != "your_key_here")
 
-    def infer_pages(self, description: str) -> List[str]:
+    async def infer_pages(self, description: str) -> List[str]:
         """
         Use LLM to infer page names from a product description.
 
@@ -208,19 +208,8 @@ Response format:
             print("🔍 GROQ PAGE INFERENCE START")
             print("="*60)
             
-            # Call async method synchronously using asyncio.run()
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If loop is already running, use run_until_complete
-                    response = loop.run_until_complete(self.generate_chat_completion(messages, max_tokens=200))
-                else:
-                    # If no loop running, use asyncio.run
-                    response = asyncio.run(self.generate_chat_completion(messages, max_tokens=200))
-            except RuntimeError:
-                # No event loop exists, create one
-                response = asyncio.run(self.generate_chat_completion(messages, max_tokens=200))
+            # Call async method with await
+            response = await self.generate_chat_completion(messages, max_tokens=200)
             
             print(f"🔍 GROQ_RAW_RESPONSE: {response[:500]}")
             logger.info(f"🔍 GROQ_RAW_RESPONSE: {response[:500]}")

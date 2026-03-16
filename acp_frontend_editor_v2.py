@@ -539,7 +539,7 @@ class ACPFrontendEditorV2:
         self.manifest_manager = PageManifest(str(self.frontend_path.parent))
         # print(f"🔴 ACPX-V2-INIT: manifest_manager.pages_path = {self.manifest_manager.pages_path}")
 
-    def apply_changes_via_acpx(
+    async def apply_changes_via_acpx(
         self,
         goal_description: str,
         execution_id: str
@@ -595,7 +595,7 @@ class ACPFrontendEditorV2:
             try:
                 # print("🔴 ACPX-V2-STEP2: Generating manifest")
                 logger.info(f"[ACPX-V2] Step 2: Generating page manifest (Phase 5)...")
-                required_pages = self._extract_required_pages_from_prompt(goal_description)
+                required_pages = await self._extract_required_pages_from_prompt(goal_description)
                 # print(f"🔴 ACPX-V2-STEP2-INFO: Pages to create: {required_pages}")
                 logger.info(f"[ACPX-V2]   Planner detected pages: {required_pages}")
 
@@ -683,7 +683,7 @@ class ACPFrontendEditorV2:
             try:
                 # print("🔴 ACPX-V2-STEP5-PROMPT: Building ACPX prompt")
                 logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
-                prompt = self._build_acpx_prompt(goal_description)
+                prompt = await self._build_acpx_prompt(goal_description)
                 # print(f"🔴 ACPX-V2-STEP5-PROMPT-DONE: Prompt built, length={len(prompt)}")
                 # print("=" * 60)
                 # print("🔴 ACPX_PROMPT_START:")
@@ -1288,7 +1288,7 @@ class ACPFrontendEditorV2:
                 # Don't fail on cleanup errors
                 logger.warning(f"[ACPX-V2] Snapshot cleanup failed but returning success: {str(e)}")
 
-    def _extract_required_pages_from_prompt(self, goal_description: str) -> List[str]:
+    async def _extract_required_pages_from_prompt(self, goal_description: str) -> List[str]:
         """
         Extract required pages from goal description using AI inference.
 
@@ -1321,12 +1321,8 @@ class ACPFrontendEditorV2:
             from groq_service import GroqService
             # print("🔴 PLANNER-STEP1: Attempting Groq AI inference...")
             groq = GroqService()
-            
-            # Extract ONLY the product description (first paragraph before "Customize")
-            # to avoid confusing the AI with ACPX instructions
-            product_description = goal_description.split("Customize this React application")[0].strip()
-            
-            inferred_pages = groq.infer_pages(product_description)
+                    
+            inferred_pages = await groq.infer_pages(product_description)
             # print(f"🔴 PLANNER-GROQ-RAW: Inferred pages = {inferred_pages}")
             if inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
@@ -1367,7 +1363,7 @@ class ACPFrontendEditorV2:
 
         return required_pages
 
-    def _build_acpx_prompt(self, goal_description: str) -> str:
+    async def _build_acpx_prompt(self, goal_description: str) -> str:
         """
         Build ACPX prompt with explicit required artifacts and completion checklist.
 
@@ -1378,7 +1374,7 @@ class ACPFrontendEditorV2:
             Prompt string for ACPX
         """
         # Extract required pages from goal description
-        required_pages = self._extract_required_pages_from_prompt(goal_description)
+        required_pages = await self._extract_required_pages_from_prompt(goal_description)
 
         # print(f"🔴 PLANNER-OUTPUT: Required pages = {required_pages}")
         # print(f"🔴 PLANNER-OUTPUT: Page count = {len(required_pages)}")
