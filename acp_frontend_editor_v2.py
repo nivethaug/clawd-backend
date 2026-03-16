@@ -1300,11 +1300,11 @@ class ACPFrontendEditorV2:
         Returns:
             List of required page names
         """
-        # Return cached pages if available (prevents double LLM calls)
-        if self._cached_pages is not None:
-            logger.info("[Planner] Returning cached page inference")
-            # print(f"🔴 PLANNER-CACHE-HIT: Returning cached pages = {self._cached_pages}")
-            return self._cached_pages
+        # # Return cached pages if available (prevents double LLM calls)
+        # if self._cached_pages is not None:
+        #     logger.info("[Planner] Returning cached page inference")
+        #     # print(f"🔴 PLANNER-CACHE-HIT: Returning cached pages = {self._cached_pages}")
+        #     return self._cached_pages
         
         # print("🔴 PLANNER-CACHE-MISS: No cached pages, performing fresh inference")
 
