@@ -737,7 +737,8 @@ class ACPFrontendEditorV2:
                     stderr=subprocess.PIPE,
                     stdin=subprocess.DEVNULL,
                     text=True,
-                    cwd=str(self.frontend_src_path)
+                    cwd=str(self.frontend_src_path),
+                     start_new_session=True, # new process group
                 )
                 
                 stdout_lines = []
@@ -1322,7 +1323,7 @@ class ACPFrontendEditorV2:
             # print("🔴 PLANNER-STEP1: Attempting Groq AI inference...")
             groq = GroqService()
                     
-            inferred_pages = await groq.infer_pages(product_description)
+            inferred_pages = await groq.infer_pages(goal_description)
             # print(f"🔴 PLANNER-GROQ-RAW: Inferred pages = {inferred_pages}")
             if inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
