@@ -539,8 +539,16 @@ class ServiceManager:
             )
             
             if install_result.returncode != 0:
+                # Extract actual errors from stderr (npm warnings go to stderr but don't fail)
+                stderr_lines = install_result.stderr.split('\n')
+                error_lines = [line for line in stderr_lines if any(kw in line.lower() for kw in ['error', 'err!', 'econnrefused', 'eacces', 'enoent'])]
+                
                 logger.error(f"[BUILD] npm install failed with code {install_result.returncode}")
-                logger.error(f"[BUILD] npm install stderr: {install_result.stderr[:500]}")
+                if error_lines:
+                    logger.error(f"[BUILD] npm errors:\n" + '\n'.join(error_lines[-10:]))
+                else:
+                    logger.error(f"[BUILD] npm stderr: {install_result.stderr[:500]}")
+                    logger.error(f"[BUILD] npm stdout: {install_result.stdout[:500]}")
                 logger.info("PHASE_5_BUILD_FAILED: npm install failed")
                 return False
             
@@ -1782,7 +1790,19 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             )
             
             if install_result.returncode != 0:
-                logger.error(f"❌ npm install failed: {install_result.stderr[:300]}")
+                # Extract actual errors from stderr (npm warnings go to stderr but don't fail)
+                stderr_lines = install_result.stderr.split('\n')
+                error_lines = [line for line in stderr_lines if any(kw in line.lower() for kw in ['error', 'err!', 'econnrefused', 'eacces', 'enoent'])]
+                
+                # Show actual errors if found, otherwise show full stderr
+                if error_lines:
+                    error_context = '\n'.join(error_lines[-10:])  # Last 10 error lines
+                    logger.error(f"❌ npm install failed (code {install_result.returncode})")
+                    logger.error(f"   Errors:\n{error_context}")
+                else:
+                    logger.error(f"❌ npm install failed (code {install_result.returncode})")
+                    logger.error(f"   stderr: {install_result.stderr[:500]}")
+                    logger.error(f"   stdout: {install_result.stdout[:500]}")
                 logger.info("PHASE_5_BUILD_FAILED: npm install failed")
                 return False
             else:
