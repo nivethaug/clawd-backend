@@ -785,37 +785,46 @@ class ACPFrontendEditorV2:
                     
                     # Hard timeout check (STRICT FAILURE)
                     if elapsed > HARD_TIMEOUT:
-                        logger.error(f"[ACPX-V2] 🔴 HARD TIMEOUT: {elapsed:.1f}s > {HARD_TIMEOUT}s — killing process")
-                        print(f"🔴 ACPX-V2-HARD-TIMEOUT: Killing process {process.pid}")
+                        logger.error(f"[ACPX-V2] 🔴 HARD TIMEOUT: {elapsed:.1f}s > {HARD_TIMEOUT}s — killing process group")
+                        print(f"🔴 ACPX-V2-HARD-TIMEOUT: Killing process group {process.pid}")
                         try:
-                            if os.name == 'nt':
-                                process.kill()
-                            else:
-                                os.killpg(process.pid, signal.SIGKILL)
-                        except (ProcessLookupError, OSError, AttributeError):
-                            pass
+                            os.killpg(process.pid, signal.SIGKILL)
+                            # Reap process to avoid zombies
+                            stdout_remain, stderr_remain = process.communicate()
+                            stdout_lines.append(stdout_remain or '')
+                            stderr_lines.append(stderr_remain or '')
+                        except (ProcessLookupError, OSError, AttributeError) as e:
+                            logger.warning(f"[ACPX-V2] Process group kill failed: {e}")
                         hard_timeout_killed = True
                         break
                     
                     # Idle timeout check (TOLERANT - check if edits succeeded)
                     if idle_time > IDLE_TIMEOUT:
-                        logger.warning(f"[ACPX-V2] ⚠️ IDLE TIMEOUT: {idle_time:.1f}s > {IDLE_TIMEOUT}s — killing process")
-                        print(f"⚠️ ACPX-V2-IDLE-TIMEOUT: Killing process {process.pid}")
+                        logger.warning(f"[ACPX-V2] ⚠️ IDLE TIMEOUT: {idle_time:.1f}s > {IDLE_TIMEOUT}s — killing process group")
+                        print(f"⚠️ ACPX-V2-IDLE-TIMEOUT: Killing process group {process.pid}")
                         try:
-                            if os.name == 'nt':
-                                process.terminate()
+                            # Send SIGTERM to process group
+                            os.killpg(process.pid, signal.SIGTERM)
+                            # Wait 5 seconds for graceful shutdown
+                            try:
+                                stdout_remain, stderr_remain = process.communicate(timeout=5)
+                                stdout_lines.append(stdout_remain or '')
+                                stderr_lines.append(stderr_remain or '')
+                                logger.info(f"[ACPX-V2] Process group exited after SIGTERM")
+                            except subprocess.TimeoutExpired:
+                                # Escalate to SIGKILL
+                                logger.warning(f"[ACPX-V2] Process still alive after 5s, sending SIGKILL")
+                                print(f"🔴 ACPX-V2-SIGKILL: Escalating to SIGKILL for process group {process.pid}")
                                 try:
-                                    process.wait(timeout=5)
-                                except subprocess.TimeoutExpired:
-                                    process.kill()
-                            else:
-                                os.killpg(process.pid, signal.SIGTERM)
-                                try:
-                                    process.wait(timeout=5)
-                                except subprocess.TimeoutExpired:
                                     os.killpg(process.pid, signal.SIGKILL)
-                        except (ProcessLookupError, OSError, AttributeError):
-                            pass
+                                except (ProcessLookupError, OSError, AttributeError):
+                                    pass
+                                # Final communicate() to reap process
+                                stdout_remain, stderr_remain = process.communicate()
+                                stdout_lines.append(stdout_remain or '')
+                                stderr_lines.append(stderr_remain or '')
+                        except (ProcessLookupError, OSError, AttributeError) as e:
+                            logger.warning(f"[ACPX-V2] Process group kill failed: {e}")
                         idle_timeout_killed = True
                         break
                     
