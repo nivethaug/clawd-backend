@@ -228,7 +228,7 @@ class ACPSnapshotManager:
             Tuple of (success, backup_path_or_error)
         """
         try:
-            logger.info(f"[Snapshot] Creating snapshot at {self.backup_dir}")
+            # logger.info(f"[Snapshot] Creating snapshot at {self.backup_dir}")
             self.backup_dir.mkdir(parents=True, exist_ok=True)
 
             if self.frontend_path.exists():
@@ -247,7 +247,7 @@ class ACPSnapshotManager:
             else:
                 (self.backup_dir / "frontend").mkdir(parents=True)
 
-            logger.info(f"[Snapshot] ✓ Snapshot created successfully")
+            # logger.info(f"[Snapshot] ✓ Snapshot created successfully")
             return True, str(self.backup_dir)
 
         except Exception as e:
@@ -275,7 +275,7 @@ class ACPSnapshotManager:
 
             shutil.copytree(backup_frontend, self.frontend_path)
 
-            logger.info(f"[Snapshot] ✓ Restored snapshot from {self.backup_dir}")
+            # logger.info(f"[Snapshot] ✓ Restored snapshot from {self.backup_dir}")
             return True, "Snapshot restored successfully"
 
         except Exception as e:
@@ -292,7 +292,7 @@ class ACPSnapshotManager:
         try:
             if self.backup_dir.exists():
                 shutil.rmtree(self.backup_dir)
-                logger.info(f"[Snapshot] ✓ Cleaned up snapshot at {self.backup_dir}")
+                # logger.info(f"[Snapshot] ✓ Cleaned up snapshot at {self.backup_dir}")
             return True
         except Exception as e:
             logger.error(f"[Snapshot] ❌ Failed to cleanup snapshot: {e}")
@@ -1328,7 +1328,7 @@ class ACPFrontendEditorV2:
         
         # print("🔴 PLANNER-CACHE-MISS: No cached pages, performing fresh inference")
 
-        logger.info("[Planner] Extracting required pages from prompt...")
+        # logger.info("[Planner] Extracting required pages from prompt...")
         print("\n" + "="*60)
         print("🔍 PAGE INFERENCE START")
         print("="*60)
@@ -1346,7 +1346,7 @@ class ACPFrontendEditorV2:
             # print(f"🔴 PLANNER-GROQ-RAW: Inferred pages = {inferred_pages}")
             if inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
-                logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
+                # logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
                 print(f"✅ PLANNER-GROQ-SUCCESS: Using {len(inferred_pages)} pages: {inferred_pages}")
             else:
                 print(f"⚠️  PLANNER-GROQ-INSUFFICIENT: Got {len(inferred_pages) if inferred_pages else 0} pages, need >= 3")
@@ -1357,7 +1357,7 @@ class ACPFrontendEditorV2:
         # Step 2: Fallback to default pages
         if len(required_pages) < 3:
             required_pages = ["Dashboard", "Settings", "Overview"]
-            logger.info(f"[Planner] Using default pages: {required_pages}")
+            # logger.info(f"[Planner] Using default pages: {required_pages}")
             print(f"⚠️  PLANNER-DEFAULT: Using default pages = {required_pages}")
 
         # Remove duplicates while preserving order
@@ -1371,12 +1371,12 @@ class ACPFrontendEditorV2:
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
-        logger.info(f"[Phase9] Allowed pages: {required_pages}")
+        # logger.info(f"[Phase9] Allowed pages: {required_pages}")
         # print(f"🔴 PHASE9-ALLOWED: Whitelist set to: {sorted(self.allowed_pages)}")
 
         # Planner logging
-        logger.info(f"[Planner] Description: {goal_description}")
-        logger.info(f"[Planner] Detected pages: {required_pages}")
+        # logger.info(f"[Planner] Description: {goal_description}")
+        # logger.info(f"[Planner] Detected pages: {required_pages}")
 
         # Cache pages to prevent double LLM calls
         self._cached_pages = required_pages
@@ -1839,7 +1839,7 @@ Just implement the changes using your available tools.
             from page_specs import format_page_spec_list
             specs = format_page_spec_list(required_pages)
             specs_section = "\n".join(specs)
-            logger.info(f"[Phase4] Page specs built for {len(required_pages)} pages")
+            # logger.info(f"[Phase4] Page specs built for {len(required_pages)} pages")
             return specs_section
         except Exception as e:
             logger.error(f"[Phase4] Error loading page specs: {e}")
@@ -1858,7 +1858,7 @@ Just implement the changes using your available tools.
         pages_dir = self.frontend_src_path / "pages"
 
         if not pages_dir.exists():
-            logger.warning(f"[Guardrail] Pages directory not found: {pages_dir}")
+            # logger.warning(f"[Guardrail] Pages directory not found: {pages_dir}")
             return 0
 
         # Always allowed pages (system pages)
@@ -1877,7 +1877,7 @@ Just implement the changes using your available tools.
             # Remove pages starting with conjunctions (e.g., "AndAudience", "OrSettings")
             conjunctions = ['And', 'Or', '&']
             if any(page_name.startswith(conj) for conj in conjunctions):
-                logger.warning(f"[Guardrail] Removing page with leading conjunction: {page_name}")
+                # logger.warning(f"[Guardrail] Removing page with leading conjunction: {page_name}")
                 try:
                     page_file.unlink()
                     unauthorized_removed += 1
@@ -1888,7 +1888,7 @@ Just implement the changes using your available tools.
 
             # Check if page is in allowed whitelist
             if page_name not in self.allowed_pages:
-                logger.warning(f"[Guardrail] Removing unauthorized page: {page_name}")
+                # logger.warning(f"[Guardrail] Removing unauthorized page: {page_name}")
                 try:
                     page_file.unlink()
                     unauthorized_removed += 1
@@ -1897,12 +1897,14 @@ Just implement the changes using your available tools.
                     # Do not increment — file was NOT removed
 
         if unauthorized_removed > 0:
-            logger.info(f"[Guardrail] Removed {unauthorized_removed} unauthorized page(s)")
-            logger.info(f"[Guardrail] Remaining allowed pages: {sorted(self.allowed_pages)}")
+            # logger.info(f"[Guardrail] Removed {unauthorized_removed} unauthorized page(s)")
+            # logger.info(f"[Guardrail] Remaining allowed pages: {sorted(self.allowed_pages)}")
+            pass
         else:
-            logger.info(f"[Guardrail] ✓ All pages are authorized")
+            # logger.info(f"[Guardrail] ✓ All pages are authorized")
+            pass
 
-        logger.info(f"[Phase9] Final validated pages: {sorted(self.allowed_pages)}")
+        # logger.info(f"[Phase9] Final validated pages: {sorted(self.allowed_pages)}")
 
         return unauthorized_removed
 
