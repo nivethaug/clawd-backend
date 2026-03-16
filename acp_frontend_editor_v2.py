@@ -1024,12 +1024,11 @@ class ACPFrontendEditorV2:
                 # Don't rollback on guardrail errors, just log
                 logger.warning(f"[ACPX-V2] Guardrail enforcement failed but continuing: {str(e)}")
 
-            # Step 10.5: FIX ROUTING - Force Dashboard as default route with Layout wrapper
+            # Step 10.5: FIX ROUTING - Force default page at "/" with Layout wrapper
             try:
-                # print("🔴 ACPX-V2-STEP10B: Fixing routing (programmatic)")
                 logger.info("[ACPX-V2] Step 10.5: Fixing routing programmatically...")
                 
-                # Determine default page
+                # Determine default page (first allowed page)
                 default_page = list(self.allowed_pages)[0] if self.allowed_pages else "Dashboard"
                 app_tsx_path = self.frontend_src_path / "App.tsx"
                 
@@ -1037,45 +1036,47 @@ class ACPFrontendEditorV2:
                     content = app_tsx_path.read_text()
                     original_content = content
                     
-                    # print(f"🔴 ACPX-V2-STEP10B-DEBUG: Original content length = {len(content)}")
-                    # print(f"🔴 ACPX-V2-STEP10B-DEBUG: Looking for routes at '/'")
-                    
                     # Count routes at "/" before fix
                     routes_at_root = re.findall(r'<Route\s+path="/"', content)
-                    # print(f"🔴 ACPX-V2-STEP10B-DEBUG: Found {len(routes_at_root)} routes at '/' before fix")
+                    logger.info(f"[ACPX-V2]   Found {len(routes_at_root)} routes at '/' before fix")
                     
-                    # Fix 1: Remove ALL routes at "/" (duplicates cause blank page)
-                    # Pattern matches: <Route path="/" element={<Welcome />} />
-                    # Also matches: <Route path="/" element={<Dashboard />}/>
-                    # Handles inline routes (multiple on same line)
-                    # IMPROVED: Handle more variations including self-closing elements
+                    # Fix 1: Remove ALL routes at "/" (duplicates and misplaced routes)
+                    # Handles: <Route path="/" element={<AnyComponent />} />
+                    # Handles varying whitespace and multi-word components
                     content = re.sub(
-                        r'<Route\s+path="/"\s+element=\{<[A-Za-z]+\s*/?>\s*\}\s*/>',
+                        r'<Route\s+path="/"\s+element=\{<[A-Za-z]+\s*/?>\s*\}\s*/>\s*',
                         '',
                         content
                     )
-                    # Also handle routes with multi-word components like <DocumentEditor />
+                    # Handle routes that span multiple lines
                     content = re.sub(
-                        r'<Route\s+path="/"\s+element=\{<[A-Za-z]+\s*/?\s*\}\s*/?>',
+                        r'<Route\s+path="/"\s+element=\{<[A-Za-z]+[^>]*>\s*\}\s*/?>\s*',
                         '',
+                        content,
+                        flags=re.DOTALL
+                    )
+                    
+                    # Fix 2: Remove any /dashboard route (will be at "/" instead)
+                    content = re.sub(
+                        r'<Route\s+path="/dashboard"\s+element=\{<[A-Za-z]+\s*/?\s*\}\s*/?>\s*',
+                        '',
+                        content
+                    )
+                    
+                    # Fix 3: Remove any orphaned routes outside Layout wrapper
+                    # These appear after </Route> before </Routes>
+                    content = re.sub(
+                        r'(</Route>)\s*<Route\s+[^>]+/?>\s*(</Routes>)',
+                        r'\1\n          \2',
                         content
                     )
                     
                     # Verify removal
                     routes_at_root_after = re.findall(r'<Route\s+path="/"', content)
-                    # print(f"🔴 ACPX-V2-STEP10B-DEBUG: Found {len(routes_at_root_after)} routes at '/' after removal")
+                    logger.info(f"[ACPX-V2]   Found {len(routes_at_root_after)} routes at '/' after removal")
                     
-                    # Fix 2: Remove any /dashboard route (will be at "/" instead)
-                    # IMPROVED: Handle more variations
-                    content = re.sub(
-                        r'<Route\s+path="/dashboard"\s+element=\{<[A-Za-z]+\s*/?\s*\}\s*/?>',
-                        '',
-                        content
-                    )
-                    
-                    # Fix 3: Check if Layout wrapper exists
+                    # Fix 4: Add default route inside Layout wrapper
                     has_layout = '<Route element={<Layout />' in content or '<Route element={<Layout/>' in content
-                    # print(f"🔴 ACPX-V2-STEP10B-DEBUG: Layout wrapper exists = {has_layout}")
                     
                     if has_layout:
                         # Insert "/" route inside existing Layout wrapper
@@ -1088,19 +1089,13 @@ class ACPFrontendEditorV2:
                             logger.info(f"[ACPX-V2]   Added {default_page} route inside Layout wrapper")
                     else:
                         # No Layout wrapper - wrap all routes with Layout
-                        # Find the Routes content (handles both inline and multiline)
                         routes_pattern = r'<Routes>(.*?)</Routes>'
                         routes_match = re.search(routes_pattern, content, re.DOTALL)
                         
                         if routes_match:
                             routes_content = routes_match.group(1).strip()
-                            
-                            # Build new routes with Layout wrapper and proper formatting
-                            # Parse individual routes and format them nicely
                             route_pattern = r'<Route\s+[^>]+/>'
                             individual_routes = re.findall(route_pattern, routes_content)
-                            
-                            # Format routes with Layout wrapper
                             formatted_routes = '\n        '.join([f'{r}' for r in individual_routes])
                             
                             new_routes = f'''<Route element={{<Layout />}}>
@@ -1108,14 +1103,12 @@ class ACPFrontendEditorV2:
         {formatted_routes}
       </Route>'''
                             
-                            # Replace the entire Routes content
                             content = content[:routes_match.start(1)] + new_routes + content[routes_match.end(1):]
                             logger.info(f"[ACPX-V2]   Added Layout wrapper with {default_page} at /")
                     
                     if content != original_content:
                         app_tsx_path.write_text(content)
                         logger.info(f"[ACPX-V2]   ✓ Fixed routing: {default_page} is now at / with Layout")
-                        # print(f"🔴 ACPX-V2-STEP10B-DONE: Routing fixed - {default_page} at / with Layout")
                     else:
                         logger.info("[ACPX-V2]   Routing appears correct")
                         # print("🔴 ACPX-V2-STEP10B-DONE: Routing already correct")
