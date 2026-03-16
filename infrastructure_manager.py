@@ -832,58 +832,6 @@ class NginxConfigurator:
         self.config_dir = NGINX_CONFIG_DIR
         self.enabled_dir = NGINX_ENABLED_DIR
 
-    def generate_ssl_certificates(self, domain: str) -> bool:
-        """
-        Generate SSL certificates using certbot for both frontend and backend domains.
-
-        Args:
-            domain: Domain name (e.g., "ecommerce22")
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            frontend_domain = f"{domain}.{BASE_DOMAIN}"
-            backend_domain = f"{domain}-api.{BASE_DOMAIN}"
-
-            logger.info(f"🔐 Generating SSL certificates for {domain}")
-            logger.info(f"   Frontend: {frontend_domain}")
-            logger.info(f"   Backend:  {backend_domain}")
-
-            # Generate SSL certificate for frontend
-            frontend_result = subprocess.run(
-                ["certbot", "--nginx", "-d", frontend_domain, "--non-interactive", "--agree-tos"],
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minutes
-            )
-
-            if frontend_result.returncode != 0:
-                logger.error(f"Failed to generate SSL for frontend: {frontend_result.stderr}")
-                return False
-
-            logger.info(f"✓ SSL certificate generated for {frontend_domain}")
-
-            # Generate SSL certificate for backend
-            backend_result = subprocess.run(
-                ["certbot", "--nginx", "-d", backend_domain, "--non-interactive", "--agree-tos"],
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minutes
-            )
-
-            if backend_result.returncode != 0:
-                logger.error(f"Failed to generate SSL for backend: {backend_result.stderr}")
-                return False
-
-            logger.info(f"✓ SSL certificate generated for {backend_domain}")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to generate SSL certificates: {e}")
-            return False
-
     # Wildcard SSL certificate paths for *.dreambigwithai.com
     WILDCARD_SSL_CERT = "/etc/letsencrypt/live/dreambigwithai.com/fullchain.pem"
     WILDCARD_SSL_KEY = "/etc/letsencrypt/live/dreambigwithai.com/privkey.pem"
