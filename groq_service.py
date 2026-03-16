@@ -125,79 +125,28 @@ class GroqService:
 Product description:
 {description}
 
-TASK:
-Determine the main application pages.
+CRITICAL: You MUST respond with ONLY a JSON object. NO explanations. NO text before or after.
+
+Output format (STRICT - nothing else):
+{{"pages": ["PageOne","PageTwo","PageThree","PageFour"]}}
 
 Step 1 — Extract Explicit Pages
-Look for phrases like:
-- "main pages"
-- "pages:"
-- "sections:"
-- "modules:"
+Look for phrases like: "main pages:", "pages:", "sections:", "modules:"
+If found, extract them EXACTLY as written.
 
-If explicit pages are mentioned, extract them EXACTLY as written.
+Step 2 — Contextual Inference (if no explicit pages)
+Identify the product type and generate 4-8 realistic pages:
+- Analytics platform → ActivityMonitor, DataExplorer, Metrics, Reports, Alerts, Integrations
+- CRM → Contacts, Leads, Deals, Accounts, Reports, Settings
+- E-commerce → Products, Orders, Customers, Inventory, Analytics, StoreSettings
+- Document system → Documents, Folders, Search, Sharing, Settings
+- Project management → Projects, Tasks, Team, Timeline, Reports, Settings
 
-Example:
-"ServiceDesk has four main pages: Dashboard, Tickets, Assets, and Requests"
-
-Output:
-{{"pages": ["Dashboard","Tickets","Assets","Requests"]}}
-
-Step 2 — Contextual Inference
-If NO explicit pages are mentioned:
-
-1. Identify the product type:
-- analytics platform
-- CRM
-- project management
-- document system
-- monitoring tool
-- e-commerce platform
-- knowledge base
-- learning platform
-
-2. Generate realistic pages for that product.
-
-Example:
-
-Analytics platform →
-ActivityMonitor
-DataExplorer
-Metrics
-Reports
-Alerts
-Integrations
-
-CRM →
-Contacts
-Leads
-Deals
-Accounts
-Reports
-Settings
-
-E-commerce →
-Products
-Orders
-Customers
-Inventory
-Analytics
-StoreSettings
-
-RULES
-
-1. If explicit pages exist → return ONLY those pages.
-2. If no explicit pages exist → infer context-specific pages.
-3. Do NOT return generic pages unless they clearly fit the product.
-4. Convert all page names to PascalCase.
-5. Page names must be 1-3 words.
-6. The "pages" array MUST contain at least 4 items and at most 8 items.
-7. Never return an empty array.
-8. Return ONLY JSON.
-
-Response format:
-
-{{"pages": ["PageOne","PageTwo","PageThree","PageFour"]}}"""
+RULES:
+1. Return ONLY JSON - no markdown, no explanation, no text
+2. 4-8 pages, PascalCase, 1-3 words each
+3. Never empty array
+4. Match product type contextually"""
 
         messages = [{"role": "user", "content": prompt}]
 
@@ -214,13 +163,22 @@ Response format:
             print(f"🔍 GROQ_RAW_RESPONSE: {response[:500]}")
             logger.info(f"🔍 GROQ_RAW_RESPONSE: {response[:500]}")
 
-            # Parse JSON response
-            # Try to extract JSON from response (handle markdown code blocks)
+            # Parse JSON response - handle multiple formats
             response = response.strip()
+            
+            # Method 1: Extract from markdown code blocks
             if "```json" in response:
                 response = response.split("```json")[1].split("```")[0].strip()
             elif "```" in response:
                 response = response.split("```")[1].split("```")[0].strip()
+            else:
+                # Method 2: Find JSON object using regex (handles embedded JSON in text)
+                import re
+                # Match {"pages": [...]} pattern
+                json_match = re.search(r'\{[^{}]*"pages"\s*:\s*\[[^\]]*\][^{}]*\}', response, re.DOTALL)
+                if json_match:
+                    response = json_match.group(0)
+                    logger.info(f"[Groq] Extracted JSON from response: {response[:200]}")
 
             data = json.loads(response)
             pages = data.get("pages", [])
