@@ -1268,83 +1268,85 @@ async def delete_project(project_id: int, force: bool = False):
         ).fetchall()
         session_keys = [row['session_key'] for row in sessions_to_delete]
 
-    # Step 2: Infrastructure cleanup (BEFORE database deletion)
-    cleanup_status = {"infrastructure": None, "error": None}
-
-    if project_path and os.path.exists(project_path):
-        try:
-            logger.info(f"Starting infrastructure cleanup for project {project_id}: {project_path}")
-            cleanup_status["infrastructure"] = cleanup_infrastructure(project_path)
-        except Exception as e:
-            logger.error(f"Infrastructure cleanup failed: {e}")
-            cleanup_status["error"] = str(e)
-            # Continue with database deletion even if cleanup fails
-    else:
-        logger.info(f"Project path not found or empty: {project_path}")
-        cleanup_status["infrastructure"] = {"skipped": True, "reason": "No project path"}
-
-    # Step 3: Delete messages first (foreign key dependency)
+    # Step 2: Mark project as "deleting" for frontend feedback
     with get_db() as conn:
-        conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))
-
-        # Step 4: Delete sessions from backend database
-        conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
-
-        # Step 5: Delete project from database
-        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-
+        conn.execute("UPDATE projects SET status = 'deleting' WHERE id = ?", (project_id,))
         conn.commit()
-
-    # Step 6: Delete corresponding OpenClaw sessions
-    # OpenClaw session key format: "agent:main:openai-user:adapter-session-{session_key}"
-    # Note: The key prefix may vary, so we match by suffix
-    sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
-
-    if os.path.exists(sessions_json_path):
+    
+    # Step 3: Start infrastructure cleanup in BACKGROUND (async)
+    import asyncio
+    from fastapi.concurrency import run_in_threadpool
+    
+    async def cleanup_task():
+        """Background task for infrastructure cleanup."""
         try:
-            with open(sessions_json_path, 'r') as f:
-                sessions_data = json.load(f)
-
-            # Find OpenClaw session keys to delete by matching suffix
-            # The full format is: "agent:main:openai-user:adapter-session-{session_key}"
-            openclaw_keys_to_delete = []
-            for key in sessions_data.keys():
-                for session_key in session_keys:
-                    if key.endswith(f"adapter-session-{session_key}"):
-                        openclaw_keys_to_delete.append(key)
-                        break  # Each session key matches at most once
-
-            # Delete entries from sessions.json
-            deleted_count = 0
-            for key in openclaw_keys_to_delete:
-                if key in sessions_data:
-                    # Get session_id before deleting the entry
-                    session_id = sessions_data.get(key, {}).get('sessionId')
-
-                    # Delete the entry
-                    del sessions_data[key]
-                    deleted_count += 1
-
-                    # Optionally delete the corresponding JSONL transcript file
-                    if session_id:
-                        jsonl_path = os.path.join(os.path.dirname(sessions_json_path), f"{session_id}.jsonl")
-                        if os.path.exists(jsonl_path):
-                            os.remove(jsonl_path)
-
-            # Write back the updated sessions.json
-            with open(sessions_json_path, 'w') as f:
-                json.dump(sessions_data, f, indent=2)
-
-            print(f"Deleted {deleted_count} OpenClaw sessions for project {project_id}")
-
+            logger.info(f"[BG] Starting infrastructure cleanup for project {project_id}: {project_path}")
+            
+            # Run cleanup in threadpool to avoid blocking
+            cleanup_result = await run_in_threadpool(cleanup_infrastructure, project_path)
+            
+            # Step 4: Delete messages first (foreign key dependency)
+            with get_db() as conn:
+                conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))
+                conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
+                conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+                conn.commit()
+            
+            # Step 5: Delete OpenClaw sessions (moved to background)
+            sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
+            if os.path.exists(sessions_json_path):
+                try:
+                    with open(sessions_json_path, 'r') as f:
+                        sessions_data = json.load(f)
+                    
+                    openclaw_keys_to_delete = []
+                    for key in sessions_data.keys():
+                        for session_key in session_keys:
+                            if key.endswith(f"adapter-session-{session_key}"):
+                                openclaw_keys_to_delete.append(key)
+                                break
+                    
+                    deleted_count = 0
+                    for key in openclaw_keys_to_delete:
+                        if key in sessions_data:
+                            session_id = sessions_data.get(key, {}).get('sessionId')
+                            del sessions_data[key]
+                            deleted_count += 1
+                            
+                            if session_id:
+                                jsonl_path = os.path.join(os.path.dirname(sessions_json_path), f"{session_id}.jsonl")
+                                if os.path.exists(jsonl_path):
+                                    os.remove(jsonl_path)
+                    
+                    with open(sessions_json_path, 'w') as f:
+                        json.dump(sessions_data, f, indent=2)
+                    
+                    logger.info(f"[BG] Deleted {deleted_count} OpenClaw sessions")
+                except Exception as e:
+                    logger.warning(f"[BG] Failed to delete OpenClaw sessions: {e}")
+            
+            logger.info(f"[BG] ✅ Cleanup completed for project {project_id}")
+            return cleanup_result
         except Exception as e:
-            # Log error but don't fail the project deletion
-            print(f"Warning: Failed to delete OpenClaw sessions: {e}")
-
+            logger.error(f"[BG] ❌ Cleanup failed for project {project_id}: {e}")
+            # Still delete from database even if cleanup fails
+            with get_db() as conn:
+                conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))
+                conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
+                conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+                conn.commit()
+            return {"error": str(e)}
+    
+    # Start background task
+    asyncio.create_task(cleanup_task())
+    
+    # IMMEDIATE RESPONSE (don't wait for cleanup)
     return {
-        "status": "deleted",
-        "message": "Project deleted",
-        "cleanup": cleanup_status
+        "status": "deleting",
+        "message": "Project deletion started (cleanup running in background)",
+        "project_id": project_id,
+        "project_name": project_name,
+        "cleanup": "running"
     }
 
 class UpdateProjectRequest(BaseModel):
