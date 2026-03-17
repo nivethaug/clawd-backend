@@ -495,66 +495,83 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
     print("=" * 60)
     print("📦 DEPENDENCY INSTALLATION")
     print("=" * 60)
-    
-    # Remove npm lockfile for pnpm compatibility (if exists)
-    npm_lock = frontend_path / "package-lock.json"
-    if npm_lock.exists():
+
+    # Detect PM2 environment
+    is_pm2 = bool(os.environ.get("PM2_USAGE")) or bool(os.environ.get("PM2_HOME"))
+
+    # 🚨 PM2 ENVIRONMENT → FORCE NPM (skip pnpm due to SIGABRT)
+    if is_pm2:
+        logger.warning("⚠️ PM2 detected - skipping pnpm (SIGABRT issue), using npm")
+        print("⚠️  [DEPS] PM2 detected → using npm for reliability")
+
         try:
-            npm_lock.unlink()
-            logger.info("🗑️ Removed package-lock.json for pnpm compatibility")
-            print("🗑️  [DEPS] Removed package-lock.json (pnpm needs clean slate)")
+            result = subprocess.run(
+                ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
+                cwd=str(frontend_path),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=BUILD_TIMEOUT
+            )
+
+            if result.returncode == 0:
+                logger.info("✅ npm install successful (PM2 mode)")
+                print("✅ [DEPS] npm ci successful (PM2 mode)")
+                print("=" * 60)
+                return True, "npm ci successful (PM2 mode)"
+
+            logger.error(f"❌ npm ci failed with code {result.returncode}")
+            print(f"❌ [DEPS] npm ci failed with code {result.returncode}")
+            if result.stderr:
+                print(f"    [DEPS] stderr: {result.stderr[:200]}")
+            print("=" * 60)
+            return False, f"npm ci failed: {result.stderr}"
+
         except Exception as e:
-            logger.warning(f"⚠️ Could not remove package-lock.json: {e}")
-    
-    # Try pnpm first (fast path)
+            logger.error(f"❌ npm install error: {e}")
+            print(f"❌ [DEPS] npm install error: {e}")
+            print("=" * 60)
+            return False, f"npm install error: {e}"
+
+    # ⚡ NON-PM2 → TRY PNPM FIRST
     try:
-        logger.info("⚡ Trying pnpm install...")
-        print("⚡ [DEPS] Trying pnpm install (fast mode)...")
-        
-        # Use explicit env with PATH for PM2 environment
-        # PM2 may not have /usr/bin in PATH for pnpm
-        env = os.environ.copy()
-        env["PATH"] = "/usr/bin:/usr/local/bin:" + env.get("PATH", "")
-        env["npm_config_yes"] = "true"  # Auto-confirm prompts
-        
+        logger.info("⚡ Trying pnpm install (non-PM2 mode)...")
+        print("⚡ [DEPS] Trying pnpm install (non-PM2 mode)...")
+
         result = subprocess.run(
-            f"cd '{frontend_path}' && /usr/bin/pnpm install",
-            shell=True,
+            ["pnpm", "install", "--prefer-offline"],
+            cwd=str(frontend_path),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=BUILD_TIMEOUT,
-            env=env
+            timeout=BUILD_TIMEOUT
         )
-        
+
         if result.returncode == 0:
             logger.info("✅ pnpm install successful")
             print("✅ [DEPS] pnpm install successful")
             print("=" * 60)
             return True, "pnpm install successful"
-        
-        # Log error for debugging
-        logger.warning(f"⚠️ pnpm install failed (code {result.returncode})")
+
+        logger.warning(f"⚠️ pnpm install failed (code {result.returncode}), falling back to npm")
+        print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm")
         if result.stderr:
-            logger.warning(f"   stderr: {result.stderr[:500]}")
-            print(f"⚠️  [DEPS] pnpm failed (code {result.returncode})")
             print(f"    [DEPS] stderr: {result.stderr[:200]}")
-        else:
-            print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm")
-        
+
     except FileNotFoundError:
         logger.warning("⚠️ pnpm not found, falling back to npm")
         print("⚠️  [DEPS] pnpm not found, falling back to npm")
     except Exception as e:
         logger.warning(f"⚠️ pnpm error: {e}, falling back to npm")
-        print(f"⚠️  [DEPS] pnpm error: {e}")
-    
-    # Fallback to npm (safe path)
+        print(f"⚠️  [DEPS] pnpm error: {e}, falling back to npm")
+
+    # 🔁 FALLBACK TO NPM
     try:
         logger.info("📦 Running npm ci fallback...")
-        print("📦 [DEPS] Running npm ci (safe fallback)...")
-        
+        print("📦 [DEPS] Running npm ci fallback...")
+
         result = subprocess.run(
             ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
             cwd=str(frontend_path),
@@ -564,18 +581,20 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
             text=True,
             timeout=BUILD_TIMEOUT
         )
-        
+
         if result.returncode == 0:
             logger.info("✅ npm install successful (fallback)")
             print("✅ [DEPS] npm ci successful (fallback)")
             print("=" * 60)
             return True, "npm ci successful (fallback)"
-        
+
         logger.error(f"❌ npm ci failed with code {result.returncode}")
         print(f"❌ [DEPS] npm ci failed with code {result.returncode}")
+        if result.stderr:
+            print(f"    [DEPS] stderr: {result.stderr[:200]}")
         print("=" * 60)
         return False, f"npm ci failed: {result.stderr}"
-        
+
     except Exception as e:
         logger.error(f"❌ npm fallback error: {e}")
         print(f"❌ [DEPS] npm fallback error: {e}")
