@@ -1693,8 +1693,8 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             logger.info(f"✓ Cleaned {caches_cleaned} Vite cache directories")
 
             # ⚡ Skip npm install if node_modules exists (optimized caching)
-            if node_modules_path.exists() and (node_modules_path / ".package-lock.json").exists():
-                logger.info("⚡ Skipping npm install (node_modules exists and cached)")
+            if node_modules_path.exists():
+                logger.info("⚡ Skipping npm install (node_modules exists)")
                 install_result = type('obj', (object,), {'returncode': 0, 'stderr': ''})
             else:
                 # Step 2: npm ci with dev dependencies (optimized)

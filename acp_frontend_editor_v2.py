@@ -512,8 +512,8 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
 
     # ⚡ Skip install if node_modules already exists (cached)
     node_modules = Path(frontend_path) / "node_modules"
-    if node_modules.exists() and (node_modules / ".package-lock.json").exists():
-        logger.info("⚡ Skipping npm install (node_modules exists and cached)")
+    if node_modules.exists():
+        logger.info("⚡ Skipping npm install (node_modules exists)")
         print("⚡ [DEPS] Skipping install (dependencies already installed)")
         print("=" * 60)
         return True, "Dependencies already installed (cached)"
