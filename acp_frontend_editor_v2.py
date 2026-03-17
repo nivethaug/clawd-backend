@@ -275,7 +275,7 @@ class ACPSnapshotManager:
 
             shutil.copytree(backup_frontend, self.frontend_path)
 
-            # logger.info(f"[Snapshot] ✓ Restored snapshot from {self.backup_dir}")
+            logger.info(f"[Snapshot] ✓ Restored snapshot from {self.backup_dir}")
             return True, "Snapshot restored successfully"
 
         except Exception as e:
@@ -488,6 +488,168 @@ class ACPBuildGate:
 
 
 # =============================================================================
+# HELPER FUNCTIONS FOR PARTIAL COMMIT SYSTEM
+# =============================================================================
+
+def safe_snapshot(snapshot_manager: ACPSnapshotManager, max_retries: int = 1) -> Tuple[bool, str]:
+    """
+    Safely create a snapshot with retry logic.
+    
+    Args:
+        snapshot_manager: ACPSnapshotManager instance
+        max_retries: Number of retry attempts (default 1)
+        
+    Returns:
+        Tuple of (success, message) - On failure, returns (True, warning) to allow continuation
+    """
+    attempts = 0
+    last_error = None
+    
+    while attempts <= max_retries:
+        try:
+            success, msg = snapshot_manager.create_snapshot()
+            if success:
+                logger.info(f"[SafeSnapshot] ✓ Snapshot created successfully")
+                return True, msg
+            last_error = msg
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"[SafeSnapshot] ⚠️ Snapshot attempt {attempts + 1} failed: {e}")
+        
+        attempts += 1
+        if attempts <= max_retries:
+            logger.info(f"[SafeSnapshot] Retrying snapshot (attempt {attempts + 1}/{max_retries + 1})...")
+    
+    # Snapshot failed but we continue - return soft failure
+    logger.warning(f"[SafeSnapshot] ⚠️ Snapshot creation failed after {max_retries + 1} attempts, continuing without backup")
+    return True, f"Snapshot warning: {last_error}"
+
+
+def safe_diff(
+    hashes_before: Dict[str, str],
+    hashes_after: Dict[str, str]
+) -> Dict[str, List[str]]:
+    """
+    Safely compute filesystem diff with fallback to empty diff.
+    
+    Args:
+        hashes_before: File hashes before changes
+        hashes_after: File hashes after changes
+        
+    Returns:
+        Dict with 'added', 'removed', 'modified' lists - empty on failure
+    """
+    try:
+        diff = FilesystemSnapshot.compute_diff(hashes_before, hashes_after)
+        logger.info(f"[SafeDiff] ✓ Diff computed: {len(diff['added'])} added, {len(diff['modified'])} modified, {len(diff['removed'])} removed")
+        return diff
+    except Exception as e:
+        logger.warning(f"[SafeDiff] ⚠️ Diff computation failed: {e}, returning empty diff")
+        return {"added": [], "removed": [], "modified": []}
+
+
+def filter_valid_paths(
+    file_paths: List[str],
+    validator: ACPPathValidator
+) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """
+    Filter files into valid and invalid paths.
+    
+    Args:
+        file_paths: List of file paths to validate
+        validator: ACPPathValidator instance
+        
+    Returns:
+        Tuple of (valid_paths, invalid_paths_with_reasons)
+    """
+    valid_paths = []
+    invalid_paths = []
+    
+    for file_path in file_paths:
+        try:
+            is_allowed, reason = validator.is_path_allowed(str(file_path))
+            if is_allowed:
+                valid_paths.append(str(file_path))
+            else:
+                invalid_paths.append((str(file_path), reason))
+                logger.warning(f"[FilterPaths] ⚠️ Invalid path detected: {file_path} - {reason}")
+        except Exception as e:
+            logger.warning(f"[FilterPaths] ⚠️ Path validation error for {file_path}: {e}")
+            invalid_paths.append((str(file_path), f"Validation error: {e}"))
+    
+    logger.info(f"[FilterPaths] ✓ Filtered: {len(valid_paths)} valid, {len(invalid_paths)} invalid")
+    return valid_paths, invalid_paths
+
+
+def enforce_file_limit(
+    files_added: List[str],
+    max_new_files: int,
+    frontend_src_path: Path
+) -> Tuple[List[str], List[str]]:
+    """
+    Enforce file limit by keeping only first max_new_files.
+    
+    Args:
+        files_added: List of newly added files
+        max_new_files: Maximum allowed new files
+        frontend_src_path: Path to frontend src for file deletion
+        
+    Returns:
+        Tuple of (kept_files, removed_files)
+    """
+    if len(files_added) <= max_new_files:
+        logger.info(f"[FileLimit] ✓ Within limit: {len(files_added)}/{max_new_files}")
+        return files_added, []
+    
+    # Keep first max_new_files, remove the rest
+    kept_files = files_added[:max_new_files]
+    excess_files = files_added[max_new_files:]
+    removed_files = []
+    
+    for file_path in excess_files:
+        try:
+            full_path = frontend_src_path / file_path
+            if full_path.exists():
+                full_path.unlink()
+                removed_files.append(file_path)
+                logger.warning(f"[FileLimit] 🗑️ Removed excess file: {file_path}")
+        except Exception as e:
+            logger.warning(f"[FileLimit] ⚠️ Failed to remove excess file {file_path}: {e}")
+    
+    logger.warning(f"[FileLimit] ⚠️ Trimmed {len(removed_files)} excess files (limit: {max_new_files})")
+    return kept_files, removed_files
+
+
+def delete_invalid_files(
+    invalid_paths: List[Tuple[str, str]],
+    frontend_src_path: Path
+) -> int:
+    """
+    Delete files at invalid paths.
+    
+    Args:
+        invalid_paths: List of (path, reason) tuples
+        frontend_src_path: Path to frontend src
+        
+    Returns:
+        Number of files successfully deleted
+    """
+    deleted_count = 0
+    
+    for file_path, reason in invalid_paths:
+        try:
+            full_path = frontend_src_path / file_path
+            if full_path.exists():
+                full_path.unlink()
+                deleted_count += 1
+                logger.warning(f"[DeleteInvalid] 🗑️ Deleted invalid file: {file_path} ({reason})")
+        except Exception as e:
+            logger.warning(f"[DeleteInvalid] ⚠️ Failed to delete {file_path}: {e}")
+    
+    return deleted_count
+
+
+# =============================================================================
 # MAIN ACP EDITOR V2
 # =============================================================================
 
@@ -547,155 +709,85 @@ class ACPFrontendEditorV2:
         """
         Apply frontend changes by running ACPX and detecting filesystem changes.
 
+        Implements 3-state outcome system:
+        - "success": All validations passed, clean execution
+        - "partial_success": Some issues but usable output preserved
+        - "failed": Fatal error, rollback performed
+
         Args:
             goal_description: Natural language description of changes
             execution_id: Unique ID for tracking
 
         Returns:
-            Dict with success, message, files changed, build output, rollback status
+            Dict with status, message, files changed, build output, rollback status
         """
         import traceback
 
-        # print("🔴 ACPX-V2-METHOD-START: apply_changes_via_acpx called")
-        # print(f"🔴 ACPX-V2-METHOD-START: Goal: {goal_description[:100]}")
-        # print(f"🔴 ACPX-V2-METHOD-START: Execution ID: {execution_id}")
-
         # Clear cache for each new execution to ensure fresh page inference
         self._cached_pages = None
-        # print("🔴 ACPX-V2-CACHE-CLEAR: Cleared cached pages for fresh inference")
+
+        # Track issues for partial_success determination
+        issues: List[str] = []
+        status = "success"  # Default to success, downgrade as needed
 
         try:
-            # print("🔴 ACPX-V2-TRY-BLOCK: Starting main logic")
-            logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Starting Phase 9 (Filesystem Diff Architecture)")
+            logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Starting Phase 9 (Partial Commit System)")
             logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Project: {self.project_name}")
             logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Execution ID: {execution_id}")
 
-            # Step 1: Create snapshot
-            try:
-                # print("🔴 ACPX-V2-STEP1: Creating snapshot")
-                logger.info(f"[ACPX-V2] Step 1: Creating filesystem snapshot...")
-                snapshot_success, snapshot_msg = self.snapshot_manager.create_snapshot()
-                # print(f"🔴 ACPX-V2-STEP1-DONE: Snapshot created, success={snapshot_success}")
-
-                if not snapshot_success:
-                    # print("🔴 ACPX-V2-EARLY-RETURN: Snapshot creation failed, returning early")
-                    result = {
-                        "success": False,
-                        "message": f"Snapshot creation failed: {snapshot_msg}",
-                        "rollback": False
-                    }
-                    # print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
-                    return result
-            except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP1-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                return {"success": False, "message": f"Snapshot failed: {str(e)}"}
+            # Step 1: Create snapshot (safe - continues on failure)
+            logger.info(f"[ACPX-V2] Step 1: Creating filesystem snapshot...")
+            snapshot_success, snapshot_msg = safe_snapshot(self.snapshot_manager, max_retries=1)
+            if not snapshot_success or "warning" in snapshot_msg.lower():
+                issues.append(f"Snapshot warning: {snapshot_msg}")
+                logger.warning(f"[ACPX-V2] ⚠️ Snapshot issue (continuing): {snapshot_msg}")
+            else:
+                logger.info(f"[ACPX-V2] ✓ Snapshot created")
 
             # Step 2: Generate page manifest from planner (Phase 5 - NEW)
-            try:
-                # print("🔴 ACPX-V2-STEP2: Generating manifest")
-                logger.info(f"[ACPX-V2] Step 2: Generating page manifest (Phase 5)...")
-                required_pages = await self._extract_required_pages_from_prompt(goal_description)
-                # print(f"🔴 ACPX-V2-STEP2-INFO: Pages to create: {required_pages}")
-                logger.info(f"[ACPX-V2]   Planner detected pages: {required_pages}")
+            logger.info(f"[ACPX-V2] Step 2: Generating page manifest (Phase 5)...")
+            required_pages = await self._extract_required_pages_from_prompt(goal_description)
+            logger.info(f"[ACPX-V2]   Planner detected pages: {required_pages}")
 
-                # Write manifest to project directory
-                manifest_success = self.manifest_manager.write_manifest(required_pages)
-                if not manifest_success:
-                    # print("🔴 ACPX-V2-EARLY-RETURN: Failed to write page manifest, returning early")
-                    result = {
-                        "success": False,
-                        "message": "Failed to write page manifest",
-                        "rollback": False
-                    }
-                    # print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
-                    return result
+            # Write manifest to project directory
+            manifest_success = self.manifest_manager.write_manifest(required_pages)
+            if not manifest_success:
+                issues.append("Failed to write page manifest")
+                logger.warning(f"[ACPX-V2] ⚠️ Failed to write page manifest (continuing)")
 
-                # Update allowed_pages with manifest pages (source of truth)
-                self.allowed_pages = set(required_pages)
-                logger.info(f"[ACPX-V2]   Manifest pages set as allowed: {required_pages}")
-                
-                # 🎯 FINALIZED PAGES - Clear PM2 log visibility
-                print("=" * 80)
-                print("🎯 FINALIZED PAGES FOR AI EDITING:")
-                for i, page in enumerate(required_pages, 1):
-                    print(f"   {i}. {page}.tsx")
-                print(f"   Total: {len(required_pages)} pages")
-                print("=" * 80)
-                logger.info(f"[ACPX-V2] 🎯 FINALIZED PAGES: {required_pages}")
-                
-                # print("🔴 ACPX-V2-STEP2-DONE: Manifest generated")
-            except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP2-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                return {"success": False, "message": f"Manifest failed: {str(e)}"}
+            # Update allowed_pages with manifest pages (source of truth)
+            self.allowed_pages = set(required_pages)
+            logger.info(f"[ACPX-V2]   Manifest pages set as allowed: {required_pages}")
+            
+            # 🎯 FINALIZED PAGES - Clear PM2 log visibility
+            print("=" * 80)
+            print("🎯 FINALIZED PAGES FOR AI EDITING:")
+            for i, page in enumerate(required_pages, 1):
+                print(f"   {i}. {page}.tsx")
+            print(f"   Total: {len(required_pages)} pages")
+            print("=" * 80)
+            logger.info(f"[ACPX-V2] 🎯 FINALIZED PAGES: {required_pages}")
 
             # Step 3: Capture filesystem state BEFORE ACPX (moved before scaffold)
+            logger.info(f"[ACPX-V2] Step 3: Capturing filesystem state before ACPX...")
             try:
-                # print("🔴 ACPX-V2-STEP3: Capturing filesystem state before ACPX")
-                logger.info(f"[ACPX-V2] Step 3: Capturing filesystem state before ACPX...")
                 hashes_before = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
                 logger.info(f"[ACPX-V2]   Found {len(hashes_before)} files before ACPX")
-                # print("🔴 ACPX-V2-STEP3-DONE: Filesystem state captured")
             except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP3-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                return {"success": False, "message": f"Failed to capture filesystem state: {str(e)}"}
+                logger.warning(f"[ACPX-V2] ⚠️ Failed to capture pre-ACPX state: {e}")
+                hashes_before = {}
+                issues.append(f"Pre-ACPX snapshot failed: {e}")
 
             # Step 4: Scaffold pages from manifest (Phase 5 - NEW)
-            try:
-                # print("🔴 ACPX-V2-STEP4: Scaffolding pages")
-                logger.info(f"[ACPX-V2] Step 4: Scaffolding pages from manifest...")
-
-                # print(f"🔴 ACPX-V2-STEP4-PAGES: Pages to scaffold = {required_pages}")
-                # print("🔴 ACPX-V2-STEP4-PRE: Calling scaffold_pages()")
-                scaffold_result = self.manifest_manager.scaffold_pages(required_pages, create_placeholder=True)
-                # print(f"🔴 ACPX-V2-STEP4-POST: scaffold_pages() returned")
-                # print(f"🔴 ACPX-V2-STEP4-POST-VALUE: {scaffold_result}")
-
-                # Verify files were created
-                # print("🔴 ACPX-V2-STEP4-VERIFY: Checking created files...")
-                for page in required_pages:
-                    page_file = self.frontend_src_path / "pages" / f"{page}.tsx"
-                    exists = page_file.exists()
-                    # print(f"🔴 ACPX-V2-STEP4-VERIFY: {page}.tsx exists = {exists}")
-                    if exists:
-                        size = page_file.stat().st_size
-                        # print(f"🔴 ACPX-V2-STEP4-VERIFY: {page}.tsx size = {size} bytes")
-
-                # Check return value type
-                if isinstance(scaffold_result, bool):
-                    # print(f"🔴 ACPX-V2-STEP4-POST-TYPE: bool, value={scaffold_result}")
-                    pass
-                elif scaffold_result is None:
-                    # print("🔴 ACPX-V2-STEP4-POST-TYPE: None (treated as True)")
-                    pass
-
-                if not scaffold_result:
-                    logger.warning(f"[ACPX-V2]   Some pages failed to scaffold, but continuing...")
-                # print("🔴 ACPX-V2-STEP4-DONE: Pages scaffolded")
-            except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP4-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                return {"success": False, "message": f"Scaffolding failed: {str(e)}"}
+            logger.info(f"[ACPX-V2] Step 4: Scaffolding pages from manifest...")
+            scaffold_result = self.manifest_manager.scaffold_pages(required_pages, create_placeholder=True)
+            if not scaffold_result:
+                issues.append("Some pages failed to scaffold")
+                logger.warning(f"[ACPX-V2] ⚠️ Some pages failed to scaffold, continuing...")
 
             # Step 5: Build ACPX prompt using manifest pages
-            try:
-                # print("🔴 ACPX-V2-STEP5-PROMPT: Building ACPX prompt")
-                logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
-                prompt = await self._build_acpx_prompt(goal_description)
-                # print(f"🔴 ACPX-V2-STEP5-PROMPT-DONE: Prompt built, length={len(prompt)}")
-                # print("=" * 60)
-                # print("🔴 ACPX_PROMPT_START:")
-                # print(prompt[:2000] if len(prompt) > 2000 else prompt)
-                # if len(prompt) > 2000:
-                #     print(f"... (truncated, total {len(prompt)} chars)")
-                # # print("🔴 ACPX_PROMPT_END")
-                # print("=" * 60)
-            except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP5-PROMPT-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                return {"success": False, "message": f"Failed to build ACPX prompt: {str(e)}"}
+            logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
+            prompt = await self._build_acpx_prompt(goal_description)
 
             # Step 6: Run ACPX with Idle + Hard Timeout Protection
             try:
@@ -855,202 +947,109 @@ class ACPFrontendEditorV2:
                 print("ACPX STDOUT:", stdout_output[:500] if stdout_output else "(empty)")
                 print("ACPX STDERR:", stderr_output[:500] if stderr_output else "(empty)")
                 
-                # Handle HARD timeout kills (STRICT FAILURE - always rollback)
+                # =============================================
+                # PARTIAL COMMIT: Timeout handling (NO ROLLBACK)
+                # =============================================
+                
+                # Handle HARD timeout kills (PARTIAL_SUCCESS - keep files)
                 if hard_timeout_killed:
-                    # Aggressive cleanup: Kill any remaining child processes
                     self._kill_process_tree(process.pid)
-                    self.snapshot_manager.rollback_and_cleanup()
-                    result = {
-                        "success": False,
-                        "message": f"ACPX hard timeout exceeded ({HARD_TIMEOUT}s) — process killed",
-                        "rollback": True
-                    }
-                    return result
+                    issues.append(f"Hard timeout exceeded ({HARD_TIMEOUT}s)")
+                    logger.warning(f"[ACPX-V2] ⚠️ Hard timeout ({HARD_TIMEOUT}s) — keeping generated files")
+                    print(f"⚠️ ACPX-HARD-TIMEOUT: Keeping generated files (partial success)")
+                    status = "partial_success"
                 
-                # Handle IDLE timeout kills (TOLERANT - check if edits succeeded)
-                if idle_timeout_killed:
-                    logger.warning(f"[ACPX-V2] ⚠️ Idle timeout exceeded — checking if edits succeeded...")
-                    # Check if any .tsx files were modified/created
-                    edited_files = list(self.frontend_src_path.glob("**/*.tsx"))
-                    if edited_files:
-                        logger.info(f"[ACPX-V2] ✓ Idle timeout but {len(edited_files)} .tsx files exist — continuing")
-                        print(f"✅ ACPX-IDLE-TOLERANT: {len(edited_files)} .tsx files found, continuing")
-                    else:
-                        logger.error(f"[ACPX-V2] ❌ Idle timeout and no edits produced — rolling back")
-                        self.snapshot_manager.rollback_and_cleanup()
-                        result = {
-                            "success": False,
-                            "message": f"ACPX idle timeout ({IDLE_TIMEOUT}s) and no edits produced",
-                            "rollback": True
-                        }
-                        return result
+                # Handle IDLE timeout kills (PARTIAL_SUCCESS - keep files)
+                elif idle_timeout_killed:
+                    issues.append(f"Idle timeout exceeded ({IDLE_TIMEOUT}s)")
+                    logger.warning(f"[ACPX-V2] ⚠️ Idle timeout — keeping generated files")
+                    print(f"⚠️ ACPX-IDLE-TIMEOUT: Keeping generated files (partial success)")
+                    status = "partial_success"
 
-                # Tolerant error handling
-                should_fail = True
-                
-                # Ignore harmless JSON-RPC notification errors
-                if "session/update" in stderr_output and "Invalid params" in stderr_output:
-                    logger.warning("[ACPX] Ignoring JSON-RPC notification error (session/update Invalid params)")
-                    should_fail = False
-                
-                # Accept ACPX's -6 return code (idle timeout) as potential success
-                if return_code == -6 or idle_timeout_killed:
-                    logger.warning("[ACPX] ACPX idle timeout (return code -6) — checking if edits succeeded")
-                    should_fail = False
-
-                if return_code != 0 and should_fail:
-                    logger.error(f"[ACPX] ACPX execution failed (code {return_code})")
-                    logger.error(f"[ACPX] stderr: {stderr_output[:1000]}")
-                    raise RuntimeError(f"ACPX execution failed (code {return_code}): {stderr_output}")
-
-                # Verify edits were actually produced
-                edited_files = list(self.frontend_src_path.glob("**/*.tsx"))
-                if not edited_files:
-                    logger.error("[ACPX] ACPX produced no edits - no .tsx files found")
-                    raise RuntimeError("ACPX produced no edits")
-
-                logger.info(f"[ACPX-V2] ACPX subprocess completed successfully")
-                logger.info(f"[ACPX-V2]   Return code: {return_code}")
-                logger.info(f"[ACPX-V2]   Edited files: {len(edited_files)}")
-                logger.info(f"[ACPX-V2]   Stdout length: {len(stdout_output)} chars")
-                logger.info(f"[ACPX-V2]   Stderr length: {len(stderr_output)} chars")
-
-                # print("🔴 ACPX-V2-STEP5B-EXEC-DONE: ACPX CLI completed")
-
-            except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP5B-EXEC-ERROR: {type(e).__name__}: {str(e)}")
-                logger.error(f"[ACPX-V2] ACPX execution error: {type(e).__name__}: {str(e)}")
+            except RuntimeError as e:
+                # ACPX execution exception - THIS IS THE ONLY CASE FOR ROLLBACK
+                logger.error(f"[ACPX-V2] 🔴 ACPX execution CRASHED: {e}")
                 traceback.print_exc()
                 self.snapshot_manager.rollback_and_cleanup()
-                return {"success": False, "message": f"ACPX execution failed: {str(e)}"}
+                return {
+                    "status": "failed",
+                    "success": False,
+                    "message": f"ACPX execution crashed: {str(e)}",
+                    "rollback": True
+                }
 
-            # Step 6: Capture filesystem state AFTER ACPX
+            # Step 6: Capture filesystem state AFTER ACPX (safe - continues on failure)
+            logger.info(f"[ACPX-V2] Step 6: Capturing filesystem state after ACPX...")
             try:
-                # print("🔴 ACPX-V2-STEP6: Capturing filesystem state after ACPX")
-                logger.info(f"[ACPX-V2] Step 6: Capturing filesystem state after ACPX...")
                 hashes_after = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
                 logger.info(f"[ACPX-V2]   Found {len(hashes_after)} files after ACPX")
-                # print("🔴 ACPX-V2-STEP6-DONE: Filesystem state captured after ACPX")
             except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP6-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                self.snapshot_manager.rollback_and_cleanup()
-                return {"success": False, "message": f"Failed to capture post-ACPX state: {str(e)}"}
+                logger.warning(f"[ACPX-V2] ⚠️ Failed to capture post-ACPX state: {e}")
+                hashes_after = {}
+                issues.append(f"Post-ACPX snapshot failed: {e}")
 
-            # Step 7: Compute changes (filesystem diff)
-            try:
-                # print("🔴 ACPX-V2-STEP7: Computing filesystem diff")
-                logger.info(f"[ACPX-V2] Step 7: Computing filesystem diff...")
-                diff = FilesystemSnapshot.compute_diff(hashes_before, hashes_after)
+            # Step 7: Compute changes (safe_diff - returns empty on failure)
+            logger.info(f"[ACPX-V2] Step 7: Computing filesystem diff...")
+            diff = safe_diff(hashes_before, hashes_after)
 
-                files_added = diff['added']
-                files_removed = diff['removed']
-                files_modified = diff['modified']
+            files_added = diff['added']
+            files_removed = diff['removed']
+            files_modified = diff['modified']
 
-                logger.info(f"[ACPX-V2]   Files added: {len(files_added)}")
-                # print(f"🔴 FILES_ADDED: {files_added}")
-                for f in files_added[:10]:
-                    logger.info(f"[ACPX-V2]     + {f}")
-                if len(files_added) > 10:
-                    logger.info(f"[ACPX-V2]     ... and {len(files_added) - 10} more")
+            logger.info(f"[ACPX-V2]   Files added: {len(files_added)}")
+            for f in files_added[:10]:
+                logger.info(f"[ACPX-V2]     + {f}")
+            if len(files_added) > 10:
+                logger.info(f"[ACPX-V2]     ... and {len(files_added) - 10} more")
 
-                logger.info(f"[ACPX-V2]   Files removed: {len(files_removed)}")
-                # print(f"🔴 FILES_REMOVED: {files_removed}")
-                for f in files_removed[:10]:
-                    logger.info(f"[ACPX-V2]     - {f}")
-                if len(files_removed) > 10:
-                    logger.info(f"[ACPX-V2]     ... and {len(files_removed) - 10} more")
+            logger.info(f"[ACPX-V2]   Files removed: {len(files_removed)}")
+            for f in files_removed[:10]:
+                logger.info(f"[ACPX-V2]     - {f}")
+            if len(files_removed) > 10:
+                logger.info(f"[ACPX-V2]     ... and {len(files_removed) - 10} more")
 
-                logger.info(f"[ACPX-V2]   Files modified: {len(files_modified)}")
-                # print(f"🔴 FILES_MODIFIED: {files_modified}")
-                for f in files_modified[:10]:
-                    logger.info(f"[ACPX-V2]     ~ {f}")
-                if len(files_modified) > 10:
-                    logger.info(f"[ACPX-V2]     ... and {len(files_modified) - 10} more")
+            logger.info(f"[ACPX-V2]   Files modified: {len(files_modified)}")
+            for f in files_modified[:10]:
+                logger.info(f"[ACPX-V2]     ~ {f}")
+            if len(files_modified) > 10:
+                logger.info(f"[ACPX-V2]     ... and {len(files_modified) - 10} more")
 
-                # print(f"🔴 ACPX-V2-STEP7-DONE: Diff computed - Added={len(files_added)}, Removed={len(files_removed)}, Modified={len(files_modified)}")
-            except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP7-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                self.snapshot_manager.rollback_and_cleanup()
-                return {"success": False, "message": f"Failed to compute diff: {str(e)}"}
-
-            # Step 8: Validate file limits
-            try:
-                # print("🔴 ACPX-V2-STEP8: Validating file limits")
-                logger.info(f"[ACPX-V2] Step 8: Validating file limits...")
-                if len(files_added) > self.max_new_files:
-                    logger.error(f"[ACPX-V2] ❌ File limit exceeded: {len(files_added)} > {self.max_new_files}")
-                    # print("🔴 ACPX-V2-STEP8-ERROR: File limit exceeded, rolling back")
-                    self.snapshot_manager.rollback_and_cleanup()
-                    result = {
-                        "success": False,
-                        "message": f"File limit exceeded: {len(files_added)} new files, max {self.max_new_files} allowed",
-                        "rollback": True
-                    }
-                    # print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
-                    return result
+            # Step 8: Enforce file limits (trim excess, NO rollback)
+            logger.info(f"[ACPX-V2] Step 8: Enforcing file limits...")
+            kept_files, removed_files = enforce_file_limit(files_added, self.max_new_files, self.frontend_src_path)
+            if removed_files:
+                issues.append(f"Trimmed {len(removed_files)} excess files (limit: {self.max_new_files})")
+                status = "partial_success"
+                files_added = kept_files  # Update for final count
+            else:
                 logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{self.max_new_files})")
-                # print("🔴 ACPX-V2-STEP8-DONE: File limits validated")
-            except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP8-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                self.snapshot_manager.rollback_and_cleanup()
-                return {"success": False, "message": f"File limit validation failed: {str(e)}"}
 
-            # Step 9: Validate paths
-            try:
-                # print("🔴 ACPX-V2-STEP9: Validating paths")
-                logger.info(f"[ACPX-V2] Step 9: Validating paths...")
-                for file_path in files_added + files_removed:
-                    # file_path is already a relative path string from compute_diff
-                    # Convert to string in case it's a Path object
-                    rel_path = str(file_path) if not isinstance(file_path, str) else file_path
-                    # print(f"🔴 ACPX-V2-STEP9-CHECK: Validating '{rel_path}'")
-                    allowed, reason = self.validator.is_path_allowed(rel_path)
-                    if not allowed:
-                        logger.error(f"[ACPX-V2] ❌ Path validation failed for '{rel_path}': {reason}")
-                        # print(f"🔴 ACPX-V2-STEP9-ERROR: Path validation failed for '{rel_path}': {reason}")
-                        # print(f"🔴 ACPX-V2-STEP9-ERROR: Rolling back to snapshot")
-                        self.snapshot_manager.rollback_and_cleanup()
-                        result = {
-                            "success": False,
-                            "message": f"Path validation failed: {reason}",
-                            "rollback": True
-                        }
-                        # print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added', 0)}, Modified={result.get('files_modified', 0)}")
-                        return result
+            # Step 9: Validate and filter paths (remove invalid, NO rollback)
+            logger.info(f"[ACPX-V2] Step 9: Validating paths...")
+            valid_paths, invalid_paths = filter_valid_paths(files_added, self.validator)
+            
+            if invalid_paths:
+                deleted_count = delete_invalid_files(invalid_paths, self.frontend_src_path)
+                issues.append(f"Removed {deleted_count} files at invalid paths")
+                status = "partial_success"
+                files_added = valid_paths  # Update for final count
+                logger.warning(f"[ACPX-V2]   ⚠️ Removed {deleted_count} invalid files")
+            else:
                 logger.info(f"[ACPX-V2]   ✓ All paths valid")
-                # print("🔴 ACPX-V2-STEP9-DONE: All paths validated")
-            except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP9-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                self.snapshot_manager.rollback_and_cleanup()
-                return {"success": False, "message": f"Path validation failed: {str(e)}"}
 
             # Step 10: Enforce page guardrails (BEFORE build to prevent routing issues)
+            logger.info(f"[ACPX-V2] Step 10: Enforcing page guardrails (BEFORE build)...")
             try:
-                # print("🔴 ACPX-V2-STEP10: Enforcing page guardrails")
-                logger.info(f"[ACPX-V2] Step 10: Enforcing page guardrails (BEFORE build)...")
                 unauthorized_removed = self._enforce_page_guardrails()
-
                 if unauthorized_removed > 0:
+                    issues.append(f"Removed {unauthorized_removed} unauthorized page(s)")
                     logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
-                    # print(f"🔴 ACPX-V2-STEP10-INFO: Removed {unauthorized_removed} unauthorized pages")
                 else:
                     logger.info(f"[ACPX-V2]   ✓ All pages authorized")
-                # print("🔴 ACPX-V2-STEP10-DONE: Page guardrails enforced")
             except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP10-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                # Don't rollback on guardrail errors, just log
-                logger.warning(f"[ACPX-V2] Guardrail enforcement failed but continuing: {str(e)}")
+                logger.warning(f"[ACPX-V2] ⚠️ Guardrail enforcement failed but continuing: {str(e)}")
 
-            # Step 10.5: DISABLED - Let ACPX handle routing on its own
-            # The routing fix was causing issues when ACPX already handles routing correctly.
-            # Re-enable if ACPX consistently fails to fix routing.
-            #
-            # try:
+            # Step 10.5: Routing fix DISABLED - ACPX handles routing
             #     logger.info("[ACPX-V2] Step 10.5: Fixing routing programmatically...")
             #     
             #     # Determine default page (first allowed page)
@@ -1138,10 +1137,8 @@ class ACPFrontendEditorV2:
             logger.info("[ACPX-V2] Step 10.5: Routing fix DISABLED - ACPX handles routing")
 
             # Step 10.6: Fix Layout components - Replace {children} with <Outlet />
+            logger.info("[ACPX-V2] Step 10.6: Fixing Layout components to use Outlet...")
             try:
-                # print("🔴 ACPX-V2-STEP10C: Fixing Layout components (Outlet)")
-                logger.info("[ACPX-V2] Step 10.6: Fixing Layout components to use Outlet...")
-                
                 # Find all Layout files
                 layout_patterns = [
                     self.frontend_src_path / "layout" / "Layout.tsx",
@@ -1150,13 +1147,12 @@ class ACPFrontendEditorV2:
                 ]
                 
                 layout_files = [p for p in layout_patterns if p.exists()]
-                # Also search for any file with "Layout" in the name
                 for layout_dir in ["layout", "layouts", "app/layouts"]:
                     layout_path = self.frontend_src_path / layout_dir
                     if layout_path.exists():
                         layout_files.extend(layout_path.glob("*Layout*.tsx"))
                 
-                layout_files = list(set(layout_files))  # Remove duplicates
+                layout_files = list(set(layout_files))
                 
                 for layout_file in layout_files:
                     try:
@@ -1171,9 +1167,7 @@ class ACPFrontendEditorV2:
                                 content
                             )
                         elif "Outlet" not in content:
-                            # Add import at top after other imports
                             import_line = "import { Outlet } from 'react-router-dom';\n"
-                            # Find last import line
                             import_match = re.search(r"(^import.*?;[\s]*)+", content, re.MULTILINE)
                             if import_match:
                                 insert_pos = import_match.end()
@@ -1206,38 +1200,19 @@ class ACPFrontendEditorV2:
                         if content != original:
                             layout_file.write_text(content)
                             logger.info(f"[ACPX-V2]   ✓ Fixed {layout_file.name}: replaced {{children}} with <Outlet />")
-                            # print(f"🔴 ACPX-V2-STEP10C-FIX: {layout_file.name} - children → Outlet")
                     
                     except Exception as e:
                         logger.warning(f"[ACPX-V2]   Failed to fix {layout_file}: {e}")
-                        # print(f"🔴 ACPX-V2-STEP10C-WARN: Failed to fix {layout_file.name}: {e}")
-                
-                # print("🔴 ACPX-V2-STEP10C-DONE: Layout components fixed")
                 
             except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP10C-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                logger.warning(f"[ACPX-V2] Layout fix failed but continuing: {str(e)}")
+                logger.warning(f"[ACPX-V2] ⚠️ Layout fix failed but continuing: {str(e)}")
 
             # Step 11: Build gate skipped - build handled by infrastructure pipeline
-            try:
-                # print("🔴 ACPX-V2-STEP11: Build gate skipped")
-                logger.info("[ACPX-V2] Build gate skipped — build handled by infrastructure pipeline")
-                # print("🔴 ACPX-V2-STEP11-DONE: Build gate skipped")
-            except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP11-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                # Don't fail on skip errors
-                logger.warning(f"[ACPX-V2] Build gate skip had issues but continuing: {str(e)}")
+            logger.info("[ACPX-V2] Step 11: Build gate skipped — build handled by infrastructure pipeline")
 
-            # Step 12: Success - cleanup snapshot (in finally to prevent leaks)
-            # Cleanup moved to finally block below
-
-            # Step 13: Post-process - Detect empty/placeholder pages (ENFORCE - remove if found)
+            # Step 12: Post-process - Detect empty/placeholder pages (remove if found)
+            logger.info("[ACPX-V2] Step 12: Checking for empty/placeholder pages...")
             try:
-                # print("🔴 ACPX-V2-STEP13: Checking for empty pages")
-                logger.info("[ACPX-V2] Step 13: Checking for empty/placeholder pages...")
-                
                 empty_pages = []
                 pages_dir = self.frontend_src_path / "pages"
                 
@@ -1247,13 +1222,13 @@ class ACPFrontendEditorV2:
                         
                         # Check for placeholder content
                         is_empty = (
-                            len(content) < 800 or  # Very short file (increased threshold)
+                            len(content) < 800 or
                             "Page content will be generated by AI" in content or
                             "placeholder" in content.lower() or
                             "will be generated" in content.lower() or
                             content.strip().endswith("return <div></div>;") or
                             content.strip().endswith("return null;") or
-                            (content.count("return") == 1 and len(content) < 1000)  # Minimal component
+                            (content.count("return") == 1 and len(content) < 1000)
                         )
                         
                         if is_empty:
@@ -1261,74 +1236,82 @@ class ACPFrontendEditorV2:
                             empty_pages.append(page_name)
                             logger.warning(f"[ACPX-V2]   ⚠️  Empty/placeholder page detected: {page_name}")
                             
-                            # REMOVE placeholder page (enforce quality)
                             try:
                                 page_file.unlink()
                                 logger.warning(f"[ACPX-V2]   🗑️  Removed placeholder page: {page_name}")
                             except Exception as remove_error:
                                 logger.error(f"[ACPX-V2]   Failed to remove placeholder page {page_name}: {remove_error}")
-                            # print(f"🔴 ACPX-V2-STEP13-EMPTY: {page_name}.tsx is empty/placeholder")
                 
                 if empty_pages:
-                    logger.warning(f"[ACPX-V2]   ❌ Removed {len(empty_pages)} placeholder pages: {empty_pages}")
-                    logger.warning(f"[ACPX-V2]   These pages should be regenerated with full content")
-                    # print(f"🔴 ACPX-V2-STEP13-EMPTY-COUNT: {len(empty_pages)} empty pages detected")
+                    issues.append(f"Removed {len(empty_pages)} placeholder pages: {empty_pages}")
+                    status = "partial_success"
+                    logger.warning(f"[ACPX-V2]   ⚠️ Removed {len(empty_pages)} placeholder pages")
                 else:
                     logger.info("[ACPX-V2]   ✓ All pages have substantial content")
-                    # print("🔴 ACPX-V2-STEP13-DONE: All pages have content")
                     
             except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP13-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                logger.warning(f"[ACPX-V2] Empty page check failed but continuing: {str(e)}")
+                logger.warning(f"[ACPX-V2] ⚠️ Empty page check failed but continuing: {str(e)}")
 
-            # Final result
+            # =============================================
+            # FINAL RESULT (3-state outcome)
+            # =============================================
+            
+            # Determine final message based on status
+            if status == "success":
+                message = "ACPX changes applied successfully"
+            else:
+                message = f"ACPX changes applied with issues: {'; '.join(issues[:5])}"
+            
             result = {
-                "success": True,
-                "message": "ACPX changes applied successfully (build will run in infrastructure pipeline)",
+                "status": status,
+                "success": True,  # Both success and partial_success return success=True
+                "message": message,
+                "issues": issues,
                 "files_added": len(files_added),
                 "files_modified": len(files_modified),
                 "files_removed": len(files_removed),
                 "build_output": "Build skipped - handled by infrastructure pipeline",
                 "rollback": False
             }
-            # print(f"🔴 ACPX-V2-RETURN: Success={result.get('success')}, Added={result.get('files_added')}, Modified={result.get('files_modified')}")
+            
+            logger.info(f"[ACPX-V2] ✅ Final status: {status}")
+            if issues:
+                logger.info(f"[ACPX-V2]   Issues: {issues}")
+            logger.info(f"[ACPX-V2]   Files: +{len(files_added)} ~{len(files_modified)} -{len(files_removed)}")
+            
             return result
 
         except Exception as e:
-            # Global exception handler
-            # print(f"🔴 ACPX-V2-FATAL-ERROR: {type(e).__name__}: {str(e)}")
-            # print("🔴 ACPX-V2-FATAL-ERROR: Traceback:")
+            # =============================================
+            # GLOBAL EXCEPTION HANDLER (ONLY case for rollback)
+            # =============================================
+            logger.error(f"[ACPX-V2] 🔴 FATAL ERROR: {type(e).__name__}: {str(e)}")
             traceback.print_exc()
-            # print("🔴 ACPX-V2-FATAL-ERROR: Returning error result")
 
-            # Attempt to rollback if possible
+            # Attempt to rollback
             try:
                 self.snapshot_manager.rollback_and_cleanup()
+                logger.info("[ACPX-V2] Rollback completed")
             except Exception as rollback_error:
-                # print(f"🔴 ACPX-V2-FATAL-ERROR: Rollback also failed: {rollback_error}")
-                pass
+                logger.warning(f"[ACPX-V2] Rollback also failed: {rollback_error}")
 
             return {
+                "status": "failed",
                 "success": False,
                 "message": f"FATAL ERROR in apply_changes_via_acpx: {str(e)}",
+                "issues": [str(e)],
                 "files_added": 0,
                 "files_modified": 0,
                 "files_removed": 0,
-                "rollback": False
+                "rollback": True
             }
         finally:
-            # Step 12: Always cleanup snapshot to prevent leaks
+            # Cleanup snapshot to prevent leaks
             try:
-                # print("🔴 ACPX-V2-STEP12: Cleaning up snapshot (finally)")
-                logger.info(f"[ACPX-V2] Step 12: Cleanup snapshot (finally)...")
+                logger.info(f"[ACPX-V2] Step 13: Cleanup snapshot...")
                 self.snapshot_manager.cleanup_snapshot()
-                # print("🔴 ACPX-V2-STEP12-DONE: Snapshot cleaned up")
             except Exception as e:
-                # print(f"🔴 ACPX-V2-STEP12-ERROR: {type(e).__name__}: {str(e)}")
-                traceback.print_exc()
-                # Don't fail on cleanup errors
-                logger.warning(f"[ACPX-V2] Snapshot cleanup failed but returning success: {str(e)}")
+                logger.warning(f"[ACPX-V2] Snapshot cleanup failed: {str(e)}")
 
     async def _extract_required_pages_from_prompt(self, goal_description: str) -> List[str]:
         """
