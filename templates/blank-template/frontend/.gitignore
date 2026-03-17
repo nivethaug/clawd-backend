@@ -1,5 +1,10 @@
 # Dependencies
 node_modules/
+.pnpm-store/
+
+# Lock files (keep only one)
+# pnpm-lock.yaml
+package-lock.json
 
 # Build output
 dist/
