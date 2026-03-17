@@ -1482,7 +1482,38 @@ YOUR TASK
 
 Transform the existing template into a production-ready application based on the project description above.
 
-🚨🚨🚨 CRITICAL ROUTING FIX - MUST DO FIRST 🚨🚨🚨
+� FAST EXECUTION MODE (UI-FIRST SCAFFOLD)
+
+This is an INITIAL BUILD phase.
+
+PRIORITY:
+- Focus on HIGH-QUALITY UI
+- Use STATIC / MOCK DATA
+- Build visually COMPLETE pages quickly
+
+DO NOT:
+- implement complex logic
+- implement real backend integrations
+- implement full feature engines (editor, canvas, drag-drop)
+
+FOR COMPLEX FEATURES:
+- block editor → UI layout only
+- canvas → static visual layout
+- charts → static UI with sample data
+
+TIME OPTIMIZATION RULES:
+- Do NOT over-engineer
+- Do NOT spend time on edge cases
+- Do NOT try to perfect every detail
+
+SUCCESS CRITERIA:
+- Pages must LOOK complete (not logically complete)
+- No blank or placeholder pages
+- UI should feel production-ready visually
+
+This is NOT the final implementation — focus on SPEED + UI QUALITY.
+
+�🚨🚨🚨 CRITICAL ROUTING FIX - MUST DO FIRST 🚨🚨🚨
 
 BEFORE YOU DO ANYTHING ELSE, FIX THE ROUTING:
 
@@ -1614,12 +1645,12 @@ export default function Navbar() {{
 
 🚨🚨🚨 CRITICAL: NO EMPTY/PLACEHOLDER PAGES - BUILD MUST SUCCEED 🚨🚨🚨
 
-THIS IS THE ONLY ACPX CALL - YOU MUST GET IT RIGHT THE FIRST TIME!
+This is the INITIAL UI BUILD phase. Focus on visual completeness. Further improvements can be done later.
 
 EVERY PAGE MUST BE FULLY IMPLEMENTED OR THE BUILD WILL FAIL:
 
 1. MINIMUM CONTENT REQUIREMENTS (MANDATORY):
-   - Each page MUST be at least 800 characters
+   - Each page must contain meaningful UI with multiple sections (no empty or placeholder content)
    - Each page MUST include ACTUAL content (not stubs/placeholders)
    - Each page MUST have REAL functionality (working components, data displays)
    - Each page MUST compile without TypeScript errors
@@ -1734,13 +1765,10 @@ export default function Dashboard() {{
 ```
 
 5. MANDATORY FINAL VERIFICATION (YOU MUST DO THIS):
-   STEP 1: Run `npm run build` in the frontend directory
-   STEP 2: Check that build succeeds with NO errors
-   STEP 3: If build fails, FIX ALL ERRORS before marking complete
-   STEP 4: Verify each page file is 800+ characters
-   STEP 5: Verify NO files contain "placeholder", "TODO", or "coming soon"
-
-🚨 IF npm run build FAILS, YOUR TASK IS INCOMPLETE - FIX ALL ERRORS 🚨
+   
+   NOTE:
+   Do NOT run build commands.
+   Focus on generating clean, correct UI code.
 
 CHECKLIST (complete in order - ALL STEPS REQUIRED)
 1. [ ] Fix routing — remove Welcome at "/", single {default_page} route at "/" inside Layout wrapper
