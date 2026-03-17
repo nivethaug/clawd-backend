@@ -511,10 +511,13 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         logger.info("⚡ Trying pnpm install...")
         print("⚡ [DEPS] Trying pnpm install (fast mode)...")
         
+        # Don't capture output - let it stream directly to avoid buffer issues
+        # pnpm produces large output that can cause buffer overflows in subprocess
         result = subprocess.run(
-            ["pnpm", "install", "--prefer-offline"],
+            ["pnpm", "install"],
             cwd=str(frontend_path),
-            capture_output=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             timeout=BUILD_TIMEOUT
         )
@@ -525,13 +528,14 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
             print("=" * 60)
             return True, "pnpm install successful"
         
-        # Log detailed error for debugging
+        # Log error for debugging
         logger.warning(f"⚠️ pnpm install failed (code {result.returncode})")
-        logger.warning(f"   stdout: {result.stdout[:500] if result.stdout else 'empty'}")
-        logger.warning(f"   stderr: {result.stderr[:500] if result.stderr else 'empty'}")
-        print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm")
         if result.stderr:
-            print(f"    [DEPS] pnpm stderr: {result.stderr[:200]}")
+            logger.warning(f"   stderr: {result.stderr[:500]}")
+            print(f"⚠️  [DEPS] pnpm failed (code {result.returncode})")
+            print(f"    [DEPS] stderr: {result.stderr[:200]}")
+        else:
+            print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm")
         
     except FileNotFoundError:
         logger.warning("⚠️ pnpm not found, falling back to npm")
