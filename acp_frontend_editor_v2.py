@@ -496,13 +496,23 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
     print("📦 DEPENDENCY INSTALLATION")
     print("=" * 60)
     
+    # Remove npm lockfile for pnpm compatibility (if exists)
+    npm_lock = frontend_path / "package-lock.json"
+    if npm_lock.exists():
+        try:
+            npm_lock.unlink()
+            logger.info("🗑️ Removed package-lock.json for pnpm compatibility")
+            print("🗑️  [DEPS] Removed package-lock.json (pnpm needs clean slate)")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not remove package-lock.json: {e}")
+    
     # Try pnpm first (fast path)
     try:
         logger.info("⚡ Trying pnpm install...")
         print("⚡ [DEPS] Trying pnpm install (fast mode)...")
         
         result = subprocess.run(
-            ["pnpm", "install", "--prefer-offline", "--shamefully-hoist"],
+            ["pnpm", "install", "--prefer-offline"],
             cwd=str(frontend_path),
             capture_output=True,
             text=True,
