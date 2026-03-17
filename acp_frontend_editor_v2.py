@@ -525,8 +525,13 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
             print("=" * 60)
             return True, "pnpm install successful"
         
-        logger.warning(f"⚠️ pnpm install failed (code {result.returncode}), falling back to npm")
+        # Log detailed error for debugging
+        logger.warning(f"⚠️ pnpm install failed (code {result.returncode})")
+        logger.warning(f"   stdout: {result.stdout[:500] if result.stdout else 'empty'}")
+        logger.warning(f"   stderr: {result.stderr[:500] if result.stderr else 'empty'}")
         print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm")
+        if result.stderr:
+            print(f"    [DEPS] pnpm stderr: {result.stderr[:200]}")
         
     except FileNotFoundError:
         logger.warning("⚠️ pnpm not found, falling back to npm")
