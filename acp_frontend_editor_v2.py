@@ -511,16 +511,21 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         logger.info("⚡ Trying pnpm install...")
         print("⚡ [DEPS] Trying pnpm install (fast mode)...")
         
-        # Use shell=True + stdin=DEVNULL for PM2 environment
-        # PM2 doesn't provide TTY, pnpm may wait on stdin causing SIGABRT
+        # Use explicit env with PATH for PM2 environment
+        # PM2 may not have /usr/bin in PATH for pnpm
+        env = os.environ.copy()
+        env["PATH"] = "/usr/bin:/usr/local/bin:" + env.get("PATH", "")
+        env["npm_config_yes"] = "true"  # Auto-confirm prompts
+        
         result = subprocess.run(
-            f"cd '{frontend_path}' && pnpm install",
+            f"cd '{frontend_path}' && /usr/bin/pnpm install",
             shell=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=BUILD_TIMEOUT
+            timeout=BUILD_TIMEOUT,
+            env=env
         )
         
         if result.returncode == 0:
