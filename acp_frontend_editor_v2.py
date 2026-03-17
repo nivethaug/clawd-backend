@@ -951,18 +951,46 @@ class ACPFrontendEditorV2:
                 # PARTIAL COMMIT: Timeout handling (NO ROLLBACK)
                 # =============================================
                 
-                # Handle HARD timeout kills (PARTIAL_SUCCESS - keep files)
+                # Handle HARD timeout kills (PARTIAL_SUCCESS - keep files if any exist)
                 if hard_timeout_killed:
                     self._kill_process_tree(process.pid)
-                    issues.append(f"Hard timeout exceeded ({HARD_TIMEOUT}s)")
-                    logger.warning(f"[ACPX-V2] ⚠️ Hard timeout ({HARD_TIMEOUT}s) — keeping generated files")
-                    print(f"⚠️ ACPX-HARD-TIMEOUT: Keeping generated files (partial success)")
-                    status = "partial_success"
+                    # Check if any files were created
+                    created_files = list(self.frontend_src_path.glob("**/*.tsx"))
+                    if created_files:
+                        issues.append(f"Hard timeout exceeded ({HARD_TIMEOUT}s)")
+                        logger.warning(f"[ACPX-V2] ⚠️ Hard timeout ({HARD_TIMEOUT}s) — keeping {len(created_files)} generated files")
+                        print(f"⚠️ ACPX-HARD-TIMEOUT: Keeping {len(created_files)} generated files (partial success)")
+                        status = "partial_success"
+                    else:
+                        logger.error(f"[ACPX-V2] 🔴 Hard timeout and NO files created — rollback")
+                        print(f"🔴 ACPX-HARD-TIMEOUT: No files created, rolling back")
+                        self.snapshot_manager.rollback_and_cleanup()
+                        return {
+                            "status": "failed",
+                            "success": False,
+                            "message": f"Hard timeout ({HARD_TIMEOUT}s) and no files created",
+                            "rollback": True
+                        }
                 
-                # Handle IDLE timeout kills (PARTIAL_SUCCESS - keep files)
+                # Handle IDLE timeout kills (PARTIAL_SUCCESS - keep files if any exist)
                 elif idle_timeout_killed:
-                    issues.append(f"Idle timeout exceeded ({IDLE_TIMEOUT}s)")
-                    logger.warning(f"[ACPX-V2] ⚠️ Idle timeout — keeping generated files")
+                    # Check if any files were created
+                    created_files = list(self.frontend_src_path.glob("**/*.tsx"))
+                    if created_files:
+                        issues.append(f"Idle timeout exceeded ({IDLE_TIMEOUT}s)")
+                        logger.warning(f"[ACPX-V2] ⚠️ Idle timeout — keeping {len(created_files)} generated files")
+                        print(f"⚠️ ACPX-IDLE-TIMEOUT: Keeping {len(created_files)} generated files (partial success)")
+                        status = "partial_success"
+                    else:
+                        logger.error(f"[ACPX-V2] 🔴 Idle timeout and NO files created — rollback")
+                        print(f"🔴 ACPX-IDLE-TIMEOUT: No files created, rolling back")
+                        self.snapshot_manager.rollback_and_cleanup()
+                        return {
+                            "status": "failed",
+                            "success": False,
+                            "message": f"Idle timeout ({IDLE_TIMEOUT}s) and no files created",
+                            "rollback": True
+                        }
                     print(f"⚠️ ACPX-IDLE-TIMEOUT: Keeping generated files (partial success)")
                     status = "partial_success"
 
