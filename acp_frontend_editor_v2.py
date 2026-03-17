@@ -369,25 +369,16 @@ class ACPBuildGate:
         output.append(f"Working directory: {self.frontend_path}")
 
         try:
-            # Step 1: npm install
-            output.append("\n--- Running npm install ---")
-            result = subprocess.run(
-                ["npm", "install"],
-                cwd=self.frontend_path,
-                capture_output=True,
-                text=True,
-                timeout=BUILD_TIMEOUT
-            )
-
-            output.append(result.stdout)
-            if result.stderr:
-                output.append("STDERR: " + result.stderr)
-
-            if result.returncode != 0:
-                output.append(f"npm install failed with code {result.returncode}")
+            # Step 1: Install dependencies (pnpm first, npm fallback)
+            output.append("\n--- Installing Dependencies ---")
+            install_success, install_msg = install_dependencies(self.frontend_path)
+            output.append(install_msg)
+            
+            if not install_success:
+                output.append(f"❌ Dependency installation failed: {install_msg}")
                 return False, "\n".join(output)
 
-            output.append("npm install completed successfully")
+            output.append("✅ Dependencies installed successfully")
 
             # Step 2: npm run build with retry logic (max 3 attempts)
             max_retries = 3
@@ -490,6 +481,63 @@ class ACPBuildGate:
 # =============================================================================
 # HELPER FUNCTIONS FOR PARTIAL COMMIT SYSTEM
 # =============================================================================
+
+def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
+    """
+    Install frontend dependencies using pnpm (fast) with npm fallback (safe).
+    
+    Args:
+        frontend_path: Path to frontend directory containing package.json
+        
+    Returns:
+        Tuple of (success, message)
+    """
+    # Try pnpm first (fast path)
+    try:
+        logger.info("⚡ Trying pnpm install...")
+        
+        result = subprocess.run(
+            ["pnpm", "install", "--prefer-offline", "--shamefully-hoist"],
+            cwd=str(frontend_path),
+            capture_output=True,
+            text=True,
+            timeout=BUILD_TIMEOUT
+        )
+        
+        if result.returncode == 0:
+            logger.info("✅ pnpm install successful")
+            return True, "pnpm install successful"
+        
+        logger.warning(f"⚠️ pnpm install failed (code {result.returncode}), falling back to npm")
+        
+    except FileNotFoundError:
+        logger.warning("⚠️ pnpm not found, falling back to npm")
+    except Exception as e:
+        logger.warning(f"⚠️ pnpm error: {e}, falling back to npm")
+    
+    # Fallback to npm (safe path)
+    try:
+        logger.info("📦 Running npm ci fallback...")
+        
+        result = subprocess.run(
+            ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
+            cwd=str(frontend_path),
+            capture_output=True,
+            text=True,
+            timeout=BUILD_TIMEOUT
+        )
+        
+        if result.returncode == 0:
+            logger.info("✅ npm install successful (fallback)")
+            return True, "npm ci successful (fallback)"
+        
+        logger.error(f"❌ npm ci failed with code {result.returncode}")
+        return False, f"npm ci failed: {result.stderr}"
+        
+    except Exception as e:
+        logger.error(f"❌ npm fallback error: {e}")
+        return False, f"npm fallback error: {e}"
+
 
 def safe_snapshot(snapshot_manager: ACPSnapshotManager, max_retries: int = 1) -> Tuple[bool, str]:
     """
