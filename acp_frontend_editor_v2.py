@@ -492,9 +492,14 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
     Returns:
         Tuple of (success, message)
     """
+    print("=" * 60)
+    print("📦 DEPENDENCY INSTALLATION")
+    print("=" * 60)
+    
     # Try pnpm first (fast path)
     try:
         logger.info("⚡ Trying pnpm install...")
+        print("⚡ [DEPS] Trying pnpm install (fast mode)...")
         
         result = subprocess.run(
             ["pnpm", "install", "--prefer-offline", "--shamefully-hoist"],
@@ -506,18 +511,24 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         
         if result.returncode == 0:
             logger.info("✅ pnpm install successful")
+            print("✅ [DEPS] pnpm install successful")
+            print("=" * 60)
             return True, "pnpm install successful"
         
         logger.warning(f"⚠️ pnpm install failed (code {result.returncode}), falling back to npm")
+        print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm")
         
     except FileNotFoundError:
         logger.warning("⚠️ pnpm not found, falling back to npm")
+        print("⚠️  [DEPS] pnpm not found, falling back to npm")
     except Exception as e:
         logger.warning(f"⚠️ pnpm error: {e}, falling back to npm")
+        print(f"⚠️  [DEPS] pnpm error: {e}")
     
     # Fallback to npm (safe path)
     try:
         logger.info("📦 Running npm ci fallback...")
+        print("📦 [DEPS] Running npm ci (safe fallback)...")
         
         result = subprocess.run(
             ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
@@ -529,13 +540,19 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         
         if result.returncode == 0:
             logger.info("✅ npm install successful (fallback)")
+            print("✅ [DEPS] npm ci successful (fallback)")
+            print("=" * 60)
             return True, "npm ci successful (fallback)"
         
         logger.error(f"❌ npm ci failed with code {result.returncode}")
+        print(f"❌ [DEPS] npm ci failed with code {result.returncode}")
+        print("=" * 60)
         return False, f"npm ci failed: {result.stderr}"
         
     except Exception as e:
         logger.error(f"❌ npm fallback error: {e}")
+        print(f"❌ [DEPS] npm fallback error: {e}")
+        print("=" * 60)
         return False, f"npm fallback error: {e}"
 
 
