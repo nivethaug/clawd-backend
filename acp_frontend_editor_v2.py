@@ -511,11 +511,12 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         logger.info("⚡ Trying pnpm install...")
         print("⚡ [DEPS] Trying pnpm install (fast mode)...")
         
-        # Use shell=True to run in same environment as CLI
-        # This avoids PM2/subprocess environment differences
+        # Use shell=True + stdin=DEVNULL for PM2 environment
+        # PM2 doesn't provide TTY, pnpm may wait on stdin causing SIGABRT
         result = subprocess.run(
             f"cd '{frontend_path}' && pnpm install",
             shell=True,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
@@ -552,7 +553,9 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         result = subprocess.run(
             ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
             cwd=str(frontend_path),
-            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             timeout=BUILD_TIMEOUT
         )
