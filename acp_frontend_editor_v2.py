@@ -1448,6 +1448,10 @@ class ACPFrontendEditorV2:
 Project Name: {self.project_name}
 Project Description: {goal_description}
 
+IMPORTANT:
+Do not analyze the entire project deeply.
+Focus only on required pages and layout files.
+
 🎨 UI/UX DESIGN REFERENCE - FOLLOW THESE STANDARDS 🎨
 
 For ALL UI/UX design decisions, use the ui-ux-pro-max skill:
@@ -1478,6 +1482,26 @@ Before implementing ANY UI component:
 5. Implement smooth transitions and micro-interactions
 6. Follow accessibility best practices
 
+🎨 PREMIUM UI MODE
+
+Enhance UI using:
+- glassmorphism (backdrop blur + transparency)
+- soft shadows and depth
+- subtle hover animations
+- gradient accents (blue → purple)
+- modern SaaS styling (Stripe / Linear inspired)
+
+Apply:
+- backdrop-blur-xl + semi-transparent backgrounds
+- hover:scale-[1.02] + hover:shadow-xl on cards
+- gradient headers and icon accents
+- smooth transitions (transition-all duration-300)
+
+Avoid:
+- flat UI
+- plain white sections without depth
+- static non-interactive components
+
 YOUR TASK
 
 Transform the existing template into a production-ready application based on the project description above.
@@ -1505,6 +1529,8 @@ TIME OPTIMIZATION RULES:
 - Do NOT over-engineer
 - Do NOT spend time on edge cases
 - Do NOT try to perfect every detail
+- Limit each page to 2–3 main UI sections
+- Avoid deeply nested or overly complex layouts
 
 SUCCESS CRITERIA:
 - Pages must LOOK complete (not logically complete)
