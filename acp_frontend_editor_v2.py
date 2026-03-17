@@ -463,6 +463,20 @@ class ACPBuildGate:
                 output.append("--- Build Verification Complete ---")
 
                 # If we got here, build verification passed
+
+                # Step 4: Optional cleanup - remove node_modules to save disk space
+                output.append("\n--- Optional Cleanup ---")
+                node_modules = self.frontend_path / "node_modules"
+                if node_modules.exists():
+                    try:
+                        import shutil
+                        shutil.rmtree(node_modules)
+                        output.append("🧹 node_modules removed (disk optimization)")
+                    except Exception as e:
+                        output.append(f"⚠️ Could not remove node_modules: {e}")
+                else:
+                    output.append("node_modules not found, skipping cleanup")
+
                 break
 
             output.append("=== Build Process Complete ===")
@@ -496,13 +510,21 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
     print("📦 DEPENDENCY INSTALLATION")
     print("=" * 60)
 
+    # ⚡ Skip install if node_modules already exists (cached)
+    node_modules = Path(frontend_path) / "node_modules"
+    if node_modules.exists() and (node_modules / ".package-lock.json").exists():
+        logger.info("⚡ Skipping npm install (node_modules exists and cached)")
+        print("⚡ [DEPS] Skipping install (dependencies already installed)")
+        print("=" * 60)
+        return True, "Dependencies already installed (cached)"
+
     # Detect PM2 environment
     is_pm2 = bool(os.environ.get("PM2_USAGE")) or bool(os.environ.get("PM2_HOME"))
 
     # 🚨 PM2 ENVIRONMENT → FORCE NPM (skip pnpm due to SIGABRT)
     if is_pm2:
-        logger.warning("⚠️ PM2 detected - skipping pnpm (SIGABRT issue), using npm")
-        print("⚠️  [DEPS] PM2 detected → using npm for reliability")
+        logger.warning("⚠️ PM2 detected - using optimized npm ci")
+        print("⚠️  [DEPS] PM2 detected → optimized npm ci")
 
         try:
             result = subprocess.run(
@@ -516,10 +538,10 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
             )
 
             if result.returncode == 0:
-                logger.info("✅ npm install successful (PM2 mode)")
-                print("✅ [DEPS] npm ci successful (PM2 mode)")
+                logger.info("✅ npm ci successful (optimized)")
+                print("✅ [DEPS] npm ci successful (optimized)")
                 print("=" * 60)
-                return True, "npm ci successful (PM2 mode)"
+                return True, "npm ci successful (optimized)"
 
             logger.error(f"❌ npm ci failed with code {result.returncode}")
             print(f"❌ [DEPS] npm ci failed with code {result.returncode}")
@@ -529,10 +551,10 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
             return False, f"npm ci failed: {result.stderr}"
 
         except Exception as e:
-            logger.error(f"❌ npm install error: {e}")
-            print(f"❌ [DEPS] npm install error: {e}")
+            logger.error(f"❌ npm ci error: {e}")
+            print(f"❌ [DEPS] npm ci error: {e}")
             print("=" * 60)
-            return False, f"npm install error: {e}"
+            return False, f"npm ci error: {e}"
 
     # ⚡ NON-PM2 → TRY PNPM FIRST
     try:
@@ -569,8 +591,8 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
 
     # 🔁 FALLBACK TO NPM
     try:
-        logger.info("📦 Running npm ci fallback...")
-        print("📦 [DEPS] Running npm ci fallback...")
+        logger.info("📦 Running optimized npm ci...")
+        print("📦 [DEPS] Running optimized npm ci...")
 
         result = subprocess.run(
             ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
@@ -583,10 +605,10 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         )
 
         if result.returncode == 0:
-            logger.info("✅ npm install successful (fallback)")
-            print("✅ [DEPS] npm ci successful (fallback)")
+            logger.info("✅ npm ci successful (optimized)")
+            print("✅ [DEPS] npm ci successful (optimized)")
             print("=" * 60)
-            return True, "npm ci successful (fallback)"
+            return True, "npm ci successful (optimized)"
 
         logger.error(f"❌ npm ci failed with code {result.returncode}")
         print(f"❌ [DEPS] npm ci failed with code {result.returncode}")
@@ -596,10 +618,10 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         return False, f"npm ci failed: {result.stderr}"
 
     except Exception as e:
-        logger.error(f"❌ npm fallback error: {e}")
-        print(f"❌ [DEPS] npm fallback error: {e}")
+        logger.error(f"❌ npm ci error: {e}")
+        print(f"❌ [DEPS] npm ci error: {e}")
         print("=" * 60)
-        return False, f"npm fallback error: {e}"
+        return False, f"npm ci error: {e}"
 
 
 def safe_snapshot(snapshot_manager: ACPSnapshotManager, max_retries: int = 1) -> Tuple[bool, str]:

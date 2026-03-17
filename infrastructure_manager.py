@@ -527,10 +527,10 @@ class ServiceManager:
             
             logger.info(f"[BUILD] Cleaned {caches_cleaned} Vite cache directories")
             
-            # Install dependencies before build
+            # Install dependencies before build (use npm ci for speed)
             logger.info("[BUILD] Installing frontend dependencies...")
             install_result = subprocess.run(
-                ["npm", "install"],
+                ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
                 capture_output=True,
                 text=True,
                 timeout=600,  # 10 minutes
@@ -655,9 +655,9 @@ class ServiceManager:
                                 except Exception as cache_err:
                                     logger.warning(f"⚠️ Could not clean cache {cache_path}: {cache_err}")
                         
-                        # Install dependencies
+                        # Install dependencies (use npm ci for speed)
                         install_result = subprocess.run(
-                            ["npm", "install"],
+                            ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
                             capture_output=True,
                             text=True,
                             timeout=300,
@@ -1691,20 +1691,16 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                     logger.warning(f"⚠️ Could not clean .vite cache: {e}")
             
             logger.info(f"✓ Cleaned {caches_cleaned} Vite cache directories")
-            
-            # Step 2: Remove existing node_modules for clean install
-            logger.info("🧹 Removing existing node_modules for clean install...")
-            if node_modules_path.exists():
-                try:
-                    shutil.rmtree(node_modules_path)
-                    logger.info("✓ Removed existing node_modules")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not remove node_modules: {e}")
-            
-            # Step 2: npm install with dev dependencies
-            logger.info(f"[BUILD] Running npm install in {frontend_path}")
+
+            # ⚡ Skip npm install if node_modules exists (optimized caching)
+            if node_modules_path.exists() and (node_modules_path / ".package-lock.json").exists():
+                logger.info("⚡ Skipping npm install (node_modules exists and cached)")
+                install_result = type('obj', (object,), {'returncode': 0, 'stderr': ''})
+            else:
+                # Step 2: npm ci with dev dependencies (optimized)
+                logger.info(f"[BUILD] Running npm ci in {frontend_path}")
             install_result = subprocess.run(
-                ["npm", "install", "--include=dev", "--legacy-peer-deps"],
+                ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
                 cwd=str(frontend_path),
                 env=env,
                 capture_output=True,
