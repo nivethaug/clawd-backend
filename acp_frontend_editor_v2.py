@@ -511,11 +511,11 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         logger.info("⚡ Trying pnpm install...")
         print("⚡ [DEPS] Trying pnpm install (fast mode)...")
         
-        # Don't capture output - let it stream directly to avoid buffer issues
-        # pnpm produces large output that can cause buffer overflows in subprocess
+        # Use shell=True to run in same environment as CLI
+        # This avoids PM2/subprocess environment differences
         result = subprocess.run(
-            ["pnpm", "install"],
-            cwd=str(frontend_path),
+            f"cd '{frontend_path}' && pnpm install",
+            shell=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
