@@ -24,7 +24,114 @@ src/
 ├── layout/          # Layout wrappers
 ├── hooks/           # Custom React hooks
 ├── lib/             # Utility functions
+│   └── api-config.ts  # API endpoints configuration
+├── services/        # API service layer
+│   └── database.ts  # Backend API client
 └── index.css        # Global styles
+```
+
+---
+
+## 🌐 API Integration
+
+### API Configuration
+
+**File:** `src/lib/api-config.ts`
+
+Central configuration for all API endpoints. Base URL uses `{domain}` placeholder that gets replaced during deployment.
+
+```typescript
+import { API_ENDPOINTS, getApiUrl } from "@/lib/api-config";
+
+// Get full URL for an endpoint
+const loginUrl = getApiUrl(API_ENDPOINTS.auth.login);
+// → "https://{domain}-api.dreambigwithai.com/api/auth/login"
+```
+
+**Available Endpoints:**
+| Endpoint | Path |
+|----------|------|
+| Health | `/health` |
+| Auth Register | `/api/auth/register` |
+| Auth Login | `/api/auth/login` |
+| Auth Logout | `/api/auth/logout` |
+| Auth Me | `/api/auth/me` |
+| Users Profile | `/api/users/profile` |
+
+### Database Service
+
+**File:** `src/services/database.ts`
+
+Service layer for backend API communication with built-in auth token handling.
+
+```typescript
+import { authService, userService, healthService } from "@/services/database";
+
+// Health check
+const { success, data } = await healthService.check();
+
+// Login
+const result = await authService.login(email, password);
+if (result.success && result.data) {
+  localStorage.setItem("auth_token", result.data.token);
+}
+
+// Get user profile
+const { data: user } = await userService.getProfile();
+
+// Create CRUD service for any resource
+const postsService = createCrudService<Post>("posts");
+const { data: posts } = await postsService.list({ page: 1 });
+```
+
+**Available Services:**
+| Service | Methods |
+|---------|---------|
+| `healthService` | `check()` |
+| `authService` | `register()`, `login()`, `logout()`, `me()`, `refresh()` |
+| `userService` | `getProfile()`, `updateProfile()`, `getById()`, `list()` |
+| `createCrudService<T>()` | `list()`, `getById()`, `create()`, `update()`, `delete()` |
+
+### How to Call Backend API
+
+**Option 1: Use Pre-built Services (Recommended)**
+```typescript
+import { authService } from "@/services/database";
+
+const handleLogin = async (email: string, password: string) => {
+  const result = await authService.login(email, password);
+  if (result.success) {
+    // Token automatically stored, user data in result.data
+  }
+};
+```
+
+**Option 2: Use Generic API Helper**
+```typescript
+import { api } from "@/services/database";
+import { API_ENDPOINTS } from "@/lib/api-config";
+
+const customCall = async () => {
+  const result = await api.post("/api/custom-endpoint", { data });
+};
+```
+
+**Option 3: Create New Service**
+```typescript
+import { createCrudService } from "@/services/database";
+
+interface Product {
+  id: number;
+  name: string;
+  price: number;
+}
+
+const productService = createCrudService<Product>("products");
+
+// Now you have:
+// productService.list(), productService.getById(id)
+// productService.create(data), productService.update(id, data)
+// productService.delete(id)
 ```
 
 ---
