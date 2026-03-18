@@ -395,13 +395,16 @@ class ServiceManager:
             backend_port = port if port else 8000
 
             # FIX 1: Create ecosystem config with venv interpreter
+            # Use uvicorn directly from venv for PM2 compatibility
+            venv_uvicorn = f"{self.venv_path}/bin/uvicorn"
+            
             ecosystem_config = {
                 "apps": [{
                     "name": app_name,
-                    "script": venv_python,
-                    "args": f"-m uvicorn main:app --host 0.0.0.0 --port {backend_port}",
+                    "script": venv_uvicorn,
+                    "args": f"main:app --host 0.0.0.0 --port {backend_port}",
                     "cwd": str(backend_path),
-                    "interpreter": venv_python,
+                    "interpreter": "none",
                     "instances": 1,
                     "exec_mode": "fork",
                     "watch": False,
