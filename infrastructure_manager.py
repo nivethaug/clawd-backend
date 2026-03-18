@@ -350,14 +350,6 @@ class ServiceManager:
             logger.info(f"[SERVICE] Backend working directory: {backend_path}")
             logger.info(f"[SERVICE] Backend port: {port}")
 
-            # FIX 3: Validate main.py exists before attempting to start
-            main_py_path = backend_path / "main.py"
-            if not main_py_path.exists():
-                logger.error(f"[SERVICE] ❌ main.py not found at {main_py_path}")
-                logger.error(f"[SERVICE] Backend directory contents: {list(backend_path.iterdir()) if backend_path.exists() else 'N/A'}")
-                return False
-            logger.info(f"[SERVICE] ✓ main.py found at {main_py_path}")
-
             # FIX 1: Use shared venv for dependency installation
             venv_python = f"{self.venv_path}/bin/python"
             venv_pip = f"{self.venv_path}/bin/pip"
@@ -369,6 +361,32 @@ class ServiceManager:
                 venv_pip = "pip"
             else:
                 logger.info(f"[SERVICE] Using venv Python: {venv_python}")
+
+            # FIX 3: Validate main.py exists and has 'app' object
+            main_py_path = backend_path / "main.py"
+            if not main_py_path.exists():
+                logger.error(f"[SERVICE] ❌ main.py not found at {main_py_path}")
+                logger.error(f"[SERVICE] Backend directory contents: {list(backend_path.iterdir()) if backend_path.exists() else 'N/A'}")
+                return False
+            logger.info(f"[SERVICE] ✓ main.py found at {main_py_path}")
+            
+            # Validate main.py has 'app' object by attempting import check
+            try:
+                import_check = subprocess.run(
+                    [venv_python, "-c", "import sys; sys.path.insert(0, '.'); from main import app; print('app found:', type(app).__name__)"],
+                    cwd=str(backend_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if import_check.returncode != 0:
+                    logger.error(f"[SERVICE] ❌ main.py does not have valid 'app' object")
+                    logger.error(f"[SERVICE] Import check stdout: {import_check.stdout[:500]}")
+                    logger.error(f"[SERVICE] Import check stderr: {import_check.stderr[:500]}")
+                    return False
+                logger.info(f"[SERVICE] ✓ main.py app validation passed: {import_check.stdout.strip()}")
+            except Exception as e:
+                logger.warning(f"[SERVICE] Could not validate main.py app object: {e}")
 
             # Install Python dependencies first
             requirements_path = backend_path / "requirements.txt"
@@ -455,21 +473,21 @@ class ServiceManager:
 
             # FIX 2: Check PM2 logs immediately for startup errors
             pm2_logs = subprocess.run(
-                ["pm2", "logs", app_name, "--lines", "50", "--nostream"],
+                ["pm2", "logs", app_name, "--lines", "100", "--nostream"],
                 capture_output=True,
                 text=True
             )
             
             # Check for common error patterns in logs
             if pm2_logs.stdout:
-                error_patterns = ["Error", "Exception", "ModuleNotFoundError", "ImportError", "Traceback"]
+                error_patterns = ["Error", "Exception", "ModuleNotFoundError", "ImportError", "Traceback", "AssertionError", "FileNotFound"]
                 has_errors = any(pattern in pm2_logs.stdout for pattern in error_patterns)
                 
                 if has_errors:
                     logger.error(f"[SERVICE] ❌ Backend startup errors detected in PM2 logs:")
-                    logger.error(f"[SERVICE] PM2 logs for {app_name}:\n{pm2_logs.stdout[:2000]}")
+                    logger.error(f"[SERVICE] PM2 logs for {app_name}:\n{pm2_logs.stdout[:3000]}")
                     if pm2_logs.stderr:
-                        logger.error(f"[SERVICE] PM2 stderr:\n{pm2_logs.stderr[:500]}")
+                        logger.error(f"[SERVICE] PM2 stderr:\n{pm2_logs.stderr[:1000]}")
                     return False
                 else:
                     logger.info(f"[SERVICE] ✓ No startup errors in PM2 logs")
@@ -502,11 +520,13 @@ class ServiceManager:
             # FIX 2: Capture PM2 logs on error for debugging
             try:
                 error_logs = subprocess.run(
-                    ["pm2", "logs", app_name, "--lines", "30", "--nostream"],
+                    ["pm2", "logs", app_name, "--lines", "100", "--nostream"],
                     capture_output=True,
                     text=True
                 )
-                logger.error(f"[SERVICE] PM2 error logs:\n{error_logs.stdout[:1500]}")
+                logger.error(f"[SERVICE] PM2 error logs:\n{error_logs.stdout[:3000]}")
+                if error_logs.stderr:
+                    logger.error(f"[SERVICE] PM2 stderr:\n{error_logs.stderr[:1000]}")
             except Exception:
                 pass
             return False
