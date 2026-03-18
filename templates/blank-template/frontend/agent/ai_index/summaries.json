@@ -1,0 +1,10 @@
+{
+  "src/App.tsx": "Root application component. Sets up React Query, TooltipProvider, Toast notifications, and React Router. Defines all routes with Layout wrapper and nested pages.",
+  "src/main.tsx": "Application entry point. Renders the App component into the root DOM element.",
+  "src/pages/Welcome.tsx": "Landing page with centered layout, title, description, and CTA button. Uses Shadcn Button component.",
+  "src/pages/NotFound.tsx": "404 error page for unmatched routes.",
+  "src/layout/Layout.tsx": "Main layout wrapper using React Router Outlet. Provides structure for sidebar/header placement. Full viewport height with scrollable main content.",
+  "src/lib/utils.ts": "Utility function cn() for merging Tailwind CSS classes using clsx and tailwind-merge.",
+  "src/index.css": "Global CSS with Tailwind directives and CSS variables for theming.",
+  "src/components/ui/": "Shadcn UI primitives - DO NOT MODIFY. Use these components but don't edit them."
+}

@@ -1,0 +1,47 @@
+{
+  "src/main.tsx": {
+    "imports": ["react-dom/client", "./App.tsx", "./index.css"],
+    "imported_by": [],
+    "description": "Entry point - no other files depend on it"
+  },
+  "src/App.tsx": {
+    "imports": [
+      "react",
+      "@/components/ui/toaster",
+      "@/components/ui/sonner",
+      "@/components/ui/tooltip",
+      "@tanstack/react-query",
+      "react-router-dom",
+      "./layout/Layout",
+      "./pages/Welcome",
+      "./pages/NotFound"
+    ],
+    "imported_by": ["src/main.tsx"],
+    "description": "Root component - all pages and layouts imported here"
+  },
+  "src/pages/Welcome.tsx": {
+    "imports": ["@/components/ui/button"],
+    "imported_by": ["src/App.tsx"],
+    "description": "Welcome page"
+  },
+  "src/pages/NotFound.tsx": {
+    "imports": [],
+    "imported_by": ["src/App.tsx"],
+    "description": "404 page"
+  },
+  "src/layout/Layout.tsx": {
+    "imports": ["react-router-dom"],
+    "imported_by": ["src/App.tsx"],
+    "description": "Main layout wrapper"
+  },
+  "src/lib/utils.ts": {
+    "imports": ["clsx", "tailwind-merge"],
+    "imported_by": ["components/ui/*"],
+    "description": "Utility function used by UI components"
+  },
+  "src/index.css": {
+    "imports": ["tailwindcss"],
+    "imported_by": [],
+    "description": "Global styles with Tailwind directives"
+  }
+}

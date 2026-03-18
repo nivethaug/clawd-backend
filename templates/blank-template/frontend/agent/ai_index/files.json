@@ -1,0 +1,50 @@
+{
+  "src/App.tsx": {
+    "lines": 31,
+    "language": "typescript",
+    "purpose": "root",
+    "routes": [
+      {"path": "/", "component": "Welcome"},
+      {"path": "*", "component": "NotFound"}
+    ],
+    "has_layout": true
+  },
+  "src/main.tsx": {
+    "lines": 5,
+    "language": "typescript",
+    "purpose": "entry"
+  },
+  "src/pages/Welcome.tsx": {
+    "lines": 15,
+    "language": "typescript",
+    "purpose": "page",
+    "route": "/"
+  },
+  "src/pages/NotFound.tsx": {
+    "lines": 10,
+    "language": "typescript",
+    "purpose": "page",
+    "route": "*"
+  },
+  "src/layout/Layout.tsx": {
+    "lines": 32,
+    "language": "typescript",
+    "purpose": "layout"
+  },
+  "src/lib/utils.ts": {
+    "lines": 6,
+    "language": "typescript",
+    "purpose": "utility"
+  },
+  "src/index.css": {
+    "lines": 100,
+    "language": "css",
+    "purpose": "styles"
+  },
+  "package.json": {
+    "lines": 50,
+    "language": "json",
+    "purpose": "config",
+    "scripts": ["dev", "build", "preview", "lint"]
+  }
+}

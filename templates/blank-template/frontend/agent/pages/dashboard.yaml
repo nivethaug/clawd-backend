@@ -1,0 +1,6 @@
+# Sample page definition
+path: /dashboard
+component: Dashboard
+auth: required
+layout: Layout
+description: Main dashboard page after login

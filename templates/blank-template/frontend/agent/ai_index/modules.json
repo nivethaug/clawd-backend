@@ -1,0 +1,41 @@
+{
+  "pages": {
+    "files": [
+      "src/pages/Welcome.tsx",
+      "src/pages/NotFound.tsx"
+    ],
+    "description": "Page components that are route targets"
+  },
+  "components": {
+    "files": [
+      "src/components/"
+    ],
+    "description": "Reusable UI components (not pages)"
+  },
+  "layout": {
+    "files": [
+      "src/layout/Layout.tsx"
+    ],
+    "description": "Layout wrappers for page structure"
+  },
+  "hooks": {
+    "files": [
+      "src/hooks/"
+    ],
+    "description": "Custom React hooks"
+  },
+  "lib": {
+    "files": [
+      "src/lib/utils.ts"
+    ],
+    "description": "Utility functions and helpers"
+  },
+  "core": {
+    "files": [
+      "src/App.tsx",
+      "src/main.tsx",
+      "src/index.css"
+    ],
+    "description": "Application entry points and configuration"
+  }
+}
