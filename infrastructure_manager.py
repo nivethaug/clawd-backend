@@ -203,8 +203,9 @@ class DatabaseProvisioner:
             return []
 
     def _generate_password(self, length: int = 32) -> str:
-        """Generate secure random password."""
-        chars = string.ascii_letters + string.digits + "!@#$%^&*"
+        """Generate secure random password (alphanumeric only for URL safety)."""
+        # Only use alphanumeric chars to avoid URL encoding issues in DATABASE_URL
+        chars = string.ascii_letters + string.digits
         return ''.join(random.choice(chars) for _ in range(length))
 
     def create_database_and_user(self, project_name: str) -> Dict[str, str]:
