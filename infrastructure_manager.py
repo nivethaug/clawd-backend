@@ -1490,6 +1490,7 @@ class InfrastructureManager:
             # Phase 3: Configure backend environment
             logger.info("Phase 3/8: Backend environment configuration")
             self._configure_backend_env()
+            self._update_agent_readme()
             logger.info("✓ Backend environment configured")
 
             # Phase 4: Create service config
@@ -2233,6 +2234,29 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
         except Exception as e:
             logger.error(f"Failed to configure backend env: {e}")
             raise
+
+    def _update_agent_readme(self):
+        """Replace {domain} placeholder in agent/README.md with actual domain."""
+        try:
+            readme_path = self.project_path / "backend" / "agent" / "README.md"
+            
+            if not readme_path.exists():
+                logger.info(f"agent/README.md not found, skipping placeholder update")
+                return
+            
+            content = readme_path.read_text(encoding="utf-8")
+            
+            # Replace {domain} placeholder with actual domain
+            if "{domain}" in content:
+                content = content.replace("{domain}", self.domain)
+                readme_path.write_text(content, encoding="utf-8")
+                logger.info(f"✓ Updated agent/README.md: {{domain}} → {self.domain}")
+            else:
+                logger.info(f"agent/README.md has no {{domain}} placeholder (already updated)")
+
+        except Exception as e:
+            logger.warning(f"Failed to update agent/README.md: {e}")
+            # Don't raise - this is not critical for deployment
 
     def _save_metadata(self):
         """Save project metadata to project.json."""
