@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Database schema for DreamPilot backend - helps agents understand and modify database structure",
+  "maintenance": "MANUAL - Update this file whenever database schema changes. Follow schema_validation checklist.",
   "version": "1.0.0",
   "last_updated": "2026-03-18",
   
@@ -61,7 +62,9 @@
         "3. Set __tablename__ to lowercase with underscores",
         "4. Define columns with proper types and constraints",
         "5. Import model in models/__init__.py",
-        "6. Restart backend - tables auto-create via init_db()"
+        "6. UPDATE THIS JSON FILE - add entry to tables section",
+        "7. Update last_updated date above",
+        "8. Restart backend - tables auto-create via init_db()"
       ],
       "template": {
         "file": "models/user.py",
@@ -71,11 +74,12 @@
 
     "add_column": {
       "steps": [
-        "1. Add Column definition to model class",
+        "1. Add Column definition to model class in models/*.py",
         "2. Create Alembic migration: alembic revision --autogenerate -m 'description'",
         "3. Apply migration: alembic upgrade head",
-        "4. Update this JSON file with new column",
-        "5. Restart backend"
+        "4. UPDATE THIS JSON FILE - add column to tables.{table_name}.columns",
+        "5. Update last_updated date above",
+        "6. Restart backend"
       ],
       "example": "phone = Column(String(20))"
     },
@@ -86,7 +90,8 @@
         "2. Add relationship() to child model",
         "3. Add back_populates relationship to parent model",
         "4. Create and apply migration",
-        "5. Update this JSON file"
+        "5. UPDATE THIS JSON FILE - add to tables.{table}.relationships",
+        "6. Update last_updated date above"
       ],
       "example": {
         "foreign_key": "user_id = Column(Integer, ForeignKey('users.id'))",
@@ -141,8 +146,9 @@
     "after_changes": [
       "Test model imports work",
       "Verify migration applied",
-      "Update this JSON file",
+      "UPDATE THIS JSON FILE with new tables/columns/relationships",
       "Restart backend service"
-    ]
+    ],
+    "note": "This file must stay in sync with models/*.py - manual updates required"
   }
 }
