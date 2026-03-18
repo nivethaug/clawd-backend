@@ -2053,6 +2053,38 @@ Make your changes directly to files.
 Do NOT request JSON output or any specific format.
 
 Just implement the changes using your available tools.
+
+🚨 POST-BUILD: UPDATE AI INDEX (MANDATORY) 🚨
+
+After npm run build succeeds, you MUST update the AI index files:
+
+1. Update agent/ai_index/symbols.json:
+   - Add new components/pages with file path and line numbers
+   - Update line numbers for modified files
+
+2. Update agent/ai_index/files.json:
+   - Add new file entries with line count and purpose
+   - Update routes array in App.tsx entry
+
+3. Update agent/ai_index/dependencies.json:
+   - Add new import relationships
+
+4. Update agent/ai_index/summaries.json:
+   - Add brief description for new files
+
+Quick update example for symbols.json:
+```json
+"NewPage": {{
+  "type": "component",
+  "file": "src/pages/NewPage.tsx",
+  "start_line": 1,
+  "end_line": 50,
+  "module": "pages",
+  "description": "New page description"
+}}
+```
+
+AI index keeps the codebase navigable for future AI edits.
 """
 
     def _build_page_templates_section(self, required_pages: List[str], goal_description: str) -> str:
