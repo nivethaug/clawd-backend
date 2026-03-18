@@ -1491,6 +1491,7 @@ class InfrastructureManager:
             logger.info("Phase 3/8: Backend environment configuration")
             self._configure_backend_env()
             self._update_agent_readme()
+            self._update_frontend_api_config()
             logger.info("✓ Backend environment configured")
 
             # Phase 4: Create service config
@@ -2256,6 +2257,29 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
 
         except Exception as e:
             logger.warning(f"Failed to update agent/README.md: {e}")
+            # Don't raise - this is not critical for deployment
+
+    def _update_frontend_api_config(self):
+        """Replace {domain} placeholder in frontend API config with actual domain."""
+        try:
+            api_config_path = self.project_path / "frontend" / "src" / "lib" / "api-config.ts"
+            
+            if not api_config_path.exists():
+                logger.info(f"frontend/src/lib/api-config.ts not found, skipping placeholder update")
+                return
+            
+            content = api_config_path.read_text(encoding="utf-8")
+            
+            # Replace {domain} placeholder with actual domain
+            if "{domain}" in content:
+                content = content.replace("{domain}", self.domain)
+                api_config_path.write_text(content, encoding="utf-8")
+                logger.info(f"✓ Updated frontend api-config.ts: {{domain}} → {self.domain}")
+            else:
+                logger.info(f"api-config.ts has no {{domain}} placeholder (already updated)")
+
+        except Exception as e:
+            logger.warning(f"Failed to update frontend api-config.ts: {e}")
             # Don't raise - this is not critical for deployment
 
     def _save_metadata(self):

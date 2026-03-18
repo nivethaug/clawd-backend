@@ -95,6 +95,34 @@ def update_agent_readme(domain: str):
         return False
 
 
+def update_frontend_api_config(domain: str):
+    """Replace {domain} placeholder in frontend/src/lib/api-config.ts with actual domain"""
+    print("\n" + "="*50)
+    print("UPDATE FRONTEND API CONFIG")
+    print("="*50)
+    
+    api_config_path = Path("../frontend/src/lib/api-config.ts")
+    if not api_config_path.exists():
+        print("⚠ frontend/src/lib/api-config.ts not found, skipping")
+        return True
+    
+    try:
+        content = api_config_path.read_text(encoding="utf-8")
+        
+        # Replace {domain} placeholder
+        if "{domain}" in content:
+            content = content.replace("{domain}", domain)
+            api_config_path.write_text(content, encoding="utf-8")
+            print(f"✓ Replaced {{domain}} → {domain} in frontend/src/lib/api-config.ts")
+        else:
+            print("⚠ No {domain} placeholder found in api-config.ts")
+        
+        return True
+    except Exception as e:
+        print(f"✗ Failed to update frontend api-config.ts: {e}")
+        return False
+
+
 def run_migrations():
     """Run database migrations if alembic is configured"""
     print("\n" + "="*50)
@@ -144,9 +172,10 @@ def main():
         restart_pm2(args.project_name)
         reload_nginx()
     
-    # Step 5: Update agent README with actual domain (if provided)
+    # Step 5: Update placeholders with actual domain (if provided)
     if args.domain and success:
         update_agent_readme(args.domain)
+        update_frontend_api_config(args.domain)
     
     print("\n" + "="*50)
     if success:
