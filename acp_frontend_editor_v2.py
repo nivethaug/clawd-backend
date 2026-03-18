@@ -2202,10 +2202,10 @@ AI index keeps the codebase navigable for future AI edits.
         import signal
         
         try:
-            # Step 1: Get all child PIDs
-            child_pids = []
+            # Step 1: Get all descendant PIDs (recursive, not just direct children)
+            all_pids = []
             try:
-                # Use pgrep to find child processes
+                # Use pgrep -P recursively to find all descendants
                 result = subprocess.run(
                     ["pgrep", "-P", str(pid)],
                     capture_output=True,
@@ -2213,37 +2213,67 @@ AI index keeps the codebase navigable for future AI edits.
                     timeout=2
                 )
                 if result.returncode == 0:
-                    child_pids = [int(p.strip()) for p in result.stdout.strip().split('\n') if p.strip()]
-                    logger.info(f"[ACPX-V2] Found {len(child_pids)} child processes to kill")
+                    direct_children = [int(p.strip()) for p in result.stdout.strip().split('\n') if p.strip()]
+                    all_pids.extend(direct_children)
+                    
+                    # Recursively find children of children
+                    for child_pid in direct_children:
+                        try:
+                            child_result = subprocess.run(
+                                ["pgrep", "-P", str(child_pid)],
+                                capture_output=True,
+                                text=True,
+                                timeout=1
+                            )
+                            if child_result.returncode == 0:
+                                grandchildren = [int(p.strip()) for p in child_result.stdout.strip().split('\n') if p.strip()]
+                                all_pids.extend(grandchildren)
+                        except Exception:
+                            pass
+                    
+                    logger.info(f"[ACPX-V2] Found {len(all_pids)} descendant processes to kill")
             except Exception as e:
-                logger.warning(f"[ACPX-V2] Failed to get child PIDs: {e}")
+                logger.warning(f"[ACPX-V2] Failed to get descendant PIDs: {e}")
             
-            # Step 2: Kill all children first (SIGKILL)
-            for child_pid in child_pids:
-                try:
-                    os.kill(child_pid, signal.SIGKILL)
-                    logger.info(f"[ACPX-V2] Killed child process {child_pid}")
-                except (ProcessLookupError, OSError) as e:
-                    logger.debug(f"[ACPX-V2] Child process {child_pid} already dead: {e}")
-            
-            # Step 3: Kill main process (SIGKILL)
-            try:
-                os.kill(pid, signal.SIGKILL)
-                logger.info(f"[ACPX-V2] Killed main process {pid}")
-            except (ProcessLookupError, OSError) as e:
-                logger.debug(f"[ACPX-V2] Main process {pid} already dead: {e}")
-            
-            # Step 4: Kill process group (belt and suspenders)
+            # Step 2: Kill process group first (most reliable for spawned processes)
             try:
                 os.killpg(pid, signal.SIGKILL)
                 logger.info(f"[ACPX-V2] Killed process group {pid}")
             except (ProcessLookupError, OSError, AttributeError) as e:
                 logger.debug(f"[ACPX-V2] Process group kill skipped: {e}")
             
-            # Step 5: Verify all processes are dead
+            # Step 3: Kill all descendants (SIGKILL)
+            for child_pid in all_pids:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                    logger.info(f"[ACPX-V2] Killed descendant process {child_pid}")
+                except (ProcessLookupError, OSError) as e:
+                    logger.debug(f"[ACPX-V2] Descendant process {child_pid} already dead: {e}")
+            
+            # Step 4: Kill main process (SIGKILL)
+            try:
+                os.kill(pid, signal.SIGKILL)
+                logger.info(f"[ACPX-V2] Killed main process {pid}")
+            except (ProcessLookupError, OSError) as e:
+                logger.debug(f"[ACPX-V2] Main process {pid} already dead: {e}")
+            
+            # Step 5: Use pkill as fallback for claude-agent-acp processes
+            try:
+                result = subprocess.run(
+                    ["pkill", "-9", "-f", "claude-agent-acp"],
+                    capture_output=True,
+                    text=True,
+                    timeout=3
+                )
+                if result.returncode == 0:
+                    logger.info(f"[ACPX-V2] Killed orphan claude-agent-acp processes via pkill")
+            except Exception as e:
+                logger.debug(f"[ACPX-V2] pkill fallback skipped: {e}")
+            
+            # Step 6: Verify all processes are dead
             time.sleep(0.5)
-            all_pids = [pid] + child_pids
-            for check_pid in all_pids:
+            check_pids = [pid] + all_pids
+            for check_pid in check_pids:
                 try:
                     os.kill(check_pid, 0)  # Check if process exists
                     logger.error(f"[ACPX-V2] ⚠️  Process {check_pid} STILL ALIVE after SIGKILL!")
