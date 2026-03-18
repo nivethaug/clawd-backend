@@ -238,6 +238,19 @@ class DatabaseProvisioner:
             )
             # logger.info(f"✓ Privileges granted to {username}")  # Commented for cleaner logs
 
+            # Grant schema permissions (required for PostgreSQL 15+)
+            # Connect to the specific database and grant schema permissions
+            self._execute_sql(
+                f'GRANT ALL ON SCHEMA public TO "{username}";',
+                database_name=db_name
+            )
+            # Also grant table creation permissions
+            self._execute_sql(
+                f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{username}";',
+                database_name=db_name
+            )
+            logger.info(f"✓ Schema privileges granted to {username} on {db_name}")
+
             return {
                 "database_name": db_name,
                 "username": username,
@@ -450,6 +463,7 @@ class ServiceManager:
             ecosystem_path = backend_path / "ecosystem.config.json"
             ecosystem_path.write_text(json.dumps(ecosystem_config, indent=2))
             logger.info(f"[SERVICE] Ecosystem config written to {ecosystem_path}")
+            logger.info(f"[SERVICE] Environment variables: {env_vars}")
 
             # Start FastAPI backend using ecosystem config
             backend_cmd = [
