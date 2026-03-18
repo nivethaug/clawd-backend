@@ -6,8 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from ..core.database import get_db
-from ..services.auth_service import AuthService
+from core.database import get_db
+from services.auth_service import AuthService
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 

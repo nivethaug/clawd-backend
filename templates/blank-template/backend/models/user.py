@@ -2,7 +2,7 @@
 User model for DreamPilot backend.
 """
 from sqlalchemy import Column, Integer, String
-from ..core.database import Base
+from core.database import Base
 
 
 class User(Base):

@@ -3,7 +3,7 @@ Authentication service for DreamPilot backend.
 """
 import bcrypt
 from sqlalchemy.orm import Session
-from ..models.user import User
+from models.user import User
 
 
 class AuthService:
