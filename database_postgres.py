@@ -395,15 +395,17 @@ def delete_project_database(project_name: str, force: bool = False) -> Dict[str,
             cur.execute("SET statement_timeout = 60000")
             logger.debug(f"✓ Set statement timeout: 60s")
             
-            # Drop user (if exists)
+            # Drop user (if exists) - use sql.SQL().format() for proper identifier handling
             try:
-                cur.execute(sql.SQL(f"DROP USER IF EXISTS {sql.Identifier(db_user)}"))
+                drop_user_sql = sql.SQL("DROP USER IF EXISTS {}").format(sql.Identifier(db_user))
+                cur.execute(drop_user_sql)
                 logger.info(f"✓ Dropped user: {db_user}")
             except Exception as e:
                 logger.warning(f"User drop warning: {e}")
             
-            # Drop database (if exists)
-            cur.execute(sql.SQL(f"DROP DATABASE IF EXISTS {sql.Identifier(db_name)}"))
+            # Drop database (if exists) - use sql.SQL().format() for proper identifier handling
+            drop_db_sql = sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name))
+            cur.execute(drop_db_sql)
             logger.info(f"✓ Dropped database: {db_name}")
             conn.commit()
             
