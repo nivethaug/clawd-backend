@@ -2,6 +2,95 @@
 
 This folder helps AI assistants understand and modify the codebase efficiently.
 
+---
+
+## 🗄️ Database Connection Details (CRITICAL)
+
+### Environment Variables
+
+The backend receives these environment variables from PM2:
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql://learninggrid_user:AbC123@postgres:5432/learninggrid_db` | Full connection string |
+| `PORT` | `8010` | Backend port |
+| `PROJECT_NAME` | `LearningGrid` | Project name |
+| `HOST` | `0.0.0.0` | Bind address |
+
+### Database Configuration
+
+**File:** `core/config.py`
+
+```python
+class Settings:
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql://postgres:postgres@localhost:5432/dreampilot"  # Fallback
+    )
+```
+
+### Database Naming Convention
+
+```
+Project: "LearningGrid"
+├── Database: learninggrid_db (lowercase, hyphens → underscores)
+├── Username: learninggrid_user
+└── Password: 32-char alphanumeric (no special chars)
+```
+
+**⚠️ Important:** Database names are ALWAYS lowercase to avoid PostgreSQL case-sensitivity issues.
+
+### DATABASE_URL Format
+
+```
+postgresql://{username}:{password}@{host}:{port}/{database}
+```
+
+| Component | Source |
+|-----------|--------|
+| `username` | `{project_name}_user` (lowercase) |
+| `password` | 32-char alphanumeric |
+| `host` | `postgres` (Docker) or `localhost` |
+| `port` | `5432` |
+| `database` | `{project_name}_db` (lowercase) |
+
+### Testing Database Connection
+
+**From Backend:**
+```python
+from core.database import engine
+from sqlalchemy import text
+
+with engine.connect() as conn:
+    result = conn.execute(text("SELECT current_database(), current_user"))
+    print(result.fetchone())
+```
+
+**From Server:**
+```bash
+docker exec -it postgres psql -U learninggrid_user -d learninggrid_db
+```
+
+### Common Database Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `password authentication failed` | Wrong credentials | Check DATABASE_URL in ecosystem.config.json |
+| `database "X" does not exist` | DB not created | Check infrastructure_manager.py logs |
+| `permission denied for schema public` | PG 15+ permissions | Schema grant required |
+| `relation "users" does not exist` | Tables not created | Check init_db() runs on startup |
+
+### PostgreSQL Schema Permissions (PG 15+)
+
+PostgreSQL 15+ requires explicit schema permissions:
+
+```sql
+GRANT ALL ON SCHEMA public TO "learninggrid_user";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "learninggrid_user";
+```
+
+---
+
 ## AI Index Files
 
 | File | Purpose | When to Update |
