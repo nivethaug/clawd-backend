@@ -362,33 +362,15 @@ class ServiceManager:
             else:
                 logger.info(f"[SERVICE] Using venv Python: {venv_python}")
 
-            # FIX 3: Validate main.py exists and has 'app' object
+            # FIX 3: Validate main.py exists
             main_py_path = backend_path / "main.py"
             if not main_py_path.exists():
                 logger.error(f"[SERVICE] ❌ main.py not found at {main_py_path}")
                 logger.error(f"[SERVICE] Backend directory contents: {list(backend_path.iterdir()) if backend_path.exists() else 'N/A'}")
                 return False
             logger.info(f"[SERVICE] ✓ main.py found at {main_py_path}")
-            
-            # Validate main.py has 'app' object by attempting import check
-            try:
-                import_check = subprocess.run(
-                    [venv_python, "-c", "import sys; sys.path.insert(0, '.'); from main import app; print('app found:', type(app).__name__)"],
-                    cwd=str(backend_path),
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                if import_check.returncode != 0:
-                    logger.error(f"[SERVICE] ❌ main.py does not have valid 'app' object")
-                    logger.error(f"[SERVICE] Import check stdout: {import_check.stdout[:1000]}")
-                    logger.error(f"[SERVICE] Import check stderr:\n{import_check.stderr[:2000]}")
-                    return False
-                logger.info(f"[SERVICE] ✓ main.py app validation passed: {import_check.stdout.strip()}")
-            except Exception as e:
-                logger.warning(f"[SERVICE] Could not validate main.py app object: {e}")
 
-            # Install Python dependencies first
+            # Install Python dependencies FIRST (before import validation)
             requirements_path = backend_path / "requirements.txt"
             if requirements_path.exists():
                 logger.info("[SERVICE] Installing Python dependencies from requirements.txt...")
@@ -408,6 +390,24 @@ class ServiceManager:
                     return False
             else:
                 logger.warning(f"[SERVICE] No requirements.txt found at {requirements_path}")
+            
+            # Validate main.py has 'app' object AFTER dependencies are installed
+            try:
+                import_check = subprocess.run(
+                    [venv_python, "-c", "import sys; sys.path.insert(0, '.'); from main import app; print('app found:', type(app).__name__)"],
+                    cwd=str(backend_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if import_check.returncode != 0:
+                    logger.error(f"[SERVICE] ❌ main.py does not have valid 'app' object")
+                    logger.error(f"[SERVICE] Import check stdout: {import_check.stdout[:1000]}")
+                    logger.error(f"[SERVICE] Import check stderr:\n{import_check.stderr[:2000]}")
+                    return False
+                logger.info(f"[SERVICE] ✓ main.py app validation passed: {import_check.stdout.strip()}")
+            except Exception as e:
+                logger.warning(f"[SERVICE] Could not validate main.py app object: {e}")
 
             # Prepare backend port
             backend_port = port if port else 8000
