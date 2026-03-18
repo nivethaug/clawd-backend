@@ -168,12 +168,12 @@ class DatabaseProvisioner:
         """
         return name.replace("-", "_").lower()
 
-    def _execute_sql(self, sql: str, database_name: str = "defaultdb", check_success: bool = False) -> Tuple[bool, List[Tuple]]:
+    def _execute_sql(self, sql: str, database_name: str = "postgres", check_success: bool = False) -> Tuple[bool, List[Tuple]]:
         """Execute SQL command in PostgreSQL container.
 
         Args:
             sql: SQL command to execute
-            database_name: Database to connect to (defaults to "defaultdb")
+            database_name: Database to connect to (defaults to "postgres" - the default PG database)
             check_success: If True, return success status instead of silently failing
 
         Returns:
