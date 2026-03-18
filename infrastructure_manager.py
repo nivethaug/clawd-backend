@@ -161,8 +161,12 @@ class DatabaseProvisioner:
         self.container = POSTGRES_CONTAINER
 
     def _sanitize_db_name(self, name: str) -> str:
-        """Sanitize database name by replacing hyphens with underscores."""
-        return name.replace("-", "_")
+        """Sanitize database name: replace hyphens with underscores, force lowercase.
+        
+        PostgreSQL is case-sensitive with identifiers. Using lowercase ensures
+        consistency between CREATE DATABASE and connection URLs.
+        """
+        return name.replace("-", "_").lower()
 
     def _execute_sql(self, sql: str, database_name: str = "defaultdb") -> List[Tuple]:
         """Execute SQL command in PostgreSQL container.
