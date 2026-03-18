@@ -1,53 +1,129 @@
-# Agent Module Guide
+# Agent Guide - Backend Code Navigation & Modification
 
-This folder contains AI-powered agents and dynamic endpoint generation.
+This folder helps AI assistants understand and modify the codebase efficiently.
 
----
+## AI Index Files
 
-## 📁 Structure
-
-```
-agent/
-├ ai_index/
-│   ├ index_creation_guide.md   # How to create AI indexes for codebases
-│   ├ modules.json              # Generated: Module groupings
-│   ├ symbols.json              # Generated: Functions, classes, APIs
-│   ├ dependencies.json         # Generated: File relationships
-│   ├ summaries.json            # Generated: Semantic summaries
-│   └ files.json                # Generated: File metadata
-├ endpoints/                    # Dynamic endpoint definitions
-│   └ *.yaml                    # Endpoint specifications
-└ README.md                     # This file
-```
+| File | Purpose | When to Update |
+|------|---------|----------------|
+| `ai_index/symbols.json` | Functions, classes, APIs with line numbers | After adding/editing/removing any code |
+| `ai_index/modules.json` | Logical module groupings | After adding new files/modules |
+| `ai_index/dependencies.json` | Import relationships between files | After changing imports |
+| `ai_index/summaries.json` | Semantic descriptions per file | After significant file changes |
+| `ai_index/files.json` | File metadata (lines, endpoints) | After adding/removing files |
 
 ---
 
-## 🔧 How to Add a New Endpoint
+## How to Add New Endpoint
 
-### Option 1: Standard Route (Recommended)
+### 1. Read existing pattern
+```
+Read: ai_index/symbols.json → Find similar endpoint (e.g., "login", "register")
+```
 
-1. Create a new route file in `routes/`:
-
+### 2. Create route file (if new module) or add to existing
 ```python
 # routes/products.py
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from core.database import get_db
+from fastapi import APIRouter
+from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/products", tags=["Products"])
+router = APIRouter(prefix="/api/products", tags=["products"])
 
-@router.get("/")
-async def list_products(db: Session = Depends(get_db)):
-    """List all products."""
-    return {"products": []}
+class ProductCreate(BaseModel):
+    name: str
+    price: float
 
 @router.post("/")
-async def create_product(db: Session = Depends(get_db)):
-    """Create a new product."""
-    return {"id": 1}
+async def create_product(data: ProductCreate):
+    # Implementation
+    return {"id": 1, "name": data.name}
 ```
 
-2. Register in `main.py`:
+### 3. Register router in main.py
+```python
+from routes.products import router as products_router
+app.include_router(products_router)
+```
+
+### 4. Update AI Index
+Add to `ai_index/symbols.json`:
+```json
+"create_product": {
+  "type": "api",
+  "file": "routes/products.py",
+  "start_line": 12,
+  "end_line": 16,
+  "module": "routes",
+  "description": "POST /api/products - Create new product"
+}
+```
+
+---
+
+## How to Edit Existing Endpoint
+
+### 1. Find the endpoint
+```
+Read: ai_index/symbols.json → Search for endpoint name
+```
+
+### 2. Navigate to file and lines
+```
+symbols.json gives you: file path + start_line + end_line
+```
+
+### 3. Make changes
+
+### 4. Update AI Index
+Update line numbers in `ai_index/symbols.json` if they changed.
+
+---
+
+## How to Remove Endpoint
+
+### 1. Find the endpoint in `ai_index/symbols.json`
+
+### 2. Delete the code from the route file
+
+### 3. Remove router from `main.py` if entire file removed
+
+### 4. Update AI Index
+- Remove entry from `ai_index/symbols.json`
+- Remove from `ai_index/files.json` if file deleted
+- Update `ai_index/dependencies.json` if imports changed
+
+---
+
+## Quick Reference: AI Index Update Checklist
+
+| Action | symbols | modules | dependencies | summaries | files |
+|--------|:-------:|:-------:|:------------:|:---------:|:-----:|
+| Add endpoint | ✅ | - | - | - | - |
+| Edit endpoint | ✅ | - | - | - | - |
+| Remove endpoint | ✅ | - | - | - | - |
+| Add new file | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Delete file | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Change imports | - | - | ✅ | - | - |
+
+---
+
+## Endpoints Folder
+
+`endpoints/` contains YAML definitions for planned/implemented endpoints:
+
+```yaml
+# endpoints/products.yaml
+path: /api/products
+methods:
+  GET:
+    description: List all products
+    auth: required
+  POST:
+    description: Create product
+    body: {name: string, price: number}
+```
+
+Use this to plan endpoints before implementation.
 
 ```python
 from routes.products import router as products_router
