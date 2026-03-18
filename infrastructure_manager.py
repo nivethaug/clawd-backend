@@ -381,8 +381,8 @@ class ServiceManager:
                 )
                 if import_check.returncode != 0:
                     logger.error(f"[SERVICE] ❌ main.py does not have valid 'app' object")
-                    logger.error(f"[SERVICE] Import check stdout: {import_check.stdout[:500]}")
-                    logger.error(f"[SERVICE] Import check stderr: {import_check.stderr[:500]}")
+                    logger.error(f"[SERVICE] Import check stdout: {import_check.stdout[:1000]}")
+                    logger.error(f"[SERVICE] Import check stderr:\n{import_check.stderr[:2000]}")
                     return False
                 logger.info(f"[SERVICE] ✓ main.py app validation passed: {import_check.stdout.strip()}")
             except Exception as e:
