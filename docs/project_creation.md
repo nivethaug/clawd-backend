@@ -349,6 +349,135 @@
 
 ---
 
+## Backend Database Connection Details
+
+### Database Creation Flow
+
+| Step | File | Lines | Description |
+|------|------|-------|-------------|
+| 1 | `infrastructure_manager.py` | 220-278 | `DatabaseProvisioner.create_database_and_user()` |
+| 2 | `infrastructure_manager.py` | 171-200 | `_execute_sql()` via Docker exec |
+| 3 | `infrastructure_manager.py` | 440-470 | Pass DATABASE_URL to ecosystem config |
+| 4 | Backend `core/config.py` | 1-40 | Read DATABASE_URL from environment |
+
+### Database Naming Convention
+
+```
+Project Name: "LearningGrid"
+├── Database: learninggrid_db (lowercase, - replaced with _)
+├── Username: learninggrid_user
+└── Password: 32-char alphanumeric (no special chars for URL safety)
+```
+
+**Important:** All database names are forced to lowercase to avoid PostgreSQL case-sensitivity issues.
+
+### DATABASE_URL Construction
+
+**Format:**
+```
+postgresql://{username}:{password}@{host}:{port}/{database}
+```
+
+**Example:**
+```
+postgresql://learninggrid_user:AbC123XyZ456@postgres:5432/learninggrid_db
+```
+
+**Components:**
+| Component | Source | Example |
+|-----------|--------|---------|
+| `username` | `{project_name}_user` (lowercase) | `learninggrid_user` |
+| `password` | 32-char alphanumeric | `AbC123XyZ456...` |
+| `host` | `POSTGRES_HOST` env var | `postgres` (Docker) or `localhost` |
+| `port` | `POSTGRES_PORT` env var | `5432` |
+| `database` | `{project_name}_db` (lowercase) | `learninggrid_db` |
+
+### Environment Variables Passed to Backend
+
+The following environment variables are set in the PM2 ecosystem config:
+
+```json
+{
+  "PORT": "8010",
+  "BACKEND_HOST": "0.0.0.0",
+  "BACKEND_PORT": "8010",
+  "PROJECT_NAME": "LearningGrid",
+  "DATABASE_URL": "postgresql://learninggrid_user:xxx@postgres:5432/learninggrid_db"
+}
+```
+
+### Backend Configuration (Template)
+
+**File:** `templates/blank-template/backend/core/config.py`
+
+```python
+class Settings:
+    # Database - reads from DATABASE_URL env var
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql://postgres:postgres@localhost:5432/dreampilot"
+    )
+    
+    # Other settings
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "change-in-production")
+    HOST: str = os.getenv("HOST", "0.0.0.0")
+    PORT: int = int(os.getenv("PORT", "8000"))
+    PROJECT_NAME: str = os.getenv("PROJECT_NAME", "DreamPilot API")
+```
+
+### PostgreSQL Schema Permissions (PG 15+)
+
+PostgreSQL 15+ requires explicit schema permissions beyond database-level grants:
+
+```sql
+-- Create database and user
+CREATE DATABASE "learninggrid_db";
+CREATE USER "learninggrid_user" WITH PASSWORD 'xxx';
+
+-- Database-level grant (traditional)
+GRANT ALL PRIVILEGES ON DATABASE "learninggrid_db" TO "learninggrid_user";
+
+-- Schema-level grant (required for PG 15+)
+GRANT ALL ON SCHEMA public TO "learninggrid_user";
+
+-- Table creation permissions
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "learninggrid_user";
+```
+
+### Common Database Errors & Fixes
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `FATAL: database "X" does not exist` | CREATE DATABASE failed | Check `_execute_sql()` logs, ensure connecting to `postgres` db |
+| `DROP DATABASE cannot run inside a transaction block` | Transaction mode active | Use `conn.autocommit = True` before DROP |
+| `password authentication failed` | Special chars in password | Use alphanumeric-only passwords |
+| `permission denied for schema public` | PG 15+ missing schema grant | Add `GRANT ALL ON SCHEMA public TO user` |
+| `relation "users" does not exist` | Tables not created | Check `init_db()` runs on startup |
+
+### Testing Database Connection
+
+**From Server:**
+```bash
+# Connect to project database
+docker exec -it postgres psql -U learninggrid_user -d learninggrid_db
+
+# List tables
+\dt
+
+# Check connection
+SELECT current_database(), current_user;
+```
+
+**From Backend Logs:**
+```bash
+pm2 logs LearningGrid-backend --lines 50
+```
+
+Look for:
+- `🔧 Initializing database...` - SQLAlchemy engine creation
+- `✓ Database tables created` - `init_db()` success
+- `sqlalchemy.exc.OperationalError` - Connection failed
+
 ## Common Modifications
 
 ### Add New Page Type
