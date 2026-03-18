@@ -343,12 +343,14 @@ class ServiceManager:
             logger.error(f"Failed to create backend service config: {e}")
             raise
 
-    def start_backend_service(self, app_name: str, backend_path: Path, port: int = None) -> bool:
+    def start_backend_service(self, app_name: str, backend_path: Path, port: int = None, database_url: str = None) -> bool:
         """Start backend service with FastAPI/uvicorn and dependency installation."""
         try:
             logger.info(f"[SERVICE] Starting backend service: {app_name}")
             logger.info(f"[SERVICE] Backend working directory: {backend_path}")
             logger.info(f"[SERVICE] Backend port: {port}")
+            if database_url:
+                logger.info(f"[SERVICE] Database URL: {database_url[:30]}...")
 
             # FIX 1: Use shared venv for dependency installation
             venv_python = f"{self.venv_path}/bin/python"
@@ -416,6 +418,18 @@ class ServiceManager:
             # Use uvicorn directly from venv for PM2 compatibility
             venv_uvicorn = f"{self.venv_path}/bin/uvicorn"
             
+            # Build environment variables
+            env_vars = {
+                "PORT": str(backend_port),
+                "BACKEND_HOST": "0.0.0.0",
+                "BACKEND_PORT": str(backend_port),
+                "PROJECT_NAME": app_name.replace("-backend", "")
+            }
+            
+            # Add DATABASE_URL if provided
+            if database_url:
+                env_vars["DATABASE_URL"] = database_url
+            
             ecosystem_config = {
                 "apps": [{
                     "name": app_name,
@@ -427,11 +441,7 @@ class ServiceManager:
                     "exec_mode": "fork",
                     "watch": False,
                     "max_memory_restart": "500M",
-                    "env": {
-                        "PORT": str(backend_port),
-                        "BACKEND_HOST": "0.0.0.0",
-                        "BACKEND_PORT": str(backend_port)
-                    }
+                    "env": env_vars
                 }]
             }
 
@@ -2031,7 +2041,8 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             backend_success = self.service_manager.start_backend_service(
                 self.service_name, 
                 self.project_path / "backend",
-                self.ports["backend"]
+                self.ports["backend"],
+                self.database_info.get("database_url") if self.database_info else None
             )
             
             if backend_success:
