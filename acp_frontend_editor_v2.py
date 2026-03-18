@@ -50,6 +50,8 @@ ALLOWED_EDIT_PATHS = [
 # Forbidden paths that ACPX must NOT modify
 FORBIDDEN_EDIT_PATHS = [
     "node_modules",
+    "services",
+    "api-config.ts",
     "package.json",
     "package-lock.json",
     "vite.config.ts",
