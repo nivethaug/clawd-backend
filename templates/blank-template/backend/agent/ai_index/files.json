@@ -1,0 +1,59 @@
+{
+  "main.py": {
+    "lines": 61,
+    "language": "python",
+    "purpose": "entry",
+    "has_auth": true,
+    "has_database": true,
+    "routers": ["health", "auth"]
+  },
+  "core/config.py": {
+    "lines": 27,
+    "language": "python",
+    "purpose": "configuration",
+    "env_vars": ["DATABASE_URL"]
+  },
+  "core/database.py": {
+    "lines": 34,
+    "language": "python",
+    "purpose": "database",
+    "orm": "sqlalchemy"
+  },
+  "models/user.py": {
+    "lines": 15,
+    "language": "python",
+    "purpose": "model",
+    "table": "users",
+    "fields": ["id", "email", "password_hash"]
+  },
+  "services/auth_service.py": {
+    "lines": 95,
+    "language": "python",
+    "purpose": "service",
+    "features": ["password_hashing", "login", "register", "token_management"]
+  },
+  "routes/health.py": {
+    "lines": 11,
+    "language": "python",
+    "purpose": "router",
+    "endpoints": [
+      {"method": "GET", "path": "/health", "function": "health"}
+    ]
+  },
+  "routes/auth.py": {
+    "lines": 74,
+    "language": "python",
+    "purpose": "router",
+    "endpoints": [
+      {"method": "POST", "path": "/api/auth/register", "function": "register"},
+      {"method": "POST", "path": "/api/auth/login", "function": "login"},
+      {"method": "GET", "path": "/api/auth/me", "function": "get_current_user"}
+    ]
+  },
+  "requirements.txt": {
+    "lines": 12,
+    "language": "text",
+    "purpose": "dependencies",
+    "packages": ["fastapi", "uvicorn", "sqlalchemy", "psycopg2-binary", "pydantic", "pydantic-settings", "bcrypt"]
+  }
+}

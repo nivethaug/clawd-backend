@@ -1,0 +1,10 @@
+{
+  "main.py": "FastAPI application entry point. Initializes database on startup via lifespan context manager. Includes health and auth routers. Provides root endpoint with API info.",
+  "core/config.py": "Application configuration using Pydantic BaseSettings. Loads DATABASE_URL from environment. Provides Settings class for dependency injection.",
+  "core/database.py": "SQLAlchemy database setup. Creates engine from DATABASE_URL, provides SessionLocal for request sessions, Base for model declarations. Includes init_db() for table creation.",
+  "models/user.py": "User SQLAlchemy model. Fields: id (primary key), email (unique), password_hash. Used by AuthService for authentication.",
+  "services/auth_service.py": "Core authentication service. Handles password hashing (bcrypt), login (returns simple token), register (creates user), and in-memory token management. Creates default test user on startup.",
+  "routes/health.py": "Simple health check endpoint at /health. Returns status ok. Used for monitoring and deployment verification.",
+  "routes/auth.py": "Authentication API routes. POST /api/auth/register - create new user. POST /api/auth/login - authenticate and get token. GET /api/auth/me - get current user from Bearer token. Uses Pydantic models for request/response.",
+  "agent/": "AI assistance folder containing index files and endpoint definitions. Helps AI understand codebase structure for modifications."
+}

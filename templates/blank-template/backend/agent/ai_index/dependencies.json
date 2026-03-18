@@ -1,0 +1,73 @@
+{
+  "main.py": {
+    "imports": [
+      "fastapi.FastAPI",
+      "fastapi.responses.JSONResponse",
+      "contextlib.asynccontextmanager",
+      "core.database.init_db",
+      "core.database.engine",
+      "services.auth_service.AuthService",
+      "routes.health.router",
+      "routes.auth.router"
+    ],
+    "imported_by": [],
+    "description": "Application entry point - FastAPI app with lifespan and routers"
+  },
+  "core/config.py": {
+    "imports": [
+      "pydantic_settings.BaseSettings"
+    ],
+    "imported_by": ["core.database", "routes.auth"],
+    "description": "Configuration settings using Pydantic BaseSettings"
+  },
+  "core/database.py": {
+    "imports": [
+      "sqlalchemy.create_engine",
+      "sqlalchemy.orm.declarative_base",
+      "sqlalchemy.orm.sessionmaker",
+      "sqlalchemy.orm.Session"
+    ],
+    "imported_by": ["main", "models.user", "services.auth_service", "routes.auth"],
+    "description": "Database connection and session management"
+  },
+  "models/user.py": {
+    "imports": [
+      "sqlalchemy.Column",
+      "sqlalchemy.Integer",
+      "sqlalchemy.String",
+      "core.database.Base"
+    ],
+    "imported_by": ["services.auth_service", "routes.auth"],
+    "description": "User model definition"
+  },
+  "services/auth_service.py": {
+    "imports": [
+      "bcrypt",
+      "secrets",
+      "core.database.Session",
+      "core.database.Base",
+      "models.user.User"
+    ],
+    "imported_by": ["main", "routes.auth"],
+    "description": "Authentication service - password hashing, tokens, login/register"
+  },
+  "routes/health.py": {
+    "imports": [
+      "fastapi.APIRouter"
+    ],
+    "imported_by": ["main"],
+    "description": "Health check router"
+  },
+  "routes/auth.py": {
+    "imports": [
+      "fastapi.APIRouter",
+      "fastapi.Depends",
+      "fastapi.HTTPException",
+      "pydantic.BaseModel",
+      "core.config.Settings",
+      "services.auth_service.AuthService"
+    ],
+    "imported_by": ["main"],
+    "description": "Authentication router - register, login, get current user"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "core": {
+    "files": [
+      "core/config.py",
+      "core/database.py"
+    ],
+    "description": "Core configuration and database setup"
+  },
+  "models": {
+    "files": [
+      "models/user.py"
+    ],
+    "description": "SQLAlchemy database models"
+  },
+  "services": {
+    "files": [
+      "services/auth_service.py"
+    ],
+    "description": "Business logic and service layer"
+  },
+  "routes": {
+    "files": [
+      "routes/health.py",
+      "routes/auth.py"
+    ],
+    "description": "FastAPI route handlers and API endpoints"
+  },
+  "agent": {
+    "files": [
+      "agent/README.md",
+      "agent/ai_index/index_creation_guide.md"
+    ],
+    "description": "AI-powered endpoint generation and code indexing"
+  }
+}

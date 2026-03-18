@@ -1,0 +1,146 @@
+{
+  "Settings": {
+    "type": "class",
+    "file": "core/config.py",
+    "start_line": 11,
+    "end_line": 27,
+    "module": "core",
+    "dependencies": [],
+    "description": "Application configuration settings loaded from environment"
+  },
+  "get_db": {
+    "type": "function",
+    "file": "core/database.py",
+    "start_line": 24,
+    "end_line": 29,
+    "module": "core",
+    "dependencies": ["SessionLocal"],
+    "description": "Database session generator for FastAPI dependency injection"
+  },
+  "init_db": {
+    "type": "function",
+    "file": "core/database.py",
+    "start_line": 32,
+    "end_line": 34,
+    "module": "core",
+    "dependencies": ["Base", "engine"],
+    "description": "Initialize database tables"
+  },
+  "User": {
+    "type": "class",
+    "file": "models/user.py",
+    "start_line": 7,
+    "end_line": 15,
+    "module": "models",
+    "dependencies": ["Base"],
+    "description": "User database model with id, email, password_hash"
+  },
+  "AuthService": {
+    "type": "class",
+    "file": "services/auth_service.py",
+    "start_line": 9,
+    "end_line": 95,
+    "module": "services",
+    "dependencies": ["bcrypt", "User", "Session"],
+    "description": "Authentication service with password hashing, login, register, token management"
+  },
+  "AuthService.hash_password": {
+    "type": "function",
+    "file": "services/auth_service.py",
+    "start_line": 14,
+    "end_line": 18,
+    "module": "services",
+    "dependencies": ["bcrypt"],
+    "description": "Hash password using bcrypt"
+  },
+  "AuthService.verify_password": {
+    "type": "function",
+    "file": "services/auth_service.py",
+    "start_line": 20,
+    "end_line": 26,
+    "module": "services",
+    "dependencies": ["bcrypt"],
+    "description": "Verify password against hash"
+  },
+  "AuthService.login": {
+    "type": "function",
+    "file": "services/auth_service.py",
+    "start_line": 49,
+    "end_line": 61,
+    "module": "services",
+    "dependencies": ["User", "TOKENS"],
+    "description": "Login user and return simple token"
+  },
+  "AuthService.register": {
+    "type": "function",
+    "file": "services/auth_service.py",
+    "start_line": 71,
+    "end_line": 81,
+    "module": "services",
+    "dependencies": ["User"],
+    "description": "Register a new user"
+  },
+  "AuthService.ensure_default_user": {
+    "type": "function",
+    "file": "services/auth_service.py",
+    "start_line": 83,
+    "end_line": 95,
+    "module": "services",
+    "dependencies": ["User"],
+    "description": "Ensure default test user exists"
+  },
+  "health": {
+    "type": "api",
+    "file": "routes/health.py",
+    "start_line": 8,
+    "end_line": 11,
+    "module": "routes",
+    "dependencies": [],
+    "description": "GET /health - Health check endpoint"
+  },
+  "register": {
+    "type": "api",
+    "file": "routes/auth.py",
+    "start_line": 31,
+    "end_line": 40,
+    "module": "routes",
+    "dependencies": ["AuthService", "RegisterRequest"],
+    "description": "POST /api/auth/register - Register new user"
+  },
+  "login": {
+    "type": "api",
+    "file": "routes/auth.py",
+    "start_line": 43,
+    "end_line": 52,
+    "module": "routes",
+    "dependencies": ["AuthService", "LoginRequest"],
+    "description": "POST /api/auth/login - Login and get token"
+  },
+  "get_current_user": {
+    "type": "api",
+    "file": "routes/auth.py",
+    "start_line": 55,
+    "end_line": 74,
+    "module": "routes",
+    "dependencies": ["AuthService"],
+    "description": "GET /api/auth/me - Get current user from Bearer token"
+  },
+  "lifespan": {
+    "type": "function",
+    "file": "main.py",
+    "start_line": 16,
+    "end_line": 33,
+    "module": "main",
+    "dependencies": ["init_db", "AuthService"],
+    "description": "Application lifespan context manager - initializes DB and default user"
+  },
+  "root": {
+    "type": "api",
+    "file": "main.py",
+    "start_line": 51,
+    "end_line": 58,
+    "module": "main",
+    "dependencies": [],
+    "description": "GET / - Root endpoint with API info"
+  }
+}
