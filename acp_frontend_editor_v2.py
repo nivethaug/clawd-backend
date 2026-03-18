@@ -1581,6 +1581,26 @@ class ACPFrontendEditorV2:
 Project Name: {self.project_name}
 Project Description: {goal_description}
 
+🚨🚨🚨 CRITICAL: NO NEW PACKAGES - USE EXISTING COMPONENTS ONLY 🚨🚨🚨
+
+This is an INITIAL BUILD with pre-installed dependencies.
+
+⚠️ STRICT RULES:
+1. DO NOT install any new npm packages
+2. DO NOT modify package.json
+3. DO NOT run npm install or npm add
+4. USE ONLY existing UI components from src/components/ui/
+5. BUILD all custom UI using Tailwind CSS + Lucide icons
+6. If a component doesn't exist, CREATE it in src/components/ (NOT in src/components/ui/)
+
+Available UI components (check src/components/ui/ for full list):
+- Button, Card, Input, Label, Select, Textarea
+- Dialog, Sheet, Dropdown, Popover
+- Table, Badge, Avatar, Separator
+- And more...
+
+Use Lucide icons: import {{ IconName }} from 'lucide-react'
+
 IMPORTANT:
 Do not analyze the entire project deeply.
 Focus only on required pages and layout files.
@@ -1925,8 +1945,14 @@ export default function Dashboard() {{
 
 5. MANDATORY FINAL VERIFICATION (YOU MUST DO THIS):
    
+   STEP 1: Run `npm run build` in the frontend directory
+   STEP 2: Check that build succeeds with NO errors
+   STEP 3: If build fails, FIX ALL ERRORS before marking complete
+   STEP 4: Verify each page file is 800+ characters
+   STEP 5: Verify NO files contain "placeholder", "TODO", or "coming soon"
+
+🚨 IF npm run build FAILS, YOUR TASK IS INCOMPLETE - FIX ALL ERRORS 🚨
    NOTE:
-   Do NOT run build commands.
    Focus on generating clean, correct UI code.
 
 CHECKLIST (complete in order - ALL STEPS REQUIRED)
@@ -1945,7 +1971,7 @@ SCOPE LIMITATION (CRITICAL - Reduces AI scanning time)
 
 ONLY modify files in these directories:
 - src/pages/
-- src/components/
+- src/components/ (create custom components here, NOT in src/components/ui/)
 - src/layout/
 - src/features/
 
@@ -1955,11 +1981,14 @@ DO NOT scan:
 - build
 - .git
 
-DO NOT modify:
-- src/components/ui/ (UI primitives only)
-- package.json, vite.config.*, node_modules
+🚨 DO NOT MODIFY (STRICT):
+- package.json (NO new packages)
+- src/components/ui/ (UI primitives - use but don't modify)
+- vite.config.*, tsconfig.json
+- node_modules
 - backend files, .env files
 - Do NOT change project architecture
+- Do NOT run npm install/add/update
 
 TECHNICAL REQUIREMENTS
 

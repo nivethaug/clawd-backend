@@ -1551,6 +1551,10 @@ class InfrastructureManager:
             error_context = '\n'.join(critical_errors[-20:]) if critical_errors else build_error[-4000:]
             
             logger.info(f"🔧 ACPX_AUTO_FIX: Extracted {len(critical_errors)} critical error lines")
+            logger.info(f"🔧 ACPX_AUTO_FIX: Error context length: {len(error_context)} chars")
+            if not error_context or error_context.strip() == "":
+                logger.warning("ACPX_AUTO_FIX: Error context is empty, using generic fix prompt")
+                error_context = "Build failed - please run npm run build and fix any errors"
             print(f"🔴 ACPX_AUTO_FIX: Found {len(critical_errors)} critical errors to fix")
             
             # Build fix prompt with enhanced error context
@@ -1587,7 +1591,10 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 str(fix_prompt)
             ]
             
-            logger.info(f"ACPX_AUTO_FIX: Running: acpx --cwd {frontend_src_path} --format quiet claude exec <fix-prompt>")
+            # Log with truncated prompt for debugging
+            prompt_preview = fix_prompt[:200] + "..." if len(fix_prompt) > 200 else fix_prompt
+            logger.info(f"ACPX_AUTO_FIX: Running: acpx --cwd {frontend_src_path} --format quiet claude exec")
+            logger.info(f"ACPX_AUTO_FIX: Prompt preview: {prompt_preview}")
             
             result = subprocess.run(
                 cmd,
@@ -1694,19 +1701,21 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
 
             # ⚡ Skip npm install if node_modules exists (optimized caching)
             if node_modules_path.exists():
-                logger.info("⚡ Skipping npm install (node_modules exists)")
+                logger.info("⚡ Skipping npm install (node_modules exists - copied from template)")
+                print("⚡ Skipping npm install (node_modules copied from template)")
                 install_result = type('obj', (object,), {'returncode': 0, 'stderr': ''})
             else:
                 # Step 2: npm ci with dev dependencies (optimized)
                 logger.info(f"[BUILD] Running npm ci in {frontend_path}")
-            install_result = subprocess.run(
-                ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
-                cwd=str(frontend_path),
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=600  # 10 minutes
-            )
+                print("📦 Running npm ci (node_modules not found)...")
+                install_result = subprocess.run(
+                    ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
+                    cwd=str(frontend_path),
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=600  # 10 minutes
+                )
             
             if install_result.returncode != 0:
                 # Extract actual errors from stderr (npm warnings go to stderr but don't fail)
@@ -1726,6 +1735,17 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 return False
             else:
                 logger.info("✓ npm install completed (including dev dependencies)")
+            
+            # Step 2.5: ⚡ Skip build if dist exists (ACPX already built)
+            dist_path = frontend_path / "dist"
+            if dist_path.exists():
+                dist_contents = list(dist_path.iterdir())
+                index_html = dist_path / "index.html"
+                if dist_contents and index_html.exists():
+                    logger.info("⚡ Skipping npm build (dist exists - ACPX already built)")
+                    print("⚡ Skipping npm build (dist already exists from ACPX)")
+                    logger.info("✓ npm run build completed (skipped - dist exists)")
+                    return True
             
             # Step 3: npm run build with retry logic (max 3 ACPX auto-fix attempts)
             MAX_ACPX_RETRIES = 3

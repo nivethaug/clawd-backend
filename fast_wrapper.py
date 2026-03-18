@@ -181,7 +181,16 @@ class FastWrapper:
                 logger.info(f"📋 Detected restructured template with frontend/ and backend/")
                 logger.info(f"📁 Copying template contents to project root...")
 
-                # Copy all contents of template to project path
+                # Check if node_modules exists in template (optimization to skip npm install)
+                template_node_modules = source_path / "frontend" / "node_modules"
+                has_node_modules = template_node_modules.exists()
+                
+                if has_node_modules:
+                    logger.info(f"✓ Template has node_modules - will copy (saves npm install time)")
+                else:
+                    logger.warning(f"⚠️ Template missing node_modules - npm install will be needed in Phase 5")
+
+                # Copy all contents of template to project path (including node_modules if exists)
                 result = subprocess.run(
                     ["cp", "-r", f"{str(source_path)}/.", str(self.project_path)],
                     capture_output=True,
@@ -193,6 +202,8 @@ class FastWrapper:
                     logger.info(f"✅ Blank template copied successfully to project root")
                     logger.info(f"✓ Frontend directory: {self.project_path / 'frontend'}")
                     logger.info(f"✓ Backend directory: {self.project_path / 'backend'}")
+                    if has_node_modules:
+                        logger.info(f"✓ node_modules copied from template (no npm install needed)")
                     return True
                 else:
                     logger.error(f"❌ Failed to copy template: {result.stderr}")
