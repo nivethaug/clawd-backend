@@ -1420,6 +1420,7 @@ class BuildPublishRequest(BaseModel):
     """Request model for build & publish operations"""
     project_path: str = Field(..., description="Absolute path to project directory")
     project_name: Optional[str] = Field(None, description="Project name for PM2 restart")
+    domain: Optional[str] = Field(None, description="Domain for placeholder replacement")
     skip_install: bool = Field(False, description="Skip npm/pip install")
     skip_build: bool = Field(False, description="Skip build step")
     restart: bool = Field(True, description="Restart PM2 and nginx after build")
@@ -1547,10 +1548,10 @@ async def publish_backend(project_id: int, request: BuildPublishRequest):
     Returns:
         Build status and output
     """
-    # Validate project exists
+    # Validate project exists and get domain
     with get_db() as conn:
         project = conn.execute(
-            "SELECT id, name, project_path, status FROM projects WHERE id = ?",
+            "SELECT id, name, project_path, status, domain FROM projects WHERE id = ?",
             (project_id,)
         ).fetchone()
     
@@ -1560,6 +1561,9 @@ async def publish_backend(project_id: int, request: BuildPublishRequest):
     # Use project_path from DB if not provided in request
     project_path = request.project_path or project["project_path"]
     backend_path = Path(project_path) / "backend"
+    
+    # Get domain from request or DB
+    domain = request.domain or project.get("domain")
     
     if not backend_path.exists():
         raise HTTPException(status_code=400, detail=f"Backend directory not found: {backend_path}")
@@ -1577,6 +1581,8 @@ async def publish_backend(project_id: int, request: BuildPublishRequest):
         cmd_args.extend(["--project-name", request.project_name])
     else:
         cmd_args.extend(["--project-name", project["name"]])
+    if domain:
+        cmd_args.extend(["--domain", domain])
     
     logger.info(f"🔧 Starting backend build for project {project_id}: {' '.join(cmd_args)}")
     

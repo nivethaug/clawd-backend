@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Backend Build & Publish Script
-Run from backend directory: python buildpublish.py [--skip-deps] [--restart]
+Run from backend directory: python buildpublish.py [--skip-deps] [--restart] [--domain example-com]
 """
 
 import subprocess
 import sys
 import os
 import argparse
+import re
 from pathlib import Path
 
 
@@ -66,6 +67,34 @@ def reload_nginx():
     return run("sudo nginx -s reload") or run("nginx -s reload")
 
 
+def update_agent_readme(domain: str):
+    """Replace {domain} placeholder in agent/README.md with actual domain"""
+    print("\n" + "="*50)
+    print("UPDATE AGENT README")
+    print("="*50)
+    
+    readme_path = Path("agent/README.md")
+    if not readme_path.exists():
+        print("⚠ agent/README.md not found, skipping")
+        return True
+    
+    try:
+        content = readme_path.read_text(encoding="utf-8")
+        
+        # Replace {domain} placeholder
+        if "{domain}" in content:
+            content = content.replace("{domain}", domain)
+            readme_path.write_text(content, encoding="utf-8")
+            print(f"✓ Replaced {{domain}} → {domain} in agent/README.md")
+        else:
+            print("⚠ No {domain} placeholder found in agent/README.md")
+        
+        return True
+    except Exception as e:
+        print(f"✗ Failed to update agent/README.md: {e}")
+        return False
+
+
 def run_migrations():
     """Run database migrations if alembic is configured"""
     print("\n" + "="*50)
@@ -85,6 +114,7 @@ def main():
     parser.add_argument("--skip-migrations", action="store_true", help="Skip database migrations")
     parser.add_argument("--restart", action="store_true", help="Restart PM2 and nginx")
     parser.add_argument("--project-name", type=str, help="Project name for PM2")
+    parser.add_argument("--domain", type=str, help="Domain for placeholder replacement (e.g., learninggrid-tyh612)")
     args = parser.parse_args()
     
     # Ensure we're in backend directory
@@ -113,6 +143,10 @@ def main():
     if args.restart and success:
         restart_pm2(args.project_name)
         reload_nginx()
+    
+    # Step 5: Update agent README with actual domain (if provided)
+    if args.domain and success:
+        update_agent_readme(args.domain)
     
     print("\n" + "="*50)
     if success:
