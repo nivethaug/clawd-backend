@@ -1517,13 +1517,24 @@ class InfrastructureManager:
 
             if not backend_healthy:
                 logger.error(f"[VERIFY] Backend verification failed after {max_backend_retries} attempts")
-                # Check PM2 logs for debugging
+                # Check PM2 logs for debugging - use specific service name
+                logger.error(f"[VERIFY] Checking PM2 logs for service: {self.service_name}")
                 pm2_logs = subprocess.run(
-                    ["pm2", "logs", "--lines", "20", "--nostream"],
+                    ["pm2", "logs", self.service_name, "--lines", "30", "--nostream"],
                     capture_output=True,
                     text=True
                 )
-                logger.error(f"[VERIFY] PM2 logs for debugging:\n{pm2_logs.stdout[:1000]}")
+                logger.error(f"[VERIFY] PM2 logs for {self.service_name}:\n{pm2_logs.stdout[:2000]}")
+                if pm2_logs.stderr:
+                    logger.error(f"[VERIFY] PM2 stderr:\n{pm2_logs.stderr[:500]}")
+                
+                # Also check PM2 status
+                pm2_status = subprocess.run(
+                    ["pm2", "list"],
+                    capture_output=True,
+                    text=True
+                )
+                logger.error(f"[VERIFY] PM2 status:\n{pm2_status.stdout}")
                 raise RuntimeError("Backend verification failed")
 
             logger.info("[VERIFY] ✓ Deployment verified successfully")
