@@ -4,7 +4,48 @@ This folder helps AI assistants understand and modify the codebase efficiently.
 
 ---
 
-## 🗄️ Database Connection Details (CRITICAL)
+## � PM2 Process Management (CRITICAL)
+
+### Process Information
+
+| Property | Value |
+|----------|-------|
+| **PM2 Process Name** | `{project_name}-api` |
+| **PM2 Config File** | `ecosystem.config.json` |
+| **Entry Point** | `main:app` (uvicorn ASGI) |
+| **Default Port** | `8010` |
+
+### Common PM2 Commands
+
+```bash
+# Check status
+pm2 status
+
+# View logs
+pm2 logs {project_name}-api
+
+# Restart after changes
+pm2 restart {project_name}-api
+
+# Stop service
+pm2 stop {project_name}-api
+
+# Start service
+pm2 start ecosystem.config.json --only {project_name}-api
+
+# Save process list (persist across reboot)
+pm2 save
+```
+
+### After Any Code Change
+
+```bash
+pm2 restart {project_name}-api && pm2 logs {project_name}-api --lines 20
+```
+
+---
+
+## �🗄️ Database Connection Details (CRITICAL)
 
 ### How Backend Connects to Database
 
