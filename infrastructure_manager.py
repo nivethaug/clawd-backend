@@ -168,15 +168,16 @@ class DatabaseProvisioner:
         """
         return name.replace("-", "_").lower()
 
-    def _execute_sql(self, sql: str, database_name: str = "defaultdb") -> List[Tuple]:
+    def _execute_sql(self, sql: str, database_name: str = "defaultdb", check_success: bool = False) -> Tuple[bool, List[Tuple]]:
         """Execute SQL command in PostgreSQL container.
 
         Args:
             sql: SQL command to execute
             database_name: Database to connect to (defaults to "defaultdb")
+            check_success: If True, return success status instead of silently failing
 
         Returns:
-            List of tuples with query results
+            Tuple of (success, results) - success bool and list of tuples with query results
         """
         try:
             cmd = [
@@ -193,18 +194,23 @@ class DatabaseProvisioner:
 
             if result.returncode != 0:
                 logger.error(f"SQL execution failed: {result.stderr}")
-                return []
+                if check_success:
+                    return False, []
+                return True, []  # Legacy behavior for backwards compatibility
 
             # Parse output (if any)
+            results = []
             if result.stdout.strip():
                 lines = result.stdout.strip().split('\n')
-                return [tuple(line.split(' | ')) for line in lines if '|' in line]
+                results = [tuple(line.split(' | ')) for line in lines if '|' in line]
 
-            return []
+            return True, results
 
         except Exception as e:
             logger.error(f"Failed to execute SQL: {e}")
-            return []
+            if check_success:
+                return False, []
+            return True, []
 
     def _generate_password(self, length: int = 32) -> str:
         """Generate secure random password (alphanumeric only for URL safety)."""
@@ -228,27 +234,39 @@ class DatabaseProvisioner:
             logger.info(f"Creating user: {username}")
 
             # Create database (quoted to handle SQL keywords)
-            self._execute_sql(f'CREATE DATABASE "{db_name}";')
-            # logger.info(f"✓ Database created: {db_name}")  # Commented for cleaner logs
+            success, _ = self._execute_sql(f'CREATE DATABASE "{db_name}";', check_success=True)
+            if not success:
+                raise Exception(f"Failed to create database: {db_name}")
+            logger.info(f"✓ Database created: {db_name}")
 
             # Create user (quoted to handle SQL keywords)
-            self._execute_sql(
-                f'CREATE USER "{username}" WITH PASSWORD \'{password}\';'
+            success, _ = self._execute_sql(
+                f'CREATE USER "{username}" WITH PASSWORD \'{password}\';',
+                check_success=True
             )
-            # logger.info(f"✓ User created: {username}")  # Commented for cleaner logs
+            if not success:
+                raise Exception(f"Failed to create user: {username}")
+            logger.info(f"✓ User created: {username}")
 
             # Grant privileges
-            self._execute_sql(
-                f'GRANT ALL PRIVILEGES ON DATABASE "{db_name}" TO "{username}";'
+            success, _ = self._execute_sql(
+                f'GRANT ALL PRIVILEGES ON DATABASE "{db_name}" TO "{username}";',
+                check_success=True
             )
-            # logger.info(f"✓ Privileges granted to {username}")  # Commented for cleaner logs
+            if not success:
+                raise Exception(f"Failed to grant privileges to {username}")
+            logger.info(f"✓ Privileges granted to {username}")
 
             # Grant schema permissions (required for PostgreSQL 15+)
             # Connect to the specific database and grant schema permissions
-            self._execute_sql(
+            success, _ = self._execute_sql(
                 f'GRANT ALL ON SCHEMA public TO "{username}";',
-                database_name=db_name
+                database_name=db_name,
+                check_success=True
             )
+            if not success:
+                logger.warning(f"Schema grant failed (may already exist): {username}@{db_name}")
+            
             # Also grant table creation permissions
             self._execute_sql(
                 f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{username}";',
@@ -275,22 +293,21 @@ class DatabaseProvisioner:
 
             logger.info(f"Dropping database: {db_name}")
 
-            # Drop connections first (connect to project-specific database)
+            # Drop connections first (connect to defaultdb, not the db being dropped)
             self._execute_sql(
                 f"SELECT pg_terminate_backend(pg_stat_activity.pid) "
                 f"FROM pg_stat_activity "
                 f"WHERE pg_stat_activity.datname = '{db_name}' "
-                f"AND pid <> pg_backend_pid();",
-                database_name=db_name
+                f"AND pid <> pg_backend_pid();"
             )
 
-            # Drop database (quoted to handle SQL keywords, connect to project-specific database)
-            self._execute_sql(f'DROP DATABASE IF EXISTS "{db_name}";', database_name=db_name)
-            # logger.info(f"✓ Database dropped: {db_name}")  # Commented for cleaner logs
+            # Drop database (must connect to defaultdb, not the database being dropped)
+            self._execute_sql(f'DROP DATABASE IF EXISTS "{db_name}";')
+            logger.info(f"✓ Database dropped: {db_name}")
 
-            # Drop user (quoted to handle SQL keywords, connect to project-specific database)
-            self._execute_sql(f'DROP USER IF EXISTS "{username}";', database_name=db_name)
-            # logger.info(f"✓ User dropped: {username}")  # Commented for cleaner logs
+            # Drop user
+            self._execute_sql(f'DROP USER IF EXISTS "{username}";')
+            logger.info(f"✓ User dropped: {username}")
 
         except Exception as e:
             logger.error(f"Failed to drop database/user: {e}")
@@ -300,12 +317,12 @@ class DatabaseProvisioner:
         try:
             db_name = f"{self._sanitize_db_name(project_name)}_db"
 
-            result = self._execute_sql(
+            success, result = self._execute_sql(
                 f'SELECT pg_database_size(\'{db_name}\') AS size;',
                 database_name=db_name
             )
 
-            if result and len(result) > 0:
+            if success and result and len(result) > 0:
                 size_bytes = int(result[0][0])
                 size_mb = size_bytes / (1024 * 1024)
                 return round(size_mb, 2)
