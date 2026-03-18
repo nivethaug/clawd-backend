@@ -399,15 +399,20 @@ def delete_project_database(project_name: str, force: bool = False) -> Dict[str,
             try:
                 drop_user_sql = sql.SQL("DROP USER IF EXISTS {}").format(sql.Identifier(db_user))
                 cur.execute(drop_user_sql)
+                conn.commit()  # Commit user drop before database drop
                 logger.info(f"✓ Dropped user: {db_user}")
             except Exception as e:
                 logger.warning(f"User drop warning: {e}")
             
-            # Drop database (if exists) - use sql.SQL().format() for proper identifier handling
-            drop_db_sql = sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name))
-            cur.execute(drop_db_sql)
-            logger.info(f"✓ Dropped database: {db_name}")
-            conn.commit()
+            # Drop database (if exists) - MUST be outside transaction block
+            # PostgreSQL doesn't allow DROP DATABASE inside a transaction
+            conn.autocommit = True  # Enable autocommit for DROP DATABASE
+            try:
+                drop_db_sql = sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name))
+                cur.execute(drop_db_sql)
+                logger.info(f"✓ Dropped database: {db_name}")
+            finally:
+                conn.autocommit = False  # Reset autocommit
             
             # Log pool status after operation
             logger.debug(f"Pool status after DROP: used={len(pool._used)}, idle={len(pool._pool)}")
