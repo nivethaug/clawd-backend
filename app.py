@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Request, Body
+from fastapi import FastAPI, HTTPException, Request, Body, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -2270,6 +2270,208 @@ async def save_file_content(
         raise HTTPException(status_code=403, detail="Permission denied")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+# ============================================================================
+# Authentication API
+# ============================================================================
+
+import bcrypt
+import secrets
+
+# In-memory token store (token -> user_id)
+AUTH_TOKENS: Dict[str, int] = {}
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = None
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: Optional[str] = None
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserResponse
+
+
+class MessageResponseModel(BaseModel):
+    message: str
+
+
+def hash_password(password: str) -> str:
+    """Hash password using bcrypt."""
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """Verify password against hash."""
+    return bcrypt.checkpw(
+        password.encode('utf-8'),
+        password_hash.encode('utf-8')
+    )
+
+
+def generate_token() -> str:
+    """Generate a secure random token."""
+    return secrets.token_hex(32)
+
+
+@app.post("/auth/signup", response_model=AuthResponse)
+async def signup(request: SignupRequest):
+    """Register a new user and return token."""
+    # Check if user already exists
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM users WHERE email = ?",
+            (request.email,)
+        ).fetchone()
+        
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already exists")
+        
+        # Hash password and create user
+        password_hash = hash_password(request.password)
+        
+        conn.execute(
+            "INSERT INTO users (email, name, password) VALUES (?, ?, ?) RETURNING id",
+            (request.email, request.name, password_hash)
+        )
+        result = conn.fetchone()
+        
+        if isinstance(result, dict):
+            user_id = result.get('id')
+        else:
+            user_id = result[0] if result else None
+        
+        conn.commit()
+    
+    # Generate token
+    token = generate_token()
+    AUTH_TOKENS[token] = user_id
+    
+    return AuthResponse(
+        token=token,
+        user=UserResponse(
+            id=str(user_id),
+            email=request.email,
+            name=request.name
+        )
+    )
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+async def login(request: LoginRequest):
+    """Login and return token."""
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT id, email, name, password FROM users WHERE email = ?",
+            (request.email,)
+        ).fetchone()
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Handle both dict (PostgreSQL) and tuple (SQLite) row types
+        if isinstance(user, dict):
+            user_id = user.get('id')
+            email = user.get('email')
+            name = user.get('name')
+            password_hash = user.get('password')
+        else:
+            user_id = user[0]
+            email = user[1]
+            name = user[2]
+            password_hash = user[3]
+        
+        # Verify password
+        if not password_hash or not verify_password(request.password, password_hash):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Generate token
+    token = generate_token()
+    AUTH_TOKENS[token] = user_id
+    
+    return AuthResponse(
+        token=token,
+        user=UserResponse(
+            id=str(user_id),
+            email=email,
+            name=name
+        )
+    )
+
+
+@app.post("/auth/logout")
+async def logout(authorization: Optional[str] = Header(None)):
+    """Logout and invalidate token."""
+    if not authorization:
+        return {"message": "Logged out"}
+    
+    # Extract token from "Bearer <token>"
+    parts = authorization.split()
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        token = parts[1]
+        # Remove token from store
+        if token in AUTH_TOKENS:
+            del AUTH_TOKENS[token]
+    
+    return {"message": "Logged out"}
+
+
+@app.get("/auth/me", response_model=UserResponse)
+async def get_current_user(authorization: Optional[str] = Header(None)):
+    """Get current user from token."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing authorization header")
+    
+    # Extract token from "Bearer <token>"
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Invalid authorization format")
+    
+    token = parts[1]
+    
+    # Validate token
+    user_id = AUTH_TOKENS.get(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Get user from database
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT id, email, name FROM users WHERE id = ?",
+            (user_id,)
+        ).fetchone()
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        # Handle both dict (PostgreSQL) and tuple (SQLite) row types
+        if isinstance(user, dict):
+            return UserResponse(
+                id=str(user.get('id')),
+                email=user.get('email'),
+                name=user.get('name')
+            )
+        else:
+            return UserResponse(
+                id=str(user[0]),
+                email=user[1],
+                name=user[2]
+            )
+
+
 @app.get("/health")
 async def health_check():
     return {
