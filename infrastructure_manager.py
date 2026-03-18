@@ -1435,10 +1435,6 @@ class InfrastructureManager:
             # PHASE_9 Verification
             logger.info("[VERIFY] PHASE_9_VERIFY_START")
 
-            # Add startup delay to ensure backend is ready
-            logger.info("[VERIFY] Waiting for backend to fully start (5s)...")
-            time.sleep(5)
-
             # DNS Resolution Check with Auto-Repair
             frontend_domain = self.domains.get("frontend")
             if frontend_domain:
@@ -1485,23 +1481,49 @@ class InfrastructureManager:
                 text=True
             )
 
-            logger.info("[VERIFY] Checking backend health")
-            backend_check = subprocess.run(
-                ["curl", f"http://localhost:{self.ports['backend']}/health"],
-                capture_output=True,
-                text=True
-            )
-
+            # Backend health check with retry logic
+            logger.info("[VERIFY] Checking backend health (with retries)")
+            backend_healthy = False
+            max_backend_retries = 6  # 6 retries * 5s = 30s max wait
+            backend_check = None
+            
+            for retry in range(max_backend_retries):
+                logger.info(f"[VERIFY] Backend health check attempt {retry + 1}/{max_backend_retries}")
+                backend_check = subprocess.run(
+                    ["curl", "-s", f"http://localhost:{self.ports['backend']}/health"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                # Check if backend is healthy
+                if "ok" in backend_check.stdout.lower() or backend_check.returncode == 0:
+                    backend_healthy = True
+                    logger.info(f"[VERIFY] ✓ Backend health check passed: {backend_check.stdout[:100]}")
+                    break
+                else:
+                    logger.warning(f"[VERIFY] Backend not ready yet (attempt {retry + 1}/{max_backend_retries})")
+                    if retry < max_backend_retries - 1:
+                        logger.info("[VERIFY] Waiting 5s before retry...")
+                        time.sleep(5)
+            
             # Debug: Log the actual backend health check response
-            logger.info(f"[VERIFY] Backend health check response (stdout): {backend_check.stdout[:200]}")
-            logger.info(f"[VERIFY] Backend health check response (stderr): {backend_check.stderr[:200]}")
-            logger.info(f"[VERIFY] Backend health check return code: {backend_check.returncode}")
+            logger.info(f"[VERIFY] Backend health check response (stdout): {backend_check.stdout[:200] if backend_check else 'None'}")
+            logger.info(f"[VERIFY] Backend health check response (stderr): {backend_check.stderr[:200] if backend_check else 'None'}")
+            logger.info(f"[VERIFY] Backend health check return code: {backend_check.returncode if backend_check else 'None'}")
 
             if "200" not in frontend_check.stdout:
                 raise RuntimeError("Frontend verification failed")
 
-            if "200" not in backend_check.stdout and "ok" not in backend_check.stdout.lower():
-                logger.error(f"[VERIFY] Backend verification failed - Expected HTTP 200 or 'ok', got: {backend_check.stdout[:100]}")
+            if not backend_healthy:
+                logger.error(f"[VERIFY] Backend verification failed after {max_backend_retries} attempts")
+                # Check PM2 logs for debugging
+                pm2_logs = subprocess.run(
+                    ["pm2", "logs", "--lines", "20", "--nostream"],
+                    capture_output=True,
+                    text=True
+                )
+                logger.error(f"[VERIFY] PM2 logs for debugging:\n{pm2_logs.stdout[:1000]}")
                 raise RuntimeError("Backend verification failed")
 
             logger.info("[VERIFY] ✓ Deployment verified successfully")
