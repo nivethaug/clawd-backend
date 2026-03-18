@@ -2023,45 +2023,37 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
         try:
             env_path = self.project_path / "backend" / ".env"
 
-            # Read existing .env
+            # Read existing .env or use template defaults
             env_content = env_path.read_text() if env_path.exists() else ""
 
-            # Update/add configuration
-            lines = env_content.split('\n')
-            updated_lines = []
+            # Parse existing vars
+            existing_vars = {}
+            for line in env_content.split('\n'):
+                if '=' in line and not line.startswith('#'):
+                    key, _, value = line.partition('=')
+                    existing_vars[key.strip()] = value.strip()
 
-            # Track what we've updated
-            updated_vars = set()
+            # Update with database and project info
             backend_port = self.ports.get("backend", 8000)
+            
+            # Required variables for new template
+            updates = {
+                'DATABASE_URL': self.database_info["database_url"],
+                'HOST': '0.0.0.0',
+                'PORT': str(backend_port),
+                'PROJECT_NAME': self.project_name,
+                'SECRET_KEY': f'dreampilot-{self.project_name}-secret-key',
+                'DEBUG': 'false'
+            }
 
-            # Update or add database URL
-            for line in lines:
-                if line.startswith('DATABASE_URL='):
-                    line = f'DATABASE_URL={self.database_info["database_url"]}'
-                    updated_vars.add('DATABASE_URL')
-                updated_lines.append(line)
-
-            # Add missing variables
-            if 'DATABASE_URL' not in updated_vars:
-                updated_lines.append(f'DATABASE_URL={self.database_info["database_url"]}')
-
-            # Add FastAPI-specific environment variables
-            if 'BACKEND_HOST' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
-                updated_lines.append(f'BACKEND_HOST=0.0.0.0')
-
-            if 'BACKEND_PORT' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
-                updated_lines.append(f'BACKEND_PORT={backend_port}')
-
-            if 'API_PORT' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
-                updated_lines.append(f'API_PORT={backend_port}')
-
-            if 'PROJECT_NAME' not in [l.split('=')[0] if '=' in l else '' for l in lines]:
-                updated_lines.append(f'PROJECT_NAME={self.project_name}')
+            # Merge with existing (our updates take precedence)
+            existing_vars.update(updates)
 
             # Write updated .env
-            env_path.write_text('\n'.join(updated_lines))
+            lines = [f"{k}={v}" for k, v in existing_vars.items()]
+            env_path.write_text('\n'.join(lines))
 
-            logger.info(f"✓ Backend .env configured for FastAPI")
+            logger.info(f"✓ Backend .env configured for FastAPI (PORT={backend_port})")
 
         except Exception as e:
             logger.error(f"Failed to configure backend env: {e}")
