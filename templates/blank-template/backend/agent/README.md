@@ -6,39 +6,50 @@ This folder helps AI assistants understand and modify the codebase efficiently.
 
 ## 🗄️ Database Connection Details (CRITICAL)
 
+### How Backend Connects to Database
+
+The backend uses **SQLAlchemy ORM** with a connection string from environment variables:
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  PM2 Ecosystem  │────▶│  Environment     │────▶│  SQLAlchemy     │
+│  Config JSON    │     │  Variables       │     │  Engine         │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+                                                        │
+                                                        ▼
+                                                 ┌─────────────────┐
+                                                 │  PostgreSQL     │
+                                                 │  Database       │
+                                                 └─────────────────┘
+```
+
 ### Environment Variables
 
-The backend receives these environment variables from PM2:
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DATABASE_URL` | Full PostgreSQL connection string | `postgresql://{user}:{pass}@{host}:5432/{db}` |
+| `PORT` | Backend API port | `8010` |
+| `PROJECT_NAME` | Project identifier | `MyProject` |
+| `HOST` | Bind address | `0.0.0.0` |
 
-| Variable | Example | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `postgresql://learninggrid_user:AbC123@postgres:5432/learninggrid_db` | Full connection string |
-| `PORT` | `8010` | Backend port |
-| `PROJECT_NAME` | `LearningGrid` | Project name |
-| `HOST` | `0.0.0.0` | Bind address |
+### Database Configuration Files
 
-### Database Configuration
-
-**File:** `core/config.py`
-
-```python
-class Settings:
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:5432/dreampilot"  # Fallback
-    )
-```
+| File | Purpose |
+|------|---------|
+| `core/config.py` | Reads `DATABASE_URL` from environment |
+| `core/database.py` | SQLAlchemy engine, session factory, `Base` class |
+| `models/*.py` | SQLAlchemy model definitions (tables) |
 
 ### Database Naming Convention
 
 ```
-Project: "LearningGrid"
-├── Database: learninggrid_db (lowercase, hyphens → underscores)
-├── Username: learninggrid_user
+Project: "MyProject"
+├── Database: myproject_db (lowercase, hyphens → underscores)
+├── Username: myproject_user
 └── Password: 32-char alphanumeric (no special chars)
 ```
 
-**⚠️ Important:** Database names are ALWAYS lowercase to avoid PostgreSQL case-sensitivity issues.
+**⚠️ Important:** All database identifiers are lowercase to avoid PostgreSQL case-sensitivity issues.
 
 ### DATABASE_URL Format
 
@@ -54,39 +65,227 @@ postgresql://{username}:{password}@{host}:{port}/{database}
 | `port` | `5432` |
 | `database` | `{project_name}_db` (lowercase) |
 
-### Testing Database Connection
+---
 
-**From Backend:**
+## 🤖 Agent Guide: Database Modifications
+
+### How to Read Current Database Schema
+
+**Option 1: Read Models**
+```python
+# Check models/ folder for all table definitions
+# Each model class = one database table
+```
+
+**Option 2: Query Database Directly**
+```python
+from core.database import engine
+from sqlalchemy import inspect, text
+
+inspector = inspect(engine)
+
+# List all tables
+tables = inspector.get_table_names()
+print(f"Tables: {tables}")
+
+# Get columns for a table
+columns = inspector.get_columns('users')
+for col in columns:
+    print(f"  {col['name']}: {col['type']}")
+```
+
+**Option 3: Check ai_index/database_schema.json**
+```json
+{
+  "tables": {
+    "users": {
+      "columns": {"id": "Integer", "email": "String", ...},
+      "relationships": [...]
+    }
+  }
+}
+```
+
+### How to Add a New Table
+
+**Step 1: Create Model File**
+
+```python
+# models/product.py
+from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy.sql import func
+from core.database import Base
+
+class Product(Base):
+    __tablename__ = "products"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    price = Column(Float, nullable=False)
+    description = Column(String(500))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+```
+
+**Step 2: Import in models/__init__.py**
+
+```python
+from models.user import User
+from models.product import Product  # Add this
+
+__all__ = ["User", "Product"]
+```
+
+**Step 3: Register in core/database.py**
+
+```python
+# Ensure model is imported so Base.metadata.create_all() creates the table
+import models.product  # Add this
+```
+
+**Step 4: Tables Auto-Create on Startup**
+
+The `init_db()` function in `core/database.py` creates all tables:
+```python
+Base.metadata.create_all(bind=engine)
+```
+
+### How to Add a New Column to Existing Table
+
+**Step 1: Update Model**
+
+```python
+# models/user.py
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, nullable=False)
+    password = Column(String(255), nullable=False)
+    phone = Column(String(20))  # ← NEW COLUMN
+    created_at = Column(DateTime, server_default=func.now())
+```
+
+**Step 2: Restart Backend**
+
+SQLAlchemy will NOT automatically add columns. Use Alembic migration:
+
+```bash
+# Create migration
+alembic revision --autogenerate -m "Add phone column to users"
+
+# Apply migration
+alembic upgrade head
+```
+
+**Or Manual SQL (Quick Fix):**
 ```python
 from core.database import engine
 from sqlalchemy import text
 
 with engine.connect() as conn:
-    result = conn.execute(text("SELECT current_database(), current_user"))
-    print(result.fetchone())
+    conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(20)"))
+    conn.commit()
 ```
 
-**From Server:**
-```bash
-docker exec -it postgres psql -U learninggrid_user -d learninggrid_db
+### How to Create a New Relationship
+
+**Step 1: Add Foreign Key**
+
+```python
+# models/order.py
+from sqlalchemy import Column, Integer, ForeignKey
+from sqlalchemy.orm import relationship
+from core.database import Base
+
+class Order(Base):
+    __tablename__ = "orders"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))  # FK
+    total = Column(Float)
+    
+    # Relationship
+    user = relationship("User", back_populates="orders")
 ```
 
-### Common Database Errors
+**Step 2: Add Back-Reference**
+
+```python
+# models/user.py
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True)
+    
+    # Back-reference
+    orders = relationship("Order", back_populates="user")
+```
+
+### How to Query the Database
+
+```python
+from sqlalchemy.orm import Session
+from core.database import SessionLocal
+from models.user import User
+
+# Get database session
+db: Session = SessionLocal()
+
+# Create
+new_user = User(email="test@example.com", password="hashed")
+db.add(new_user)
+db.commit()
+db.refresh(new_user)
+
+# Read
+user = db.query(User).filter(User.email == "test@example.com").first()
+users = db.query(User).all()
+
+# Update
+user.password = "new_hashed"
+db.commit()
+
+# Delete
+db.delete(user)
+db.commit()
+
+# Always close
+db.close()
+```
+
+### Database Modification Checklist
+
+| Action | Update Model | Migration | Restart | Update ai_index |
+|--------|:------------:|:---------:|:-------:|:---------------:|
+| Add table | ✅ | Auto | ✅ | ✅ |
+| Add column | ✅ | ✅ | ✅ | ✅ |
+| Remove column | ✅ | ✅ | ✅ | ✅ |
+| Add relationship | ✅ | ✅ | ✅ | ✅ |
+| Change column type | ✅ | ✅ | ✅ | ✅ |
+
+---
+
+## Common Database Errors
 
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `password authentication failed` | Wrong credentials | Check DATABASE_URL in ecosystem.config.json |
-| `database "X" does not exist` | DB not created | Check infrastructure_manager.py logs |
-| `permission denied for schema public` | PG 15+ permissions | Schema grant required |
-| `relation "users" does not exist` | Tables not created | Check init_db() runs on startup |
+| `database "X" does not exist` | DB not created | Check infrastructure logs |
+| `permission denied for schema public` | PG 15+ permissions | Run schema GRANT commands |
+| `relation "X" does not exist` | Table not created | Check model imported, restart backend |
+| `column "X" does not exist` | Migration not applied | Run Alembic migration or manual ALTER |
 
-### PostgreSQL Schema Permissions (PG 15+)
+---
+
+## PostgreSQL Schema Permissions (PG 15+)
 
 PostgreSQL 15+ requires explicit schema permissions:
 
 ```sql
-GRANT ALL ON SCHEMA public TO "learninggrid_user";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "learninggrid_user";
+GRANT ALL ON SCHEMA public TO "{project_user}";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{project_user}";
 ```
 
 ---

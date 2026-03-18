@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Database schema for DreamPilot backend - helps agents understand and modify database structure",
+  "version": "1.0.0",
+  "last_updated": "2026-03-18",
+  
+  "connection": {
+    "env_var": "DATABASE_URL",
+    "format": "postgresql://{username}:{password}@{host}:{port}/{database}",
+    "config_file": "core/config.py",
+    "engine_file": "core/database.py"
+  },
+
+  "naming_convention": {
+    "database": "{project_name}_db (lowercase, hyphens → underscores)",
+    "username": "{project_name}_user (lowercase)",
+    "password": "32-char alphanumeric (no special chars)",
+    "tables": "lowercase with underscores (e.g., user_sessions)",
+    "columns": "lowercase with underscores (e.g., created_at)"
+  },
+
+  "tables": {
+    "users": {
+      "model_file": "models/user.py",
+      "columns": {
+        "id": {
+          "type": "Integer",
+          "primary_key": true,
+          "index": true,
+          "nullable": false
+        },
+        "email": {
+          "type": "String(255)",
+          "unique": true,
+          "nullable": false,
+          "index": true
+        },
+        "password": {
+          "type": "String(255)",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "DateTime",
+          "server_default": "func.now()"
+        },
+        "updated_at": {
+          "type": "DateTime",
+          "onupdate": "func.now()"
+        }
+      },
+      "relationships": [],
+      "indexes": ["id", "email"]
+    }
+  },
+
+  "agent_instructions": {
+    "add_table": {
+      "steps": [
+        "1. Create model file in models/{table_name}.py",
+        "2. Define class extending Base from core.database",
+        "3. Set __tablename__ to lowercase with underscores",
+        "4. Define columns with proper types and constraints",
+        "5. Import model in models/__init__.py",
+        "6. Restart backend - tables auto-create via init_db()"
+      ],
+      "template": {
+        "file": "models/user.py",
+        "copy_and_modify": true
+      }
+    },
+
+    "add_column": {
+      "steps": [
+        "1. Add Column definition to model class",
+        "2. Create Alembic migration: alembic revision --autogenerate -m 'description'",
+        "3. Apply migration: alembic upgrade head",
+        "4. Update this JSON file with new column",
+        "5. Restart backend"
+      ],
+      "example": "phone = Column(String(20))"
+    },
+
+    "add_relationship": {
+      "steps": [
+        "1. Add ForeignKey column to child table",
+        "2. Add relationship() to child model",
+        "3. Add back_populates relationship to parent model",
+        "4. Create and apply migration",
+        "5. Update this JSON file"
+      ],
+      "example": {
+        "foreign_key": "user_id = Column(Integer, ForeignKey('users.id'))",
+        "relationship": "user = relationship('User', back_populates='orders')",
+        "back_reference": "orders = relationship('Order', back_populates='user')"
+      }
+    },
+
+    "query_patterns": {
+      "create": "db.add(obj) → db.commit() → db.refresh(obj)",
+      "read_one": "db.query(Model).filter(Model.field == value).first()",
+      "read_all": "db.query(Model).all()",
+      "read_filter": "db.query(Model).filter(Model.field == value).all()",
+      "update": "obj.field = new_value → db.commit()",
+      "delete": "db.delete(obj) → db.commit()"
+    },
+
+    "common_column_types": {
+      "Integer": "For IDs, counts, quantities",
+      "String(N)": "For text (emails, names, descriptions)",
+      "Text": "For long text content",
+      "Boolean": "For true/false flags",
+      "Float": "For decimal numbers",
+      "DateTime": "For timestamps",
+      "JSON": "For JSON data",
+      "ForeignKey": "For relationships"
+    }
+  },
+
+  "migration_guide": {
+    "alembic_commands": {
+      "init": "alembic init migrations",
+      "create_migration": "alembic revision --autogenerate -m 'description'",
+      "apply_migration": "alembic upgrade head",
+      "rollback": "alembic downgrade -1",
+      "history": "alembic history"
+    },
+    "manual_sql": {
+      "add_column": "ALTER TABLE {table} ADD COLUMN {column} {type}",
+      "drop_column": "ALTER TABLE {table} DROP COLUMN {column}",
+      "add_index": "CREATE INDEX idx_{name} ON {table}({column})",
+      "add_foreign_key": "ALTER TABLE {table} ADD CONSTRAINT fk_{name} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column})"
+    }
+  },
+
+  "schema_validation": {
+    "before_changes": [
+      "Check models/ folder for existing tables",
+      "Check this JSON file for current schema",
+      "Backup database if production"
+    ],
+    "after_changes": [
+      "Test model imports work",
+      "Verify migration applied",
+      "Update this JSON file",
+      "Restart backend service"
+    ]
+  }
+}
