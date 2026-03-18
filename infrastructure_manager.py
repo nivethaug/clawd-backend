@@ -350,20 +350,40 @@ class ServiceManager:
             logger.info(f"[SERVICE] Backend working directory: {backend_path}")
             logger.info(f"[SERVICE] Backend port: {port}")
 
+            # FIX 3: Validate main.py exists before attempting to start
+            main_py_path = backend_path / "main.py"
+            if not main_py_path.exists():
+                logger.error(f"[SERVICE] ❌ main.py not found at {main_py_path}")
+                logger.error(f"[SERVICE] Backend directory contents: {list(backend_path.iterdir()) if backend_path.exists() else 'N/A'}")
+                return False
+            logger.info(f"[SERVICE] ✓ main.py found at {main_py_path}")
+
+            # FIX 1: Use shared venv for dependency installation
+            venv_python = f"{self.venv_path}/bin/python"
+            venv_pip = f"{self.venv_path}/bin/pip"
+            
+            # Check if venv exists, fall back to system python if not
+            if not Path(venv_python).exists():
+                logger.warning(f"[SERVICE] Venv not found at {venv_python}, using system python3")
+                venv_python = "python3"
+                venv_pip = "pip"
+            else:
+                logger.info(f"[SERVICE] Using venv Python: {venv_python}")
+
             # Install Python dependencies first
             requirements_path = backend_path / "requirements.txt"
             if requirements_path.exists():
                 logger.info("[SERVICE] Installing Python dependencies from requirements.txt...")
                 try:
                     subprocess.run(
-                        ["pip", "install", "--break-system-packages", "-r", "requirements.txt"],
+                        [venv_pip, "install", "-r", "requirements.txt"],
                         cwd=str(backend_path),
                         check=True,
                         capture_output=True,
                         text=True,
                         timeout=300  # 5 minutes
                     )
-                    # logger.info("[SERVICE] ✓ Python dependencies installed successfully")  # Commented for cleaner logs
+                    logger.info("[SERVICE] ✓ Python dependencies installed successfully")
                 except subprocess.CalledProcessError as e:
                     logger.error(f"[SERVICE] Failed to install dependencies: {e}")
                     logger.error(f"[SERVICE] Install stderr: {e.stderr[:500]}")
@@ -374,13 +394,14 @@ class ServiceManager:
             # Prepare backend port
             backend_port = port if port else 8000
 
-            # Create ecosystem config for PM2 with Python FastAPI backend
+            # FIX 1: Create ecosystem config with venv interpreter
             ecosystem_config = {
                 "apps": [{
                     "name": app_name,
-                    "script": "python3",
+                    "script": venv_python,
                     "args": f"-m uvicorn main:app --host 0.0.0.0 --port {backend_port}",
                     "cwd": str(backend_path),
+                    "interpreter": venv_python,
                     "instances": 1,
                     "exec_mode": "fork",
                     "watch": False,
@@ -397,6 +418,7 @@ class ServiceManager:
             import json
             ecosystem_path = backend_path / "ecosystem.config.json"
             ecosystem_path.write_text(json.dumps(ecosystem_config, indent=2))
+            logger.info(f"[SERVICE] Ecosystem config written to {ecosystem_path}")
 
             # Start FastAPI backend using ecosystem config
             backend_cmd = [
@@ -414,14 +436,13 @@ class ServiceManager:
                 timeout=30
             )
 
-            # logger.info(f"[SERVICE] Backend service started successfully: {app_name}")  # Commented for cleaner logs
             logger.info(f"[SERVICE] Backend stdout: {result.stdout[:200]}")
 
             # Add startup delay to ensure backend is ready
             logger.info("[SERVICE] Waiting for backend to start (5s)...")
             time.sleep(5)
 
-            # Log PM2 status to verify backend is running
+            # FIX 2: Enhanced PM2 status and error logging
             pm2_status = subprocess.run(
                 ["pm2", "list"],
                 capture_output=True,
@@ -429,11 +450,62 @@ class ServiceManager:
             )
             logger.info(f"[SERVICE] PM2 status after startup:\n{pm2_status.stdout}")
 
+            # FIX 2: Check PM2 logs immediately for startup errors
+            pm2_logs = subprocess.run(
+                ["pm2", "logs", app_name, "--lines", "50", "--nostream"],
+                capture_output=True,
+                text=True
+            )
+            
+            # Check for common error patterns in logs
+            if pm2_logs.stdout:
+                error_patterns = ["Error", "Exception", "ModuleNotFoundError", "ImportError", "Traceback"]
+                has_errors = any(pattern in pm2_logs.stdout for pattern in error_patterns)
+                
+                if has_errors:
+                    logger.error(f"[SERVICE] ❌ Backend startup errors detected in PM2 logs:")
+                    logger.error(f"[SERVICE] PM2 logs for {app_name}:\n{pm2_logs.stdout[:2000]}")
+                    if pm2_logs.stderr:
+                        logger.error(f"[SERVICE] PM2 stderr:\n{pm2_logs.stderr[:500]}")
+                    return False
+                else:
+                    logger.info(f"[SERVICE] ✓ No startup errors in PM2 logs")
+            
+            # Check PM2 process status (online/errored)
+            pm2_jlist = subprocess.run(
+                ["pm2", "jlist"],
+                capture_output=True,
+                text=True
+            )
+            if pm2_jlist.returncode == 0:
+                try:
+                    pm2_processes = json.loads(pm2_jlist.stdout)
+                    for proc in pm2_processes:
+                        if proc.get("name") == app_name:
+                            proc_status = proc.get("pm2_env", {}).get("status", "unknown")
+                            if proc_status == "errored":
+                                logger.error(f"[SERVICE] ❌ PM2 process {app_name} is in 'errored' state")
+                                return False
+                            logger.info(f"[SERVICE] ✓ PM2 process {app_name} status: {proc_status}")
+                            break
+                except json.JSONDecodeError:
+                    pass  # Fall through if JSON parsing fails
+
             return True
 
         except subprocess.CalledProcessError as e:
             logger.error(f"[SERVICE] Backend service failed to start: {e}")
             logger.error(f"[SERVICE] Backend stderr: {e.stderr[:300]}")
+            # FIX 2: Capture PM2 logs on error for debugging
+            try:
+                error_logs = subprocess.run(
+                    ["pm2", "logs", app_name, "--lines", "30", "--nostream"],
+                    capture_output=True,
+                    text=True
+                )
+                logger.error(f"[SERVICE] PM2 error logs:\n{error_logs.stdout[:1500]}")
+            except Exception:
+                pass
             return False
         except Exception as e:
             logger.error(f"[SERVICE] Backend service error: {e}")
