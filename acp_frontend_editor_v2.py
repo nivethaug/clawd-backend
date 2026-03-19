@@ -637,8 +637,8 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
 
         if result.returncode == 0:
             logger.info("✅ npm ci successful (optimized)")
-print("✅ [DEPS] npm ci successful (optimized)", flush=True)
-                print("=" * 60, flush=True)
+            print("✅ [DEPS] npm ci successful (optimized)", flush=True)
+            print("=" * 60, flush=True)
             return True, "npm ci successful (optimized)"
 
         logger.error(f"❌ npm ci failed with code {result.returncode}")
@@ -650,8 +650,8 @@ print("✅ [DEPS] npm ci successful (optimized)", flush=True)
 
     except Exception as e:
         logger.error(f"❌ npm ci error: {e}")
-print(f"❌ [DEPS] npm ci error: {e}", flush=True)
-            print("=" * 60, flush=True)
+        print(f"❌ [DEPS] npm ci error: {e}", flush=True)
+        print("=" * 60, flush=True)
         return False, f"npm ci error: {e}"
 
 
