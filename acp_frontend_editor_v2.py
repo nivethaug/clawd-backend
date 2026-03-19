@@ -1997,6 +1997,14 @@ CHECKLIST (complete in order - ALL STEPS REQUIRED)
 7. [ ] Run npm run build and VERIFY IT SUCCEEDS
 8. [ ] Fix any TypeScript or build errors
 9. [ ] RE-RUN npm run build to confirm success
+10. [ ] SERVE dist folder: `npx serve dist -l 3000` (or available port)
+11. [ ] VERIFY with Chrome DevTools MCP:
+    - Open browser page at http://localhost:3000
+    - Take snapshot to confirm page loads correctly
+    - Check for console errors
+    - Verify all routes work (click through each page)
+    - Confirm no blank/white screens
+    - Screenshot final result for confirmation
 
 SCOPE LIMITATION (CRITICAL - Reduces AI scanning time)
 

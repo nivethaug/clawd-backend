@@ -1498,7 +1498,7 @@ class InfrastructureManager:
 
             # Phase 2: Provision database
             logger.info("Phase 2/8: Database provisioning")
-            self.database_info = self.db_provisioner.create_database_and_user(self.project_name)
+            self.database_info = self.db_provisioner.create_database_and_user(self.domain)
             # logger.info(f"✓ Database created: {self.database_info['database_name']}")  # Commented for cleaner logs
 
             # Phase 3: Configure backend environment
@@ -2351,8 +2351,8 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             # Remove nginx config
             self.nginx_configurator.remove_config(self.project_name)
 
-            # Drop database
-            self.db_provisioner.drop_database_and_user(self.project_name)
+            # Drop database (use domain name)
+            self.db_provisioner.drop_database_and_user(self.domain)
 
             # Release ports
             if hasattr(self, 'ports'):
@@ -2564,8 +2564,8 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 # Remove nginx config
                 self.nginx_configurator.remove_config(self.project_name)
 
-                # Drop database
-                self.db_provisioner.drop_database_and_user(self.project_name)
+                # Drop database (use domain name)
+                self.db_provisioner.drop_database_and_user(self.domain)
 
                 # Release ports
                 ports = metadata.get("ports", {})
