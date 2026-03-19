@@ -25,7 +25,7 @@ import requests
 
 # Configuration
 API_BASE_URL = "http://localhost:8002"
-DEFAULT_TIMEOUT = 600  # 10 minutes
+DEFAULT_TIMEOUT = 800  # 10 minutes
 POLL_INTERVAL = 5  # seconds
 
 # Status progression order
