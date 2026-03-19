@@ -25,9 +25,9 @@ from typing import Dict, List, Optional, Tuple, Any, Set
 # Page manifest system
 from page_manifest import PageManifest, create_page_manifest, scaffold_pages
 
-# Configure logging
+# Configure logging - WARNING level to suppress INFO messages
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='[%(levelname)s] %(name)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -537,16 +537,16 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
     Returns:
         Tuple of (success, message)
     """
-    print("=" * 60)
-    print("📦 DEPENDENCY INSTALLATION")
-    print("=" * 60)
+    print("=" * 60, flush=True)
+    print("📦 DEPENDENCY INSTALLATION", flush=True)
+    print("=" * 60, flush=True)
 
     # ⚡ Skip install if node_modules already exists (cached)
     node_modules = Path(frontend_path) / "node_modules"
     if node_modules.exists():
         logger.info("⚡ Skipping npm install (node_modules exists)")
-        print("⚡ [DEPS] Skipping install (dependencies already installed)")
-        print("=" * 60)
+        print("⚡ [DEPS] Skipping install (dependencies already installed)", flush=True)
+        print("=" * 60, flush=True)
         return True, "Dependencies already installed (cached)"
 
     # Detect PM2 environment
@@ -555,7 +555,7 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
     # 🚨 PM2 ENVIRONMENT → FORCE NPM (skip pnpm due to SIGABRT)
     if is_pm2:
         logger.warning("⚠️ PM2 detected - using optimized npm ci")
-        print("⚠️  [DEPS] PM2 detected → optimized npm ci")
+        print("⚠️  [DEPS] PM2 detected → optimized npm ci", flush=True)
 
         try:
             result = subprocess.run(
@@ -570,27 +570,27 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
 
             if result.returncode == 0:
                 logger.info("✅ npm ci successful (optimized)")
-                print("✅ [DEPS] npm ci successful (optimized)")
-                print("=" * 60)
+                print("✅ [DEPS] npm ci successful (optimized)", flush=True)
+                print("=" * 60, flush=True)
                 return True, "npm ci successful (optimized)"
 
             logger.error(f"❌ npm ci failed with code {result.returncode}")
-            print(f"❌ [DEPS] npm ci failed with code {result.returncode}")
+            print(f"❌ [DEPS] npm ci failed with code {result.returncode}", flush=True)
             if result.stderr:
-                print(f"    [DEPS] stderr: {result.stderr[:200]}")
+                print(f"    [DEPS] stderr: {result.stderr[:200]}", flush=True)
             print("=" * 60)
             return False, f"npm ci failed: {result.stderr}"
 
         except Exception as e:
             logger.error(f"❌ npm ci error: {e}")
-            print(f"❌ [DEPS] npm ci error: {e}")
+            print(f"❌ [DEPS] npm ci error: {e}", flush=True)
             print("=" * 60)
             return False, f"npm ci error: {e}"
 
     # ⚡ NON-PM2 → TRY PNPM FIRST
     try:
         logger.info("⚡ Trying pnpm install (non-PM2 mode)...")
-        print("⚡ [DEPS] Trying pnpm install (non-PM2 mode)...")
+        print("⚡ [DEPS] Trying pnpm install (non-PM2 mode)...", flush=True)
 
         result = subprocess.run(
             ["pnpm", "install", "--prefer-offline"],
@@ -604,26 +604,26 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
 
         if result.returncode == 0:
             logger.info("✅ pnpm install successful")
-            print("✅ [DEPS] pnpm install successful")
-            print("=" * 60)
+            print("✅ [DEPS] pnpm install successful", flush=True)
+            print("=" * 60, flush=True)
             return True, "pnpm install successful"
 
         logger.warning(f"⚠️ pnpm install failed (code {result.returncode}), falling back to npm")
-        print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm")
+        print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm", flush=True)
         if result.stderr:
             print(f"    [DEPS] stderr: {result.stderr[:200]}")
 
     except FileNotFoundError:
         logger.warning("⚠️ pnpm not found, falling back to npm")
-        print("⚠️  [DEPS] pnpm not found, falling back to npm")
+        print("⚠️  [DEPS] pnpm not found, falling back to npm", flush=True)
     except Exception as e:
         logger.warning(f"⚠️ pnpm error: {e}, falling back to npm")
-        print(f"⚠️  [DEPS] pnpm error: {e}, falling back to npm")
+        print(f"⚠️  [DEPS] pnpm error: {e}, falling back to npm", flush=True)
 
     # 🔁 FALLBACK TO NPM
     try:
         logger.info("📦 Running optimized npm ci...")
-        print("📦 [DEPS] Running optimized npm ci...")
+        print("📦 [DEPS] Running optimized npm ci...", flush=True)
 
         result = subprocess.run(
             ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
@@ -637,8 +637,8 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
 
         if result.returncode == 0:
             logger.info("✅ npm ci successful (optimized)")
-            print("✅ [DEPS] npm ci successful (optimized)")
-            print("=" * 60)
+print("✅ [DEPS] npm ci successful (optimized)", flush=True)
+                print("=" * 60, flush=True)
             return True, "npm ci successful (optimized)"
 
         logger.error(f"❌ npm ci failed with code {result.returncode}")
@@ -650,8 +650,8 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
 
     except Exception as e:
         logger.error(f"❌ npm ci error: {e}")
-        print(f"❌ [DEPS] npm ci error: {e}")
-        print("=" * 60)
+print(f"❌ [DEPS] npm ci error: {e}", flush=True)
+            print("=" * 60, flush=True)
         return False, f"npm ci error: {e}"
 
 
@@ -1042,7 +1042,7 @@ class ACPFrontendEditorV2:
                     # Hard timeout check (STRICT FAILURE)
                     if elapsed > HARD_TIMEOUT:
                         logger.error(f"[ACPX-V2] 🔴 HARD TIMEOUT: {elapsed:.1f}s > {HARD_TIMEOUT}s — killing process group")
-                        print(f"🔴 ACPX-V2-HARD-TIMEOUT: Killing process group {process.pid}")
+                        print(f"🔴 ACPX-V2-HARD-TIMEOUT: Killing process group {process.pid}", flush=True)
                         try:
                             os.killpg(process.pid, signal.SIGKILL)
                             # Reap process to avoid zombies
@@ -1057,7 +1057,7 @@ class ACPFrontendEditorV2:
                     # Idle timeout check (TOLERANT - check if edits succeeded)
                     if idle_time > IDLE_TIMEOUT:
                         logger.warning(f"[ACPX-V2] ⚠️ IDLE TIMEOUT: {idle_time:.1f}s > {IDLE_TIMEOUT}s — killing process group")
-                        print(f"⚠️ ACPX-V2-IDLE-TIMEOUT: Killing process group {process.pid}")
+                        print(f"⚠️ ACPX-V2-IDLE-TIMEOUT: Killing process group {process.pid}", flush=True)
                         try:
                             # Send SIGTERM to process group
                             os.killpg(process.pid, signal.SIGTERM)
@@ -1070,7 +1070,7 @@ class ACPFrontendEditorV2:
                             except subprocess.TimeoutExpired:
                                 # Escalate to SIGKILL
                                 logger.warning(f"[ACPX-V2] Process still alive after 5s, sending SIGKILL")
-                                print(f"🔴 ACPX-V2-SIGKILL: Escalating to SIGKILL for process group {process.pid}")
+                                print(f"🔴 ACPX-V2-SIGKILL: Escalating to SIGKILL for process group {process.pid}", flush=True)
                                 try:
                                     os.killpg(process.pid, signal.SIGKILL)
                                 except (ProcessLookupError, OSError, AttributeError):
@@ -1107,9 +1107,9 @@ class ACPFrontendEditorV2:
                 return_code = process.returncode
 
                 # Robust debug logging after execution
-                print("ACPX RETURN CODE:", return_code)
-                print("ACPX STDOUT:", stdout_output[:500] if stdout_output else "(empty)")
-                print("ACPX STDERR:", stderr_output[:500] if stderr_output else "(empty)")
+                print("ACPX RETURN CODE:", return_code, flush=True)
+                print("ACPX STDOUT:", stdout_output[:500] if stdout_output else "(empty)", flush=True)
+                print("ACPX STDERR:", stderr_output[:500] if stderr_output else "(empty)", flush=True)
                 
                 # =============================================
                 # PARTIAL COMMIT: Timeout handling (NO ROLLBACK)
@@ -1123,11 +1123,11 @@ class ACPFrontendEditorV2:
                     if created_files:
                         issues.append(f"Hard timeout exceeded ({HARD_TIMEOUT}s)")
                         logger.warning(f"[ACPX-V2] ⚠️ Hard timeout ({HARD_TIMEOUT}s) — keeping {len(created_files)} generated files")
-                        print(f"⚠️ ACPX-HARD-TIMEOUT: Keeping {len(created_files)} generated files (partial success)")
+                        print(f"⚠️ ACPX-HARD-TIMEOUT: Keeping {len(created_files)} generated files (partial success)", flush=True)
                         status = "partial_success"
                     else:
                         logger.error(f"[ACPX-V2] 🔴 Hard timeout and NO files created — rollback")
-                        print(f"🔴 ACPX-HARD-TIMEOUT: No files created, rolling back")
+                        print(f"🔴 ACPX-HARD-TIMEOUT: No files created, rolling back", flush=True)
                         self.snapshot_manager.rollback_and_cleanup()
                         return {
                             "status": "failed",
@@ -1143,11 +1143,11 @@ class ACPFrontendEditorV2:
                     if created_files:
                         issues.append(f"Idle timeout exceeded ({IDLE_TIMEOUT}s)")
                         logger.warning(f"[ACPX-V2] ⚠️ Idle timeout — keeping {len(created_files)} generated files")
-                        print(f"⚠️ ACPX-IDLE-TIMEOUT: Keeping {len(created_files)} generated files (partial success)")
+                        print(f"⚠️ ACPX-IDLE-TIMEOUT: Keeping {len(created_files)} generated files (partial success)", flush=True)
                         status = "partial_success"
                     else:
                         logger.error(f"[ACPX-V2] 🔴 Idle timeout and NO files created — rollback")
-                        print(f"🔴 ACPX-IDLE-TIMEOUT: No files created, rolling back")
+                        print(f"🔴 ACPX-IDLE-TIMEOUT: No files created, rolling back", flush=True)
                         self.snapshot_manager.rollback_and_cleanup()
                         return {
                             "status": "failed",
@@ -1155,7 +1155,7 @@ class ACPFrontendEditorV2:
                             "message": f"Idle timeout ({IDLE_TIMEOUT}s) and no files created",
                             "rollback": True
                         }
-                    print(f"⚠️ ACPX-IDLE-TIMEOUT: Keeping generated files (partial success)")
+                    print(f"⚠️ ACPX-IDLE-TIMEOUT: Keeping generated files (partial success)", flush=True)
                     status = "partial_success"
 
             except RuntimeError as e:
@@ -1526,9 +1526,9 @@ class ACPFrontendEditorV2:
         # print("🔴 PLANNER-CACHE-MISS: No cached pages, performing fresh inference")
 
         # logger.info("[Planner] Extracting required pages from prompt...")
-        print("\n" + "="*60)
-        print("🔍 PAGE INFERENCE START")
-        print("="*60)
+        print("\n" + "="*60, flush=True)
+        print("🔍 PAGE INFERENCE START", flush=True)
+        print("="*60, flush=True)
         # print(f"🔴 PLANNER-INPUT: {goal_description[:200]}...")
 
         required_pages = []
@@ -1544,27 +1544,27 @@ class ACPFrontendEditorV2:
             if inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
                 # logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
-                print(f"✅ PLANNER-GROQ-SUCCESS: Using {len(inferred_pages)} pages: {inferred_pages}")
+                print(f"✅ PLANNER-GROQ-SUCCESS: Using {len(inferred_pages)} pages: {inferred_pages}", flush=True)
             else:
-                print(f"⚠️  PLANNER-GROQ-INSUFFICIENT: Got {len(inferred_pages) if inferred_pages else 0} pages, need >= 3")
+                print(f"⚠️  PLANNER-GROQ-INSUFFICIENT: Got {len(inferred_pages) if inferred_pages else 0} pages, need >= 3", flush=True)
         except Exception as e:
             logger.warning(f"[Planner] Groq inference failed: {e}")
-            print(f"❌ PLANNER-GROQ-ERROR: {type(e).__name__}: {str(e)}")
+            print(f"❌ PLANNER-GROQ-ERROR: {type(e).__name__}: {str(e)}", flush=True)
 
         # Step 2: Fallback to default pages
         if len(required_pages) < 3:
             required_pages = ["Dashboard", "Settings", "Overview"]
             # logger.info(f"[Planner] Using default pages: {required_pages}")
-            print(f"⚠️  PLANNER-DEFAULT: Using default pages = {required_pages}")
+            print(f"⚠️  PLANNER-DEFAULT: Using default pages = {required_pages}", flush=True)
 
         # Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
 
-        print(f"🎯 PLANNER-FINAL: Pages = {required_pages}")
-        print(f"📊 PLANNER-COUNT: {len(required_pages)} pages detected")
-        print("="*60)
-        print("🔍 PAGE INFERENCE COMPLETE")
-        print("="*60 + "\n")
+        print(f"🎯 PLANNER-FINAL: Pages = {required_pages}", flush=True)
+        print(f"📊 PLANNER-COUNT: {len(required_pages)} pages detected", flush=True)
+        print("="*60, flush=True)
+        print("🔍 PAGE INFERENCE COMPLETE", flush=True)
+        print("="*60 + "\n", flush=True)
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
