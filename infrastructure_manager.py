@@ -1682,6 +1682,26 @@ class InfrastructureManager:
 
             logger.info("[VERIFY] ✓ Deployment verified successfully")
             logger.info("PHASE_9_VERIFY_COMPLETE: success")
+            
+            # PHASE_10: Final Cleanup (node_modules removal)
+            logger.info("Phase 8/8: Final cleanup")
+            logger.info("🧹 Cleaning up node_modules to save disk space...")
+            try:
+                import shutil
+                frontend_path = self.project_path / "frontend"
+                node_modules_path = frontend_path / "node_modules"
+                if node_modules_path.exists():
+                    # Calculate size before deletion for logging
+                    total_size = sum(f.stat().st_size for f in node_modules_path.rglob("*") if f.is_file())
+                    size_mb = total_size / (1024 * 1024)
+                    shutil.rmtree(node_modules_path)
+                    logger.info(f"✓ Removed node_modules (freed {size_mb:.1f} MB)")
+                else:
+                    logger.info("node_modules not found, skipping cleanup")
+            except Exception as cleanup_error:
+                logger.warning(f"⚠️ Could not remove node_modules: {cleanup_error}")
+                # Don't fail the deployment, just warn
+            
             logger.info("DEPLOY: Project READY")
             logger.info("✅ All infrastructure provisioned and verified successfully!")
             self._save_metadata()
@@ -2018,32 +2038,11 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 logger.warning(f"⚠️ Could not fix permissions: {perm_error}")
                 # Don't fail the build, just warn
             
-            # Step 7: Cleanup node_modules to save disk space
-            logger.info("🧹 Cleaning up node_modules to save disk space...")
-            try:
-                import shutil
-                node_modules_path = frontend_path / "node_modules"
-                if node_modules_path.exists():
-                    shutil.rmtree(node_modules_path)
-                    logger.info(f"✓ Removed node_modules (saved disk space)")
-                else:
-                    logger.info("node_modules not found, skipping cleanup")
-            except Exception as cleanup_error:
-                logger.warning(f"⚠️ Could not remove node_modules: {cleanup_error}")
-                # Don't fail the build, just warn
+            # Note: node_modules cleanup moved to Phase 10 in provision_all() (final step after verification)
             
             logger.info("PHASE_5_BUILD_COMPLETE: success")
             logger.info("✅ Build phase completed successfully")
             return True
-            
-        except subprocess.TimeoutExpired:
-            logger.error("❌ Build phase timed out")
-            logger.info("PHASE_5_BUILD_FAILED: timeout")
-            return False
-        except Exception as e:
-            logger.error(f"❌ Build phase failed: {e}")
-            logger.info("PHASE_5_BUILD_FAILED: exception")
-            return False
             
         except subprocess.TimeoutExpired:
             logger.error("❌ Build phase timed out")
