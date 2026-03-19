@@ -362,13 +362,42 @@ class ACPBuildGate:
         Returns:
             Tuple of (success, output)
         """
-        valid, message = self.validate_environment()
-        if not valid:
-            return False, f"Environment validation failed: {message}"
-
         output = []
         output.append("=== Starting Build Process ===")
         output.append(f"Working directory: {self.frontend_path}")
+
+        # ⚡ Skip build if dist already exists (ACPX may have built it)
+        dist_path = self.frontend_path / "dist"
+        if dist_path.exists():
+            index_html = dist_path / "index.html"
+            assets_dir = dist_path / "assets"
+            js_files = list(assets_dir.glob("*.js")) if assets_dir.exists() else []
+            
+            if index_html.exists() and js_files:
+                output.append(f"⚡ Skipping build (dist already exists)")
+                output.append(f"✓ dist/index.html: {index_html.stat().st_size:,} bytes")
+                output.append(f"✓ dist/assets/*.js: {len(js_files)} files")
+                
+                # Cleanup node_modules to save disk space
+                output.append("\n--- Optional Cleanup ---")
+                node_modules = self.frontend_path / "node_modules"
+                if node_modules.exists():
+                    try:
+                        shutil.rmtree(node_modules)
+                        output.append("🧹 node_modules removed (disk optimization)")
+                        logger.info("🧹 node_modules removed (disk optimization)")
+                    except Exception as e:
+                        output.append(f"⚠️ Could not remove node_modules: {e}")
+                else:
+                    output.append("node_modules not found, skipping cleanup")
+                
+                output.append("=== Build Process Complete (skipped) ===")
+                logger.info("⚡ Skipping build (dist already exists)")
+                return True, "\n".join(output)
+
+        valid, message = self.validate_environment()
+        if not valid:
+            return False, f"Environment validation failed: {message}"
 
         try:
             # Step 1: Install dependencies (pnpm first, npm fallback)
