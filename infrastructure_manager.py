@@ -1699,7 +1699,7 @@ class InfrastructureManager:
             logger.info("[VERIFY] ✓ Deployment verified successfully")
             logger.info("PHASE_9_VERIFY_COMPLETE: success")
             
-            # PHASE_10: Final Cleanup (node_modules removal)
+            # PHASE_10: Final Cleanup (node_modules removal + orphaned ACPX processes)
             logger.info("Phase 8/8: Final cleanup")
             logger.info("🧹 Cleaning up node_modules to save disk space...")
             try:
@@ -1718,6 +1718,10 @@ class InfrastructureManager:
                 logger.warning(f"⚠️ Could not remove node_modules: {cleanup_error}")
                 # Don't fail the deployment, just warn
             
+            # Clean up orphaned claude-agent-acp processes from this project
+            logger.info("🧹 Cleaning up orphaned ACPX processes...")
+            self._cleanup_orphaned_acpx_processes()
+            
             logger.info("DEPLOY: Project READY")
             logger.info("✅ All infrastructure provisioned and verified successfully!")
             self._save_metadata()
@@ -1727,6 +1731,71 @@ class InfrastructureManager:
             logger.error(f"❌ Infrastructure provisioning failed: {e}")
             self._rollback()
             return False
+    
+    def _cleanup_orphaned_acpx_processes(self):
+        """
+        Clean up orphaned claude-agent-acp processes.
+        
+        Only kills processes whose parent process has died (orphaned).
+        This ensures we don't kill processes from other active projects.
+        """
+        try:
+            # Find all claude-agent-acp processes
+            result = subprocess.run(
+                ["pgrep", "-f", "claude-agent-acp"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode != 0 or not result.stdout.strip():
+                logger.info("✓ No claude-agent-acp processes found")
+                return
+            
+            pids = [int(p.strip()) for p in result.stdout.strip().split('\n') if p.strip()]
+            killed_count = 0
+            
+            for pid in pids:
+                try:
+                    # Check if this process is orphaned (parent is dead or init)
+                    try:
+                        stat_path = f"/proc/{pid}/stat"
+                        with open(stat_path, 'r') as f:
+                            parts = f.read().split()
+                            if len(parts) >= 4:
+                                ppid = int(parts[3])
+                                
+                                # Check if parent process exists
+                                try:
+                                    os.kill(ppid, 0)
+                                    # Parent exists, don't kill this one
+                                    logger.debug(f"claude-agent-acp {pid} has parent {ppid}, skipping")
+                                    continue
+                                except (ProcessLookupError, OSError):
+                                    # Parent is dead - this is an orphan!
+                                    logger.info(f"Found orphaned claude-agent-acp {pid} (parent {ppid} dead)")
+                    except (FileNotFoundError, PermissionError, ValueError) as e:
+                        # Can't read /proc, try to kill anyway
+                        logger.debug(f"Could not check parent for {pid}: {e}")
+                    
+                    # Kill the orphaned process
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                        logger.info(f"✓ Killed orphaned claude-agent-acp process {pid}")
+                        killed_count += 1
+                    except (ProcessLookupError, OSError) as e:
+                        logger.debug(f"Process {pid} already dead: {e}")
+                        
+                except Exception as e:
+                    logger.debug(f"Failed to check/kill process {pid}: {e}")
+            
+            if killed_count > 0:
+                logger.info(f"✓ Cleaned up {killed_count} orphaned ACPX processes")
+            else:
+                logger.info("✓ No orphaned ACPX processes to clean up")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ ACPX cleanup failed: {e}")
 
     def _acpx_fix_build_error(self, build_error: str, attempt: int, max_attempts: int = 3) -> bool:
         """
