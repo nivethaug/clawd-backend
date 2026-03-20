@@ -119,18 +119,19 @@ Be concise but thorough. Focus on the user's specific request.
         """
         prompt = self._build_chat_prompt(user_message, session_context)
         
-        # Build command - pass prompt via stdin to avoid CLI arg issues
+        # Build command - pass prompt as CLI arg (same as acp_frontend_editor_v2.py)
         cmd = [
             "acpx",
             "--format", "quiet",
             "claude",
-            "exec"
+            "exec",
+            str(prompt)
         ]
         
         logger.info(f"[ACP-CHAT] Running ACPX for project: {self.project_name}")
         logger.info(f"[ACP-CHAT] Working directory: {self.frontend_src_path}")
         logger.info(f"[ACP-CHAT] User message: {user_message[:100]}...")
-        logger.info(f"[ACP-CHAT] Command: {' '.join(cmd)} (prompt via stdin)")
+        logger.info(f"[ACP-CHAT] Command: acpx --format quiet claude exec <prompt>")
         logger.info(f"[ACP-CHAT] Prompt length: {len(prompt)} chars")
         
         try:
@@ -151,24 +152,17 @@ Be concise but thorough. Focus on the user's specific request.
                 }
             logger.info(f"[ACP-CHAT] acpx found at: {acpx_check.stdout.strip()}")
             
-            # Run ACPX with timeout
+            # Run ACPX with timeout (same pattern as acp_frontend_editor_v2.py)
             logger.info(f"[ACP-CHAT] Starting subprocess...")
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                stdin=subprocess.PIPE,  # Pass prompt via stdin
+                stdin=subprocess.DEVNULL,  # No stdin needed - prompt is CLI arg
                 text=True,
                 cwd=str(self.frontend_src_path),
                 start_new_session=True
             )
-            
-            # Write prompt to stdin
-            try:
-                process.stdin.write(prompt)
-                process.stdin.close()
-            except Exception as stdin_err:
-                logger.error(f"[ACP-CHAT] Failed to write to stdin: {stdin_err}")
             
             logger.info(f"[ACP-CHAT] Subprocess started with PID: {process.pid}")
             
