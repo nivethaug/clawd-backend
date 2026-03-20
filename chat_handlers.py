@@ -169,7 +169,10 @@ def save_stream_to_db(state: StreamState):
     """Save accumulated stream content to database. Called as background task."""
     from database_adapter import get_db
 
+    print(f"[STREAM] Background save called - saved={state.saved}, content_len={len(state.content)}, session={state.session_id}")
+
     if state.saved or not state.content:
+        print(f"[STREAM] Skipping save - already saved or no content")
         return
 
     state.saved = True
@@ -180,7 +183,7 @@ def save_stream_to_db(state: StreamState):
                 (state.session_id, 'assistant', state.content)
             )
             conn.commit()
-        print(f"[STREAM] Saved {len(state.content)} chars to session {state.session_id}")
+        print(f"[STREAM] ✓ Saved {len(state.content)} chars to session {state.session_id}")
     except Exception as db_error:
         print(f"CRITICAL: Failed to save assistant message to database: {db_error}")
         print(f"  Session ID: {state.session_id}")
@@ -209,12 +212,16 @@ async def generate_sse_stream_with_db_save(request, session_id, user_content, st
         state = StreamState()
     state.session_id = session_id
 
+    print(f"[STREAM] Starting stream for session {session_id}")
+
     try:
+        chunk_count = 0
         async for chunk in generate_sse_stream(request, session_id, user_content):
+            chunk_count += 1
             # Extract content from SSE chunks
-            if chunk.startswith('data: {'):
-                data = chunk[6:]
-                if data.strip() != '[DONE]':
+            if chunk.startswith('data: '):
+                data = chunk[6:].strip()  # Strip whitespace/newlines
+                if data and data != '[DONE]':
                     try:
                         parsed = json.loads(data)
                         if parsed.get('choices') and parsed['choices']:
@@ -222,12 +229,15 @@ async def generate_sse_stream_with_db_save(request, session_id, user_content, st
                             content = delta.get('content', '')
                             if content:
                                 state.content += content
-                    except:
+                    except json.JSONDecodeError:
                         pass
             # Yield chunk
             yield chunk
 
+        print(f"[STREAM] Completed {chunk_count} chunks, accumulated {len(state.content)} chars")
+
     except Exception as e:
+        print(f"[STREAM] Error: {e}")
         # CRITICAL: Network failure or stream error - save partial content + error
         error_msg = f"\n\n[Network Error: Stream interrupted. Partial response saved.]"
 

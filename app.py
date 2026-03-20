@@ -2051,6 +2051,8 @@ async def chat_stream_endpoint(request: ChatRequest):
     from starlette.background import BackgroundTask
     from chat_handlers import StreamState, save_stream_to_db, generate_sse_stream_with_db_save
 
+    logger.info(f"[STREAM ENDPOINT] Called with session_key={request.session_key}, stream={request.stream}")
+
     with get_db() as conn:
         session = conn.execute(
             "SELECT * FROM sessions WHERE session_key = ? AND archived = 0",
@@ -2076,10 +2078,12 @@ async def chat_stream_endpoint(request: ChatRequest):
             (session_id, 'user', user_content)
         )
         conn.commit()
+        logger.info(f"[STREAM ENDPOINT] User message saved for session {session_id}")
 
     # Create shared state that survives client disconnect
     state = StreamState()
     state.session_id = session_id
+    logger.info(f"[STREAM ENDPOINT] Starting streaming response for session {session_id}")
 
     return StreamingResponse(
         generate_sse_stream_with_db_save(request, session_id, user_content, state),
