@@ -218,6 +218,8 @@ async def generate_sse_stream_with_db_save(request, session_id, user_content, st
         chunk_count = 0
         async for chunk in generate_sse_stream(request, session_id, user_content):
             chunk_count += 1
+            print(f"[STREAM] Chunk #{chunk_count}: {repr(chunk[:100])}...")  # Debug: show first 100 chars
+            
             # Extract content from SSE chunks
             if chunk.startswith('data: '):
                 data = chunk[6:].strip()  # Strip whitespace/newlines
@@ -229,8 +231,9 @@ async def generate_sse_stream_with_db_save(request, session_id, user_content, st
                             content = delta.get('content', '')
                             if content:
                                 state.content += content
-                    except json.JSONDecodeError:
-                        pass
+                                print(f"[STREAM] Accumulated content, total: {len(state.content)} chars")
+                    except json.JSONDecodeError as je:
+                        print(f"[STREAM] JSON decode error: {je}")
             # Yield chunk
             yield chunk
 
