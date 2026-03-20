@@ -2116,39 +2116,47 @@ async def chat_endpoint(request: ChatRequest):
         last_user_message = user_messages[-1]
         user_content = last_user_message.content
 
-        # Insert user message
+        # Insert user message and COMMIT IMMEDIATELY (ensures user message saved even if API fails)
         conn.execute(
             "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
             (session_id, 'user', user_content)
         )
+        conn.commit()
 
+        # Generate assistant response with error handling
         assistant_content = ""
         image_to_store = None
 
-        if request.image:
-            assistant_content = await handle_chat_with_image(request, session_id, user_content)
-            image_to_store = request.image  # Store the base64 image data
-        elif not request.image and not request.stream:
-            assistant_content = await handle_chat_text_only(request, user_content)
+        try:
+            if request.image:
+                assistant_content = await handle_chat_with_image(request, session_id, user_content)
+                image_to_store = request.image  # Store the base64 image data
+            elif not request.image and not request.stream:
+                assistant_content = await handle_chat_text_only(request, user_content)
+        except Exception as e:
+            # CRITICAL: Save error message to database even if API fails
+            logger.error(f"Chat API failed for session {session_id}: {e}")
+            assistant_content = f"Error: Unable to process request. Please try again. (Details: {str(e)})"
+            # Don't re-raise - we want to save the error message
 
-        # Insert assistant message with image field
-        if image_to_store:
-            conn.execute(
-                "INSERT INTO messages (session_id, role, content, image) VALUES (?, ?, ?, ?)",
-                (session_id, 'assistant', assistant_content, image_to_store)
+        # GUARANTEED: Insert assistant message (even if it's an error message)
+        with get_db() as save_conn:
+            if image_to_store:
+                save_conn.execute(
+                    "INSERT INTO messages (session_id, role, content, image) VALUES (?, ?, ?, ?)",
+                    (session_id, 'assistant', assistant_content, image_to_store)
+                )
+            else:
+                save_conn.execute(
+                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                    (session_id, 'assistant', assistant_content)
+                )
+
+            save_conn.execute(
+                "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (session_id,)
             )
-        else:
-            conn.execute(
-                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                (session_id, 'assistant', assistant_content)
-            )
-
-        conn.execute(
-            "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (session_id,)
-        )
-
-        conn.commit()
+            save_conn.commit()
 
         return ChatResponse(
             id=0,

@@ -155,6 +155,7 @@ async def handle_chat_with_image(request, session_id, user_content):
 async def generate_sse_stream_with_db_save(request, session_id, user_content):
     """
     Generate SSE stream and save assistant message to database after completion.
+    GUARANTEED to save message even if network disconnects or stream fails.
 
     Args:
         request: ChatRequest
@@ -171,32 +172,56 @@ async def generate_sse_stream_with_db_save(request, session_id, user_content):
     from database_adapter import get_db
 
     assistant_content = ""
+    error_occurred = False
 
-    async for chunk in generate_sse_stream(request, session_id, user_content):
-        # Extract content from SSE chunks
-        if chunk.startswith('data: {'):
-            data = chunk[6:]
-            if data.strip() != '[DONE]':
-                try:
-                    parsed = json.loads(data)
-                    if parsed.get('choices') and parsed['choices']:
-                        delta = parsed['choices'][0].get('delta', {})
-                        content = delta.get('content', '')
-                        if content:
-                            assistant_content += content
-                except:
-                    pass
-        # Yield chunk
-        yield chunk
+    try:
+        async for chunk in generate_sse_stream(request, session_id, user_content):
+            # Extract content from SSE chunks
+            if chunk.startswith('data: {'):
+                data = chunk[6:]
+                if data.strip() != '[DONE]':
+                    try:
+                        parsed = json.loads(data)
+                        if parsed.get('choices') and parsed['choices']:
+                            delta = parsed['choices'][0].get('delta', {})
+                            content = delta.get('content', '')
+                            if content:
+                                assistant_content += content
+                    except:
+                        pass
+            # Yield chunk
+            yield chunk
 
-    # Save accumulated assistant message to database
-    if assistant_content:
-        with get_db() as conn:
-            conn.execute(
-                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                (session_id, 'assistant', assistant_content)
-            )
-            conn.commit()
+    except Exception as e:
+        # CRITICAL: Network failure or stream error - save partial content + error
+        error_occurred = True
+        error_msg = f"\n\n[Network Error: Stream interrupted. Partial response saved.]"
+        
+        if assistant_content:
+            assistant_content += error_msg
+        else:
+            assistant_content = f"Error: Unable to complete response due to network issue. Please try again."
+        
+        # Yield error to client
+        event_data = json.dumps({'choices': [{'delta': {'content': error_msg}}]})
+        yield f"data: {event_data}\n\n"
+        yield "data: [DONE]\n\n"
+
+    finally:
+        # GUARANTEED: Save accumulated assistant message to database (even if partial or error)
+        if assistant_content:
+            try:
+                with get_db() as conn:
+                    conn.execute(
+                        "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                        (session_id, 'assistant', assistant_content)
+                    )
+                    conn.commit()
+            except Exception as db_error:
+                # Last resort: log if database save fails
+                print(f"CRITICAL: Failed to save assistant message to database: {db_error}")
+                print(f"  Session ID: {session_id}")
+                print(f"  Content length: {len(assistant_content)} chars")
 
 async def handle_chat_text_only(request, user_content):
     """
