@@ -18,7 +18,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Configuration
-ACPX_TIMEOUT = 300  # 5 minutes for chat responses
+ACPX_TIMEOUT = 120  # 2 minutes for chat responses (reduced from 5 min for faster feedback)
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 
 
@@ -131,9 +131,28 @@ Be concise but thorough. Focus on the user's specific request.
         logger.info(f"[ACP-CHAT] Running ACPX for project: {self.project_name}")
         logger.info(f"[ACP-CHAT] Working directory: {self.frontend_src_path}")
         logger.info(f"[ACP-CHAT] User message: {user_message[:100]}...")
+        logger.info(f"[ACP-CHAT] Command: {' '.join(cmd)}")
         
         try:
+            # Check if acpx exists
+            acpx_check = subprocess.run(
+                ["which", "acpx"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if acpx_check.returncode != 0:
+                logger.error(f"[ACP-CHAT] acpx not found in PATH")
+                return {
+                    "status": "error",
+                    "success": False,
+                    "response": "Error: acpx command not found. Please install ACPX first.",
+                    "error": "acpx not found in PATH"
+                }
+            logger.info(f"[ACP-CHAT] acpx found at: {acpx_check.stdout.strip()}")
+            
             # Run ACPX with timeout
+            logger.info(f"[ACP-CHAT] Starting subprocess...")
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -143,6 +162,7 @@ Be concise but thorough. Focus on the user's specific request.
                 cwd=str(self.frontend_src_path),
                 start_new_session=True
             )
+            logger.info(f"[ACP-CHAT] Subprocess started with PID: {process.pid}")
             
             stdout_lines = []
             stderr_lines = []
@@ -177,6 +197,8 @@ Be concise but thorough. Focus on the user's specific request.
             # Watchdog loop
             prev_stdout_len = 0
             prev_stderr_len = 0
+            log_interval = 10  # Log every 10 seconds
+            last_log_time = time.time()
             
             while process.poll() is None:
                 current_time = time.time()
@@ -190,6 +212,14 @@ Be concise but thorough. Focus on the user's specific request.
                     last_output_time = current_time
                     prev_stdout_len = current_stdout_len
                     prev_stderr_len = current_stderr_len
+                    # Log new output
+                    if current_stdout_len > 0:
+                        logger.info(f"[ACP-CHAT] stdout progress: {current_stdout_len} lines, last: {stdout_lines[-1][:100] if stdout_lines else ''}")
+                
+                # Periodic status log
+                if current_time - last_log_time > log_interval:
+                    logger.info(f"[ACP-CHAT] Still running... elapsed: {elapsed:.1f}s, stdout: {current_stdout_len} lines, stderr: {current_stderr_len} lines")
+                    last_log_time = current_time
                 
                 # Timeout check
                 if elapsed > ACPX_TIMEOUT:
@@ -216,6 +246,10 @@ Be concise but thorough. Focus on the user's specific request.
             return_code = process.returncode
             
             logger.info(f"[ACP-CHAT] ACPX completed with return code: {return_code}")
+            if stderr_output:
+                logger.info(f"[ACP-CHAT] stderr output: {stderr_output[:500]}")
+            if stdout_output:
+                logger.info(f"[ACP-CHAT] stdout length: {len(stdout_output)} chars")
             
             if timeout_killed:
                 return {
