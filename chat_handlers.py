@@ -80,6 +80,7 @@ async def generate_sse_stream(request, session_id, user_content):
 
         print(f"[SSE] Opening stream connection to {CLAWDBOT_BASE_URL}/v1/chat/completions")
         async with AsyncClient(timeout=300) as client:
+            # Direct streaming request - use aiter_lines() for SSE format
             async with client.stream(
                 'POST',
                 f"{CLAWDBOT_BASE_URL}/v1/chat/completions",
@@ -87,44 +88,35 @@ async def generate_sse_stream(request, session_id, user_content):
                 headers=headers
             ) as stream_response:
                 print(f"[SSE] Stream response status: {stream_response.status_code}")
-                print(f"[SSE] About to start iterating over bytes...")
+                print(f"[SSE] Response headers: {dict(stream_response.headers)}")
                 
-                raw_chunks = 0
                 line_count = 0
                 
-                try:
-                    async for raw_chunk in stream_response.aiter_bytes():
-                        raw_chunks += 1
-                        print(f"[SSE] Raw chunk #{raw_chunks}: {len(raw_chunk)} bytes - {repr(raw_chunk[:100])}")
-                        
-                        # Decode and process lines
-                        text = raw_chunk.decode('utf-8')
-                        for line in text.split('\n'):
-                            if not line.strip():
-                                continue
-                            
-                            line_count += 1
-                            print(f"[SSE] Line #{line_count}: {repr(line[:80])}...")
-                            
-                            if line.startswith('data: '):
-                                data = line[6:]
-                                if data.strip() == '[DONE]':
-                                    print(f"[SSE] Got [DONE], yielding final chunk")
-                                    yield "data: [DONE]\n\n"
-                                    break
-                                try:
-                                    parsed = json.loads(data)
-                                    if parsed.get('choices') and parsed['choices']:
-                                        delta = parsed['choices'][0].get('delta', {})
-                                        if delta.get('content'):
-                                            event_data = json.dumps({'choices': [{'delta': {'content': delta['content']}}]})
-                                            yield f"data: {event_data}\n\n"
-                                except:
-                                    pass
-                except Exception as iter_err:
-                    print(f"[SSE] Iteration error: {iter_err}")
+                # Use aiter_lines() which is better suited for SSE format
+                async for line in stream_response.aiter_lines():
+                    line_count += 1
+                    print(f"[SSE] Line #{line_count}: {repr(line[:120] if len(line) > 120 else line)}")
+                    
+                    if not line.strip():
+                        continue
+                    
+                    if line.startswith('data: '):
+                        data = line[6:]
+                        if data.strip() == '[DONE]':
+                            print(f"[SSE] Got [DONE], yielding final chunk")
+                            yield "data: [DONE]\n\n"
+                            break
+                        try:
+                            parsed = json.loads(data)
+                            if parsed.get('choices') and parsed['choices']:
+                                delta = parsed['choices'][0].get('delta', {})
+                                if delta.get('content'):
+                                    event_data = json.dumps({'choices': [{'delta': {'content': delta['content']}}]})
+                                    yield f"data: {event_data}\n\n"
+                        except json.JSONDecodeError as je:
+                            print(f"[SSE] JSON decode error: {je}")
                 
-                print(f"[SSE] Stream finished, {raw_chunks} raw chunks, {line_count} lines")
+                print(f"[SSE] Stream finished, {line_count} lines processed")
 
     except Exception as e:
         print(f"[SSE] Stream error: {e}")
