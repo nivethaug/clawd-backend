@@ -2212,13 +2212,16 @@ Complete in order before marking task complete:
         Kill a process and all its children aggressively.
         Handles npx child processes that may be in different process groups.
         
+        IMPORTANT: Only kills processes that are descendants of THIS session's PID.
+        Multiple projects may run ACPX sessions in parallel - DO NOT use global pkill!
+        
         Args:
             pid: Process ID to kill (will also kill all children)
         """
         import signal
         
         def get_all_descendants(parent_pid: int, max_depth: int = 10) -> list:
-            """Recursively find all descendant PIDs."""
+            """Recursively find all descendant PIDs using pgrep -P."""
             descendants = []
             pids_to_check = [parent_pid]
             visited = set()
@@ -2248,15 +2251,80 @@ Complete in order before marking task complete:
             
             return descendants
         
+        def is_descendant_of(child_pid: int, ancestor_pid: int) -> bool:
+            """Check if child_pid is a descendant of ancestor_pid by walking parent chain."""
+            try:
+                current_pid = child_pid
+                max_walk = 20  # Prevent infinite loop
+                
+                while current_pid and max_walk > 0:
+                    max_walk -= 1
+                    
+                    # Read parent PID from /proc
+                    try:
+                        stat_path = f"/proc/{current_pid}/stat"
+                        with open(stat_path, 'r') as f:
+                            # /proc/[pid]/stat format: pid (comm) state ppid ...
+                            parts = f.read().split()
+                            if len(parts) >= 4:
+                                ppid = int(parts[3])
+                                if ppid == ancestor_pid:
+                                    return True
+                                if ppid <= 1:  # Reached init
+                                    return False
+                                current_pid = ppid
+                            else:
+                                return False
+                    except (FileNotFoundError, PermissionError, ValueError):
+                        return False
+            except Exception:
+                pass
+            return False
+        
+        def find_claude_agent_descendants(ancestor_pid: int) -> list:
+            """Find claude-agent-acp processes that are descendants of ancestor_pid."""
+            claude_pids = []
+            try:
+                # Find all claude-agent-acp processes
+                result = subprocess.run(
+                    ["pgrep", "-f", "claude-agent-acp"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    for p in result.stdout.strip().split('\n'):
+                        if p.strip():
+                            try:
+                                child_pid = int(p.strip())
+                                # Verify it's a descendant of our session
+                                if is_descendant_of(child_pid, ancestor_pid):
+                                    claude_pids.append(child_pid)
+                                    logger.info(f"[ACPX-V2] Found claude-agent-acp descendant: {child_pid}")
+                            except ValueError:
+                                pass
+            except Exception as e:
+                logger.debug(f"[ACPX-V2] Failed to find claude-agent processes: {e}")
+            return claude_pids
+        
         try:
-            # Step 1: Get all descendant PIDs (fully recursive)
+            # Step 1: Get all descendant PIDs (fully recursive via pgrep -P)
             all_pids = get_all_descendants(pid)
-            logger.info(f"[ACPX-V2] Found {len(all_pids)} descendant processes to kill")
+            logger.info(f"[ACPX-V2] Found {len(all_pids)} descendant processes via pgrep")
+            
+            # Step 1b: Also find claude-agent-acp processes that are descendants
+            claude_pids = find_claude_agent_descendants(pid)
+            if claude_pids:
+                logger.info(f"[ACPX-V2] Found {len(claude_pids)} claude-agent-acp descendants")
+                all_pids.extend(claude_pids)
+                all_pids = list(set(all_pids))  # Remove duplicates
+            
         except Exception as e:
             logger.warning(f"[ACPX-V2] Failed to get descendant PIDs: {e}")
             all_pids = []
         
         try:
+            # Step 2: Try to kill process group first
             try:
                 os.killpg(pid, signal.SIGKILL)
                 logger.info(f"[ACPX-V2] Killed process group {pid}")
@@ -2285,12 +2353,17 @@ Complete in order before marking task complete:
             # Step 5: Verify all processes are dead
             time.sleep(0.5)
             check_pids = [pid] + all_pids
+            alive_count = 0
             for check_pid in check_pids:
                 try:
                     os.kill(check_pid, 0)  # Check if process exists
-                    logger.error(f"[ACPX-V2] ⚠️  Process {check_pid} STILL ALIVE after SIGKILL!")
+                    logger.warning(f"[ACPX-V2] ⚠️  Process {check_pid} STILL ALIVE after SIGKILL!")
+                    alive_count += 1
                 except (ProcessLookupError, OSError):
                     logger.debug(f"[ACPX-V2] ✓ Process {check_pid} confirmed dead")
+            
+            if alive_count > 0:
+                logger.warning(f"[ACPX-V2] ⚠️ {alive_count} processes still alive after cleanup")
             
         except Exception as e:
             logger.error(f"[ACPX-V2] Failed to kill process tree: {e}")
