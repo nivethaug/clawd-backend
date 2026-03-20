@@ -1,184 +1,275 @@
 #!/usr/bin/env python3
 """
-ACP Chat Handler - Chat with ACP-Claude for frontend editing.
+ACP Chat Handler - Direct Claude API for frontend editing.
 
-This module provides chat functionality that routes messages through
-ACPX (ACP eXecutor) which allows Claude to edit frontend files.
+This module provides chat functionality using direct Claude API calls
+with database-driven conversation history. Lighter and faster than OpenClaw.
+
+Supports project types: website, telegrambot, discordbot, scheduler
 """
 
 import os
-import subprocess
-import asyncio
+import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, AsyncGenerator
+
+import anthropic
 
 logger = logging.getLogger(__name__)
+
+# Project type-specific system prompts
+PROJECT_TYPE_PROMPTS = {
+    "website": """You are an expert frontend developer assistant. Help the user build and modify their React/Vite website.
+
+Focus areas:
+- React components with TypeScript
+- Tailwind CSS styling
+- Vite configuration
+- Modern web best practices
+
+When the user asks for changes, provide clear explanations and code snippets.""",
+
+    "telegrambot": """You are an expert Telegram bot developer assistant. Help the user build and modify their Telegram bot.
+
+Focus areas:
+- Telegram Bot API integration
+- Node.js/Python bot frameworks
+- Command handling and middleware
+- Webhook configuration
+
+When the user asks for changes, provide clear explanations and code snippets.""",
+
+    "discordbot": """You are an expert Discord bot developer assistant. Help the user build and modify their Discord bot.
+
+Focus areas:
+- Discord.js / discord.py integration
+- Slash commands and interactions
+- Event handling
+- Bot permissions and intents
+
+When the user asks for changes, provide clear explanations and code snippets.""",
+
+    "scheduler": """You are an expert scheduler/automation developer assistant. Help the user build and modify their scheduling application.
+
+Focus areas:
+- Cron jobs and scheduling logic
+- Task queues and workers
+- Timezone handling
+- Job monitoring and logging
+
+When the user asks for changes, provide clear explanations and code snippets.""",
+
+    "default": """You are a helpful development assistant. Help the user with their project.
+
+Provide clear explanations and code snippets when appropriate."""
+}
 
 
 async def handle_acp_chat(
     session_key: str,
     user_content: str,
-    project_path: Optional[str] = None
+    session_id: Optional[int] = None,
+    project_type: str = "default"
 ) -> str:
     """
-    Handle chat request using ACP-Claude (frontend editing agent).
-    
-    This runs ACPX with the user's message, allowing Claude to edit
-    frontend files using its tools.
+    Handle chat request using direct Claude API.
     
     Args:
         session_key: Session key for tracking
         user_content: User's message/prompt
-        project_path: Optional project path (will be inferred if not provided)
+        session_id: Session ID for fetching conversation history
+        project_type: Project type for system prompt selection
     
     Returns:
         Assistant response content string
     """
-    logger.info(f"[ACP-CHAT] Starting ACP chat for session {session_key}")
+    logger.info(f"[ACP-CHAT] Starting Claude direct chat for session {session_key}")
+    logger.info(f"[ACP-CHAT] Project type: {project_type}")
     logger.info(f"[ACP-CHAT] User message: {user_content[:100]}...")
     
-    # Get project path from session if not provided
-    if not project_path:
-        project_path = await _get_project_path_from_session(session_key)
-        if not project_path:
-            return "Error: Could not determine project path for ACP chat. Please ensure you have an active project."
+    # Get API key
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        logger.error("[ACP-CHAT] ANTHROPIC_API_KEY not set")
+        return "Error: Claude API key not configured. Please set ANTHROPIC_API_KEY environment variable."
     
-    # Construct frontend src path
-    frontend_src_path = os.path.join(project_path, "frontend", "src")
+    # Get conversation history from database
+    history = await _get_conversation_history(session_id) if session_id else []
+    logger.info(f"[ACP-CHAT] Loaded {len(history)} messages from history")
     
-    if not os.path.exists(frontend_src_path):
-        logger.error(f"[ACP-CHAT] Frontend src path not found: {frontend_src_path}")
-        return f"Error: Frontend source directory not found at {frontend_src_path}"
+    # Get system prompt for project type
+    system_prompt = PROJECT_TYPE_PROMPTS.get(project_type, PROJECT_TYPE_PROMPTS["default"])
     
-    logger.info(f"[ACP-CHAT] Using frontend path: {frontend_src_path}")
-    
-    # Build ACPX command
-    # acpx --format quiet claude exec "<prompt>"
-    prompt = _build_acp_prompt(user_content)
-    
-    cmd = [
-        "acpx",
-        "--format", "quiet",
-        "claude",
-        "exec",
-        prompt
-    ]
-    
-    logger.info(f"[ACP-CHAT] Running ACPX command...")
-    logger.info(f"[ACP-CHAT] Working directory: {frontend_src_path}")
+    # Build messages array
+    messages = history + [{"role": "user", "content": user_content}]
     
     try:
-        # Run ACPX with timeout
-        result = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=frontend_src_path
+        # Create Anthropic client
+        client = anthropic.Anthropic(api_key=api_key)
+        
+        # Call Claude API (non-streaming for simplicity)
+        logger.info("[ACP-CHAT] Calling Claude API...")
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            system=system_prompt,
+            messages=messages
         )
         
-        stdout, stderr = await asyncio.wait_for(
-            result.communicate(),
-            timeout=300  # 5 minute timeout
-        )
+        # Extract response text
+        assistant_content = ""
+        for block in response.content:
+            if hasattr(block, 'text'):
+                assistant_content += block.text
         
-        stdout_text = stdout.decode('utf-8') if stdout else ''
-        stderr_text = stderr.decode('utf-8') if stderr else ''
+        logger.info(f"[ACP-CHAT] Response received: {len(assistant_content)} chars")
         
-        logger.info(f"[ACP-CHAT] ACPX exit code: {result.returncode}")
+        return assistant_content
         
-        if result.returncode == 0 and stdout_text:
-            # Clean up the response
-            response = stdout_text.strip()
-            
-            # Log truncated response
-            if len(response) > 200:
-                logger.info(f"[ACP-CHAT] Response: {response[:200]}... ({len(response)} chars)")
-            else:
-                logger.info(f"[ACP-CHAT] Response: {response}")
-            
-            return response
-        else:
-            error_msg = stderr_text or stdout_text or "Unknown error"
-            logger.error(f"[ACP-CHAT] ACPX failed: {error_msg}")
-            return f"Error: ACP chat failed - {error_msg[:500]}"
-            
-    except asyncio.TimeoutError:
-        logger.error(f"[ACP-CHAT] ACPX timeout after 300 seconds")
-        return "Error: ACP chat timed out. The request took too long to process."
+    except anthropic.APIError as e:
+        logger.error(f"[ACP-CHAT] Claude API error: {e}")
+        return f"Error: Claude API error - {str(e)}"
     except Exception as e:
         logger.error(f"[ACP-CHAT] Exception: {e}")
-        return f"Error: ACP chat failed - {str(e)}"
+        return f"Error: Chat failed - {str(e)}"
 
 
 async def handle_acp_chat_stream(
     session_key: str,
     user_content: str,
-    project_path: Optional[str] = None
-):
+    session_id: Optional[int] = None,
+    project_type: str = "default"
+) -> AsyncGenerator[str, None]:
     """
-    Handle streaming chat request using ACP-Claude.
+    Handle streaming chat request using direct Claude API.
     
     Yields SSE-formatted chunks as they are received.
     
     Args:
         session_key: Session key for tracking
         user_content: User's message/prompt
-        project_path: Optional project path
+        session_id: Session ID for conversation history
+        project_type: Project type for system prompt
     
     Yields:
         SSE-formatted strings
     """
-    import json
+    logger.info(f"[ACP-CHAT-STREAM] Starting Claude streaming for session {session_key}")
     
-    logger.info(f"[ACP-CHAT-STREAM] Starting ACP streaming chat for session {session_key}")
+    # Get API key
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        error_data = json.dumps({'choices': [{'delta': {'content': "Error: Claude API key not configured"}}]})
+        yield f"data: {error_data}\n\n"
+        yield "data: [DONE]\n\n"
+        return
     
-    # Get full response first (ACPX doesn't support true streaming)
-    response = await handle_acp_chat(session_key, user_content, project_path)
+    # Get conversation history from database
+    history = await _get_conversation_history(session_id) if session_id else []
+    logger.info(f"[ACP-CHAT-STREAM] Loaded {len(history)} messages from history")
     
-    # Yield as single SSE event
-    event_data = json.dumps({'choices': [{'delta': {'content': response}}]})
-    yield f"data: {event_data}\n\n"
-    yield "data: [DONE]\n\n"
+    # Get system prompt
+    system_prompt = PROJECT_TYPE_PROMPTS.get(project_type, PROJECT_TYPE_PROMPTS["default"])
+    
+    # Build messages
+    messages = history + [{"role": "user", "content": user_content}]
+    
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        
+        # Stream from Claude API
+        logger.info("[ACP-CHAT-STREAM] Starting Claude stream...")
+        with client.messages.stream(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            system=system_prompt,
+            messages=messages
+        ) as stream:
+            for text in stream.text_stream:
+                # Format as SSE
+                event_data = json.dumps({'choices': [{'delta': {'content': text}}]})
+                yield f"data: {event_data}\n\n"
+        
+        yield "data: [DONE]\n\n"
+        logger.info("[ACP-CHAT-STREAM] Stream completed")
+        
+    except anthropic.APIError as e:
+        logger.error(f"[ACP-CHAT-STREAM] Claude API error: {e}")
+        error_data = json.dumps({'choices': [{'delta': {'content': f"Error: {str(e)}"}}]})
+        yield f"data: {error_data}\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception as e:
+        logger.error(f"[ACP-CHAT-STREAM] Exception: {e}")
+        error_data = json.dumps({'choices': [{'delta': {'content': f"Error: {str(e)}"}}]})
+        yield f"data: {error_data}\n\n"
+        yield "data: [DONE]\n\n"
 
 
-def _build_acp_prompt(user_content: str) -> str:
+async def _get_conversation_history(session_id: int) -> List[Dict[str, str]]:
     """
-    Build ACPX prompt from user content.
+    Fetch conversation history from database.
     
     Args:
-        user_content: User's message
+        session_id: Session ID to fetch messages for
     
     Returns:
-        Formatted prompt string for ACPX
+        List of message dicts with 'role' and 'content' keys
     """
-    # Add context about the editing task
-    prompt = f"""The user wants to make changes to the frontend. Please help them by editing the appropriate files.
-
-User request: {user_content}
-
-Please make the necessary file edits to fulfill this request. After making changes, verify the build works correctly."""
+    history = []
     
-    return prompt
+    try:
+        from database_adapter import get_db
+        
+        with get_db() as conn:
+            # Fetch last N messages for context (exclude current message)
+            rows = conn.execute(
+                """
+                SELECT role, content 
+                FROM messages 
+                WHERE session_id = ? 
+                ORDER BY created_at ASC
+                LIMIT 50
+                """,
+                (session_id,)
+            ).fetchall()
+            
+            for row in rows:
+                # Handle both dict and tuple results
+                if isinstance(row, dict):
+                    role = row['role']
+                    content = row['content']
+                else:
+                    role, content = row[0], row[1]
+                
+                # Map database roles to Claude format
+                if role in ('user', 'assistant'):
+                    history.append({"role": role, "content": content})
+                    
+        logger.info(f"[ACP-CHAT] Retrieved {len(history)} messages from database")
+        
+    except Exception as e:
+        logger.error(f"[ACP-CHAT] Failed to get conversation history: {e}")
+    
+    return history
 
 
-async def _get_project_path_from_session(session_key: str) -> Optional[str]:
+async def get_project_info_from_session(session_key: str) -> Dict[str, Any]:
     """
-    Get project path from session key.
+    Get project path and type from session key.
     
     Args:
         session_key: Session key
     
     Returns:
-        Project path or None if not found
+        Dict with 'project_path', 'project_type', 'session_id' or empty dict
     """
     try:
         from database_adapter import get_db
         
         with get_db() as conn:
-            # Get session and project info
             result = conn.execute(
                 """
-                SELECT p.project_path 
+                SELECT s.id as session_id, p.project_path, p.project_type
                 FROM sessions s 
                 JOIN projects p ON s.project_id = p.id 
                 WHERE s.session_key = ?
@@ -187,30 +278,51 @@ async def _get_project_path_from_session(session_key: str) -> Optional[str]:
             ).fetchone()
             
             if result:
-                return result['project_path'] if isinstance(result, dict) else result[0]
-            
-        return None
+                if isinstance(result, dict):
+                    return {
+                        'session_id': result['session_id'],
+                        'project_path': result['project_path'],
+                        'project_type': result.get('project_type', 'default')
+                    }
+                else:
+                    return {
+                        'session_id': result[0],
+                        'project_path': result[1],
+                        'project_type': result[2] if len(result) > 2 else 'default'
+                    }
+        
+        return {}
     except Exception as e:
-        logger.error(f"[ACP-CHAT] Failed to get project path: {e}")
-        return None
+        logger.error(f"[ACP-CHAT] Failed to get project info: {e}")
+        return {}
 
 
-# Synchronous wrapper for use in non-async contexts
-def handle_acp_chat_sync(session_key: str, user_content: str, project_path: Optional[str] = None) -> str:
+# Synchronous wrapper for non-async contexts
+def handle_acp_chat_sync(
+    session_key: str,
+    user_content: str,
+    session_id: Optional[int] = None,
+    project_type: str = "default"
+) -> str:
     """
     Synchronous wrapper for ACP chat handler.
     
     Args:
-        session_key: Session key for tracking
-        user_content: User's message/prompt
-        project_path: Optional project path
+        session_key: Session key
+        user_content: User's message
+        session_id: Session ID for history
+        project_type: Project type
     
     Returns:
-        Assistant response content string
+        Assistant response string
     """
+    import asyncio
+    
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        return loop.run_until_complete(handle_acp_chat(session_key, user_content, project_path))
+        return loop.run_until_complete(
+            handle_acp_chat(session_key, user_content, session_id, project_type)
+        )
     finally:
         loop.close()

@@ -208,7 +208,7 @@ class ChatRequest(BaseModel):
     messages: list[Message]
     stream: bool = False
     image: Optional[str] = None
-    acp_mode: bool = False  # When True, use ACPX for frontend editing chat
+    acp_mode: bool = True  # Default to ACP mode for frontend editing via ACPX
 
 class ChatResponse(BaseModel):
     id: int
@@ -2164,36 +2164,132 @@ async def chat_stream_endpoint(request: ChatRequest):
     state.session_id = session_id
     logger.info(f"[STREAM ENDPOINT] Starting streaming response for session {session_id}")
 
-    # Handle ACP mode - route to ACPX for frontend editing
+    # Handle ACP mode - route to ACPX for frontend editing with file access
     if request.acp_mode:
-        logger.info(f"[STREAM ENDPOINT] ACP mode enabled for session {session_id}")
-        from acp_chat import handle_acp_chat
+        logger.info(f"[ACP-STREAM] === ACP MODE STARTED ===")
+        logger.info(f"[ACP-STREAM] Session key: {request.session_key}")
+        logger.info(f"[ACP-STREAM] Session ID: {session_id}")
+        logger.info(f"[ACP-STREAM] User message: {user_content[:200]}...")
+        
+        from acp_chat_handler import get_acp_chat_handler
+        import asyncio
+        import re
         
         try:
-            # Get project path from session
-            with get_db() as conn:
-                result = conn.execute(
-                    """
-                    SELECT p.project_path 
-                    FROM sessions s 
-                    JOIN projects p ON s.project_id = p.id 
-                    WHERE s.session_key = ?
-                    """,
-                    (request.session_key,)
-                ).fetchone()
-                
-                project_path = result['project_path'] if result else None
+            # Get ACP handler (validates project path)
+            logger.info(f"[ACP-STREAM] Getting ACP handler...")
+            handler = get_acp_chat_handler(request.session_key)
+            if not handler:
+                logger.error(f"[ACP-STREAM] Failed to get ACP handler - project not found")
+                raise ValueError("Could not initialize ACP handler - project not found or invalid path")
             
-            # Get ACP response
-            assistant_content = await handle_acp_chat(
-                request.session_key,
-                user_content,
-                project_path
+            logger.info(f"[ACP-STREAM] Handler initialized for project: {handler.project_name}")
+            logger.info(f"[ACP-STREAM] Frontend path: {handler.frontend_src_path}")
+            
+            # Handle image for ACP mode - save to temp file and use path instead of base64
+            acp_user_content = user_content
+            image_path_for_context = None
+            
+            if request.image:
+                logger.info(f"[ACP-STREAM] Image detected, saving to temp file...")
+                # Save image to temp file for ACPX to access
+                import base64
+                import uuid
+                temp_dir = "/tmp/acp_images"
+                os.makedirs(temp_dir, exist_ok=True)
+                image_filename = f"{session_id}_{uuid.uuid4().hex[:8]}.png"
+                image_path = os.path.join(temp_dir, image_filename)
+                
+                try:
+                    # Decode and save image
+                    image_data = base64.b64decode(request.image)
+                    with open(image_path, 'wb') as f:
+                        f.write(image_data)
+                    image_path_for_context = image_path
+                    acp_user_content = f"{user_content}\n\n[Image attached: {image_path}]"
+                    logger.info(f"[ACP-STREAM] Saved image to {image_path} ({len(image_data)} bytes)")
+                except Exception as img_err:
+                    logger.error(f"[ACP-STREAM] Failed to save image: {img_err}")
+                    acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
+            
+            # Get conversation context from database for continuity
+            # Replace base64 images with placeholder to avoid bloating context
+            session_context = ""
+            try:
+                with get_db() as conn:
+                    rows = conn.execute(
+                        """SELECT role, content, image FROM messages 
+                           WHERE session_id = ? 
+                           ORDER BY created_at DESC LIMIT 10""",
+                        (session_id,)
+                    ).fetchall()
+                    if rows:
+                        context_parts = []
+                        for row in reversed(rows):  # Chronological order
+                            role = row['role'] if isinstance(row, dict) else row[0]
+                            content = row['content'] if isinstance(row, dict) else row[1]
+                            image = row['image'] if isinstance(row, dict) else row[2] if len(row) > 2 else None
+                            
+                            # If message has image, add placeholder instead of base64
+                            if image:
+                                content = f"{content}\n\n[Image was attached in previous message]"
+                            
+                            context_parts.append(f"{role.upper()}: {content}")
+                        session_context = "\n\n".join(context_parts)
+                        logger.info(f"[ACP-STREAM] Loaded {len(rows)} messages as context ({len(session_context)} chars)")
+            except Exception as ctx_err:
+                logger.warning(f"[ACP-STREAM] Could not load context: {ctx_err}")
+            
+            # Run ACPX in thread pool (it's synchronous)
+            logger.info(f"[ACP-STREAM] Starting ACPX execution (timeout: 300s)...")
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                handler.run_acpx_chat,
+                acp_user_content,
+                session_context
             )
             
+            logger.info(f"[ACP-STREAM] ACPX completed with status: {result.get('status')}")
+            
+            # Extract response
+            assistant_content = result.get('response', '')
+            if not result.get('success'):
+                logger.error(f"[ACP-STREAM] ACPX failed: {result.get('error')}")
+                assistant_content = f"Error: {result.get('error', 'ACPX failed')}"
+            else:
+                logger.info(f"[ACP-STREAM] Response length: {len(assistant_content)} chars")
+            
+            # Kill orphan processes after response
+            handler.kill_orphan_processes()
+            logger.info(f"[ACP-STREAM] Cleaned up ACPX processes for session {session_id}")
+            
+            # Cleanup temp image file
+            if image_path_for_context and os.path.exists(image_path_for_context):
+                try:
+                    os.remove(image_path_for_context)
+                    logger.info(f"[ACP-STREAM] Cleaned up temp image: {image_path_for_context}")
+                except:
+                    pass
+            
             # Save to database
-            state.content = assistant_content
-            save_stream_to_db(state)
+            if assistant_content:
+                try:
+                    with get_db() as save_conn:
+                        save_conn.execute(
+                            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                            (session_id, 'assistant', assistant_content)
+                        )
+                        save_conn.execute(
+                            "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (session_id,)
+                        )
+                        save_conn.commit()
+                    logger.info(f"[ACP-STREAM] Saved assistant message ({len(assistant_content)} chars)")
+                except Exception as save_err:
+                    logger.error(f"[ACP-STREAM] Failed to save message: {save_err}")
+            
+            logger.info(f"[ACP-STREAM] === ACP MODE COMPLETED ===")
             
             # Return as SSE stream
             async def acp_response_stream():
@@ -2361,10 +2457,103 @@ async def chat_endpoint(request: ChatRequest):
 
         # Check for ACP mode - frontend editing via ACPX
         if request.acp_mode:
-            logger.info(f"[ACP-MODE] ACP chat mode enabled for session {session_id}")
-            assistant_content = await handle_acp_chat(request, session_id, user_content)
+            logger.info(f"[ACP-MODE] === ACP MODE STARTED (non-streaming) ===")
+            logger.info(f"[ACP-MODE] Session key: {request.session_key}")
+            logger.info(f"[ACP-MODE] Session ID: {session_id}")
+            logger.info(f"[ACP-MODE] User message: {user_content[:200]}...")
+            
+            from acp_chat_handler import get_acp_chat_handler
+            import asyncio
+            import base64
+            import uuid
+            
+            # Get ACP handler (validates project path)
+            logger.info(f"[ACP-MODE] Getting ACP handler...")
+            handler = get_acp_chat_handler(request.session_key)
+            if not handler:
+                logger.error(f"[ACP-MODE] Failed to get ACP handler - project not found")
+                assistant_content = "Error: Could not initialize ACP handler - project not found or invalid path"
+            else:
+                logger.info(f"[ACP-MODE] Handler initialized for project: {handler.project_name}")
+                logger.info(f"[ACP-MODE] Frontend path: {handler.frontend_src_path}")
+                
+                # Handle image for ACP mode - save to temp file and use path instead of base64
+                acp_user_content = user_content
+                image_path_for_context = None
+                
+                if request.image:
+                    logger.info(f"[ACP-MODE] Image detected, saving to temp file...")
+                    # Save image to temp file for ACPX to access
+                    temp_dir = "/tmp/acp_images"
+                    os.makedirs(temp_dir, exist_ok=True)
+                    image_filename = f"{session_id}_{uuid.uuid4().hex[:8]}.png"
+                    image_path = os.path.join(temp_dir, image_filename)
+                    
+                    try:
+                        # Decode and save image
+                        image_data = base64.b64decode(request.image)
+                        with open(image_path, 'wb') as f:
+                            f.write(image_data)
+                        image_path_for_context = image_path
+                        acp_user_content = f"{user_content}\n\n[Image attached: {image_path}]"
+                        logger.info(f"[ACP-MODE] Saved image to {image_path} ({len(image_data)} bytes)")
+                    except Exception as img_err:
+                        logger.error(f"[ACP-MODE] Failed to save image: {img_err}")
+                        acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
+                
+                # Get conversation context from database
+                # Replace base64 images with placeholder to avoid bloating context
+                session_context = ""
+                try:
+                    with get_db() as ctx_conn:
+                        rows = ctx_conn.execute(
+                            """SELECT role, content, image FROM messages 
+                               WHERE session_id = ? 
+                               ORDER BY created_at DESC LIMIT 10""",
+                            (session_id,)
+                        ).fetchall()
+                        if rows:
+                            context_parts = []
+                            for row in reversed(rows):
+                                role = row['role'] if isinstance(row, dict) else row[0]
+                                content = row['content'] if isinstance(row, dict) else row[1]
+                                image = row['image'] if isinstance(row, dict) else row[2] if len(row) > 2 else None
+                                
+                                # If message has image, add placeholder instead of base64
+                                if image:
+                                    content = f"{content}\n\n[Image was attached in previous message]"
+                                
+                                context_parts.append(f"{role.upper()}: {content}")
+                            session_context = "\n\n".join(context_parts)
+                except Exception as ctx_err:
+                    logger.warning(f"[ACP-MODE] Could not load context: {ctx_err}")
+                
+                # Run ACPX (synchronous)
+                logger.info(f"[ACP-MODE] Starting ACPX execution (timeout: 300s)...")
+                result = handler.run_acpx_chat(acp_user_content, session_context)
+                
+                logger.info(f"[ACP-MODE] ACPX completed with status: {result.get('status')}")
+                assistant_content = result.get('response', '')
+                if not result.get('success'):
+                    logger.error(f"[ACP-MODE] ACPX failed: {result.get('error')}")
+                    assistant_content = f"Error: {result.get('error', 'ACPX failed')}"
+                else:
+                    logger.info(f"[ACP-MODE] Response length: {len(assistant_content)} chars")
+                
+                # Kill orphan processes after response
+                handler.kill_orphan_processes()
+                logger.info(f"[ACP-MODE] Cleaned up ACPX processes for session {session_id}")
+                
+                # Cleanup temp image file
+                if image_path_for_context and os.path.exists(image_path_for_context):
+                    try:
+                        os.remove(image_path_for_context)
+                        logger.info(f"[ACP-MODE] Cleaned up temp image: {image_path_for_context}")
+                    except:
+                        pass
             
             # Save assistant message
+            logger.info(f"[ACP-MODE] Saving assistant message to database...")
             with get_db() as save_conn:
                 save_conn.execute(
                     "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
@@ -2375,6 +2564,8 @@ async def chat_endpoint(request: ChatRequest):
                     (session_id,)
                 )
                 save_conn.commit()
+            
+            logger.info(f"[ACP-MODE] === ACP MODE COMPLETED ===")
             
             return ChatResponse(
                 id=0,
