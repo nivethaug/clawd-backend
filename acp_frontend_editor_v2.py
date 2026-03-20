@@ -833,7 +833,7 @@ class ACPFrontendEditorV2:
     6. On failure: rollback
     """
 
-    def __init__(self, frontend_src_path: str, project_name: str, max_new_files: int = 15, allow_dist_time: bool = False):
+    def __init__(self, frontend_src_path: str, project_name: str, max_new_files: int = 15):
         """
         Initialize ACP Frontend Editor v2.
 
@@ -841,13 +841,11 @@ class ACPFrontendEditorV2:
             frontend_src_path: Absolute path to frontend/src directory
             project_name: Name of the project for logging
             max_new_files: Maximum number of new files allowed per execution
-            allow_dist_time: If True, wait 2 min for dist/index.html after idle timeout
         """
         self.frontend_src_path = Path(frontend_src_path).resolve()
         self.frontend_path = self.frontend_src_path.parent
         self.project_name = project_name
         self.max_new_files = max_new_files
-        self.allow_dist_time = allow_dist_time
 
         # print(f"🔴 ACPX-V2-INIT: frontend_src_path = {self.frontend_src_path}")
         # print(f"🔴 ACPX-V2-INIT: frontend_path = {self.frontend_path}")
@@ -1059,53 +1057,10 @@ class ACPFrontendEditorV2:
                         hard_timeout_killed = True
                         break
                     
-                    # Idle timeout check (TOLERANT - wait 2 min for dist/index.html if allow_dist_time)
+                    # Idle timeout check (TOLERANT - check if edits succeeded)
                     if idle_time > IDLE_TIMEOUT:
-                        dist_found = False
-                        
-                        # Only wait for dist/index.html if allow_dist_time flag is enabled
-                        if self.allow_dist_time:
-                            logger.warning(f"[ACPX-V2] ⚠️ IDLE TIMEOUT: {idle_time:.1f}s > {IDLE_TIMEOUT}s — waiting 2 min for dist/index.html")
-                            print(f"⚠️ ACPX-V2-IDLE-TIMEOUT: Waiting 2 min for dist/index.html before killing", flush=True)
-                            
-                            # Wait up to 2 more minutes for dist/index.html to appear
-                            DIST_WAIT_TIMEOUT = 120  # 2 minutes
-                            dist_wait_start = time.time()
-                            dist_path = self.frontend_src_path / "dist"
-                            dist_index_path = dist_path / "index.html"
-                            
-                            while process.poll() is None:
-                                dist_elapsed = time.time() - dist_wait_start
-                                
-                                # Check if dist/index.html exists
-                                if dist_index_path.exists():
-                                    logger.info(f"[ACPX-V2] ✓ dist/index.html found after {dist_elapsed:.1f}s — killing process")
-                                    print(f"✅ ACPX-V2-DIST-FOUND: dist/index.html created, killing process", flush=True)
-                                    dist_found = True
-                                    break
-                                
-                                # Check if we've waited long enough
-                                if dist_elapsed > DIST_WAIT_TIMEOUT:
-                                    logger.warning(f"[ACPX-V2] ⚠️ Dist wait timeout ({DIST_WAIT_TIMEOUT}s) — no dist/index.html found")
-                                    print(f"⚠️ ACPX-V2-DIST-TIMEOUT: No dist/index.html after 2 min, killing process", flush=True)
-                                    break
-                                
-                                # Check for new output (reset idle timer if output appears)
-                                current_stdout_len = len(stdout_lines)
-                                current_stderr_len = len(stderr_lines)
-                                if current_stdout_len > prev_stdout_len or current_stderr_len > prev_stderr_len:
-                                    logger.info(f"[ACPX-V2] New output detected during dist wait — resuming normal watchdog")
-                                    last_output_time = time.time()
-                                    prev_stdout_len = current_stdout_len
-                                    prev_stderr_len = current_stderr_len
-                                    break
-                                
-                                time.sleep(1)
-                        else:
-                            logger.warning(f"[ACPX-V2] ⚠️ IDLE TIMEOUT: {idle_time:.1f}s > {IDLE_TIMEOUT}s — killing process group")
-                            print(f"⚠️ ACPX-V2-IDLE-TIMEOUT: Killing process group {process.pid}", flush=True)
-                        
-                        # Now kill the process
+                        logger.warning(f"[ACPX-V2] ⚠️ IDLE TIMEOUT: {idle_time:.1f}s > {IDLE_TIMEOUT}s — killing process group")
+                        print(f"⚠️ ACPX-V2-IDLE-TIMEOUT: Killing process group {process.pid}", flush=True)
                         try:
                             # Send SIGTERM to process group
                             os.killpg(process.pid, signal.SIGTERM)
@@ -1132,14 +1087,14 @@ class ACPFrontendEditorV2:
                         
                         # Verify process actually died
                         try:
-                            os.kill(process.pid, 0)
+                            # Check if process still exists
+                            os.kill(process.pid, 0)  # Doesn't actually kill, just checks
                             logger.warning(f"[ACPX-V2] Process {process.pid} still alive after kill, using aggressive cleanup")
                             self._kill_process_tree(process.pid)
                         except (ProcessLookupError, OSError):
+                            # Process is dead, good
                             pass
                         
-                        # Store dist_found for later use
-                        self._dist_build_completed = dist_found
                         idle_timeout_killed = True
                         break
                     
