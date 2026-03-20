@@ -1143,15 +1143,19 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     }
 
     # STEP 1: Stop and remove PM2 services
+    # Use domain for PM2 service names (matches provisioning logic)
+    pm2_service_name = frontend_domain or project_name
     try:
-        cleanup_results["steps"]["pm2"] = cleanup_pm2_services(project_name)
+        cleanup_results["steps"]["pm2"] = cleanup_pm2_services(pm2_service_name)
     except Exception as e:
         logger.error(f"Error in PM2 cleanup: {e}")
         cleanup_results["steps"]["pm2"] = {"error": str(e)}
 
     # STEP 2: Remove Nginx configuration
+    # Use domain for nginx config name (matches provisioning logic)
+    nginx_service_name = frontend_domain or project_name
     try:
-        cleanup_results["steps"]["nginx"] = cleanup_nginx_config(project_name)
+        cleanup_results["steps"]["nginx"] = cleanup_nginx_config(nginx_service_name)
     except Exception as e:
         logger.error(f"Error in Nginx cleanup: {e}")
         cleanup_results["steps"]["nginx"] = {"error": str(e)}
@@ -1181,10 +1185,12 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         cleanup_results["steps"]["dns"] = {"error": str(e)}
 
     # STEP 5: Drop PostgreSQL database
+    # Use domain for database name (matches provisioning logic in infrastructure_manager.py)
+    db_service_name = frontend_domain or project_name
     try:
         if db_name and db_user:
             # Use validated database deletion with master DB protection
-            cleanup_results["steps"]["database"] = delete_project_database(project_name, force=False)
+            cleanup_results["steps"]["database"] = delete_project_database(db_service_name, force=False)
         else:
             logger.info("Skipping database cleanup: no database info found in metadata")
             cleanup_results["steps"]["database"] = {"skipped": True}
