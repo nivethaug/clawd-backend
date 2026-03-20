@@ -119,12 +119,14 @@ Be concise but thorough. Focus on the user's specific request.
         """
         prompt = self._build_chat_prompt(user_message, session_context)
         
-        # Build command - pass prompt as CLI arg (same as acp_frontend_editor_v2.py)
+        # Build command - use stdbuf for line buffering (matching telegram-acpx-devbot)
+        # Direct node execution is more reliable than acpx wrapper
+        acpx_path = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
+        
         cmd = [
-            "acpx",
-            "--format", "quiet",
-            "claude",
-            "exec",
+            "stdbuf", "-oL",  # Line-buffered output for real-time streaming
+            "node", acpx_path,
+            "claude", "exec",
             str(prompt)
         ]
         
@@ -152,106 +154,62 @@ Be concise but thorough. Focus on the user's specific request.
                 }
             logger.info(f"[ACP-CHAT] acpx found at: {acpx_check.stdout.strip()}")
             
-            # Run ACPX with timeout (same pattern as acp_frontend_editor_v2.py)
+            # Run ACPX with timeout (matching telegram-acpx-devbot pattern)
             logger.info(f"[ACP-CHAT] Starting subprocess...")
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.DEVNULL,  # No stdin needed - prompt is CLI arg
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout (like working bot)
                 text=True,
+                bufsize=1,  # CRITICAL: Line-buffered for real-time streaming
                 cwd=str(self.frontend_src_path),
-                start_new_session=True
+                universal_newlines=True
             )
             
             logger.info(f"[ACP-CHAT] Subprocess started with PID: {process.pid}")
             
             stdout_lines = []
-            stderr_lines = []
-            last_output_time = time.time()
             start_time = time.time()
             timeout_killed = False
             
-            def read_stream(stream, lines_list):
-                """Read from stream line by line."""
-                try:
-                    for line in iter(stream.readline, ''):
-                        if line:
-                            lines_list.append(line)
-                    stream.close()
-                except:
-                    pass
-            
-            # Start reader threads
-            stdout_thread = threading.Thread(
-                target=read_stream, 
-                args=(process.stdout, stdout_lines), 
-                daemon=True
-            )
-            stderr_thread = threading.Thread(
-                target=read_stream, 
-                args=(process.stderr, stderr_lines), 
-                daemon=True
-            )
-            stdout_thread.start()
-            stderr_thread.start()
-            
-            # Watchdog loop
-            prev_stdout_len = 0
-            prev_stderr_len = 0
-            log_interval = 10  # Log every 10 seconds
-            last_log_time = time.time()
-            
-            while process.poll() is None:
-                current_time = time.time()
-                elapsed = current_time - start_time
+            # Stream output line by line (matching telegram-acpx-devbot pattern)
+            while True:
+                line = process.stdout.readline()
                 
-                # Check for new output
-                current_stdout_len = len(stdout_lines)
-                current_stderr_len = len(stderr_lines)
-                
-                if current_stdout_len > prev_stdout_len or current_stderr_len > prev_stderr_len:
-                    last_output_time = current_time
-                    prev_stdout_len = current_stdout_len
-                    prev_stderr_len = current_stderr_len
-                    # Log new output
-                    if current_stdout_len > 0:
-                        logger.info(f"[ACP-CHAT] stdout progress: {current_stdout_len} lines, last: {stdout_lines[-1][:100] if stdout_lines else ''}")
-                
-                # Periodic status log
-                if current_time - last_log_time > log_interval:
-                    logger.info(f"[ACP-CHAT] Still running... elapsed: {elapsed:.1f}s, stdout: {current_stdout_len} lines, stderr: {current_stderr_len} lines")
-                    last_log_time = current_time
-                
-                # Timeout check
+                # Check for timeout
+                elapsed = time.time() - start_time
                 if elapsed > ACPX_TIMEOUT:
                     logger.warning(f"[ACP-CHAT] Timeout after {elapsed:.1f}s")
                     try:
-                        os.killpg(process.pid, signal.SIGTERM)
+                        process.terminate()
                         time.sleep(2)
                         if process.poll() is None:
-                            os.killpg(process.pid, signal.SIGKILL)
+                            process.kill()
                     except (ProcessLookupError, OSError):
                         pass
                     timeout_killed = True
                     break
                 
-                time.sleep(0.5)
+                # Check if process has exited
+                if process.poll() is not None:
+                    # Read any remaining output
+                    remaining = process.stdout.read()
+                    if remaining:
+                        stdout_lines.append(remaining)
+                    break
+                
+                line = line.rstrip('\n\r')
+                if line:
+                    stdout_lines.append(line + '\n')
+                    logger.info(f"[ACP-CHAT] stdout: {line[:100]}")
             
-            # Wait for reader threads
-            stdout_thread.join(timeout=2)
-            stderr_thread.join(timeout=2)
+            # Wait for process to complete
+            return_code = process.wait() if process.poll() is None else process.returncode
             
             # Collect output
             stdout_output = ''.join(stdout_lines)
-            stderr_output = ''.join(stderr_lines)
-            return_code = process.returncode
-            
             logger.info(f"[ACP-CHAT] ACPX completed with return code: {return_code}")
-            if stderr_output:
-                logger.info(f"[ACP-CHAT] stderr output: {stderr_output[:500]}")
-            if stdout_output:
-                logger.info(f"[ACP-CHAT] stdout length: {len(stdout_output)} chars")
+            logger.info(f"[ACP-CHAT] stdout length: {len(stdout_output)} chars")
             
             if timeout_killed:
                 return {
@@ -266,14 +224,13 @@ Be concise but thorough. Focus on the user's specific request.
                     "status": "error",
                     "success": False,
                     "response": f"ACPX failed with code {return_code}",
-                    "error": stderr_output or "Unknown error"
+                    "error": "No output received"
                 }
             
             return {
                 "status": "success",
                 "success": True,
-                "response": stdout_output or "Operation completed successfully.",
-                "stderr": stderr_output
+                "response": stdout_output or "Operation completed successfully."
             }
             
         except Exception as e:
