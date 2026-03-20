@@ -1621,238 +1621,114 @@ class ACPFrontendEditorV2:
 Project Name: {self.project_name}
 Project Description: {goal_description}
 
-🚨🚨🚨 CRITICAL: NO NEW PACKAGES - USE EXISTING COMPONENTS ONLY 🚨🚨🚨
+---
 
-This is an INITIAL BUILD with pre-installed dependencies.
+## EXECUTION ORDER — FOLLOW THIS EXACTLY
 
-⚠️ STRICT RULES:
-1. DO NOT install any new npm packages
-2. DO NOT modify package.json
-3. DO NOT run npm install or npm add
-4. USE ONLY existing UI components from src/components/ui/
-5. BUILD all custom UI using Tailwind CSS + Lucide icons
-6. If a component doesn't exist, CREATE it in src/components/ (NOT in src/components/ui/)
+1. Fix routing (remove Welcome route, set `{default_page}` at `"/"`)
+2. Create `src/layout/Navbar.tsx` with mobile hamburger menu
+3. Integrate Navbar into `Layout.tsx`
+4. Create each required page (fully implemented, 800+ chars)
+5. Run `npm run build` — fix all errors until it succeeds
+6. Serve dist: `npx serve dist -l 3000`
+7. Verify with Chrome DevTools MCP — snapshot, console, routes, screenshot
+8. Update AI index files (symbols, files, dependencies, summaries)
 
-Available UI components (check src/components/ui/ for full list):
-- Button, Card, Input, Label, Select, Textarea
-- Dialog, Sheet, Dropdown, Popover
-- Table, Badge, Avatar, Separator
-- And more...
+---
 
-Use Lucide icons: import {{ IconName }} from 'lucide-react'
+## CONSTRAINTS
 
-IMPORTANT:
-Do not analyze the entire project deeply.
-Focus only on required pages and layout files.
+**Never do:**
+- Install new npm packages or modify `package.json`
+- Run `npm install`, `npm add`, or `npm update`
+- Modify files in `src/components/ui/` (use them, don't change them)
+- Modify `vite.config.*`, `tsconfig.json`, or any backend/env files
+- Create pages not in the required list
+- Leave any page as a stub, placeholder, or under 800 characters
+- Change project architecture
 
-🎨 UI/UX DESIGN REFERENCE - FOLLOW THESE STANDARDS 🎨
+**Only modify files in:**
+- `src/pages/`
+- `src/components/` (custom components here, NOT in `src/components/ui/`)
+- `src/layout/`
+- `src/features/`
 
-For ALL UI/UX design decisions, use the ui-ux-pro-max skill:
-📖 Skill Name: ui-ux-pro-max
-🔗 GitHub: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
-💡 Invoke with: /ui-ux-pro-max [your request]
+**Do NOT scan:** `node_modules/`, `dist/`, `build/`, `.git/`
 
-Examples:
-- /ui-ux-pro-max review my dashboard component
-- /ui-ux-pro-max create a glassmorphism button
-- /ui-ux-pro-max improve the accessibility of my form
+**Available UI components** (from `src/components/ui/`):
+Button, Card, Input, Label, Select, Textarea, Dialog, Sheet, Dropdown, Popover, Table, Badge, Avatar, Separator — and more. Check the folder for the full list.
 
-This skill provides expert guidance on:
-- Modern UI component patterns
-- Responsive design best practices
-- Accessibility standards (WCAG 2.1)
-- Color theory and typography
-- Layout composition and spacing
-- Interactive states and micro-interactions
-- Mobile-first design approach
-- Professional UI polish techniques
+**Icons:** `import {{ IconName }} from 'lucide-react'`
 
-Before implementing ANY UI component:
-1. Consider the UI/UX Pro Max principles
-2. Apply modern design patterns (not outdated Bootstrap-style layouts)
-3. Ensure mobile-responsive implementation
-4. Use proper visual hierarchy and spacing
-5. Implement smooth transitions and micro-interactions
-6. Follow accessibility best practices
+---
 
-🎨 PREMIUM UI MODE
+## STEP 1 — FIX ROUTING
 
-Enhance UI using:
-- glassmorphism (backdrop blur + transparency)
-- soft shadows and depth
-- subtle hover animations
-- gradient accents (blue → purple)
-- modern SaaS styling (Stripe / Linear inspired)
+Read `src/App.tsx`. Delete ALL routes at `path="/"`. Add exactly one. Do this BEFORE creating any pages.
 
-Apply:
-- backdrop-blur-xl + semi-transparent backgrounds
-- hover:scale-[1.02] + hover:shadow-xl on cards
-- gradient headers and icon accents
-- smooth transitions (transition-all duration-300)
-
-Avoid:
-- flat UI
-- plain white sections without depth
-- static non-interactive components
-
-YOUR TASK
-
-Transform the existing template into a production-ready application based on the project description above.
-
-� FAST EXECUTION MODE (UI-FIRST SCAFFOLD)
-
-This is an INITIAL BUILD phase.
-
-PRIORITY:
-- Focus on HIGH-QUALITY UI
-- Use STATIC / MOCK DATA
-- Build visually COMPLETE pages quickly
-
-DO NOT:
-- implement complex logic
-- implement real backend integrations
-- implement full feature engines (editor, canvas, drag-drop)
-
-FOR COMPLEX FEATURES:
-- block editor → UI layout only
-- canvas → static visual layout
-- charts → static UI with sample data
-
-TIME OPTIMIZATION RULES:
-- Do NOT over-engineer
-- Do NOT spend time on edge cases
-- Do NOT try to perfect every detail
-- Limit each page to 2–3 main UI sections
-- Avoid deeply nested or overly complex layouts
-
-SUCCESS CRITERIA:
-- Pages must LOOK complete (not logically complete)
-- No blank or placeholder pages
-- UI should feel production-ready visually
-
-This is NOT the final implementation — focus on SPEED + UI QUALITY.
-
-�🚨🚨🚨 CRITICAL ROUTING FIX - MUST DO FIRST 🚨🚨🚨
-
-BEFORE YOU DO ANYTHING ELSE, FIX THE ROUTING:
-
-1. READ src/App.tsx
-2. FIND the Welcome route at path="/"
-3. DELETE or REPLACE it with {default_page} at path="/"
-
-REQUIRED STATE (FIXED):
 ```tsx
 <Routes>
   <Route element={{<Layout />}}>
-    <Route path="/" element={{<{default_page} />}} />  ← ONLY ONE route at "/"
+    <Route path="/" element={{<{default_page} />}} />   {{/* ONLY ONE route at "/" */}}
     <Route path="/team" element={{<Team />}} />
-    ...
+    {{/* other routes */}}
   </Route>
 </Routes>
 ```
 
-⚠️ ROUTING RULES (MANDATORY):
-1. DELETE ALL routes with path="/" (there may be MULTIPLE duplicates)
-2. Keep only ONE route at path="/" for {default_page}
-3. All routes MUST be inside <Route element={{<Layout />}}> wrapper
-4. If no Layout wrapper exists, ADD IT
-5. DO NOT leave Welcome at path="/"
-6. DO NOT create duplicate routes at path="/"
+Rules:
+- Exactly ONE route at `"/"` — there may be multiple duplicates in the file, delete them all
+- All routes nested inside `<Route element={{<Layout />}}>`
+- If no Layout wrapper exists, add it
+- Layout MUST use `<Outlet />`, not a `children` prop
+- Pages render at `<Outlet />`, not via children prop
+- Layout uses flex for full-screen layout with overflow handling
+- Do not leave Welcome at `"/"`
 
-FAILURE TO FIX ROUTING = BROKEN APP (blank page)
+Verify routing is correct BEFORE creating pages. Wrong routing = blank page.
 
-Verify routing is correct BEFORE creating pages!
+---
 
-PHASE 9 STRICT PAGE GENERATION RULES (ENFORCED)
+## STEP 2 — NAVBAR
 
-⚠️  CRITICAL: EXACT PAGE CREATION REQUIRED ⚠️
+Create `src/layout/Navbar.tsx`:
 
-1. ONLY create the pages listed below:
-{required_pages_str}
-
-2. File names must match EXACTLY:
-   - Use this pattern: src/pages/{{PageName}}.tsx
-   - Examples: src/pages/Dashboard.tsx, src/pages/Contacts.tsx, src/pages/Settings.tsx
-   - DO NOT add "Page" suffix: ✗ DashboardPage.tsx → ✓ Dashboard.tsx
-   - DO NOT add "Overview" suffix: ✗ AnalyticsOverview.tsx → ✓ Analytics.tsx
-   - DO NOT use variations: ✗ ReportsPage.tsx → ✓ Reports.tsx
-
-3. ABSOLUTELY FORBIDDEN:
-   - DO NOT create any additional pages beyond the list
-   - DO NOT create variations like: Account.tsx, Activity.tsx, Users.tsx, Team.tsx, Billing.tsx
-   - DO NOT rename pages - use exact names from REQUIRED PAGES list
-   - DO NOT generate default SaaS pages when explicit pages are provided
-
-4. FINAL VERIFICATION CHECKLIST:
-   Before marking task complete, verify:
-   - [ ] ROUTING FIXED: Welcome route removed, {default_page} at "/" (ONLY ONE)
-   - [ ] ROUTING FIXED: All routes inside Layout wrapper
-   - [ ] ONLY pages from REQUIRED PAGES list exist in src/pages/
-   - [ ] NO unauthorized pages were created
-   - [ ] All required pages are complete
-   - [ ] File names match exactly with REQUIRED PAGES list
-
-PAGE SPECIFICATIONS (Phase 4 - Enhanced UI Quality)
-{page_specs_section}
-
-⚠️ CRITICAL: NAVIGATION MENU REQUIREMENTS ⚠️
-
-YOU MUST CREATE OR UPDATE A NAVIGATION MENU THAT IS MOBILE RESPONSIVE:
-
-1. CREATE/UPDATE src/layout/Navbar.tsx or src/components/Navbar.tsx with:
-   - Desktop view: Horizontal menu with links to all required pages
-   - Mobile view: Hamburger menu (☰) that toggles navigation
-   - Use React state for mobile menu toggle: `const [isOpen, setIsOpen] = useState(false)`
-   - Include links to: {', '.join(required_pages_list)}
-   - Use Lucide icons for menu icons: Menu, X, Home, Settings, etc.
-
-2. MOBILE RESPONSIVE REQUIREMENTS:
-   - Use Tailwind responsive classes: `hidden md:flex` for desktop menu
-   - Hamburger button visible on mobile: `md:hidden`
-   - Mobile menu with full-screen overlay or slide-in sidebar
-   - Touch-friendly tap targets (min 44px height)
-   - Smooth transitions for menu open/close
-
-3. INTEGRATE WITH LAYOUT:
-   - Import Navbar in Layout.tsx
-   - Place Navbar in Layout header section
-   - Ensure Navbar works with existing Layout structure
-
-4. NAVIGATION LINKS MUST INCLUDE:
-   - All required pages: {', '.join(required_pages_list)}
-   - Active link highlighting (use NavLink from react-router-dom)
-   - Proper routing to each page
-
-EXAMPLE NAVBAR STRUCTURE:
 ```tsx
 import {{ useState }} from 'react';
 import {{ NavLink }} from 'react-router-dom';
-import {{ Menu, X }} from 'lucide-react';
+import {{ Menu, X, Home }} from 'lucide-react';
 
 export default function Navbar() {{
   const [isOpen, setIsOpen] = useState(false);
-  
+
   const links = [
-    {{ to: '/', label: '{required_pages_list[0] if required_pages_list else 'Dashboard'}', icon: Home }},
-    // ... add other page links
+    {{ to: '/', label: '{required_pages_list[0] if required_pages_list else "Dashboard"}', icon: Home }},
+    // add remaining page links
   ];
 
   return (
     <nav className="bg-white border-b">
       {{/* Desktop Menu */}}
       <div className="hidden md:flex">
-        {{links.map(link => <NavLink key={{link.to}} to={{link.to}}>...)}}
+        {{links.map(link => (
+          <NavLink key={{link.to}} to={{link.to}}>
+            <span className="flex items-center gap-2">
+              <link.icon className="w-4 h-4" />
+              {{link.label}}
+            </span>
+          </NavLink>
+        ))}}
       </div>
-      
+
       {{/* Mobile Hamburger */}}
       <button className="md:hidden" onClick={{() => setIsOpen(!isOpen)}}>
         {{isOpen ? <X /> : <Menu />}}
       </button>
-      
+
       {{/* Mobile Menu Overlay */}}
       {{isOpen && (
         <div className="md:hidden fixed inset-0 bg-white z-50">
-          {{/* Mobile menu links */}}
+          {{/* mobile menu links */}}
         </div>
       )}}
     </nav>
@@ -1860,44 +1736,76 @@ export default function Navbar() {{
 }}
 ```
 
-⚠️ NAVIGATION IS NOT OPTIONAL - Every app MUST have a working mobile-responsive menu!
+Requirements:
+- Desktop: horizontal menu (`hidden md:flex`) with links to all required pages
+- Mobile: hamburger (`md:hidden`) toggles full-screen overlay or slide-in sidebar
+- Use `NavLink` from `react-router-dom` for active link highlighting
+- Include links to: {', '.join(required_pages_list)}
+- Touch-friendly tap targets (min 44px height)
+- Smooth open/close transitions
+- Import Navbar in `Layout.tsx` and place it in the header section
 
-🚨🚨🚨 CRITICAL: NO EMPTY/PLACEHOLDER PAGES - BUILD MUST SUCCEED 🚨🚨🚨
+**Navigation link rule** — always wrap multiple children in a single element:
 
-This is the INITIAL UI BUILD phase. Focus on visual completeness. Further improvements can be done later.
+```tsx
+// Wrong — causes React.Children.only error
+<Link to="/dashboard">
+  <Icon />
+  Dashboard
+</Link>
 
-EVERY PAGE MUST BE FULLY IMPLEMENTED OR THE BUILD WILL FAIL:
+// Correct
+<Link to="/dashboard">
+  <span className="flex items-center gap-2">
+    <Icon />
+    Dashboard
+  </span>
+</Link>
+```
 
-1. MINIMUM CONTENT REQUIREMENTS (MANDATORY):
-   - Each page must contain meaningful UI with multiple sections (no empty or placeholder content)
-   - Each page MUST include ACTUAL content (not stubs/placeholders)
-   - Each page MUST have REAL functionality (working components, data displays)
-   - Each page MUST compile without TypeScript errors
+Same rule applies to: Button, NavLink, and any component expecting a single child.
 
-2. FORBIDDEN PATTERNS (DO NOT CREATE - WILL CAUSE BUILD FAILURE):
-   ❌ return <div></div>
-   ❌ return null
-   ❌ return <div>Dashboard</div>
-   ❌ return <div className="p-4">Page content coming soon</div>
-   ❌ // TODO: Add content
-   ❌ // Page content will be generated by AI
-   ❌ Any file under 800 characters
-   ❌ Any placeholder text whatsoever
+---
 
-3. REQUIRED CONTENT FOR EACH PAGE (ALL REQUIRED):
-   ✅ Proper imports (React, hooks, icons from lucide-react)
-   ✅ State management (useState, useEffect as needed)
-   ✅ Real UI components (cards, tables, forms, charts)
-   ✅ Styled with Tailwind CSS (responsive layouts with md: breakpoints)
-   ✅ Functional interactions (clicks, forms, modals)
-   ✅ Loading states and error handling
-   ✅ Mobile-responsive design
-   ✅ TypeScript types properly defined
+## STEP 3 — REQUIRED PAGES
 
-4. EXAMPLE FULL PAGE IMPLEMENTATION (Dashboard - COPY THIS PATTERN):
+Create exactly these pages, no more, no less:
+
+{required_pages_str}
+
+**Naming rules:**
+- Pattern: `src/pages/{{PageName}}.tsx`
+- No `Page` suffix: `Dashboard.tsx` ✓ not `DashboardPage.tsx` ✗
+- No `Overview` suffix: `Analytics.tsx` ✓ not `AnalyticsOverview.tsx` ✗
+- No variations: `Reports.tsx` ✓ not `ReportsPage.tsx` ✗
+- Do NOT create extras like: `Account.tsx`, `Activity.tsx`, `Users.tsx`, `Team.tsx`, `Billing.tsx`
+
+**Every page must have ALL of the following:**
+- Proper imports (React, hooks, Lucide icons)
+- State management (`useState`, `useEffect` as needed)
+- Real UI components — cards, tables, forms, data displays
+- Tailwind CSS responsive layout with `md:` breakpoints
+- Functional interactions (clicks, forms, modals)
+- Loading states and error handling
+- Mobile-responsive design
+- TypeScript types properly defined
+- 800+ characters — no stubs, no TODOs, no "coming soon", no placeholders
+
+**Forbidden patterns — will cause build failure:**
+```
+return <div></div>
+return null
+return <div>Dashboard</div>
+return <div className="p-4">Page content coming soon</div>
+// TODO: Add content
+// Page content will be generated by AI
+```
+
+**Reference implementation — copy this pattern:**
+
 ```tsx
 import {{ useState, useEffect }} from 'react';
-import {{ LayoutDashboard, Users, TrendingUp, Activity, DollarSign }} from 'lucide-react';
+import {{ Users, DollarSign, TrendingUp, Activity }} from 'lucide-react';
 
 interface StatCardProps {{
   title: string;
@@ -1923,51 +1831,43 @@ function StatCard({{ title, value, icon, trend }}: StatCardProps) {{
 
 export default function Dashboard() {{
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({{
-    users: 0,
-    revenue: 0,
-    growth: 0,
-    activity: 0
-  }});
+  const [stats, setStats] = useState({{ users: 0, revenue: 0, growth: 0, activity: 0 }});
 
   useEffect(() => {{
-    // Simulate data fetch
     setTimeout(() => {{
       setStats({{ users: 1234, revenue: 50000, growth: 12.5, activity: 89 }});
       setLoading(false);
     }}, 500);
   }}, []);
 
-  if (loading) {{
-    return <div className="p-6">Loading...</div>;
-  }}
+  if (loading) return <div className="p-6">Loading...</div>;
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Dashboard</h1>
       </div>
-      
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Total Users" value={{stats.users.toLocaleString()}} icon={{<Users className="w-6 h-6 text-blue-500" />}} trend="+12%" />
-        <StatCard title="Revenue" value=${{stats.revenue.toLocaleString()}} icon={{<DollarSign className="w-6 h-6 text-green-500" />}} trend="+8%" />
+        <StatCard title="Revenue" value={{`$${{stats.revenue.toLocaleString()}}`}} icon={{<DollarSign className="w-6 h-6 text-green-500" />}} trend="+8%" />
         <StatCard title="Growth" value={{`${{stats.growth}}%`}} icon={{<TrendingUp className="w-6 h-6 text-purple-500" />}} />
         <StatCard title="Activity" value={{stats.activity}} icon={{<Activity className="w-6 h-6 text-orange-500" />}} />
       </div>
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <h2 className="font-semibold mb-4">Recent Activity</h2>
           <div className="space-y-3">
             {{[1, 2, 3].map(i => (
               <div key={{i}} className="flex items-center gap-3 p-3 bg-gray-50 rounded">
-                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                <span className="text-sm">Activity item {{{{i}}}}</span>
+                <div className="w-2 h-2 bg-blue-500 rounded-full" />
+                <span className="text-sm">Activity item {{i}}</span>
               </div>
             ))}}
           </div>
         </div>
-        
+
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <h2 className="font-semibold mb-4">Quick Actions</h2>
           <div className="grid grid-cols-2 gap-3">
@@ -1983,144 +1883,137 @@ export default function Dashboard() {{
 }}
 ```
 
-5. MANDATORY FINAL VERIFICATION (YOU MUST DO THIS):
-   
-   STEP 1: Run `npm run build` in the frontend directory
-   STEP 2: Check that build succeeds with NO errors
-   STEP 3: If build fails, FIX ALL ERRORS before marking complete
-   STEP 4: Verify each page file is 800+ characters
-   STEP 5: Verify NO files contain "placeholder", "TODO", or "coming soon"
+---
 
-🚨 IF npm run build FAILS, YOUR TASK IS INCOMPLETE - FIX ALL ERRORS 🚨
-   NOTE:
-   Focus on generating clean, correct UI code.
+## STEP 4 — PAGE SPECIFICATIONS
 
-CHECKLIST (complete in order - ALL STEPS REQUIRED)
-1. [ ] Fix routing — remove Welcome at "/", single {default_page} route at "/" inside Layout wrapper
-2. [ ] Create src/layout/Navbar.tsx — mobile hamburger menu, NavLink to all required pages
-3. [ ] Integrate Navbar into Layout.tsx header
-4. [ ] Create each required page FULLY IMPLEMENTED (800+ chars, real content):
-{required_pages_str}
-5. [ ] Verify no unauthorized pages exist in src/pages/
-6. [ ] Verify each page is 800+ characters (NO placeholders)
-7. [ ] Run npm run build and VERIFY IT SUCCEEDS
-8. [ ] Fix any TypeScript or build errors
-9. [ ] RE-RUN npm run build to confirm success
-10. [ ] SERVE dist folder: `npx serve dist -l 3000` (or available port)
-11. [ ] VERIFY with Chrome DevTools MCP:
-    - Open browser page at http://localhost:3000
-    - Take snapshot to confirm page loads correctly
-    - Check for console errors
-    - Verify all routes work (click through each page)
-    - Confirm no blank/white screens
-    - Screenshot final result for confirmation
+{page_specs_section}
 
-SCOPE LIMITATION (CRITICAL - Reduces AI scanning time)
+---
 
-ONLY modify files in these directories:
-- src/pages/
-- src/components/ (create custom components here, NOT in src/components/ui/)
-- src/layout/
-- src/features/
+## STEP 5 — UI/UX QUALITY STANDARDS
 
-DO NOT scan:
-- node_modules
-- dist
-- build
-- .git
+This is an initial UI build — focus on SPEED + visual completeness. Static/mock data is fine.
 
-🚨 DO NOT MODIFY (STRICT):
-- package.json (NO new packages)
-- src/components/ui/ (UI primitives - use but don't modify)
-- vite.config.*, tsconfig.json
-- node_modules
-- backend files, .env files
-- Do NOT change project architecture
-- Do NOT run npm install/add/update
+**For all UI/UX decisions, use the ui-ux-pro-max skill:**
+- Skill name: `ui-ux-pro-max`
+- GitHub: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
+- Invoke with: `/ui-ux-pro-max [your request]`
+- Examples:
+  - `/ui-ux-pro-max review my dashboard component`
+  - `/ui-ux-pro-max create a glassmorphism button`
+  - `/ui-ux-pro-max improve the accessibility of my form`
 
-TECHNICAL REQUIREMENTS
+This skill covers: modern component patterns, responsive design, WCAG 2.1 accessibility, color theory, typography, layout composition, micro-interactions, mobile-first design, professional polish.
 
-- Fix routing BEFORE creating pages
-- Keep the code buildable (npm run build must succeed)
-- Use existing UI components from src/components/ui/
-- Follow existing code patterns and style
-- Write clean, production-ready code
-- Do not introduce placeholder content unless required
-- Follow page specifications for professional UI
-- Ensure all UI elements from page specs are implemented
+**Before implementing any UI component:**
+1. Apply ui-ux-pro-max principles
+2. Use modern design patterns (not Bootstrap-style layouts)
+3. Ensure mobile-responsive implementation
+4. Use proper visual hierarchy and spacing
+5. Implement smooth transitions and micro-interactions
+6. Follow accessibility best practices
 
-⚠️ CRITICAL: LAYOUT COMPONENT RULES ⚠️
+**Premium UI — apply to all pages:**
+- glassmorphism: `backdrop-blur-xl` + semi-transparent backgrounds
+- depth: soft shadows, `hover:shadow-xl`, `hover:scale-[1.02]` on cards
+- gradient accents: blue → purple headers and icon backgrounds
+- transitions: `transition-all duration-300` on all interactive elements
+- Stripe / Linear aesthetic — not flat or plain white sections
 
-The project uses a Layout component with React Router nested routes.
+**Per page:** 2–3 main UI sections max. No over-engineering, no edge cases, no deeply nested layouts.
 
-App.tsx routing structure:
-```tsx
-<Routes>
-  <Route element={{<Layout />}}>
-    <Route path="/" element={{<Dashboard />}} />
-    <Route path="/settings" element={{<Settings />}} />
-    <Route path="*" element={{<NotFound />}} />
-  </Route>
-</Routes>
+**Avoid:** flat UI, plain white sections without depth, static non-interactive components.
+
+**For complex features, build UI shell only:**
+- Block editor → UI layout only
+- Canvas → static visual layout
+- Charts → static UI with sample data
+
+---
+
+## STEP 6 — BUILD VERIFICATION
+
+```bash
+npm run build
 ```
 
-CRITICAL RULES:
-1. Layout MUST use <Outlet />, NOT children prop
-2. All page routes MUST be nested inside <Route element={{<Layout />}}>
-3. Pages render at <Outlet />, not via children prop
-4. Layout uses flex for full-screen layout with overflow handling
+If it fails, fix ALL TypeScript and build errors. Re-run until it passes.
 
-⚠️ CRITICAL: LINK/NAVIGATION COMPONENTS ⚠️
+Verify before serving:
+- Each page file is 800+ characters
+- No files contain "placeholder", "TODO", or "coming soon"
 
-When creating navigation links, ALWAYS wrap multiple children in a single element:
+Then serve. Multiple Claude Code sessions may be running in parallel — always check if the port is in use before serving:
 
-❌ WRONG - Multiple children cause React.Children.only error:
-```tsx
-<Link to="/dashboard">
-  <Icon />
-  Dashboard
-</Link>
+```bash
+# Check if 3000 is in use; if so, find a free port in the 4000–5000 range
+lsof -i :3000 && echo "Port 3000 in use" || npx serve dist -l 3000
+
+# If 3000 is taken, run this instead:
+for port in 4000 4001 4002 4003 4004 4005; do
+  lsof -i :$port > /dev/null 2>&1 || {{ echo "Using port $port"; npx serve dist -l $port; break; }}
+done
 ```
 
-✅ CORRECT - Single wrapper element:
-```tsx
-<Link to="/dashboard">
-  <span className="flex items-center gap-2">
-    <Icon />
-    Dashboard
-  </span>
-</Link>
+Note the port you end up using — you need it in the next step.
+
+---
+
+## STEP 7 — BROWSER VERIFICATION WITH CHROME DEVTOOLS MCP
+
+After serving, use Chrome DevTools MCP to verify the running app. Do NOT skip this step.
+
+**1. Open the app**
+```
+navigate to: http://localhost:{PORT}   ← use the actual port from Step 6
 ```
 
-Same rule applies to: Button, NavLink, and any component expecting single child.
+**2. Take a snapshot**
+Use DevTools MCP `snapshot` to capture the page state. Confirm:
+- Page is not blank or white
+- Layout renders correctly (navbar + content area visible)
+- No loading spinners stuck indefinitely
 
-IMPLEMENTATION
+**3. Check console for errors**
+Use DevTools MCP `console` to inspect logs. Fix any errors found:
+- No React runtime errors
+- No `Cannot read properties of undefined`
+- No failed imports or missing modules
+- No TypeScript/JSX errors leaked to runtime
 
-Make your changes directly to files.
+**4. Verify every route**
+Click through each required page using DevTools MCP `click`:
+- Navigate to each route in {', '.join(required_pages_list) if required_pages_list else 'all required pages'}
+- After each navigation: take a snapshot to confirm the page rendered
+- Confirm no blank screens, no 404s, no white pages
 
-Do NOT request JSON output or any specific format.
+**5. Check network tab**
+Use DevTools MCP `network` to verify:
+- All JS/CSS chunks loaded (no 404s)
+- No failed API calls blocking render
 
-Just implement the changes using your available tools.
+**6. Take final screenshot**
+Use DevTools MCP `screenshot` to capture the final confirmed state. This is the proof of completion.
 
-🚨 POST-BUILD: UPDATE AI INDEX (MANDATORY) 🚨
+**If any check fails:** fix the issue, rebuild (`npm run build`), re-serve, and re-verify.
 
-After npm run build succeeds, you MUST update the AI index files:
+**7. Stop the server**
+Once verification is complete, stop the serve process to free the port:
 
-1. Update agent/ai_index/symbols.json:
-   - Add new components/pages with file path and line numbers
-   - Update line numbers for modified files
+```bash
+kill $(lsof -t -i:{PORT})
+```
 
-2. Update agent/ai_index/files.json:
-   - Add new file entries with line count and purpose
-   - Update routes array in App.tsx entry
+Do not leave the server running after verification is done.
 
-3. Update agent/ai_index/dependencies.json:
-   - Add new import relationships
+---
 
-4. Update agent/ai_index/summaries.json:
-   - Add brief description for new files
+## STEP 8 — UPDATE AI INDEX
 
-Quick update example for symbols.json:
+After a successful build, update all four AI index files:
+
+**`agent/ai_index/symbols.json`** — add new components/pages with file path and line numbers:
 ```json
 "NewPage": {{
   "type": "component",
@@ -2132,7 +2025,38 @@ Quick update example for symbols.json:
 }}
 ```
 
+**`agent/ai_index/files.json`** — add new file entries with line count and purpose; update routes array in App.tsx entry.
+
+**`agent/ai_index/dependencies.json`** — add new import relationships.
+
+**`agent/ai_index/summaries.json`** — add brief description for each new file.
+
 AI index keeps the codebase navigable for future AI edits.
+
+---
+
+## FINAL CHECKLIST
+
+Complete in order before marking task complete:
+
+- [ ] Routing fixed — Welcome removed, single `{default_page}` at `"/"`, all routes inside Layout wrapper
+- [ ] `src/layout/Navbar.tsx` created — mobile hamburger, NavLink to all required pages: {', '.join(required_pages_list)}
+- [ ] Navbar integrated into `Layout.tsx` header
+- [ ] All required pages created with exact filenames, 800+ chars, real content, no placeholders:
+      {required_pages_str}
+- [ ] No unauthorized pages exist in `src/pages/`
+- [ ] `npm run build` succeeds with zero errors
+- [ ] Any TypeScript or build errors fixed and `npm run build` re-run to confirm
+- [ ] Port checked — free port selected (3000 or 4000–5000 range), app serving
+- [ ] Chrome DevTools MCP verification complete:
+  - [ ] Navigated to http://localhost:{PORT} (the port confirmed free in Step 6)
+  - [ ] Snapshot taken — layout visible, not blank/white
+  - [ ] Console checked — no runtime errors
+  - [ ] Every required page route clicked and snapshot confirmed
+  - [ ] Network tab checked — no 404s on JS/CSS chunks
+  - [ ] Final screenshot taken as proof of completion
+  - [ ] Server stopped (`kill $(lsof -t -i:{PORT})`)
+- [ ] AI index files updated (symbols, files, dependencies, summaries)
 """
 
     def _build_page_templates_section(self, required_pages: List[str], goal_description: str) -> str:
