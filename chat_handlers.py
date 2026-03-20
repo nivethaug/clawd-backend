@@ -54,12 +54,11 @@ async def generate_sse_stream(request, session_id, user_content):
         return
 
     # Handle text-based streaming chat
+    print(f"[SSE] Starting text-based stream for session {session_id}")
     try:
         # CRITICAL: Use "user" field to maintain session continuity in OpenClaw
         # Format: "adapter-session-{session_key}"
         user_field = f"adapter-session-{request.session_key}"
-
-        # Debug logging to verify correct format
 
         # Inject system context (project path + rules)
         user_messages = [{"role": "user", "content": user_content}]
@@ -67,11 +66,6 @@ async def generate_sse_stream(request, session_id, user_content):
             request.session_key,
             user_messages
         )
-
-        # Debug: Log the messages being sent
-        for i, msg in enumerate(messages_with_context):
-            role = msg.get("role", "unknown")
-            content_preview = msg.get("content", "")[:100]
 
         request_body = {
             "model": "agent:main",
@@ -84,6 +78,7 @@ async def generate_sse_stream(request, session_id, user_content):
             "Authorization": f"Bearer {CLAWDBOT_TOKEN}",
         }
 
+        print(f"[SSE] Opening stream connection to {CLAWDBOT_BASE_URL}/v1/chat/completions")
         async with AsyncClient(timeout=300) as client:
             async with client.stream(
                 'POST',
@@ -91,14 +86,20 @@ async def generate_sse_stream(request, session_id, user_content):
                 json=request_body,
                 headers=headers
             ) as stream_response:
+                print(f"[SSE] Stream response status: {stream_response.status_code}")
+                line_count = 0
                 async for line in stream_response.aiter_lines():
+                    line_count += 1
                     if not line.strip():
                         continue
+
+                    print(f"[SSE] Line #{line_count}: {repr(line[:80])}...")
 
                     if line.startswith('data: '):
                         data = line[6:]
 
                         if data.strip() == '[DONE]':
+                            print(f"[SSE] Got [DONE], yielding final chunk")
                             yield "data: [DONE]\n\n"
                             break
 
@@ -113,8 +114,11 @@ async def generate_sse_stream(request, session_id, user_content):
                                     yield f"data: {event_data}\n\n"
                         except:
                             continue
+                
+                print(f"[SSE] Stream finished, processed {line_count} lines")
 
     except Exception as e:
+        print(f"[SSE] Stream error: {e}")
         error_msg = f"Error: {str(e)}"
         event_data = json.dumps({'choices': [{'message': error_msg}]})
         yield f"data: {event_data}\n\n"
