@@ -87,6 +87,9 @@ async def generate_sse_stream(request, session_id, user_content):
                 headers=headers
             ) as stream_response:
                 print(f"[SSE] Stream response status: {stream_response.status_code}")
+                print(f"[SSE] Stream response headers: {dict(stream_response.headers)}")
+                print(f"[SSE] Content-Type: {stream_response.headers.get('content-type', 'N/A')}")
+                
                 line_count = 0
                 async for line in stream_response.aiter_lines():
                     line_count += 1
