@@ -80,7 +80,7 @@ async def generate_sse_stream(request, session_id, user_content):
 
         print(f"[SSE] Opening stream connection to {CLAWDBOT_BASE_URL}/v1/chat/completions")
         async with AsyncClient(timeout=300) as client:
-            # Direct streaming request - use aiter_lines() for SSE format
+            # Direct streaming request - use aiter_bytes() with manual line parsing
             async with client.stream(
                 'POST',
                 f"{CLAWDBOT_BASE_URL}/v1/chat/completions",
@@ -91,30 +91,45 @@ async def generate_sse_stream(request, session_id, user_content):
                 print(f"[SSE] Response headers: {dict(stream_response.headers)}")
                 
                 line_count = 0
+                buffer = ""
                 
-                # Use aiter_lines() which is better suited for SSE format
-                async for line in stream_response.aiter_lines():
+                # Read raw bytes and parse lines manually
+                async for chunk in stream_response.aiter_bytes():
+                    print(f"[SSE] Received chunk: {len(chunk)} bytes")
+                    
+                    # Decode and add to buffer
+                    buffer += chunk.decode('utf-8')
+                    print(f"[SSE] Buffer now: {len(buffer)} chars")
+                    
+                    # Process complete lines
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        line_count += 1
+                        print(f"[SSE] Line #{line_count}: {repr(line[:120] if len(line) > 120 else line)}")
+                        
+                        if not line.strip():
+                            continue
+                        
+                        if line.startswith('data: '):
+                            data = line[6:]
+                            if data.strip() == '[DONE]':
+                                print(f"[SSE] Got [DONE], yielding final chunk")
+                                yield "data: [DONE]\n\n"
+                                break
+                            try:
+                                parsed = json.loads(data)
+                                if parsed.get('choices') and parsed['choices']:
+                                    delta = parsed['choices'][0].get('delta', {})
+                                    if delta.get('content'):
+                                        event_data = json.dumps({'choices': [{'delta': {'content': delta['content']}}]})
+                                        yield f"data: {event_data}\n\n"
+                            except json.JSONDecodeError as je:
+                                print(f"[SSE] JSON decode error: {je}")
+                
+                # Process any remaining buffer
+                if buffer.strip():
                     line_count += 1
-                    print(f"[SSE] Line #{line_count}: {repr(line[:120] if len(line) > 120 else line)}")
-                    
-                    if not line.strip():
-                        continue
-                    
-                    if line.startswith('data: '):
-                        data = line[6:]
-                        if data.strip() == '[DONE]':
-                            print(f"[SSE] Got [DONE], yielding final chunk")
-                            yield "data: [DONE]\n\n"
-                            break
-                        try:
-                            parsed = json.loads(data)
-                            if parsed.get('choices') and parsed['choices']:
-                                delta = parsed['choices'][0].get('delta', {})
-                                if delta.get('content'):
-                                    event_data = json.dumps({'choices': [{'delta': {'content': delta['content']}}]})
-                                    yield f"data: {event_data}\n\n"
-                        except json.JSONDecodeError as je:
-                            print(f"[SSE] JSON decode error: {je}")
+                    print(f"[SSE] Final buffer: {repr(buffer[:120])}")
                 
                 print(f"[SSE] Stream finished, {line_count} lines processed")
 
