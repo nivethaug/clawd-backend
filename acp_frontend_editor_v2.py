@@ -1967,7 +1967,7 @@ After serving, use Chrome DevTools MCP to verify the running app. Do NOT skip th
 
 **1. Open the app**
 ```
-navigate to: http://localhost:{PORT}   ← use the actual port from Step 6
+navigate to: http://localhost:PORT   ← use the actual port from Step 6
 ```
 
 **2. Take a snapshot**
