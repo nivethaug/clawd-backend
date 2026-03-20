@@ -18,7 +18,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Configuration
-ACPX_TIMEOUT = 120  # 2 minutes for chat responses (reduced from 5 min for faster feedback)
+ACPX_TIMEOUT = 900  # 15 minutes for interactive chat
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 
 
@@ -393,6 +393,94 @@ Be concise but thorough. Focus on the user's specific request.
                             pass
         except Exception as e:
             logger.warning(f"[ACP-CHAT] Failed to kill orphan processes: {e}")
+    
+    def run_acpx_chat_streaming(self, user_message: str, session_context: str = ""):
+        """
+        Run ACPX chat and yield progress in real-time (generator for SSE streaming).
+        
+        This method yields progress updates as ACPX produces output, providing
+        real-time feedback to users instead of waiting for completion.
+        
+        Args:
+            user_message: User's chat message
+            session_context: Previous conversation context
+            
+        Yields:
+            Str strings with filtered progress updates
+        """
+        prompt = self._build_chat_prompt(user_message, session_context)
+        
+        # Log prompt structure
+        logger.info(f"[ACP-CHAT] === STREAMING MODE ===")
+        logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars, timeout: {ACPX_TIMEOUT}s")
+        
+        # Build command
+        acpx_path = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
+        cmd = ["stdbuf", "-oL", "node", acpx_path, "claude", "exec", str(prompt)]
+        
+        logger.info(f"[ACP-CHAT] Starting streaming subprocess...")
+        
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(self.frontend_src_path),
+                universal_newlines=True
+            )
+            
+            logger.info(f"[ACP-CHAT] Subprocess PID: {process.pid}")
+            
+            raw_output = []
+            start_time = time.time()
+            
+            # Stream output line by line
+            while True:
+                line = process.stdout.readline()
+                
+                # Check timeout
+                if time.time() - start_time > ACPX_TIMEOUT:
+                    logger.warning(f"[ACP-CHAT] Timeout")
+                    process.kill()
+                    yield "[TIMEOUT] Operation timed out\n"
+                    return
+                
+                # Process exited
+                if process.poll() is not None:
+                    remaining = process.stdout.read()
+                    if remaining:
+                        raw_output.append(remaining)
+                    break
+                
+                line = line.rstrip('\n\r')
+                if line:
+                    raw_output.append(line)
+                    logger.info(f"[ACP-CHAT] Line: {line[:80]}")
+                    
+                    # Yield useful lines immediately for real-time feedback
+                    if self._is_useful_line(line) and not self._is_inline_noise(line):
+                        yield line + "\n"
+            
+            # Process completed - yield final filtered output
+            raw_text = '\n'.join(raw_output)
+            final_output = self._filter_blocks(raw_text)
+            
+            logger.info(f"[ACP-CHAT] Completed: {len(raw_text)} chars raw → {len(final_output)} chars filtered")
+            
+            # Kill orphan processes
+            self.kill_orphan_processes()
+            
+            # Yield complete message
+            if final_output:
+                yield f"\n[COMPLETE]\n{final_output}\n"
+            else:
+                yield "\n[COMPLETE]\nOperation finished.\n"
+                
+        except Exception as e:
+            logger.error(f"[ACP-CHAT] Stream error: {e}")
+            yield f"\n[ERROR] {str(e)}\n"
 
 
 def get_acp_chat_handler(session_key: str, project_path: str = None) -> Optional[ACPChatHandler]:

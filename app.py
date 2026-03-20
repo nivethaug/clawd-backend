@@ -2240,65 +2240,67 @@ async def chat_stream_endpoint(request: ChatRequest):
             except Exception as ctx_err:
                 logger.warning(f"[ACP-STREAM] Could not load context: {ctx_err}")
             
-            # Run ACPX in thread pool (it's synchronous)
-            logger.info(f"[ACP-STREAM] Starting ACPX execution (timeout: 300s)...")
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                handler.run_acpx_chat,
-                acp_user_content,
-                session_context
-            )
+            # Run ACPX with real-time streaming
+            logger.info(f"[ACP-STREAM] Starting ACPX streaming (timeout: 900s)...")
             
-            logger.info(f"[ACP-STREAM] ACPX completed with status: {result.get('status')}")
-            
-            # Extract response
-            assistant_content = result.get('response', '')
-            if not result.get('success'):
-                logger.error(f"[ACP-STREAM] ACPX failed: {result.get('error')}")
-                assistant_content = f"Error: {result.get('error', 'ACPX failed')}"
-            else:
-                logger.info(f"[ACP-STREAM] Response length: {len(assistant_content)} chars")
-            
-            # Kill orphan processes after response
-            handler.kill_orphan_processes()
-            logger.info(f"[ACP-STREAM] Cleaned up ACPX processes for session {session_id}")
-            
-            # Cleanup temp image file
-            if image_path_for_context and os.path.exists(image_path_for_context):
+            async def acp_streaming_response():
+                """Stream ACPX output in real-time via SSE."""
+                full_response = []
+                
                 try:
-                    os.remove(image_path_for_context)
-                    logger.info(f"[ACP-STREAM] Cleaned up temp image: {image_path_for_context}")
-                except:
-                    pass
-            
-            # Save to database
-            if assistant_content:
-                try:
-                    with get_db() as save_conn:
-                        save_conn.execute(
-                            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                            (session_id, 'assistant', assistant_content)
-                        )
-                        save_conn.execute(
-                            "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (session_id,)
-                        )
-                        save_conn.commit()
-                    logger.info(f"[ACP-STREAM] Saved assistant message ({len(assistant_content)} chars)")
-                except Exception as save_err:
-                    logger.error(f"[ACP-STREAM] Failed to save message: {save_err}")
-            
-            logger.info(f"[ACP-STREAM] === ACP MODE COMPLETED ===")
-            
-            # Return as SSE stream
-            async def acp_response_stream():
-                event_data = json.dumps({'choices': [{'delta': {'content': assistant_content}}]})
-                yield f"data: {event_data}\n\n"
+                    # Run streaming in executor to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    stream_gen = handler.run_acpx_chat_streaming(acp_user_content, session_context)
+                    
+                    for chunk in stream_gen:
+                        # Yield SSE event for each chunk
+                        full_response.append(chunk)
+                        event_data = json.dumps({'choices': [{'delta': {'content': chunk}}]})
+                        yield f"data: {event_data}\n\n"
+                        logger.info(f"[ACP-STREAM] Yielded chunk: {len(chunk)} chars")
+                    
+                    # Save complete response to database
+                    assistant_content = ''.join(full_response)
+                    # Remove [COMPLETE] and [ERROR] markers before saving
+                    assistant_content = assistant_content.replace('[COMPLETE]\n', '').replace('[ERROR] ', '').replace('[TIMEOUT] ', '')
+                    assistant_content = assistant_content.strip()
+                    
+                    if assistant_content:
+                        try:
+                            with get_db() as save_conn:
+                                save_conn.execute(
+                                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                                    (session_id, 'assistant', assistant_content)
+                                )
+                                save_conn.execute(
+                                    "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                    (session_id,)
+                                )
+                                save_conn.commit()
+                            logger.info(f"[ACP-STREAM] Saved assistant message ({len(assistant_content)} chars)")
+                        except Exception as save_err:
+                            logger.error(f"[ACP-STREAM] Failed to save message: {save_err}")
+                    
+                    # Cleanup temp image file
+                    if image_path_for_context and os.path.exists(image_path_for_context):
+                        try:
+                            os.remove(image_path_for_context)
+                            logger.info(f"[ACP-STREAM] Cleaned up temp image")
+                        except:
+                            pass
+                    
+                    logger.info(f"[ACP-STREAM] === ACP STREAMING COMPLETED ===")
+                    
+                except Exception as stream_err:
+                    logger.error(f"[ACP-STREAM] Streaming error: {stream_err}")
+                    error_msg = f"Error: {str(stream_err)}"
+                    event_data = json.dumps({'error': error_msg})
+                    yield f"data: {event_data}\n\n"
+                
                 yield "data: [DONE]\n\n"
             
             return StreamingResponse(
-                acp_response_stream(),
+                acp_streaming_response(),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
