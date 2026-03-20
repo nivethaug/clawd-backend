@@ -90,35 +90,43 @@ async def generate_sse_stream(request, session_id, user_content):
                 print(f"[SSE] Stream response headers: {dict(stream_response.headers)}")
                 print(f"[SSE] Content-Type: {stream_response.headers.get('content-type', 'N/A')}")
                 
+                # Try reading raw bytes first to see if there's ANY data
+                raw_chunks = 0
                 line_count = 0
-                async for line in stream_response.aiter_lines():
-                    line_count += 1
-                    if not line.strip():
-                        continue
-
-                    print(f"[SSE] Line #{line_count}: {repr(line[:80])}...")
-
-                    if line.startswith('data: '):
-                        data = line[6:]
-
-                        if data.strip() == '[DONE]':
-                            print(f"[SSE] Got [DONE], yielding final chunk")
-                            yield "data: [DONE]\n\n"
-                            break
-
-                        try:
-                            parsed = json.loads(data)
-
-                            if parsed.get('choices') and parsed['choices']:
-                                delta = parsed['choices'][0].get('delta', {})
-
-                                if delta.get('content'):
-                                    event_data = json.dumps({'choices': [{'delta': {'content': delta['content']}}]})
-                                    yield f"data: {event_data}\n\n"
-                        except:
-                            continue
                 
-                print(f"[SSE] Stream finished, processed {line_count} lines")
+                async for raw_chunk in stream_response.aiter_bytes():
+                    raw_chunks += 1
+                    print(f"[SSE] Raw chunk #{raw_chunks}: {len(raw_chunk)} bytes")
+                    
+                    # Decode and process lines
+                    try:
+                        text = raw_chunk.decode('utf-8')
+                        for line in text.split('\n'):
+                            if not line.strip():
+                                continue
+                            
+                            line_count += 1
+                            print(f"[SSE] Line #{line_count}: {repr(line[:80])}...")
+                            
+                            if line.startswith('data: '):
+                                data = line[6:]
+                                if data.strip() == '[DONE]':
+                                    print(f"[SSE] Got [DONE], yielding final chunk")
+                                    yield "data: [DONE]\n\n"
+                                    break
+                                try:
+                                    parsed = json.loads(data)
+                                    if parsed.get('choices') and parsed['choices']:
+                                        delta = parsed['choices'][0].get('delta', {})
+                                        if delta.get('content'):
+                                            event_data = json.dumps({'choices': [{'delta': {'content': delta['content']}}]})
+                                            yield f"data: {event_data}\n\n"
+                                except:
+                                    pass
+                    except Exception as decode_err:
+                        print(f"[SSE] Decode error: {decode_err}")
+                
+                print(f"[SSE] Stream finished, {raw_chunks} raw chunks, {line_count} lines")
 
     except Exception as e:
         print(f"[SSE] Stream error: {e}")
