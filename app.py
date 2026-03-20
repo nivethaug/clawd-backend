@@ -2085,6 +2085,98 @@ async def chat_stream_endpoint(request: ChatRequest):
     state.session_id = session_id
     logger.info(f"[STREAM ENDPOINT] Starting streaming response for session {session_id}")
 
+    # DEBUG: First try non-streaming to verify OpenClaw works at all
+    import httpx
+    from context_injector import ContextInjector
+    context_injector = ContextInjector()
+    
+    CLAWDBOT_BASE_URL = os.getenv("CLAWDBOT_BASE_URL", "http://localhost:18789")
+    CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a")
+    
+    user_field = f"adapter-session-{request.session_key}"
+    user_messages = [{"role": "user", "content": user_content}]
+    messages_with_context = context_injector.inject_system_context(
+        request.session_key,
+        user_messages
+    )
+    
+    request_body = {
+        "model": "agent:main",
+        "user": user_field,
+        "messages": messages_with_context,
+        "stream": False  # Force non-streaming for debugging
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {CLAWDBOT_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    
+    logger.info(f"[STREAM DEBUG] Testing non-streaming request to OpenClaw...")
+    
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            response = await client.post(
+                f"{CLAWDBOT_BASE_URL}/v1/chat/completions",
+                json=request_body,
+                headers=headers
+            )
+            logger.info(f"[STREAM DEBUG] Response status: {response.status_code}")
+            logger.info(f"[STREAM DEBUG] Response length: {len(response.content)} bytes")
+            
+            if response.status_code == 200 and response.content:
+                result = response.json()
+                assistant_content = result.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
+                logger.info(f"[STREAM DEBUG] Got response: {assistant_content[:200]}...")
+                
+                # Save to database
+                state.content = assistant_content
+                save_stream_to_db(state)
+                
+                # Return as SSE stream (single event)
+                async def single_chunk_stream():
+                    event_data = json.dumps({'choices': [{'delta': {'content': assistant_content}}]})
+                    yield f"data: {event_data}\n\n"
+                    yield "data: [DONE]\n\n"
+                
+                return StreamingResponse(
+                    single_chunk_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    }
+                )
+            else:
+                logger.error(f"[STREAM DEBUG] Non-streaming failed: {response.text[:500]}")
+                error_content = f"Error: OpenClaw returned status {response.status_code}"
+                state.content = error_content
+                save_stream_to_db(state)
+                
+                async def error_stream():
+                    yield f"data: {json.dumps({'error': error_content})}\n\n"
+                    yield "data: [DONE]\n\n"
+                
+                return StreamingResponse(
+                    error_stream(),
+                    media_type="text/event-stream"
+                )
+    except Exception as e:
+        logger.error(f"[STREAM DEBUG] Exception: {e}")
+        state.content = f"Error: {str(e)}"
+        save_stream_to_db(state)
+        
+        async def error_stream():
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+        
+        return StreamingResponse(
+            error_stream(),
+            media_type="text/event-stream"
+        )
+
+    # OLD CODE BELOW (kept for reference, won't be reached)
     async def stream_with_guaranteed_save():
         """Wrapper that guarantees save even on client disconnect."""
         try:
