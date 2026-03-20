@@ -2129,8 +2129,10 @@ async def chat_endpoint(request: ChatRequest):
 
         try:
             if request.image:
+                logger.info(f"[IMAGE] Processing image for session {session_id}, image length: {len(request.image)}")
                 assistant_content = await handle_chat_with_image(request, session_id, user_content)
                 image_to_store = request.image  # Store the base64 image data
+                logger.info(f"[IMAGE] Image processed, storing base64 data length: {len(image_to_store)}")
             elif not request.image and not request.stream:
                 assistant_content = await handle_chat_text_only(request, user_content)
         except Exception as e:
@@ -2142,11 +2144,13 @@ async def chat_endpoint(request: ChatRequest):
         # GUARANTEED: Insert assistant message (even if it's an error message)
         with get_db() as save_conn:
             if image_to_store:
+                logger.info(f"[IMAGE] Saving assistant message with image to database (session {session_id})")
                 save_conn.execute(
                     "INSERT INTO messages (session_id, role, content, image) VALUES (?, ?, ?, ?)",
                     (session_id, 'assistant', assistant_content, image_to_store)
                 )
             else:
+                logger.info(f"[IMAGE] Saving assistant message without image (session {session_id})")
                 save_conn.execute(
                     "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
                     (session_id, 'assistant', assistant_content)
@@ -2157,6 +2161,7 @@ async def chat_endpoint(request: ChatRequest):
                 (session_id,)
             )
             save_conn.commit()
+            logger.info(f"[IMAGE] Database commit successful for session {session_id}")
 
         return ChatResponse(
             id=0,

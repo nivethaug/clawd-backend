@@ -43,7 +43,8 @@ async def generate_sse_stream(request, session_id, user_content):
         )
 
         assistant_content = result.get('choices', [{}])[0].get('message', {}).get('content', 'No response from assistant')
-        delete_image(public_path)
+        # Clear image from both public and workspace directories
+        delete_image(public_path, workspace_path)
 
         event_data = json.dumps({
             'choices': [{'message': {'content': assistant_content}}]
@@ -132,6 +133,8 @@ async def handle_chat_with_image(request, session_id, user_content):
     Returns:
         Assistant response content string
     """
+    public_path = None
+    workspace_path = None
     try:
         public_path, workspace_path, http_url = save_base64_image(request.image, session_id)
 
@@ -145,11 +148,13 @@ async def handle_chat_with_image(request, session_id, user_content):
         )
 
         assistant_content = result.get('choices', [{}])[0].get('message', {}).get('content', 'No response from assistant')
-        delete_image(public_path)
-
         return assistant_content
     except Exception as e:
         return f"Error processing image: {str(e)}"
+    finally:
+        # ALWAYS clear image from both directories after assistant replies
+        if public_path or workspace_path:
+            delete_image(public_path, workspace_path)
 
 
 async def generate_sse_stream_with_db_save(request, session_id, user_content):

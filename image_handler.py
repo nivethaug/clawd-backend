@@ -69,22 +69,32 @@ def save_base64_image(base64_data: str, session_id: int) -> tuple:
         print(f"Error saving image: {e}")
         raise
 
-def delete_image(filepath: str) -> bool:
+def delete_image(public_filepath: str, workspace_filepath: str = None) -> bool:
     """
-    Delete image file from public directory.
+    Delete image file from public directory and optionally workspace.
 
     Args:
-        filepath: Path to image file
+        public_filepath: Path to image file in public directory
+        workspace_filepath: Optional path to image file in workspace
 
     Returns:
-        True if deleted, False otherwise
+        True if any file deleted, False otherwise
     """
+    deleted = False
     try:
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            print(f"Image deleted from public: {filepath}")
-            return True
-        return False
+        # Delete from public directory
+        if public_filepath and os.path.exists(public_filepath):
+            os.remove(public_filepath)
+            print(f"Image deleted from public: {public_filepath}")
+            deleted = True
+
+        # Delete from workspace directory
+        if workspace_filepath and os.path.exists(workspace_filepath):
+            os.remove(workspace_filepath)
+            print(f"Image deleted from workspace: {workspace_filepath}")
+            deleted = True
+
+        return deleted
     except Exception as e:
         print(f"Error deleting image: {e}")
         return False
@@ -109,10 +119,11 @@ async def call_chat_completion_with_image(workspace_image_path: str, session_key
     user_field = f"adapter-session-{session_key}"
 
     # Inject system context (project path + rules)
+    # CRITICAL: Send FULL workspace path so agent can read the file
     user_messages = [
         {
             "role": "user",
-            "content": f"{prompt}\n\n[Image: {image_filename}]"
+            "content": f"{prompt}\n\n[Image: {workspace_image_path}]"
         }
     ]
     messages_with_context = context_injector.inject_system_context(
