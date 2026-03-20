@@ -2048,7 +2048,7 @@ async def get_session_messages(session_id: int):
 @app.post("/chat/stream")
 async def chat_stream_endpoint(request: ChatRequest):
     """Handle streaming chat requests using extracted chat handlers."""
-    from starlette.background import BackgroundTask
+    import asyncio
     from chat_handlers import StreamState, save_stream_to_db, generate_sse_stream_with_db_save
 
     logger.info(f"[STREAM ENDPOINT] Called with session_key={request.session_key}, stream={request.stream}")
@@ -2085,10 +2085,22 @@ async def chat_stream_endpoint(request: ChatRequest):
     state.session_id = session_id
     logger.info(f"[STREAM ENDPOINT] Starting streaming response for session {session_id}")
 
+    async def stream_with_guaranteed_save():
+        """Wrapper that guarantees save even on client disconnect."""
+        try:
+            async for chunk in generate_sse_stream_with_db_save(request, session_id, user_content, state):
+                yield chunk
+        finally:
+            # GUARANTEED: This runs even if client disconnects
+            # Use asyncio.to_thread to run save in thread pool (survives async cancellation)
+            logger.info(f"[STREAM] Finally block - saving {len(state.content)} chars")
+            if state.content and not state.saved:
+                # Run save in a thread to survive async cancellation
+                asyncio.get_event_loop().run_in_executor(None, save_stream_to_db, state)
+
     return StreamingResponse(
-        generate_sse_stream_with_db_save(request, session_id, user_content, state),
+        stream_with_guaranteed_save(),
         media_type="text/event-stream",
-        background=BackgroundTask(save_stream_to_db, state),
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
