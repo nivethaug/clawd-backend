@@ -2117,44 +2117,41 @@ async def chat_endpoint(request: ChatRequest):
         user_content = last_user_message.content
 
         # Insert user message and COMMIT IMMEDIATELY (ensures user message saved even if API fails)
-        conn.execute(
-            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-            (session_id, 'user', user_content)
-        )
+        # Image belongs to USER message, not assistant
+        if request.image:
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content, image) VALUES (?, ?, ?, ?)",
+                (session_id, 'user', user_content, request.image)
+            )
+        else:
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                (session_id, 'user', user_content)
+            )
         conn.commit()
 
         # Generate assistant response with error handling
         assistant_content = ""
-        image_to_store = None
 
         try:
             if request.image:
                 logger.info(f"[IMAGE] Processing image for session {session_id}, image length: {len(request.image)}")
                 assistant_content = await handle_chat_with_image(request, session_id, user_content)
-                image_to_store = request.image  # Store the base64 image data
-                logger.info(f"[IMAGE] Image processed, storing base64 data length: {len(image_to_store)}")
+                logger.info(f"[IMAGE] Image processed successfully")
             elif not request.image and not request.stream:
                 assistant_content = await handle_chat_text_only(request, user_content)
         except Exception as e:
             # CRITICAL: Save error message to database even if API fails
             logger.error(f"Chat API failed for session {session_id}: {e}")
             assistant_content = f"Error: Unable to process request. Please try again. (Details: {str(e)})"
-            # Don't re-raise - we want to save the error message
 
         # GUARANTEED: Insert assistant message (even if it's an error message)
+        # Note: Image is stored on USER message, not assistant
         with get_db() as save_conn:
-            if image_to_store:
-                logger.info(f"[IMAGE] Saving assistant message with image to database (session {session_id})")
-                save_conn.execute(
-                    "INSERT INTO messages (session_id, role, content, image) VALUES (?, ?, ?, ?)",
-                    (session_id, 'assistant', assistant_content, image_to_store)
-                )
-            else:
-                logger.info(f"[IMAGE] Saving assistant message without image (session {session_id})")
-                save_conn.execute(
-                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                    (session_id, 'assistant', assistant_content)
-                )
+            save_conn.execute(
+                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                (session_id, 'assistant', assistant_content)
+            )
 
             save_conn.execute(
                 "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
