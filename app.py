@@ -2085,7 +2085,8 @@ async def chat_stream_endpoint(request: ChatRequest):
     state.session_id = session_id
     logger.info(f"[STREAM ENDPOINT] Starting streaming response for session {session_id}")
 
-    # DEBUG: First try non-streaming to verify OpenClaw works at all
+    # Use non-streaming request to OpenClaw, then wrap in SSE format
+    # This is more reliable than true streaming which had issues with async generators
     import httpx
     from context_injector import ContextInjector
     context_injector = ContextInjector()
@@ -2104,7 +2105,7 @@ async def chat_stream_endpoint(request: ChatRequest):
         "model": "agent:main",
         "user": user_field,
         "messages": messages_with_context,
-        "stream": False  # Force non-streaming for debugging
+        "stream": False
     }
     
     headers = {
@@ -2112,7 +2113,7 @@ async def chat_stream_endpoint(request: ChatRequest):
         "Content-Type": "application/json",
     }
     
-    logger.info(f"[STREAM DEBUG] Testing non-streaming request to OpenClaw...")
+    logger.info(f"[STREAM] Sending request to OpenClaw for session {session_id}")
     
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -2121,19 +2122,18 @@ async def chat_stream_endpoint(request: ChatRequest):
                 json=request_body,
                 headers=headers
             )
-            logger.info(f"[STREAM DEBUG] Response status: {response.status_code}")
-            logger.info(f"[STREAM DEBUG] Response length: {len(response.content)} bytes")
+            logger.info(f"[STREAM] Response status: {response.status_code}, length: {len(response.content)} bytes")
             
             if response.status_code == 200 and response.content:
                 result = response.json()
                 assistant_content = result.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
-                logger.info(f"[STREAM DEBUG] Got response: {assistant_content[:200]}...")
+                logger.info(f"[STREAM] Got response for session {session_id}: {len(assistant_content)} chars")
                 
                 # Save to database
                 state.content = assistant_content
                 save_stream_to_db(state)
                 
-                # Return as SSE stream (single event)
+                # Return as SSE stream (single event for compatibility)
                 async def single_chunk_stream():
                     event_data = json.dumps({'choices': [{'delta': {'content': assistant_content}}]})
                     yield f"data: {event_data}\n\n"
@@ -2149,8 +2149,9 @@ async def chat_stream_endpoint(request: ChatRequest):
                     }
                 )
             else:
-                logger.error(f"[STREAM DEBUG] Non-streaming failed: {response.text[:500]}")
-                error_content = f"Error: OpenClaw returned status {response.status_code}"
+                error_msg = response.text[:500] if response.text else "No response body"
+                logger.error(f"[STREAM] OpenClaw error: status={response.status_code}, body={error_msg}")
+                error_content = f"Error: AI service returned status {response.status_code}"
                 state.content = error_content
                 save_stream_to_db(state)
                 
@@ -2163,7 +2164,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                     media_type="text/event-stream"
                 )
     except Exception as e:
-        logger.error(f"[STREAM DEBUG] Exception: {e}")
+        logger.error(f"[STREAM] Exception for session {session_id}: {e}")
         state.content = f"Error: {str(e)}"
         save_stream_to_db(state)
         
@@ -2175,33 +2176,6 @@ async def chat_stream_endpoint(request: ChatRequest):
             error_stream(),
             media_type="text/event-stream"
         )
-
-    # OLD CODE BELOW (kept for reference, won't be reached)
-    async def stream_with_guaranteed_save():
-        """Wrapper that guarantees save even on client disconnect."""
-        try:
-            async for chunk in generate_sse_stream_with_db_save(request, session_id, user_content, state):
-                yield chunk
-        finally:
-            # GUARANTEED: This runs even if client disconnects
-            # Use asyncio.to_thread to run save in thread pool (survives async cancellation)
-            logger.info(f"[STREAM] Finally block - saving {len(state.content)} chars")
-            if state.content and not state.saved:
-                # Run save in a thread to survive async cancellation
-                asyncio.get_event_loop().run_in_executor(None, save_stream_to_db, state)
-
-    return StreamingResponse(
-        stream_with_guaranteed_save(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-        }
-    )
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
