@@ -2048,8 +2048,7 @@ async def get_session_messages(session_id: int):
 @app.post("/chat/stream")
 async def chat_stream_endpoint(request: ChatRequest):
     """Handle streaming chat requests using extracted chat handlers."""
-    # Import background task utilities
-    import asyncio
+    from starlette.background import BackgroundTask
     from chat_handlers import StreamState, save_stream_to_db, generate_sse_stream_with_db_save
 
     with get_db() as conn:
@@ -2082,19 +2081,10 @@ async def chat_stream_endpoint(request: ChatRequest):
     state = StreamState()
     state.session_id = session_id
 
-    # Create a wrapper generator that triggers background save on any exit
-    async def stream_with_guaranteed_save():
-        try:
-            async for chunk in generate_sse_stream_with_db_save(request, session_id, user_content, state):
-                yield chunk
-        finally:
-            # GUARANTEED: This runs even if client disconnects
-            # Spawn background task to ensure save completes
-            asyncio.create_task(asyncio.to_thread(save_stream_to_db, state))
-
     return StreamingResponse(
-        stream_with_guaranteed_save(),
+        generate_sse_stream_with_db_save(request, session_id, user_content, state),
         media_type="text/event-stream",
+        background=BackgroundTask(save_stream_to_db, state),
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
