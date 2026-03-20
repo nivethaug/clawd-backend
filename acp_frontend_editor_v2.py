@@ -2003,7 +2003,7 @@ Use DevTools MCP `screenshot` to capture the final confirmed state. This is the 
 Once verification is complete, stop the serve process to free the port:
 
 ```bash
-kill $(lsof -t -i:{PORT})
+kill $(lsof -t -i:PORT)
 ```
 
 Do not leave the server running after verification is done.
@@ -2050,13 +2050,13 @@ Complete in order before marking task complete:
 - [ ] Any TypeScript or build errors fixed and `npm run build` re-run to confirm
 - [ ] Port checked — free port selected (3000 or 4000–5000 range), app serving
 - [ ] Chrome DevTools MCP verification complete:
-  - [ ] Navigated to http://localhost:{PORT} (the port confirmed free in Step 6)
+  - [ ] Navigated to http://localhost:PORT (the port confirmed free in Step 6)
   - [ ] Snapshot taken — layout visible, not blank/white
   - [ ] Console checked — no runtime errors
   - [ ] Every required page route clicked and snapshot confirmed
   - [ ] Network tab checked — no 404s on JS/CSS chunks
   - [ ] Final screenshot taken as proof of completion
-  - [ ] Server stopped (`kill $(lsof -t -i:{PORT})`)
+  - [ ] Server stopped (`kill $(lsof -t -i:PORT)`)
 - [ ] AI index files updated (symbols, files, dependencies, summaries)
 """
 
