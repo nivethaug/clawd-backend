@@ -87,19 +87,17 @@ async def generate_sse_stream(request, session_id, user_content):
                 headers=headers
             ) as stream_response:
                 print(f"[SSE] Stream response status: {stream_response.status_code}")
-                print(f"[SSE] Stream response headers: {dict(stream_response.headers)}")
-                print(f"[SSE] Content-Type: {stream_response.headers.get('content-type', 'N/A')}")
+                print(f"[SSE] About to start iterating over bytes...")
                 
-                # Try reading raw bytes first to see if there's ANY data
                 raw_chunks = 0
                 line_count = 0
                 
-                async for raw_chunk in stream_response.aiter_bytes():
-                    raw_chunks += 1
-                    print(f"[SSE] Raw chunk #{raw_chunks}: {len(raw_chunk)} bytes")
-                    
-                    # Decode and process lines
-                    try:
+                try:
+                    async for raw_chunk in stream_response.aiter_bytes():
+                        raw_chunks += 1
+                        print(f"[SSE] Raw chunk #{raw_chunks}: {len(raw_chunk)} bytes - {repr(raw_chunk[:100])}")
+                        
+                        # Decode and process lines
                         text = raw_chunk.decode('utf-8')
                         for line in text.split('\n'):
                             if not line.strip():
@@ -123,8 +121,8 @@ async def generate_sse_stream(request, session_id, user_content):
                                             yield f"data: {event_data}\n\n"
                                 except:
                                     pass
-                    except Exception as decode_err:
-                        print(f"[SSE] Decode error: {decode_err}")
+                except Exception as iter_err:
+                    print(f"[SSE] Iteration error: {iter_err}")
                 
                 print(f"[SSE] Stream finished, {raw_chunks} raw chunks, {line_count} lines")
 
