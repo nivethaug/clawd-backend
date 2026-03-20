@@ -1652,6 +1652,7 @@ Project Description: {goal_description}
 - `src/components/` (custom components here, NOT in `src/components/ui/`)
 - `src/layout/`
 - `src/features/`
+- `agent/` (AI index files and agent configuration)
 
 **Do NOT scan:** `node_modules/`, `dist/`, `build/`, `.git/`
 
