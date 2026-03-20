@@ -83,8 +83,34 @@ async def generate_sse_stream(request, session_id, user_content):
         print(f"[SSE] Opening stream connection to {CLAWDBOT_BASE_URL}/v1/chat/completions")
         print(f"[SSE] Request body: {json.dumps(request_body, indent=2)[:500]}")
         
-        async with AsyncClient(timeout=300) as client:
-            # Use content= with explicit JSON string for better control
+        # First, try a NON-streaming request to verify OpenClaw responds
+        print(f"[SSE] Testing non-streaming request first to verify OpenClaw responds...")
+        async with AsyncClient(timeout=60) as test_client:
+            test_body = request_body.copy()
+            test_body["stream"] = False
+            test_response = await test_client.post(
+                f"{CLAWDBOT_BASE_URL}/v1/chat/completions",
+                content=json.dumps(test_body),
+                headers=headers
+            )
+            print(f"[SSE] Non-streaming test status: {test_response.status_code}")
+            print(f"[SSE] Non-streaming test response length: {len(test_response.content)} bytes")
+            print(f"[SSE] Non-streaming test response: {test_response.text[:500]}...")
+            
+            # If non-streaming works, use that content directly
+            if test_response.status_code == 200 and test_response.content:
+                print(f"[SSE] Non-streaming works! Using non-streaming response.")
+                result = test_response.json()
+                assistant_content = result.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
+                # Yield as single SSE event
+                event_data = json.dumps({'choices': [{'delta': {'content': assistant_content}}]})
+                yield f"data: {event_data}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+        
+        # If non-streaming also fails, try streaming with aread() to see if there's ANY data
+        print(f"[SSE] Non-streaming failed or empty. Trying streaming with aread()...")
+        async with AsyncClient(timeout=60) as client:
             async with client.stream(
                 'POST',
                 f"{CLAWDBOT_BASE_URL}/v1/chat/completions",
@@ -94,33 +120,21 @@ async def generate_sse_stream(request, session_id, user_content):
                 print(f"[SSE] Stream response status: {stream_response.status_code}")
                 print(f"[SSE] Response headers: {dict(stream_response.headers)}")
                 
-                line_count = 0
-                buffer = ""
+                # Try reading all content at once
+                print(f"[SSE] Attempting to read all stream content with aread()...")
+                all_content = await stream_response.aread()
+                print(f"[SSE] Total content received: {len(all_content)} bytes")
+                print(f"[SSE] Content preview: {repr(all_content[:500])}")
                 
-                # CRITICAL: Check if we can read from the stream at all
-                print(f"[SSE] About to enter async for loop...")
-                
-                # Read raw bytes and parse lines manually
-                async for chunk in stream_response.aiter_bytes():
-                    print(f"[SSE] Received chunk: {len(chunk)} bytes - {repr(chunk[:100])}")
-                    
-                    # Decode and add to buffer
-                    buffer += chunk.decode('utf-8')
-                    print(f"[SSE] Buffer now: {len(buffer)} chars")
-                    
-                    # Process complete lines
-                    while '\n' in buffer:
-                        line, buffer = buffer.split('\n', 1)
-                        line_count += 1
-                        print(f"[SSE] Line #{line_count}: {repr(line[:120] if len(line) > 120 else line)}")
-                        
+                if all_content:
+                    # Process the content
+                    text = all_content.decode('utf-8')
+                    for line in text.split('\n'):
                         if not line.strip():
                             continue
-                        
                         if line.startswith('data: '):
                             data = line[6:]
                             if data.strip() == '[DONE]':
-                                print(f"[SSE] Got [DONE], yielding final chunk")
                                 yield "data: [DONE]\n\n"
                                 break
                             try:
@@ -130,15 +144,12 @@ async def generate_sse_stream(request, session_id, user_content):
                                     if delta.get('content'):
                                         event_data = json.dumps({'choices': [{'delta': {'content': delta['content']}}]})
                                         yield f"data: {event_data}\n\n"
-                            except json.JSONDecodeError as je:
-                                print(f"[SSE] JSON decode error: {je}")
-                
-                # Process any remaining buffer
-                if buffer.strip():
-                    line_count += 1
-                    print(f"[SSE] Final buffer: {repr(buffer[:120])}")
-                
-                print(f"[SSE] Stream finished, {line_count} lines processed")
+                            except json.JSONDecodeError:
+                                pass
+                else:
+                    print(f"[SSE] No content received from stream!")
+                    yield f"data: {json.dumps({'error': 'No response from AI service'})}\n\n"
+                    yield "data: [DONE]\n\n"
 
     except Exception as e:
         print(f"[SSE] Stream error: {e}")
