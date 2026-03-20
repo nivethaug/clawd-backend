@@ -26,11 +26,14 @@ from typing import Dict, List, Optional, Tuple, Any, Set
 from page_manifest import PageManifest, create_page_manifest, scaffold_pages
 
 # Configure logging - WARNING level to suppress INFO messages
+# Set root logger to WARNING to suppress INFO from all modules
+logging.getLogger().setLevel(logging.WARNING)
 logging.basicConfig(
     level=logging.WARNING,
     format='[%(levelname)s] %(name)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)  # Explicitly set level for this logger
 
 
 # =============================================================================
