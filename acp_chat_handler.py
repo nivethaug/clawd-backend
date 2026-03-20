@@ -106,6 +106,50 @@ Button, Card, Input, Label, Select, Textarea, Dialog, Sheet, Dropdown, Popover, 
 Be concise but thorough. Focus on the user's specific request.
 """
     
+    def _is_inline_noise(self, line: str) -> bool:
+        """Check if a line is inline telemetry/noise (matching telegram-acpx-devbot)"""
+        if not line or not line.strip():
+            return True
+            
+        line_lower = line.lower().strip()
+        
+        # Skip JSON/telemetry markers
+        if line_lower in ['{', '}', '(', ')', '[', ']', 'jsonrpc:', 'error handling notification {']:
+            return True
+            
+        # Skip structured protocol logs
+        noise_patterns = [
+            'sessionupdate:', 'session/update', 'usage_update', '_errors:',
+            '[array]', '[object]', 'invalid params', 'invalid input',
+            'error handling notification', 'end_turn', '[done]', '[thinking]',
+            '[tool]', '[console]', '[client]', 'client] initialize', 'session/new',
+            'initialize (running)', 'session/new (running)', 'code:', 'message:',
+            'method:', 'params:', 'data:', 'result:', 'id:', 'cost:', 'size:',
+            'used:', 'entry:', 'availablecommands:', 'currentmodeid:',
+            'configoptions:', 'title:', 'toolcallid:', 'jsonrpc:'
+        ]
+        
+        return any(pattern in line_lower for pattern in noise_patterns)
+    
+    def _is_useful_line(self, line: str) -> bool:
+        """Check if line contains useful info (whitelist approach)"""
+        line_lower = line.lower().strip()
+        
+        # Whitelist: actual content keywords
+        useful_patterns = [
+            'creating', 'created', 'writing', 'reading', 'editing', 'updated',
+            'deleting', 'removing', 'saving', 'file', 'folder', 'src/',
+            '.py', '.js', '.tsx', '.ts', '.css', '.html', '.json',
+            'done', 'completed', 'success', 'finished', 'running', 'executing',
+            'processing', 'analyzing', 'building', 'installing', 'generating',
+            'git', 'commit', 'push', 'pull', 'package', 'npm', 'output:',
+            'result:', 'added', 'changed', 'modified', 'hello', 'help',
+            'what', 'how', 'can', 'will', 'let me', 'i can', 'you can',
+            'features', 'pages', 'components', 'build', 'fix', 'bug'
+        ]
+        
+        return any(pattern in line_lower for pattern in useful_patterns)
+    
     def run_acpx_chat(self, user_message: str, session_context: str = "") -> Dict[str, Any]:
         """
         Run ACPX chat and return the response.
@@ -133,7 +177,7 @@ Be concise but thorough. Focus on the user's specific request.
         logger.info(f"[ACP-CHAT] Running ACPX for project: {self.project_name}")
         logger.info(f"[ACP-CHAT] Working directory: {self.frontend_src_path}")
         logger.info(f"[ACP-CHAT] User message: {user_message[:100]}...")
-        logger.info(f"[ACP-CHAT] Command: acpx --format quiet claude exec <prompt>")
+        logger.info(f"[ACP-CHAT] Command: stdbuf -oL node {acpx_path} claude exec <prompt>")
         logger.info(f"[ACP-CHAT] Prompt length: {len(prompt)} chars")
         
         try:
@@ -200,7 +244,9 @@ Be concise but thorough. Focus on the user's specific request.
                 
                 line = line.rstrip('\n\r')
                 if line:
-                    stdout_lines.append(line + '\n')
+                    # Filter out protocol noise, keep useful content
+                    if not self._is_inline_noise(line) or self._is_useful_line(line):
+                        stdout_lines.append(line + '\n')
                     logger.info(f"[ACP-CHAT] stdout: {line[:100]}")
             
             # Wait for process to complete
@@ -219,7 +265,11 @@ Be concise but thorough. Focus on the user's specific request.
                     "error": f"Timeout after {ACPX_TIMEOUT}s"
                 }
             
-            if return_code != 0 and not stdout_output:
+            # Return code -6 (SIGABRT) is from orphan cleanup - treat as success if we have output
+            # Return code 0 is normal success
+            is_success = (return_code == 0 or return_code == -6) and stdout_output
+            
+            if not is_success and not stdout_output:
                 return {
                     "status": "error",
                     "success": False,
