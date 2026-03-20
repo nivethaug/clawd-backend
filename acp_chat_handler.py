@@ -145,10 +145,70 @@ Be concise but thorough. Focus on the user's specific request.
             'git', 'commit', 'push', 'pull', 'package', 'npm', 'output:',
             'result:', 'added', 'changed', 'modified', 'hello', 'help',
             'what', 'how', 'can', 'will', 'let me', 'i can', 'you can',
-            'features', 'pages', 'components', 'build', 'fix', 'bug'
+            'features', 'pages', 'components', 'build', 'fix', 'bug',
+            'react', 'vite', 'typescript', 'saas', 'application', 'assist',
+            'working', 'today', 'would you like'
         ]
         
         return any(pattern in line_lower for pattern in useful_patterns)
+    
+    def _filter_blocks(self, raw_text: str) -> str:
+        """
+        Filter out entire JSON/telemetry blocks (from telegram-acpx-devbot)
+        
+        Uses brace/bracket depth tracking to skip entire JSON blocks.
+        """
+        lines = raw_text.split('\n')
+        clean_lines = []
+        skip_block = False
+        brace_depth = 0
+        bracket_depth = 0
+        
+        for line in lines:
+            stripped = line.strip()
+            line_lower = stripped.lower()
+            
+            # Skip single-character braces
+            if stripped in ['{', '}', '[', ']', '(', ')']:
+                if stripped == '{':
+                    brace_depth += 1
+                    if brace_depth == 1:
+                        skip_block = True
+                elif stripped == '}':
+                    if brace_depth > 0:
+                        brace_depth -= 1
+                        if brace_depth == 0:
+                            skip_block = False
+                elif stripped == '[':
+                    bracket_depth += 1
+                    if bracket_depth == 1:
+                        skip_block = True
+                elif stripped == ']':
+                    if bracket_depth > 0:
+                        bracket_depth -= 1
+                        if bracket_depth == 0:
+                            skip_block = False
+                continue
+            
+            # Detect error notification blocks
+            if 'error handling notification {' in line_lower:
+                skip_block = True
+                brace_depth += 1
+                continue
+            
+            # Skip everything in active blocks
+            if skip_block or brace_depth > 0 or bracket_depth > 0:
+                continue
+            
+            # Skip inline noise
+            if self._is_inline_noise(line):
+                continue
+            
+            # Keep useful lines
+            if self._is_useful_line(line):
+                clean_lines.append(stripped)
+        
+        return '\n'.join(clean_lines)
     
     def run_acpx_chat(self, user_message: str, session_context: str = "") -> Dict[str, Any]:
         """
@@ -213,6 +273,7 @@ Be concise but thorough. Focus on the user's specific request.
             logger.info(f"[ACP-CHAT] Subprocess started with PID: {process.pid}")
             
             stdout_lines = []
+            raw_output = []  # Collect all raw output for block filtering
             start_time = time.time()
             timeout_killed = False
             
@@ -239,23 +300,23 @@ Be concise but thorough. Focus on the user's specific request.
                     # Read any remaining output
                     remaining = process.stdout.read()
                     if remaining:
-                        stdout_lines.append(remaining)
+                        raw_output.append(remaining)
                     break
                 
                 line = line.rstrip('\n\r')
                 if line:
-                    # Filter out protocol noise, keep useful content
-                    if not self._is_inline_noise(line) or self._is_useful_line(line):
-                        stdout_lines.append(line + '\n')
+                    raw_output.append(line)
                     logger.info(f"[ACP-CHAT] stdout: {line[:100]}")
             
             # Wait for process to complete
             return_code = process.wait() if process.poll() is None else process.returncode
             
-            # Collect output
-            stdout_output = ''.join(stdout_lines)
+            # Apply block-level filtering to raw output
+            raw_text = '\n'.join(raw_output)
+            stdout_output = self._filter_blocks(raw_text)
+            
             logger.info(f"[ACP-CHAT] ACPX completed with return code: {return_code}")
-            logger.info(f"[ACP-CHAT] stdout length: {len(stdout_output)} chars")
+            logger.info(f"[ACP-CHAT] Raw output: {len(raw_text)} chars, filtered: {len(stdout_output)} chars")
             
             if timeout_killed:
                 return {
