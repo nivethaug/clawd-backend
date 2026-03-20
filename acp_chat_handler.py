@@ -223,6 +223,24 @@ Be concise but thorough. Focus on the user's specific request.
         """
         prompt = self._build_chat_prompt(user_message, session_context)
         
+        # Log prompt structure
+        logger.info(f"[ACP-CHAT] === PROMPT STRUCTURE ===")
+        logger.info(f"[ACP-CHAT] System message: Included")
+        logger.info(f"[ACP-CHAT] Conversation history: {'Included (' + str(len(session_context)) + ' chars)' if session_context else 'None'}")
+        logger.info(f"[ACP-CHAT] User message: {len(user_message)} chars")
+        logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars")
+        
+        # Log full prompt for debugging (split into multiple lines for readability)
+        prompt_lines = prompt.split('\n')
+        total_lines = len(prompt_lines)
+        logger.info(f"[ACP-CHAT] === PROMPT PREVIEW (first 20 lines) ===")
+        for i, line in enumerate(prompt_lines[:20], 1):
+            logger.info(f"[ACP-CHAT] {i:2d}| {line}")
+        if total_lines > 20:
+            remaining = total_lines - 20
+            logger.info(f"[ACP-CHAT] ... ({remaining} more lines)")
+        logger.info(f"[ACP-CHAT] === END PROMPT PREVIEW ===")
+        
         # Build command - use stdbuf for line buffering (matching telegram-acpx-devbot)
         # Direct node execution is more reliable than acpx wrapper
         acpx_path = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
