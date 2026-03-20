@@ -76,15 +76,19 @@ async def generate_sse_stream(request, session_id, user_content):
 
         headers = {
             "Authorization": f"Bearer {CLAWDBOT_TOKEN}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
         }
 
         print(f"[SSE] Opening stream connection to {CLAWDBOT_BASE_URL}/v1/chat/completions")
+        print(f"[SSE] Request body: {json.dumps(request_body, indent=2)[:500]}")
+        
         async with AsyncClient(timeout=300) as client:
-            # Direct streaming request - use aiter_bytes() with manual line parsing
+            # Use content= with explicit JSON string for better control
             async with client.stream(
                 'POST',
                 f"{CLAWDBOT_BASE_URL}/v1/chat/completions",
-                json=request_body,
+                content=json.dumps(request_body),
                 headers=headers
             ) as stream_response:
                 print(f"[SSE] Stream response status: {stream_response.status_code}")
@@ -93,9 +97,12 @@ async def generate_sse_stream(request, session_id, user_content):
                 line_count = 0
                 buffer = ""
                 
+                # CRITICAL: Check if we can read from the stream at all
+                print(f"[SSE] About to enter async for loop...")
+                
                 # Read raw bytes and parse lines manually
                 async for chunk in stream_response.aiter_bytes():
-                    print(f"[SSE] Received chunk: {len(chunk)} bytes")
+                    print(f"[SSE] Received chunk: {len(chunk)} bytes - {repr(chunk[:100])}")
                     
                     # Decode and add to buffer
                     buffer += chunk.decode('utf-8')
