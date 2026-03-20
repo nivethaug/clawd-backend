@@ -28,6 +28,84 @@ from chat_handlers import generate_sse_stream, generate_sse_stream_with_db_save,
 from file_utils import FileUtils
 from completion_service import CompletionService
 from claude_code_worker import run_claude_code_background
+
+
+# ============================================================================
+# ACP Chat Handler
+# ============================================================================
+
+async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
+    """
+    Handle chat in ACP mode - uses ACPX for frontend editing.
+    
+    Args:
+        request: ChatRequest with acp_mode=True
+        session_id: Session ID for context
+        user_content: User's message content
+        
+    Returns:
+        Assistant response content string
+    """
+    from acp_chat_handler import get_acp_chat_handler
+    
+    logger.info(f"[ACP-CHAT] Handling ACP chat for session {session_id}")
+    
+    # Get project info from session
+    with get_db() as conn:
+        session = conn.execute(
+            """SELECT s.project_id, p.project_path, p.name 
+               FROM sessions s 
+               JOIN projects p ON s.project_id = p.id 
+               WHERE s.id = ?""",
+            (session_id,)
+        ).fetchone()
+        
+        if not session:
+            return "Error: Session not found or no project associated."
+        
+        project_path = session['project_path']
+        project_name = session['name']
+    
+    if not project_path:
+        return "Error: No project path found for this session."
+    
+    # Get ACP chat handler
+    try:
+        handler = get_acp_chat_handler(request.session_key, project_path)
+        if not handler:
+            return f"Error: ACP mode not available for project '{project_name}'. Make sure the frontend directory exists."
+    except Exception as e:
+        logger.error(f"[ACP-CHAT] Failed to create handler: {e}")
+        return f"Error: Failed to initialize ACP mode: {str(e)}"
+    
+    # Build session context from recent messages
+    context_lines = []
+    with get_db() as conn:
+        recent_messages = conn.execute(
+            """SELECT role, content FROM messages 
+               WHERE session_id = ? 
+               ORDER BY created_at DESC 
+               LIMIT 10""",
+            (session_id,)
+        ).fetchall()
+        
+        for msg in reversed(recent_messages):  # Oldest first
+            role = "User" if msg['role'] == 'user' else "Assistant"
+            context_lines.append(f"{role}: {msg['content'][:500]}")
+    
+    session_context = "\n\n".join(context_lines) if context_lines else ""
+    
+    # Run ACPX chat
+    result = handler.run_acpx_chat(user_content, session_context)
+    
+    if result.get('success'):
+        return result.get('response', 'Operation completed.')
+    else:
+        error_msg = result.get('error', 'Unknown error')
+        response = result.get('response', '')
+        if response:
+            return f"{response}\n\n(Note: {error_msg})"
+        return f"Error: {error_msg}"
 from template_selector import TemplateSelector
 
 # ============================================================================
@@ -130,6 +208,7 @@ class ChatRequest(BaseModel):
     messages: list[Message]
     stream: bool = False
     image: Optional[str] = None
+    acp_mode: bool = False  # When True, use ACPX for frontend editing chat
 
 class ChatResponse(BaseModel):
     id: int
@@ -2085,6 +2164,67 @@ async def chat_stream_endpoint(request: ChatRequest):
     state.session_id = session_id
     logger.info(f"[STREAM ENDPOINT] Starting streaming response for session {session_id}")
 
+    # Handle ACP mode - route to ACPX for frontend editing
+    if request.acp_mode:
+        logger.info(f"[STREAM ENDPOINT] ACP mode enabled for session {session_id}")
+        from acp_chat import handle_acp_chat
+        
+        try:
+            # Get project path from session
+            with get_db() as conn:
+                result = conn.execute(
+                    """
+                    SELECT p.project_path 
+                    FROM sessions s 
+                    JOIN projects p ON s.project_id = p.id 
+                    WHERE s.session_key = ?
+                    """,
+                    (request.session_key,)
+                ).fetchone()
+                
+                project_path = result['project_path'] if result else None
+            
+            # Get ACP response
+            assistant_content = await handle_acp_chat(
+                request.session_key,
+                user_content,
+                project_path
+            )
+            
+            # Save to database
+            state.content = assistant_content
+            save_stream_to_db(state)
+            
+            # Return as SSE stream
+            async def acp_response_stream():
+                event_data = json.dumps({'choices': [{'delta': {'content': assistant_content}}]})
+                yield f"data: {event_data}\n\n"
+                yield "data: [DONE]\n\n"
+            
+            return StreamingResponse(
+                acp_response_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                }
+            )
+        except Exception as e:
+            logger.error(f"[STREAM ENDPOINT] ACP mode error: {e}")
+            error_content = f"Error: ACP chat failed - {str(e)}"
+            state.content = error_content
+            save_stream_to_db(state)
+            
+            async def error_stream():
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+            
+            return StreamingResponse(
+                error_stream(),
+                media_type="text/event-stream"
+            )
+
     # Use non-streaming request to OpenClaw, then wrap in SSE format
     # This is more reliable than true streaming which had issues with async generators
     import httpx
@@ -2218,6 +2358,30 @@ async def chat_endpoint(request: ChatRequest):
                 (session_id, 'user', user_content)
             )
         conn.commit()
+
+        # Check for ACP mode - frontend editing via ACPX
+        if request.acp_mode:
+            logger.info(f"[ACP-MODE] ACP chat mode enabled for session {session_id}")
+            assistant_content = await handle_acp_chat(request, session_id, user_content)
+            
+            # Save assistant message
+            with get_db() as save_conn:
+                save_conn.execute(
+                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                    (session_id, 'assistant', assistant_content)
+                )
+                save_conn.execute(
+                    "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (session_id,)
+                )
+                save_conn.commit()
+            
+            return ChatResponse(
+                id=0,
+                role="assistant",
+                content=assistant_content,
+                created_at=datetime.now().isoformat()
+            )
 
         # Generate assistant response with error handling
         assistant_content = ""
