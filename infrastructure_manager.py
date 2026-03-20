@@ -10,7 +10,6 @@ Handles all infrastructure provisioning for website projects:
 """
 
 import subprocess
-import sqlite3
 import random
 import string
 import json
@@ -28,6 +27,9 @@ from typing import Optional, Dict, List, Tuple
 
 # Import enhanced deployment verifier
 from deployment_verifier import DeploymentVerifier as EnhancedDeploymentVerifier, format_verification_report
+
+# Import PostgreSQL connection
+from database_postgres import get_connection_pool
 
 # Configure logging
 logging.basicConfig(
@@ -75,12 +77,13 @@ class PortAllocator:
         self._load_used_ports()
 
     def _load_used_ports(self):
-        """Load already allocated ports from projects database."""
+        """Load already allocated ports from projects database (PostgreSQL)."""
         try:
-            conn = sqlite3.connect(PROJECT_DB_PATH)
-            conn.row_factory = sqlite3.Row
+            pool = get_connection_pool()
+            conn = pool.getconn()
             try:
-                cursor = conn.execute("SELECT frontend_port, backend_port FROM projects WHERE status = 'ready'")
+                cursor = conn.cursor()
+                cursor.execute("SELECT frontend_port, backend_port FROM projects WHERE frontend_port IS NOT NULL OR backend_port IS NOT NULL")
                 for row in cursor:
                     if row['frontend_port']:
                         self.used_ports.add(row['frontend_port'])
@@ -88,7 +91,7 @@ class PortAllocator:
                         self.used_ports.add(row['backend_port'])
                 logger.info(f"Loaded {len(self.used_ports)} used ports from database")
             finally:
-                conn.close()
+                pool.putconn(conn)
         except Exception as e:
             logger.warning(f"Could not load used ports from database: {e}")
 
