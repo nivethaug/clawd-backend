@@ -1106,10 +1106,16 @@ class ACPFrontendEditorV2:
                 stderr_output = ''.join(stderr_lines)
                 return_code = process.returncode
 
-                # Robust debug logging after execution
+                # Robust debug logging after execution - FULL OUTPUT
+                print("=" * 80, flush=True)
                 print("ACPX RETURN CODE:", return_code, flush=True)
-                print("ACPX STDOUT:", stdout_output[:500] if stdout_output else "(empty)", flush=True)
-                print("ACPX STDERR:", stderr_output[:500] if stderr_output else "(empty)", flush=True)
+                print("=" * 80, flush=True)
+                print("ACPX STDOUT:", flush=True)
+                print(stdout_output if stdout_output else "(empty)", flush=True)
+                print("=" * 80, flush=True)
+                print("ACPX STDERR:", flush=True)
+                print(stderr_output if stderr_output else "(empty)", flush=True)
+                print("=" * 80, flush=True)
                 
                 # =============================================
                 # PARTIAL COMMIT: Timeout handling (NO ROLLBACK)
