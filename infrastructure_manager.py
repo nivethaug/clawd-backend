@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import time
+import signal
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -28,6 +29,45 @@ from typing import Optional, Dict, List, Tuple
 
 # Import enhanced deployment verifier
 from deployment_verifier import DeploymentVerifier as EnhancedDeploymentVerifier, format_verification_report
+
+
+def kill_all_claude_agent_processes():
+    """
+    Kill all orphaned claude-agent-acp processes after build completes.
+    These are npx subprocesses that may survive normal process tree kills.
+    """
+    try:
+        # Find all claude-agent-acp processes
+        result = subprocess.run(
+            ["pgrep", "-f", "claude-agent-acp"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0 and result.stdout.strip():
+            pids = [int(p.strip()) for p in result.stdout.strip().split('\n') if p.strip()]
+            logger.info(f"[CLEANUP] Found {len(pids)} claude-agent-acp processes to kill: {pids}")
+            
+            for pid in pids:
+                try:
+                    # Try to kill the process group first
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                        logger.info(f"[CLEANUP] Killed process group {pid}")
+                    except (ProcessLookupError, OSError, AttributeError):
+                        # Fall back to killing just the process
+                        os.kill(pid, signal.SIGKILL)
+                        logger.info(f"[CLEANUP] Killed process {pid}")
+                except (ProcessLookupError, OSError) as e:
+                    logger.debug(f"[CLEANUP] Process {pid} already dead: {e}")
+            
+            logger.info(f"[CLEANUP] ✓ Killed {len(pids)} claude-agent-acp processes")
+        else:
+            logger.info("[CLEANUP] No claude-agent-acp processes found")
+            
+    except Exception as e:
+        logger.warning(f"[CLEANUP] Failed to kill claude-agent-acp processes: {e}")
 
 # Configure logging
 logging.basicConfig(
@@ -1525,6 +1565,10 @@ class InfrastructureManager:
             if build_success:
                 logger.info("PHASE_5_BUILD_COMPLETE: success")
                 # logger.info("✓ Frontend build phase completed")  # Commented for cleaner logs
+                
+                # Kill all claude-agent-acp processes after build completes
+                logger.info("Phase 5.5/8: Cleaning up ACP processes")
+                kill_all_claude_agent_processes()
             else:
                 logger.error("PHASE_5_BUILD_COMPLETE: failed")
                 logger.error("❌ Frontend build failed - stopping pipeline")
