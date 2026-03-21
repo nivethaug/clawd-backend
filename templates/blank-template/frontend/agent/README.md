@@ -333,14 +333,19 @@ VERIFY DIST
 | `--skip-install` | Skip npm install |
 | `--skip-build` | Skip npm run build |
 | `--no-cleanup` | Keep node_modules after build |
-| `--project-name` | PM2 app name (uses `{project_name}` placeholder) |
-| `--restart` | Restart PM2 frontend service after build |
+| `--no-restart` | Skip PM2 and nginx restart |
 
-### With PM2 Restart
+### PM2 Restart (Default)
+
+Restart is **automatic** by default. Use `--no-restart` to skip.
 
 ```bash
-python3 buildpublish.py --restart
+# Full publish with restart (default)
+python3 buildpublish.py
 # Restarts {domain}-frontend PM2 process
+
+# Build only, no restart
+python3 buildpublish.py --no-restart
 ```
 
 ### When to Use
@@ -348,6 +353,6 @@ python3 buildpublish.py --restart
 | Scenario | Command |
 |----------|---------|
 | After code changes | `python3 buildpublish.py` |
-| Deploy to production | `python3 buildpublish.py --restart` |
+| Deploy to production | `python3 buildpublish.py` |
 | Quick rebuild (deps cached) | `python3 buildpublish.py --skip-install` |
-| Just install deps | `python3 buildpublish.py --skip-build --no-cleanup` |
+| Just install deps | `python3 buildpublish.py --skip-build --no-cleanup --no-restart` |

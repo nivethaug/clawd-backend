@@ -113,8 +113,7 @@ def main():
     parser = argparse.ArgumentParser(description="Backend Build & Publish")
     parser.add_argument("--skip-deps", action="store_true", help="Skip pip install")
     parser.add_argument("--skip-migrations", action="store_true", help="Skip database migrations")
-    parser.add_argument("--restart", action="store_true", help="Restart PM2 and nginx (requires --domain)")
-    parser.add_argument("--domain", type=str, help="Domain for PM2 app name (e.g., myapp-abc123 -> myapp-abc123-backend)")
+    parser.add_argument("--no-restart", action="store_true", help="Skip PM2 and nginx restart (restart is default)")
     parser.add_argument("--venv", type=str, help="Virtual environment path (default: /root/dreampilot/dreampilotvenv)")
     args = parser.parse_args()
     
@@ -140,9 +139,9 @@ def main():
         if not run_migrations():
             print("⚠ Migrations failed, continuing anyway")
     
-    # Step 4: Restart services (optional)
-    if args.restart and success:
-        restart_pm2(args.domain)
+    # Step 4: Restart services (MANDATORY by default)
+    if not args.no_restart and success:
+        restart_pm2()  # Uses {project_name} placeholder
         reload_nginx()
     
 

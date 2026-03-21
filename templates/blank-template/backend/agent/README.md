@@ -22,12 +22,19 @@ This folder helps AI assistants understand and modify the codebase efficiently.
 From the `backend/` directory:
 
 ```bash
-# Install deps only (no restart)
+# Full publish (installs deps + restarts PM2 + reloads nginx) - DEFAULT
 python3 buildpublish.py
 
-# Install deps + restart PM2 + reload nginx
-python3 buildpublish.py --restart
+# Install deps only (skip restart)
+python3 buildpublish.py --no-restart
 ```
+
+**What it does:**
+1. Installs Python dependencies (using shared venv)
+2. Verifies main.py exists
+3. Runs database migrations (if alembic.ini exists)
+4. Restarts PM2 (`{domain}-backend`)
+5. Reloads nginx
 
 **Options:**
 
@@ -35,7 +42,15 @@ python3 buildpublish.py --restart
 |------|-------------|
 | `--skip-deps` | Skip pip install |
 | `--skip-migrations` | Skip database migrations |
-| `--restart` | Restart PM2 and nginx |
+| `--no-restart` | Skip PM2 and nginx restart |
+
+**When to Use:**
+
+| Scenario | Command |
+|----------|---------|
+| After code changes | `python3 buildpublish.py` |
+| Just install deps | `python3 buildpublish.py --skip-migrations --no-restart` |
+| Run migrations only | `python3 buildpublish.py --skip-deps` |
 
 ### Manual PM2 Commands
 
@@ -46,74 +61,6 @@ pm2 restart {domain}-backend        # Restart service
 pm2 stop {domain}-backend           # Stop service
 pm2 save                            # Persist across reboot
 ```
-
----
-
-## 🚀 How to Publish Backend
-
-### Quick Publish (Recommended)
-
-From the `backend/` directory, run:
-
-```bash
-python3 buildpublish.py
-```
-
-This single command:
-1. Installs Python dependencies (using shared venv)
-2. Verifies main.py exists
-3. Runs database migrations (if alembic.ini exists)
-
-### With PM2 Restart
-
-To restart the service after publishing:
-
-```bash
-python3 buildpublish.py --restart --domain {domain}
-# Example: python3 buildpublish.py --restart --domain myapp-abc123
-# Restarts myapp-abc123-backend PM2 process
-```
-
-### Output Example
-
-```
-==================================================
-PIP INSTALL
-==================================================
-📦 Using shared venv: /root/dreampilot/dreampilotvenv
-✓ pip install --prefer-binary -r requirements.txt
-
-==================================================
-✓ main.py verified: 1234 bytes
-
-==================================================
-DATABASE MIGRATIONS
-==================================================
-⚠ No alembic.ini found, skipping migrations
-
-==================================================
-✓ BUILD & PUBLISH COMPLETE
-==================================================
-```
-
-### Options
-
-| Flag | Description |
-|------|-------------|
-| `--skip-deps` | Skip pip install |
-| `--skip-migrations` | Skip database migrations |
-| `--restart` | Restart PM2 and nginx (requires --domain) |
-| `--domain` | Domain for PM2 app name (e.g., myapp-abc123) |
-| `--venv` | Custom virtual environment path |
-
-### When to Use
-
-| Scenario | Command |
-|----------|---------|
-| After code changes | `python3 buildpublish.py --restart --domain {domain}` |
-| Just install deps | `python3 buildpublish.py --skip-migrations` |
-| Run migrations only | `python3 buildpublish.py --skip-deps` |
-| Custom venv | `python3 buildpublish.py --venv /path/to/venv` |
 
 ---
 

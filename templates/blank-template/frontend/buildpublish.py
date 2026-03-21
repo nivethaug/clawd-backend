@@ -242,8 +242,7 @@ def main():
     parser.add_argument("--path", type=str, help="Frontend directory path (default: current directory)")
     parser.add_argument("--skip-install", action="store_true", help="Skip npm install")
     parser.add_argument("--skip-build", action="store_true", help="Skip npm build")
-    parser.add_argument("--restart", action="store_true", help="Restart PM2 and nginx")
-    parser.add_argument("--project-name", type=str, help="Project name for PM2")
+    parser.add_argument("--no-restart", action="store_true", help="Skip PM2 and nginx restart (restart is default)")
     args = parser.parse_args()
     
     # Determine frontend directory
@@ -291,9 +290,9 @@ def main():
     if success:
         cleanup_node_modules()
     
-    # Step 8: Restart services (optional)
-    if args.restart and success:
-        restart_pm2(args.project_name)
+    # Step 8: Restart services (MANDATORY by default)
+    if not args.no_restart and success:
+        restart_pm2()  # Uses {project_name} placeholder
         reload_nginx()
     
     print("\n" + "="*50)
