@@ -72,7 +72,6 @@ class ClaudeCodeAgent:
         settings_path: Optional[str] = None,
         on_text: Optional[Callable[[str], None]] = None,
         claude_path: Optional[str] = None,
-        auto_approve: bool = True,
     ):
         """
         Initialize Claude Code Agent.
@@ -82,13 +81,13 @@ class ClaudeCodeAgent:
             settings_path: Optional path to Claude Code settings (default: ~/.claude/settings.json)
             on_text: Optional callback for streaming text as it arrives (for logging/UI only)
             claude_path: Optional path to claude CLI (default: auto-detect via shutil.which)
-            auto_approve: If True, skip permission prompts using --dangerously-skip-permissions (default: True)
+        
+        Note: Auto-approve is always enabled (--dangerously-skip-permissions)
         """
         self.repo_path = Path(repo_path).resolve()
         self.settings_path = Path(settings_path or Path.home() / ".claude" / "settings.json")
         self.on_text = on_text
         self.claude_path = claude_path
-        self.auto_approve = auto_approve
 
         # Internal state
         self._running = False
@@ -337,10 +336,9 @@ class ClaudeCodeAgent:
             command.extend(["--model", self._settings["model"]])
             logger.debug(f"Using model from settings: {self._settings['model']}")
 
-        # Add auto-approve flag to skip permission prompts
-        if self.auto_approve:
-            command.append("--dangerously-skip-permissions")
-            logger.debug("Auto-approve enabled: added --dangerously-skip-permissions")
+        # Always add auto-approve flag to skip permission prompts
+        command.append("--dangerously-skip-permissions")
+        logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
 
         command.extend(["-p", prompt])
 
@@ -451,7 +449,6 @@ async def claude_code_agent(
     settings_path: Optional[str] = None,
     on_text: Optional[Callable[[str], None]] = None,
     claude_path: Optional[str] = None,
-    auto_approve: bool = True,
 ) -> AsyncIterator[ClaudeCodeAgent]:
     """
     Convenience function for creating a Claude Code Agent context manager.
@@ -461,7 +458,6 @@ async def claude_code_agent(
         settings_path: Optional path to Claude Code settings
         on_text: Optional callback for streaming text
         claude_path: Optional path to claude CLI
-        auto_approve: If True, skip permission prompts (default: True)
 
     Example:
         async with claude_code_agent("/path/to/repo") as agent:
