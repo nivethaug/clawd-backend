@@ -520,8 +520,8 @@ I've checked your app and everything looks great! Your NatureStream app has:
                     raw_output.append(line)
                     logger.info(f"[ACP-CHAT] Line: {line[:80]}")
                     
-                    # Yield useful lines immediately for real-time feedback
-                    if self._is_useful_line(line) and not self._is_inline_noise(line):
+                    # Yield all lines EXCEPT noise (blacklist approach)
+                    if not self._is_inline_noise(line):
                         yield line + "\n"
             
             # Process completed - apply block-level filtering
