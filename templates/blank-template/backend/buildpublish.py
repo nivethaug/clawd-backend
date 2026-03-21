@@ -71,13 +71,14 @@ def restart_pm2(domain: str = None):
     
     Args:
         domain: Domain name (PM2 app name is {domain}-backend per infrastructure_manager.py)
-                Uses {project_name} placeholder by default, replaced by infra manager
+                Template uses {project_name} placeholder, replaced by infra manager during provisioning
     """
     print("\n" + "="*50)
     print("PM2 RESTART")
     print("="*50)
     
-    # Use placeholder if not provided (will be replaced by infra manager)
+    # Template placeholder - replaced by infrastructure_manager during provisioning
+    # After provisioning, domain is hardcoded in the file
     if not domain:
         domain = "{project_name}"
     
@@ -112,8 +113,8 @@ def main():
     parser = argparse.ArgumentParser(description="Backend Build & Publish")
     parser.add_argument("--skip-deps", action="store_true", help="Skip pip install")
     parser.add_argument("--skip-migrations", action="store_true", help="Skip database migrations")
-    parser.add_argument("--restart", action="store_true", help="Restart PM2 and nginx")
-    parser.add_argument("--domain", type=str, help="Domain for PM2 app name (e.g., learninggrid-tyh612 -> learninggrid-tyh612-backend)")
+    parser.add_argument("--restart", action="store_true", help="Restart PM2 and nginx (requires --domain)")
+    parser.add_argument("--domain", type=str, help="Domain for PM2 app name (e.g., myapp-abc123 -> myapp-abc123-backend)")
     parser.add_argument("--venv", type=str, help="Virtual environment path (default: /root/dreampilot/dreampilotvenv)")
     args = parser.parse_args()
     
