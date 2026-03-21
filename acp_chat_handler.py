@@ -129,6 +129,33 @@ Project Root: {self.frontend_src_path.parent.parent}
 - Add new pages or sections
 - Modify existing features
 
+## 🚀 AFTER MAKING CHANGES - PUBLISH (CRITICAL!)
+
+**If you make ANY changes to the code, you MUST publish them:**
+
+### Frontend Changes (pages, components, styles, etc.)
+```bash
+cd frontend && python3 buildpublish.py
+```
+This will:
+- Rebuild the React app
+- Restart PM2 frontend service
+- Reload nginx
+
+### Backend Changes (API, database, models, etc.)
+```bash
+cd backend && python3 buildpublish.py
+```
+This will:
+- Install dependencies
+- Run database migrations (if any)
+- Restart PM2 backend service
+- Reload nginx
+
+**⚠️ ALWAYS run buildpublish.py after making changes! The user won't see changes until you publish.**
+
+---
+
 ## RESPONSE STYLE
 
 ✅ Good: "I've added a nice contact form with name, email, and message fields to your page."
