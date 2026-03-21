@@ -353,6 +353,16 @@ Examples:
         context_parts = []
         
         try:
+            # 0. Check for agent README files (AI-friendly guides)
+            agent_readme_path = os.path.join(project_path, "agent", "README.md")
+            if os.path.exists(agent_readme_path):
+                context_parts.append("Agent README available: agent/README.md (contains AI-friendly navigation guides)")
+            
+            # Also check for backend agent README (if this is frontend)
+            backend_agent_readme = os.path.join(project_path, "..", "backend", "agent", "README.md")
+            if os.path.exists(backend_agent_readme):
+                context_parts.append("Backend Agent README available: ../backend/agent/README.md")
+            
             # 1. Read package.json for dependencies
             pkg_json_path = os.path.join(project_path, "package.json")
             if os.path.exists(pkg_json_path):
@@ -457,16 +467,19 @@ The user is asking about their project. You have access to a "read" tool to exam
 
 CRITICAL INSTRUCTIONS:
 1. The EXACT project path is: {project_path}
-2. When using the read tool, you MUST use the EXACT path provided above - do NOT modify, abbreviate, or guess paths
-3. Common files to check:
-   - {project_path}/package.json (if it exists)
+2. **ALWAYS CHECK AGENT README FIRST** before reading source code:
+   - For FRONTEND questions: Read {project_path}/agent/README.md (contains navigation guides, patterns, how-tos)
+   - For BACKEND questions: Read {project_path}/../backend/agent/README.md (contains API guides, database schema, endpoints)
+3. The agent README files contain AI-friendly guides that explain the codebase structure - use them!
+4. Only read source files if the README doesn't answer the question
+5. Common files to check (after README):
+   - {project_path}/package.json (dependencies)
    - {project_path}/App.tsx or {project_path}/main.tsx
    - Files in {project_path}/pages/ or {project_path}/components/
-4. Start by reading package.json to understand dependencies
-5. Then read relevant source files based on the user's question
-6. Provide a helpful, friendly response based on what you found
-7. Be concise but informative
-8. If you find any issues, mention them gently
+6. Start by reading the appropriate agent/README.md, then package.json, then source files
+7. Provide a helpful, friendly response based on what you found
+8. Be concise but informative
+9. If you find any issues, mention them gently
 
 {project_context}
 
