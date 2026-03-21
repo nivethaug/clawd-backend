@@ -297,7 +297,6 @@ I've checked your app and everything looks great! Your NatureStream app has:
             "stdbuf", "-oL",  # Line-buffered output for real-time streaming
             "node", acpx_path,
             "claude", "exec",
-            "--no-thinking",  # Disable thinking/reasoning output
             str(prompt)
         ]
         
@@ -470,9 +469,9 @@ I've checked your app and everything looks great! Your NatureStream app has:
         logger.info(f"[ACP-CHAT] === STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars, timeout: {ACPX_TIMEOUT}s")
         
-        # Build command - include --no-thinking flag
+        # Build command (no --no-thinking flag - not supported by ACPX)
         acpx_path = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
-        cmd = ["stdbuf", "-oL", "node", acpx_path, "claude", "exec", "--no-thinking", str(prompt)]
+        cmd = ["stdbuf", "-oL", "node", acpx_path, "claude", "exec", str(prompt)]
         
         # Set environment to disable thinking/reasoning output
         env = os.environ.copy()
