@@ -447,19 +447,30 @@ Examples:
         logger.info(f"[ACP-PRE] === READ TOOL MODE ACTIVATED ===")
         logger.info(f"[ACP-PRE] Starting read-only tool call for project '{project_name}' at {project_path}")
         logger.info(f"[ACP-PRE] User message: {user_message[:100]}...")
+        
+        # Get actual project structure to prevent hallucination
+        project_context = self._read_project_context(project_path.replace('/src', ''))  # Get root project context
+        
         system_prompt = f"""You are a helpful assistant for a web app builder called "{project_name}".
 
 The user is asking about their project. You have access to a "read" tool to examine files.
 
-IMPORTANT: 
-1. First use the read tool to examine relevant files (package.json, src/, pages/, components/)
-2. Then provide a helpful, friendly response based on what you found
-3. Be concise but informative
-4. If you find any issues, mention them gently
+CRITICAL INSTRUCTIONS:
+1. The EXACT project path is: {project_path}
+2. When using the read tool, you MUST use the EXACT path provided above - do NOT modify, abbreviate, or guess paths
+3. Common files to check:
+   - {project_path}/package.json (if it exists)
+   - {project_path}/App.tsx or {project_path}/main.tsx
+   - Files in {project_path}/pages/ or {project_path}/components/
+4. Start by reading package.json to understand dependencies
+5. Then read relevant source files based on the user's question
+6. Provide a helpful, friendly response based on what you found
+7. Be concise but informative
+8. If you find any issues, mention them gently
 
-The project is located at: {project_path}
+{project_context}
 
-Use the read tool to answer the user's question. Start by reading the project structure."""
+IMPORTANT: Always use the exact path "{project_path}" in your read tool calls. Do NOT modify this path."""
 
         user_prompt = f'User asks: "{user_message}"'
         
