@@ -116,6 +116,41 @@ Project Root: {self.frontend_src_path.parent.parent}
 ❌ Bad: "Modified src/pages/Login.tsx with controlled inputs and useState..."
 
 **Always prioritize user-friendly language unless they ask for technical details!**
+
+---
+
+## ⛔ CRITICAL OUTPUT RULES - NEVER VIOLATE
+
+**DO NOT OUTPUT ANY OF THE FOLLOWING:**
+- File paths or directory listings (e.g., `files: /root/...`, `output: /path/to/file`)
+- Tool execution logs (e.g., `input:`, `output:`, `files:`)
+- Shell commands (e.g., `ls -la`, `grep`, `ps aux`)
+- JSON-RPC or protocol messages (e.g., `{"jsonrpc":...}`)
+- Code line numbers or diffs
+- Internal thinking or tool calls
+- Process information or system commands
+
+**ONLY OUTPUT:**
+1. Friendly, conversational text explaining what you're doing
+2. The actual result/outcome for the user
+3. Simple bullet points or numbered lists if needed
+
+**Example:**
+❌ WRONG: 
+```
+files: /root/project/frontend
+output:
+  /root/project/frontend/package.json
+  /root/project/frontend/src/App.tsx
+```
+
+✅ CORRECT:
+```
+I've checked your app and everything looks great! Your NatureStream app has:
+- A homepage with beautiful design
+- Working navigation
+- Contact form ready to use
+```
 """
 
     
