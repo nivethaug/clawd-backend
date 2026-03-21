@@ -82,7 +82,7 @@ def remove_node_modules():
     return True
 
 
-def npm_install():
+def npm_install(cwd: str = None):
     """Install npm dependencies with legacy peer deps (dev deps install by default)"""
     print("\n" + "="*50)
     print("NPM INSTALL")
@@ -95,7 +95,8 @@ def npm_install():
         ["npm", "install", "--prefer-offline", "--legacy-peer-deps"],
         capture_output=True,
         text=True,
-        timeout=600
+        timeout=600,
+        cwd=cwd
     )
     
     if result.returncode != 0:
@@ -116,7 +117,7 @@ def npm_install():
     return True
 
 
-def npm_build():
+def npm_build(cwd: str = None):
     """Build production bundle"""
     print("\n" + "="*50)
     print("NPM RUN BUILD")
@@ -126,7 +127,8 @@ def npm_build():
         ["npm", "run", "build"],
         capture_output=True,
         text=True,
-        timeout=600
+        timeout=600,
+        cwd=cwd
     )
     
     if result.returncode != 0:
@@ -237,16 +239,25 @@ def reload_nginx():
 
 def main():
     parser = argparse.ArgumentParser(description="Frontend Build & Publish")
+    parser.add_argument("--path", type=str, help="Frontend directory path (default: current directory)")
     parser.add_argument("--skip-install", action="store_true", help="Skip npm install")
     parser.add_argument("--skip-build", action="store_true", help="Skip npm build")
     parser.add_argument("--restart", action="store_true", help="Restart PM2 and nginx")
     parser.add_argument("--project-name", type=str, help="Project name for PM2")
     args = parser.parse_args()
     
-    # Ensure we're in frontend directory
-    if not Path("package.json").exists():
-        print("✗ Error: Run this script from the frontend directory")
+    # Determine frontend directory
+    frontend_dir = Path(args.path) if args.path else Path.cwd()
+    
+    # Ensure we're in frontend directory (or --path points to frontend)
+    if not (frontend_dir / "package.json").exists():
+        print(f"✗ Error: package.json not found in {frontend_dir}")
+        print("   Run from frontend directory or use --path <frontend-dir>")
         sys.exit(1)
+    
+    # Change to frontend directory for all operations
+    os.chdir(frontend_dir)
+    print(f"Working directory: {frontend_dir}")
     
     success = True
     
@@ -259,12 +270,12 @@ def main():
     
     # Step 3: npm install
     if not args.skip_install:
-        if not npm_install():
+        if not npm_install(cwd=str(frontend_dir)):
             success = False
     
     # Step 4: npm run build
     if not args.skip_build and success:
-        if not npm_build():
+        if not npm_build(cwd=str(frontend_dir)):
             success = False
     
     # Step 5: Verify build
