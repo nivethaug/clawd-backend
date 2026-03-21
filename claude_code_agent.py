@@ -336,9 +336,9 @@ class ClaudeCodeAgent:
             command.extend(["--model", self._settings["model"]])
             logger.debug(f"Using model from settings: {self._settings['model']}")
 
-        # Always add auto-approve flag to skip permission prompts
-        command.append("--dangerously-skip-permissions")
-        logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
+        # Note: Permission handling is done via settings.json with:
+        # "permissions": { "defaultMode": "bypassPermissions" }
+        # Do NOT use --dangerously-skip-permissions (blocked when running as root)
 
         command.extend(["-p", prompt])
 
