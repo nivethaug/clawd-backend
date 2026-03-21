@@ -78,10 +78,9 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
         logger.error(f"[ACP-CHAT] Failed to create handler: {e}")
         return f"Error: Failed to initialize ACP mode: {str(e)}"
     
-    # Build session context from recent messages (last 4 = 2 sets of exchanges)
+    # Build session context from recent messages (last 4 messages = 2 exchanges)
     context_lines = []
     with get_db() as conn:
-        # Fetch last 4 messages (2 user + 2 assistant), same as acp_chat.py
         recent_messages = conn.execute(
             """SELECT role, content FROM messages 
                WHERE session_id = ? 
@@ -90,7 +89,7 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
             (session_id,)
         ).fetchall()
         
-        for msg in reversed(recent_messages):  # Oldest first (chronological)
+        for msg in reversed(recent_messages):  # Oldest first
             role = "User" if msg['role'] == 'user' else "Assistant"
             context_lines.append(f"{role}: {msg['content'][:500]}")
     
@@ -2225,7 +2224,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                     logger.error(f"[ACP-STREAM] Failed to save image: {img_err}")
                     acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
             
-            # Get conversation context from database for continuity (last 4 messages)
+            # Get conversation context from database for continuity (last 4 messages = 2 exchanges)
             # Replace base64 images with placeholder to avoid bloating context
             session_context = ""
             try:
@@ -2555,7 +2554,7 @@ async def chat_endpoint(request: ChatRequest):
                         logger.error(f"[ACP-MODE] Failed to save image: {img_err}")
                         acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
                 
-                # Get conversation context from database (last 4 messages)
+                # Get conversation context from database
                 # Replace base64 images with placeholder to avoid bloating context
                 session_context = ""
                 try:
@@ -2563,7 +2562,7 @@ async def chat_endpoint(request: ChatRequest):
                         rows = ctx_conn.execute(
                             """SELECT role, content, image FROM messages 
                                WHERE session_id = ? 
-                               ORDER BY created_at DESC LIMIT 4""",
+                               ORDER BY created_at DESC LIMIT 10""",
                             (session_id,)
                         ).fetchall()
                         if rows:
