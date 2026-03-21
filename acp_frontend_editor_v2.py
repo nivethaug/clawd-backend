@@ -1215,243 +1215,104 @@ class ACPFrontendEditorV2:
             if len(files_modified) > 10:
                 logger.info(f"[ACPX-V2]     ... and {len(files_modified) - 10} more")
 
-            # Step 8: Enforce file limits (trim excess, NO rollback)
-            logger.info(f"[ACPX-V2] Step 8: Enforcing file limits...")
-            kept_files, removed_files = enforce_file_limit(files_added, self.max_new_files, self.frontend_src_path)
-            if removed_files:
-                issues.append(f"Trimmed {len(removed_files)} excess files (limit: {self.max_new_files})")
-                status = "partial_success"
-                files_added = kept_files  # Update for final count
-            else:
-                logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{self.max_new_files})")
+            # # Step 8: Enforce file limits (trim excess, NO rollback)
+            # logger.info(f"[ACPX-V2] Step 8: Enforcing file limits...")
+            # kept_files, removed_files = enforce_file_limit(files_added, self.max_new_files, self.frontend_src_path)
+            # if removed_files:
+            #     issues.append(f"Trimmed {len(removed_files)} excess files (limit: {self.max_new_files})")
+            #     status = "partial_success"
+            #     files_added = kept_files  # Update for final count
+            # else:
+            #     logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{self.max_new_files})")
 
-            # Step 9: Validate and filter paths (remove invalid, NO rollback)
-            logger.info(f"[ACPX-V2] Step 9: Validating paths...")
-            valid_paths, invalid_paths = filter_valid_paths(files_added, self.validator)
+            # # Step 9: Validate and filter paths (remove invalid, NO rollback)
+            # logger.info(f"[ACPX-V2] Step 9: Validating paths...")
+            # valid_paths, invalid_paths = filter_valid_paths(files_added, self.validator)
             
-            if invalid_paths:
-                deleted_count = delete_invalid_files(invalid_paths, self.frontend_src_path)
-                issues.append(f"Removed {deleted_count} files at invalid paths")
-                status = "partial_success"
-                files_added = valid_paths  # Update for final count
-                logger.warning(f"[ACPX-V2]   ⚠️ Removed {deleted_count} invalid files")
-            else:
-                logger.info(f"[ACPX-V2]   ✓ All paths valid")
-
-            # Step 10: Enforce page guardrails (BEFORE build to prevent routing issues)
-            # logger.info(f"[ACPX-V2] Step 10: Enforcing page guardrails (BEFORE build)...")
-            # try:
-            #     unauthorized_removed = self._enforce_page_guardrails()
-            #     if unauthorized_removed > 0:
-            #         issues.append(f"Removed {unauthorized_removed} unauthorized page(s)")
-            #         logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
-            #     else:
-            #         logger.info(f"[ACPX-V2]   ✓ All pages authorized")
-            # except Exception as e:
-            #     logger.warning(f"[ACPX-V2] ⚠️ Guardrail enforcement failed but continuing: {str(e)}")
-
-            # Step 10.5: Routing fix DISABLED - ACPX handles routing
-            #     logger.info("[ACPX-V2] Step 10.5: Fixing routing programmatically...")
-            #     
-            #     # Determine default page (first allowed page)
-            #     default_page = list(self.allowed_pages)[0] if self.allowed_pages else "Dashboard"
-            #     app_tsx_path = self.frontend_src_path / "App.tsx"
-            #     
-            #     if app_tsx_path.exists():
-            #         content = app_tsx_path.read_text()
-            #         original_content = content
-            #         
-            #         # Count routes at "/" before fix
-            #         routes_at_root = re.findall(r'<Route\s+path="/"', content)
-            #         logger.info(f"[ACPX-V2]   Found {len(routes_at_root)} routes at '/' before fix")
-            #         
-            #         # Fix 1: Remove ALL routes at "/" (duplicates and misplaced routes)
-            #         content = re.sub(
-            #             r'<Route\s+path="/"\s+element=\{<[A-Za-z]+\s*/?>\s*\}\s*/>\s*',
-            #             '',
-            #             content
-            #         )
-            #         content = re.sub(
-            #             r'<Route\s+path="/"\s+element=\{<[A-Za-z]+[^>]*>\s*\}\s*/?>\s*',
-            #             '',
-            #             content,
-            #             flags=re.DOTALL
-            #         )
-            #         
-            #         # Fix 2: Remove any /dashboard route
-            #         content = re.sub(
-            #             r'<Route\s+path="/dashboard"\s+element=\{<[A-Za-z]+\s*/?\s*\}\s*/?>\s*',
-            #             '',
-            #             content
-            #         )
-            #         
-            #         # Fix 3: Remove orphaned routes outside Layout wrapper
-            #         content = re.sub(
-            #             r'(</Route>)\s*<Route\s+[^>]+/?>\s*(</Routes>)',
-            #             r'\1\n          \2',
-            #             content
-            #         )
-            #         
-            #         routes_at_root_after = re.findall(r'<Route\s+path="/"', content)
-            #         logger.info(f"[ACPX-V2]   Found {len(routes_at_root_after)} routes at '/' after removal")
-            #         
-            #         # Fix 4: Add default route inside Layout wrapper
-            #         has_layout = '<Route element={<Layout />' in content or '<Route element={<Layout/>' in content
-            #         
-            #         if has_layout:
-            #             layout_pattern = r'(<Route\s+element=\{<Layout\s*/>\}>\s*\n)'
-            #             layout_match = re.search(layout_pattern, content)
-            #             if layout_match:
-            #                 insert_pos = layout_match.end()
-            #                 default_route = f'          <Route path="/" element={{<{default_page} />}} />\n'
-            #                 content = content[:insert_pos] + default_route + content[insert_pos:]
-            #                 logger.info(f"[ACPX-V2]   Added {default_page} route inside Layout wrapper")
-            #         else:
-            #             routes_pattern = r'<Routes>(.*?)</Routes>'
-            #             routes_match = re.search(routes_pattern, content, re.DOTALL)
-            #             
-            #             if routes_match:
-            #                 routes_content = routes_match.group(1).strip()
-            #                 route_pattern = r'<Route\s+[^>]+/>'
-            #                 individual_routes = re.findall(route_pattern, routes_content)
-            #                 formatted_routes = '\n        '.join([f'{r}' for r in individual_routes])
-            #                 
-            #                 new_routes = f'''<Route element={{<Layout />}}>
-            #           <Route path="/" element={{<{default_page} />}} />
-            #         {formatted_routes}
-            #       </Route>'''
-            #                 
-            #                 content = content[:routes_match.start(1)] + new_routes + content[routes_match.end(1):]
-            #                 logger.info(f"[ACPX-V2]   Added Layout wrapper with {default_page} at /")
-            #         
-            #         if content != original_content:
-            #             app_tsx_path.write_text(content)
-            #             logger.info(f"[ACPX-V2]   ✓ Fixed routing: {default_page} is now at / with Layout")
-            #         else:
-            #             logger.info("[ACPX-V2]   Routing appears correct")
-            #     else:
-            #         logger.warning("[ACPX-V2]   App.tsx not found, skipping routing fix")
-            #                 
-            # except Exception as e:
-            #     traceback.print_exc()
-            #     logger.warning(f"[ACPX-V2] Routing fix failed but continuing: {str(e)}")
-            logger.info("[ACPX-V2] Step 10.5: Routing fix DISABLED - ACPX handles routing")
+            # if invalid_paths:
+            #     deleted_count = delete_invalid_files(invalid_paths, self.frontend_src_path)
+            #     issues.append(f"Removed {deleted_count} files at invalid paths")
+            #     status = "partial_success"
+            #     files_added = valid_paths  # Update for final count
+            #     logger.warning(f"[ACPX-V2]   ⚠️ Removed {deleted_count} invalid files")
+            # else:
+            #     logger.info(f"[ACPX-V2]   ✓ All paths valid")
 
             # Step 10.6: Fix Layout components - Replace {children} with <Outlet />
-            logger.info("[ACPX-V2] Step 10.6: Fixing Layout components to use Outlet...")
-            try:
-                # Find all Layout files
-                layout_patterns = [
-                    self.frontend_src_path / "layout" / "Layout.tsx",
-                    self.frontend_src_path / "layouts" / "Layout.tsx",
-                    self.frontend_src_path / "app" / "layouts" / "AppLayout.tsx",
-                ]
+            # logger.info("[ACPX-V2] Step 10.6: Fixing Layout components to use Outlet...")
+            # try:
+            #     # Find all Layout files
+            #     layout_patterns = [
+            #         self.frontend_src_path / "layout" / "Layout.tsx",
+            #         self.frontend_src_path / "layouts" / "Layout.tsx",
+            #         self.frontend_src_path / "app" / "layouts" / "AppLayout.tsx",
+            #     ]
                 
-                layout_files = [p for p in layout_patterns if p.exists()]
-                for layout_dir in ["layout", "layouts", "app/layouts"]:
-                    layout_path = self.frontend_src_path / layout_dir
-                    if layout_path.exists():
-                        layout_files.extend(layout_path.glob("*Layout*.tsx"))
+            #     layout_files = [p for p in layout_patterns if p.exists()]
+            #     for layout_dir in ["layout", "layouts", "app/layouts"]:
+            #         layout_path = self.frontend_src_path / layout_dir
+            #         if layout_path.exists():
+            #             layout_files.extend(layout_path.glob("*Layout*.tsx"))
                 
-                layout_files = list(set(layout_files))
+            #     layout_files = list(set(layout_files))
                 
-                for layout_file in layout_files:
-                    try:
-                        content = layout_file.read_text()
-                        original = content
+            #     for layout_file in layout_files:
+            #         try:
+            #             content = layout_file.read_text()
+            #             original = content
                         
-                        # Fix 1: Add Outlet import if missing
-                        if "Outlet" not in content and "from 'react-router-dom'" in content:
-                            content = re.sub(
-                                r"import\s+\{([^}]+)\}\s+from\s+'react-router-dom'",
-                                r"import {\1, Outlet } from 'react-router-dom'",
-                                content
-                            )
-                        elif "Outlet" not in content:
-                            import_line = "import { Outlet } from 'react-router-dom';\n"
-                            import_match = re.search(r"(^import.*?;[\s]*)+", content, re.MULTILINE)
-                            if import_match:
-                                insert_pos = import_match.end()
-                                content = content[:insert_pos] + import_line + content[insert_pos:]
+            #             # Fix 1: Add Outlet import if missing
+            #             if "Outlet" not in content and "from 'react-router-dom'" in content:
+            #                 content = re.sub(
+            #                     r"import\s+\{([^}]+)\}\s+from\s+'react-router-dom'",
+            #                     r"import {\1, Outlet } from 'react-router-dom'",
+            #                     content
+            #                 )
+            #             elif "Outlet" not in content:
+            #                 import_line = "import { Outlet } from 'react-router-dom';\n"
+            #                 import_match = re.search(r"(^import.*?;[\s]*)+", content, re.MULTILINE)
+            #                 if import_match:
+            #                     insert_pos = import_match.end()
+            #                     content = content[:insert_pos] + import_line + content[insert_pos:]
                         
-                        # Fix 2: Remove children prop from function signature
-                        content = re.sub(
-                            r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*(?::[^}]+)?\s*\}\s*:\s*[^)]+\)',
-                            r'\1()',
-                            content
-                        )
-                        content = re.sub(
-                            r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*\}\s*:\s*\{\s*children:\s*React\.ReactNode\s*\}\s*\)',
-                            r'\1()',
-                            content
-                        )
+            #             # Fix 2: Remove children prop from function signature
+            #             content = re.sub(
+            #                 r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*(?::[^}]+)?\s*\}\s*:\s*[^)]+\)',
+            #                 r'\1()',
+            #                 content
+            #             )
+            #             content = re.sub(
+            #                 r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*\}\s*:\s*\{\s*children:\s*React\.ReactNode\s*\}\s*\)',
+            #                 r'\1()',
+            #                 content
+            #             )
                         
-                        # Fix 3: Remove children interface
-                        content = re.sub(
-                            r'interface\s+\w*LayoutProps\s*\{\s*children\s*(?::\s*React\.ReactNode)?\s*\}\s*\n?',
-                            '',
-                            content,
-                            flags=re.IGNORECASE
-                        )
+            #             # Fix 3: Remove children interface
+            #             content = re.sub(
+            #                 r'interface\s+\w*LayoutProps\s*\{\s*children\s*(?::\s*React\.ReactNode)?\s*\}\s*\n?',
+            #                 '',
+            #                 content,
+            #                 flags=re.IGNORECASE
+            #             )
                         
-                        # Fix 4: Replace {children} with <Outlet />
-                        content = re.sub(r'\{children\}', '<Outlet />', content)
-                        content = re.sub(r'\{\s*children\s*\}', '<Outlet />', content)
+            #             # Fix 4: Replace {children} with <Outlet />
+            #             content = re.sub(r'\{children\}', '<Outlet />', content)
+            #             content = re.sub(r'\{\s*children\s*\}', '<Outlet />', content)
                         
-                        if content != original:
-                            layout_file.write_text(content)
-                            logger.info(f"[ACPX-V2]   ✓ Fixed {layout_file.name}: replaced {{children}} with <Outlet />")
+            #             if content != original:
+            #                 layout_file.write_text(content)
+            #                 logger.info(f"[ACPX-V2]   ✓ Fixed {layout_file.name}: replaced {{children}} with <Outlet />")
                     
-                    except Exception as e:
-                        logger.warning(f"[ACPX-V2]   Failed to fix {layout_file}: {e}")
+            #         except Exception as e:
+            #             logger.warning(f"[ACPX-V2]   Failed to fix {layout_file}: {e}")
                 
-            except Exception as e:
-                logger.warning(f"[ACPX-V2] ⚠️ Layout fix failed but continuing: {str(e)}")
+            # except Exception as e:
+            #     logger.warning(f"[ACPX-V2] ⚠️ Layout fix failed but continuing: {str(e)}")
 
-            # Step 11: Build gate skipped - build handled by infrastructure pipeline
-            logger.info("[ACPX-V2] Step 11: Build gate skipped — build handled by infrastructure pipeline")
+            # # Step 11: Build gate skipped - build handled by infrastructure pipeline
+            # logger.info("[ACPX-V2] Step 11: Build gate skipped — build handled by infrastructure pipeline")
 
-            # Step 12: Post-process - Detect empty/placeholder pages (remove if found)
-            logger.info("[ACPX-V2] Step 12: Checking for empty/placeholder pages...")
-            try:
-                empty_pages = []
-                pages_dir = self.frontend_src_path / "pages"
-                
-                if pages_dir.exists():
-                    for page_file in pages_dir.glob("*.tsx"):
-                        content = page_file.read_text()
-                        
-                        # Check for placeholder content
-                        is_empty = (
-                            len(content) < 800 or
-                            "Page content will be generated by AI" in content or
-                            "placeholder" in content.lower() or
-                            "will be generated" in content.lower() or
-                            content.strip().endswith("return <div></div>;") or
-                            content.strip().endswith("return null;") or
-                            (content.count("return") == 1 and len(content) < 1000)
-                        )
-                        
-                        if is_empty:
-                            page_name = page_file.stem
-                            empty_pages.append(page_name)
-                            logger.warning(f"[ACPX-V2]   ⚠️  Empty/placeholder page detected: {page_name}")
-                            
-                            try:
-                                #page_file.unlink()
-                                logger.warning(f"[ACPX-V2]   🗑️  Removed placeholder page: {page_name}")
-                            except Exception as remove_error:
-                                logger.error(f"[ACPX-V2]   Failed to remove placeholder page {page_name}: {remove_error}")
-                
-                if empty_pages:
-                    issues.append(f"Removed {len(empty_pages)} placeholder pages: {empty_pages}")
-                    status = "partial_success"
-                    logger.warning(f"[ACPX-V2]   ⚠️ Removed {len(empty_pages)} placeholder pages")
-                else:
-                    logger.info("[ACPX-V2]   ✓ All pages have substantial content")
-                    
-            except Exception as e:
-                logger.warning(f"[ACPX-V2] ⚠️ Empty page check failed but continuing: {str(e)}")
+
 
             # =============================================
             # FINAL RESULT (3-state outcome)
@@ -2100,67 +1961,7 @@ Complete in order before marking task complete:
             # Fallback: return empty section
             return "\n## Page Specifications\n\nNote: Page specs not available, using page templates only.\n"
 
-    def _enforce_page_guardrails(self) -> int:
-        """
-        Enforce page guardrails by removing unauthorized pages.
-
-        Scans src/pages/ and removes any pages not in the allowed_pages whitelist.
-
-        Returns:
-            Number of unauthorized pages removed
-        """
-        pages_dir = self.frontend_src_path / "pages"
-
-        if not pages_dir.exists():
-            # logger.warning(f"[Guardrail] Pages directory not found: {pages_dir}")
-            return 0
-
-        # Always allowed pages (system pages)
-        always_allowed = {"NotFound", "Welcome", "_app", "_layout", "index", "Error", "Loading"}
-
-        unauthorized_removed = 0
-
-        for page_file in pages_dir.glob("*.tsx"):
-            # Extract page name (remove .tsx extension)
-            page_name = page_file.stem
-
-            # Skip always-allowed pages
-            if page_name in always_allowed:
-                continue
-
-            # Remove pages starting with conjunctions (e.g., "AndAudience", "OrSettings")
-            conjunctions = ['And', 'Or', '&']
-            if any(page_name.startswith(conj) for conj in conjunctions):
-                # logger.warning(f"[Guardrail] Removing page with leading conjunction: {page_name}")
-                try:
-                    page_file.unlink()
-                    unauthorized_removed += 1
-                except Exception as e:
-                    logger.error(f"[Guardrail] Failed to remove {page_name}: {e}")
-                    # Do not increment — file was NOT removed
-                continue
-
-            # Check if page is in allowed whitelist
-            if page_name not in self.allowed_pages:
-                # logger.warning(f"[Guardrail] Removing unauthorized page: {page_name}")
-                try:
-                    page_file.unlink()
-                    unauthorized_removed += 1
-                except Exception as e:
-                    logger.error(f"[Guardrail] Failed to remove {page_name}: {e}")
-                    # Do not increment — file was NOT removed
-
-        if unauthorized_removed > 0:
-            # logger.info(f"[Guardrail] Removed {unauthorized_removed} unauthorized page(s)")
-            # logger.info(f"[Guardrail] Remaining allowed pages: {sorted(self.allowed_pages)}")
-            pass
-        else:
-            # logger.info(f"[Guardrail] ✓ All pages are authorized")
-            pass
-
-        # logger.info(f"[Phase9] Final validated pages: {sorted(self.allowed_pages)}")
-
-        return unauthorized_removed
+    
 
     def _kill_process_tree(self, pid: int):
         """
