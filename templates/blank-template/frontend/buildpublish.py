@@ -211,15 +211,20 @@ def cleanup_node_modules():
 
 
 def restart_pm2(project_name: str = None):
-    """Restart PM2 process"""
+    """Restart PM2 process
+    
+    Args:
+        project_name: Project name (uses {project_name} placeholder by default)
+    """
     print("\n" + "="*50)
     print("PM2 RESTART")
     print("="*50)
     
-    if project_name:
-        return run(f"pm2 restart {project_name}-frontend")
-    else:
-        return run("pm2 restart all")
+    # Use placeholder if not provided (will be replaced by infra manager)
+    if not project_name:
+        project_name = "{project_name}"
+    
+    return run(f"pm2 restart {project_name}-frontend")
 
 
 def reload_nginx():

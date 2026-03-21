@@ -1508,6 +1508,7 @@ class InfrastructureManager:
             logger.info("Phase 3/8: Backend environment configuration")
             self._configure_backend_env()
             self._update_agent_readme()
+            self._update_buildpublish()
             self._update_frontend_api_config()
             # logger.info("✓ Backend environment configured")  # Commented for cleaner logs
 
@@ -2348,6 +2349,38 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
 
         except Exception as e:
             logger.warning(f"Failed to update agent/README.md: {e}")
+            # Don't raise - this is not critical for deployment
+
+    def _update_buildpublish(self):
+        """Replace placeholders in frontend/buildpublish.py with actual values."""
+        try:
+            buildpublish_path = self.project_path / "frontend" / "buildpublish.py"
+            
+            if not buildpublish_path.exists():
+                logger.info(f"frontend/buildpublish.py not found, skipping placeholder update")
+                return
+            
+            content = buildpublish_path.read_text(encoding="utf-8")
+            
+            # Replace placeholders with actual values
+            placeholders = {
+                "{project_name}": self.domain,  # Use domain for PM2 app name
+            }
+            
+            updated = False
+            for placeholder, value in placeholders.items():
+                if placeholder in content:
+                    content = content.replace(placeholder, value)
+                    logger.info(f"✓ Updated buildpublish.py: {placeholder} → {value}")
+                    updated = True
+            
+            if updated:
+                buildpublish_path.write_text(content, encoding="utf-8")
+            else:
+                logger.info(f"buildpublish.py has no placeholders (already updated)")
+
+        except Exception as e:
+            logger.warning(f"Failed to update buildpublish.py: {e}")
             # Don't raise - this is not critical for deployment
 
     def _update_frontend_api_config(self):
