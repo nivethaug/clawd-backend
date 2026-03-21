@@ -552,7 +552,10 @@ def get_preprocessor() -> ACPPreprocessor:
     global _preprocessor
     if _preprocessor is None:
         logger.info("[ACP-PRE] Creating new preprocessor singleton")
-        _preprocessor = ACPPreprocessor()
+        # Set use_glm=False to test ClaudeCodeAgent migration
+        use_glm_env = os.getenv("ACP_USE_GLM", "false").lower() == "true"
+        _preprocessor = ACPPreprocessor(use_glm=use_glm_env)
+        logger.info(f"[ACP-PRE] Preprocessor initialized with use_glm={use_glm_env}")
     return _preprocessor
 
 

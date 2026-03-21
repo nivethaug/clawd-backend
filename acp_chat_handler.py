@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 ACPX_TIMEOUT = 900  # 15 minutes for interactive chat
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
-USE_PREPROCESSOR = os.getenv("ACP_USE_PREPROCESSOR", "true").lower() == "true"  # Enabled by default
+USE_PREPROCESSOR = os.getenv("ACP_USE_PREPROCESSOR", "false").lower() == "true"  # DISABLED for ClaudeCodeAgent migration testing
 USE_CLAUDE_AGENT = os.getenv("ACP_USE_CLAUDE_AGENT", "true").lower() == "true" and CLAUDE_AGENT_AVAILABLE  # Prefer Claude Agent
 
 
