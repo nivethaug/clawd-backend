@@ -160,9 +160,34 @@ I've checked your app and everything looks great! Your NatureStream app has:
             return True
             
         line_lower = line.lower().strip()
+        stripped = line.strip()
         
         # Skip JSON/telemetry markers
         if line_lower in ['{', '}', '(', ')', '[', ']', 'jsonrpc:', 'error handling notification {']:
+            return True
+        
+        # Skip file paths (absolute paths with /)
+        if stripped.startswith('/') and '/' in stripped[1:]:
+            return True
+        
+        # Skip indented file paths (in tool output blocks)
+        if stripped.startswith('  /') or stripped.startswith('    /'):
+            return True
+        
+        # Skip line number format: "1→", "21→", etc.
+        if stripped and stripped[0].isdigit() and '→' in stripped[:4]:
+            return True
+        
+        # Skip lines that are just continuation markers
+        if stripped.startswith('... (') and 'more lines)' in stripped:
+            return True
+        
+        # Skip system-reminder tags
+        if '<system-reminder>' in stripped or '</system-reminder>' in stripped:
+            return True
+        
+        # Skip lines that are ONLY structural (just punctuation)
+        if stripped in ['},', '],', '}, {', '], [', '{ },', '[ ],']:
             return True
             
         # Skip structured protocol logs
@@ -176,7 +201,9 @@ I've checked your app and everything looks great! Your NatureStream app has:
             'method:', 'params:', 'data:', 'result:', 'id:', 'cost:', 'size:',
             'used:', 'entry:', 'availablecommands:', 'currentmodeid:',
             'configoptions:', 'title:', 'toolcallid:', 'jsonrpc:',
-            'session cwd', 'agent needs reconnect'
+            'session cwd', 'agent needs reconnect',
+            'kind:', 'input:', 'output:', 'files:', 'pending)', 'completed)',
+            'no files found'
         ]
         
         return any(pattern in line_lower for pattern in noise_patterns)
@@ -536,7 +563,10 @@ I've checked your app and everything looks great! Your NatureStream app has:
                         brace_depth = 0
                         bracket_depth = 0
                     continue  # suppress all lines inside block
-
+                # ── Stop at end_turn marker (signals end of response) ──────────
+                if 'end_turn' in lower:
+                    logger.info(f"[ACP-CHAT] Found end_turn, stopping stream")
+                    break
                 # ── Standard noise filter for non-block lines ────────────────
                 if self._is_inline_noise(line):
                     continue
