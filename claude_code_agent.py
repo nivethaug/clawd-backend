@@ -336,9 +336,14 @@ class ClaudeCodeAgent:
             command.extend(["--model", self._settings["model"]])
             logger.debug(f"Using model from settings: {self._settings['model']}")
 
-        # Always add auto-approve flag to skip permission prompts
-        command.append("--dangerously-skip-permissions")
-        logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
+        # Add auto-approve flag to skip permission prompts (only if NOT running as root)
+        # Claude CLI blocks --dangerously-skip-permissions with root/sudo for security
+        is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
+        if not is_root:
+            command.append("--dangerously-skip-permissions")
+            logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
+        else:
+            logger.warning("Running as root - skipping --dangerously-skip-permissions (blocked by Claude CLI for security)")
 
         command.extend(["-p", prompt])
 
