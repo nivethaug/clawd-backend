@@ -656,10 +656,12 @@ I've checked your app and everything looks great! Your NatureStream app has:
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars")
         
         full_response = []
+        chunk_queue = []  # Queue for immediate yielding
         
         def on_chunk(text: str):
             """Callback for streaming chunks."""
             full_response.append(text)
+            chunk_queue.append(text)
             logger.info(f"[ACP-CHAT] Chunk: {text[:80]}...")
         
         try:
@@ -669,12 +671,9 @@ I've checked your app and everything looks great! Your NatureStream app has:
             ) as agent:
                 response = await agent.query(prompt)
                 
-                # Stream the response
-                if response:
-                    # Yield in chunks for SSE streaming
-                    chunk_size = 100  # chars per chunk
-                    for i in range(0, len(response), chunk_size):
-                        chunk = response[i:i+chunk_size]
+                # Yield all collected chunks for SSE streaming
+                for chunk in full_response:
+                    if chunk.strip():  # Skip empty chunks
                         yield chunk
                 
         except Exception as e:
