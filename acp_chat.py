@@ -209,11 +209,14 @@ async def _get_conversation_history(session_id: int) -> List[Dict[str, str]]:
     """
     Fetch conversation history from database.
     
+    Only returns the last 2 sets of messages (4 messages total: 2 user + 2 assistant)
+    to keep context focused and avoid token bloat.
+    
     Args:
         session_id: Session ID to fetch messages for
     
     Returns:
-        List of message dicts with 'role' and 'content' keys
+        List of message dicts with 'role' and 'content' keys (max 4 messages)
     """
     history = []
     
@@ -221,17 +224,21 @@ async def _get_conversation_history(session_id: int) -> List[Dict[str, str]]:
         from database_adapter import get_db
         
         with get_db() as conn:
-            # Fetch last N messages for context (exclude current message)
+            # Fetch last 4 messages (2 sets of user+assistant exchanges)
+            # Order DESC to get most recent, then reverse for chronological order
             rows = conn.execute(
                 """
                 SELECT role, content 
                 FROM messages 
                 WHERE session_id = ? 
-                ORDER BY created_at ASC
-                LIMIT 50
+                ORDER BY created_at DESC
+                LIMIT 4
                 """,
                 (session_id,)
             ).fetchall()
+            
+            # Reverse to get chronological order (oldest first)
+            rows = list(reversed(rows))
             
             for row in rows:
                 # Handle both dict and tuple results
@@ -245,7 +252,7 @@ async def _get_conversation_history(session_id: int) -> List[Dict[str, str]]:
                 if role in ('user', 'assistant'):
                     history.append({"role": role, "content": content})
                     
-        logger.info(f"[ACP-CHAT] Retrieved {len(history)} messages from database")
+        logger.info(f"[ACP-CHAT] Retrieved {len(history)} messages from database (last 2 sets)")
         
     except Exception as e:
         logger.error(f"[ACP-CHAT] Failed to get conversation history: {e}")
