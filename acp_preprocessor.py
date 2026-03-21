@@ -62,15 +62,13 @@ class ACPPreprocessor:
         Args:
             use_glm: If True, prefer GLM-4-Flash. If False, use Groq Llama.
         """
-        self.use_glm = use_glm and bool(Z_AI_API_KEY)
-        self.use_groq = bool(GROQ_API_KEY)
+        # GLM is always enabled (API key check removed)
+        self.use_glm = use_glm  # Always use GLM when requested
+        self.use_groq = bool(GROQ_API_KEY)  # Groq as fallback
         
-        if not self.use_glm and not self.use_groq:
-            logger.warning("[ACP-PRE] No fast LLM API configured, preprocessing disabled")
-            self.enabled = False
-        else:
-            self.enabled = True
-            logger.info(f"[ACP-PRE] Initialized with {'GLM-4-Flash (Z.ai)' if self.use_glm else 'Groq Llama'}")
+        # Always enable preprocessor (GLM doesn't require API key check)
+        self.enabled = True
+        logger.info(f"[ACP-PRE] Initialized with GLM-4-Flash (Z.ai) - always enabled")
     
     async def classify_intent(self, user_message: str, project_name: str, project_path: str = None) -> PreprocessResult:
         """
