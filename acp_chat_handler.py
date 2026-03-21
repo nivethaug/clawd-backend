@@ -50,7 +50,9 @@ class ACPChatHandler:
         self.project_path = Path(project_path)
         self.project_name = project_name
         self.frontend_path = self.project_path / "frontend"
-        self.frontend_src_path = self.frontend_path / "src"        self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)        
+        self.frontend_src_path = self.frontend_path / "src"
+        self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)
+        
         # Validate paths
         if not self.frontend_src_path.exists():
             raise ValueError(f"Frontend src path does not exist: {self.frontend_src_path}")
