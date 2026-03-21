@@ -69,13 +69,14 @@ class ACPPreprocessor:
             self.enabled = True
             logger.info(f"[ACP-PRE] Initialized with {'GLM-4-Flash (Z.ai)' if self.use_glm else 'Groq Llama'}")
     
-    async def classify_intent(self, user_message: str, project_name: str) -> PreprocessResult:
+    async def classify_intent(self, user_message: str, project_name: str, project_path: str = None) -> PreprocessResult:
         """
         Classify user intent and decide if ACPX is needed.
         
         Args:
             user_message: User's chat message
             project_name: Name of the project
+            project_path: Optional path to project root for reading context
             
         Returns:
             PreprocessResult with classification and enhanced prompt
@@ -90,9 +91,15 @@ class ACPPreprocessor:
                 confidence=0.0
             )
         
+        # Build project context from files (if path provided)
+        project_context = ""
+        if project_path:
+            project_context = self._read_project_context(project_path)
+        
         system_prompt = f"""You are an intent classifier for a web app builder assistant.
 
 The user is working on a project called "{project_name}".
+{project_context}
 
 Classify the user's message into ONE of these categories:
 1. GREETING - Simple hello/hi/good morning
