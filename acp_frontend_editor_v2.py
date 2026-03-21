@@ -847,10 +847,6 @@ class ACPFrontendEditorV2:
         self.project_name = project_name
         self.max_new_files = max_new_files
 
-        # print(f"🔴 ACPX-V2-INIT: frontend_src_path = {self.frontend_src_path}")
-        # print(f"🔴 ACPX-V2-INIT: frontend_path = {self.frontend_path}")
-        # print(f"🔴 ACPX-V2-INIT: project_root = {self.frontend_path.parent}")
-
         # Initialize components
         self.validator = ACPPathValidator(frontend_src_path)
         self.snapshot_manager = ACPSnapshotManager(str(self.frontend_path))
@@ -866,7 +862,6 @@ class ACPFrontendEditorV2:
         # Pass project root path (parent of frontend), not frontend path
         # to avoid path doubling in PageManifest which appends frontend/src/
         self.manifest_manager = PageManifest(str(self.frontend_path.parent))
-        # print(f"🔴 ACPX-V2-INIT: manifest_manager.pages_path = {self.manifest_manager.pages_path}")
 
     async def apply_changes_via_acpx(
         self,
@@ -1215,105 +1210,6 @@ class ACPFrontendEditorV2:
             if len(files_modified) > 10:
                 logger.info(f"[ACPX-V2]     ... and {len(files_modified) - 10} more")
 
-            # # Step 8: Enforce file limits (trim excess, NO rollback)
-            # logger.info(f"[ACPX-V2] Step 8: Enforcing file limits...")
-            # kept_files, removed_files = enforce_file_limit(files_added, self.max_new_files, self.frontend_src_path)
-            # if removed_files:
-            #     issues.append(f"Trimmed {len(removed_files)} excess files (limit: {self.max_new_files})")
-            #     status = "partial_success"
-            #     files_added = kept_files  # Update for final count
-            # else:
-            #     logger.info(f"[ACPX-V2]   ✓ File limit OK ({len(files_added)}/{self.max_new_files})")
-
-            # # Step 9: Validate and filter paths (remove invalid, NO rollback)
-            # logger.info(f"[ACPX-V2] Step 9: Validating paths...")
-            # valid_paths, invalid_paths = filter_valid_paths(files_added, self.validator)
-            
-            # if invalid_paths:
-            #     deleted_count = delete_invalid_files(invalid_paths, self.frontend_src_path)
-            #     issues.append(f"Removed {deleted_count} files at invalid paths")
-            #     status = "partial_success"
-            #     files_added = valid_paths  # Update for final count
-            #     logger.warning(f"[ACPX-V2]   ⚠️ Removed {deleted_count} invalid files")
-            # else:
-            #     logger.info(f"[ACPX-V2]   ✓ All paths valid")
-
-            # Step 10.6: Fix Layout components - Replace {children} with <Outlet />
-            # logger.info("[ACPX-V2] Step 10.6: Fixing Layout components to use Outlet...")
-            # try:
-            #     # Find all Layout files
-            #     layout_patterns = [
-            #         self.frontend_src_path / "layout" / "Layout.tsx",
-            #         self.frontend_src_path / "layouts" / "Layout.tsx",
-            #         self.frontend_src_path / "app" / "layouts" / "AppLayout.tsx",
-            #     ]
-                
-            #     layout_files = [p for p in layout_patterns if p.exists()]
-            #     for layout_dir in ["layout", "layouts", "app/layouts"]:
-            #         layout_path = self.frontend_src_path / layout_dir
-            #         if layout_path.exists():
-            #             layout_files.extend(layout_path.glob("*Layout*.tsx"))
-                
-            #     layout_files = list(set(layout_files))
-                
-            #     for layout_file in layout_files:
-            #         try:
-            #             content = layout_file.read_text()
-            #             original = content
-                        
-            #             # Fix 1: Add Outlet import if missing
-            #             if "Outlet" not in content and "from 'react-router-dom'" in content:
-            #                 content = re.sub(
-            #                     r"import\s+\{([^}]+)\}\s+from\s+'react-router-dom'",
-            #                     r"import {\1, Outlet } from 'react-router-dom'",
-            #                     content
-            #                 )
-            #             elif "Outlet" not in content:
-            #                 import_line = "import { Outlet } from 'react-router-dom';\n"
-            #                 import_match = re.search(r"(^import.*?;[\s]*)+", content, re.MULTILINE)
-            #                 if import_match:
-            #                     insert_pos = import_match.end()
-            #                     content = content[:insert_pos] + import_line + content[insert_pos:]
-                        
-            #             # Fix 2: Remove children prop from function signature
-            #             content = re.sub(
-            #                 r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*(?::[^}]+)?\s*\}\s*:\s*[^)]+\)',
-            #                 r'\1()',
-            #                 content
-            #             )
-            #             content = re.sub(
-            #                 r'(\bfunction\s+\w+Layout\s*)\(\s*\{\s*children\s*\}\s*:\s*\{\s*children:\s*React\.ReactNode\s*\}\s*\)',
-            #                 r'\1()',
-            #                 content
-            #             )
-                        
-            #             # Fix 3: Remove children interface
-            #             content = re.sub(
-            #                 r'interface\s+\w*LayoutProps\s*\{\s*children\s*(?::\s*React\.ReactNode)?\s*\}\s*\n?',
-            #                 '',
-            #                 content,
-            #                 flags=re.IGNORECASE
-            #             )
-                        
-            #             # Fix 4: Replace {children} with <Outlet />
-            #             content = re.sub(r'\{children\}', '<Outlet />', content)
-            #             content = re.sub(r'\{\s*children\s*\}', '<Outlet />', content)
-                        
-            #             if content != original:
-            #                 layout_file.write_text(content)
-            #                 logger.info(f"[ACPX-V2]   ✓ Fixed {layout_file.name}: replaced {{children}} with <Outlet />")
-                    
-            #         except Exception as e:
-            #             logger.warning(f"[ACPX-V2]   Failed to fix {layout_file}: {e}")
-                
-            # except Exception as e:
-            #     logger.warning(f"[ACPX-V2] ⚠️ Layout fix failed but continuing: {str(e)}")
-
-            # # Step 11: Build gate skipped - build handled by infrastructure pipeline
-            # logger.info("[ACPX-V2] Step 11: Build gate skipped — build handled by infrastructure pipeline")
-
-
-
             # =============================================
             # FINAL RESULT (3-state outcome)
             # =============================================
@@ -1387,33 +1283,20 @@ class ACPFrontendEditorV2:
         Returns:
             List of required page names
         """
-        # # Return cached pages if available (prevents double LLM calls)
-        # if self._cached_pages is not None:
-        #     logger.info("[Planner] Returning cached page inference")
-        #     # print(f"🔴 PLANNER-CACHE-HIT: Returning cached pages = {self._cached_pages}")
-        #     return self._cached_pages
-        
-        # print("🔴 PLANNER-CACHE-MISS: No cached pages, performing fresh inference")
-
-        # logger.info("[Planner] Extracting required pages from prompt...")
         print("\n" + "="*60, flush=True)
         print("🔍 PAGE INFERENCE START", flush=True)
         print("="*60, flush=True)
-        # print(f"🔴 PLANNER-INPUT: {goal_description[:200]}...")
 
         required_pages = []
 
         # Step 1: Try Groq AI inference
         try:
             from groq_service import GroqService
-            # print("🔴 PLANNER-STEP1: Attempting Groq AI inference...")
             groq = GroqService()
                     
             inferred_pages = await groq.infer_pages(goal_description)
-            # print(f"🔴 PLANNER-GROQ-RAW: Inferred pages = {inferred_pages}")
             if inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
-                # logger.info(f"[Planner] Groq inferred pages: {inferred_pages}")
                 print(f"✅ PLANNER-GROQ-SUCCESS: Using {len(inferred_pages)} pages: {inferred_pages}", flush=True)
             else:
                 print(f"⚠️  PLANNER-GROQ-INSUFFICIENT: Got {len(inferred_pages) if inferred_pages else 0} pages, need >= 3", flush=True)
@@ -1424,7 +1307,6 @@ class ACPFrontendEditorV2:
         # Step 2: Fallback to default pages
         if len(required_pages) < 3:
             required_pages = ["Dashboard", "Settings", "Overview"]
-            # logger.info(f"[Planner] Using default pages: {required_pages}")
             print(f"⚠️  PLANNER-DEFAULT: Using default pages = {required_pages}", flush=True)
 
         # Remove duplicates while preserving order
@@ -1438,12 +1320,6 @@ class ACPFrontendEditorV2:
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
-        # logger.info(f"[Phase9] Allowed pages: {required_pages}")
-        # print(f"🔴 PHASE9-ALLOWED: Whitelist set to: {sorted(self.allowed_pages)}")
-
-        # Planner logging
-        # logger.info(f"[Planner] Description: {goal_description}")
-        # logger.info(f"[Planner] Detected pages: {required_pages}")
 
         # Cache pages to prevent double LLM calls
         self._cached_pages = required_pages
@@ -1462,9 +1338,6 @@ class ACPFrontendEditorV2:
         """
         # Extract required pages from goal description
         required_pages = await self._extract_required_pages_from_prompt(goal_description)
-
-        # print(f"🔴 PLANNER-OUTPUT: Required pages = {required_pages}")
-        # print(f"🔴 PLANNER-OUTPUT: Page count = {len(required_pages)}")
 
         # Build required artifacts list
         required_pages_list = required_pages
