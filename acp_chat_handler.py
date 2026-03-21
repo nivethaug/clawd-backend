@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-ACP Chat Handler - Integrates ACPX for chat-based frontend editing.
+ACP Chat Handler - Integrates Claude Code Agent for chat-based frontend editing.
 
-This module provides chat mode for ACP (Agentic Code Protocol) that allows
-users to edit frontend files through natural language conversation.
+This module provides chat mode for frontend editing using Claude CLI directly.
+Supports both ClaudeCodeAgent (async) and ACPX (fallback) backends.
 """
 
 import os
@@ -16,12 +16,24 @@ import asyncio
 from typing import Dict, Any, Optional, Generator
 from pathlib import Path
 
+# Try to import ClaudeCodeAgent (preferred backend)
+try:
+    from claude_code_agent import ClaudeCodeAgent
+    CLAUDE_AGENT_AVAILABLE = True
+    logger_module = logging.getLogger(__name__)
+    logger_module.info("[ACP-CHAT] ClaudeCodeAgent available - will use direct Claude CLI")
+except ImportError:
+    CLAUDE_AGENT_AVAILABLE = False
+    logger_module = logging.getLogger(__name__)
+    logger_module.warning("[ACP-CHAT] ClaudeCodeAgent not available - will use ACPX fallback")
+
 logger = logging.getLogger(__name__)
 
 # Configuration
 ACPX_TIMEOUT = 900  # 15 minutes for interactive chat
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 USE_PREPROCESSOR = os.getenv("ACP_USE_PREPROCESSOR", "true").lower() == "true"  # Enabled by default
+USE_CLAUDE_AGENT = os.getenv("ACP_USE_CLAUDE_AGENT", "true").lower() == "true" and CLAUDE_AGENT_AVAILABLE  # Prefer Claude Agent
 
 
 class ACPChatHandler:
@@ -38,8 +50,7 @@ class ACPChatHandler:
         self.project_path = Path(project_path)
         self.project_name = project_name
         self.frontend_path = self.project_path / "frontend"
-        self.frontend_src_path = self.frontend_path / "src"
-        
+        self.frontend_src_path = self.frontend_path / "src"        self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)        
         # Validate paths
         if not self.frontend_src_path.exists():
             raise ValueError(f"Frontend src path does not exist: {self.frontend_src_path}")
@@ -314,9 +325,56 @@ I've checked your app and everything looks great! Your NatureStream app has:
         
         return '\n'.join(clean_lines)
     
+    async def run_claude_chat(self, user_message: str, session_context: str = "") -> Dict[str, Any]:
+        """
+        Run Claude Code Agent and return response (preferred async method).
+        
+        Args:
+            user_message: User's chat message
+            session_context: Previous conversation context
+            
+        Returns:
+            Dict with status, response, and any error info
+        """
+        try:
+            # Build prompt with context
+            full_prompt = user_message
+            if session_context:
+                full_prompt = f"Previous conversation:\n{session_context}\n\nCurrent request: {user_message}"
+            
+            logger.info(f"[CLAUDE-AGENT] Running for project: {self.project_name}")
+            logger.info(f"[CLAUDE-AGENT] Working directory: {self.frontend_src_path}")
+            logger.info(f"[CLAUDE-AGENT] User message: {user_message[:100]}...")
+            logger.info(f"[CLAUDE-AGENT] Prompt length: {len(full_prompt)} chars")
+            
+            # Use ClaudeCodeAgent
+            async with ClaudeCodeAgent(str(self.frontend_src_path)) as agent:
+                response = await agent.query(full_prompt)
+                
+                logger.info(f"[CLAUDE-AGENT] Response received ({len(response)} chars)")
+                logger.info(f"[CLAUDE-AGENT] Response preview: {response[:200]}...")
+                
+                return {
+                    "status": "success",
+                    "success": True,
+                    "response": response,
+                    "error": None,
+                    "backend": "claude-agent"
+                }
+        
+        except Exception as e:
+            logger.error(f"[CLAUDE-AGENT] Error: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "success": False,
+                "response": f"Error: {str(e)}",
+                "error": str(e),
+                "backend": "claude-agent"
+            }
+    
     def run_acpx_chat(self, user_message: str, session_context: str = "") -> Dict[str, Any]:
         """
-        Run ACPX chat and return the response.
+        Run ACPX chat and return the response (fallback synchronous method).
         
         Args:
             user_message: User's chat message
@@ -538,6 +596,45 @@ I've checked your app and everything looks great! Your NatureStream app has:
         except Exception as e:
             logger.warning(f"[ACP-CHAT] Preprocessor failed: {e}, continuing with ACPX")
             return None
+    
+    async def run_chat_unified(self, user_message: str, session_context: str = "") -> Dict[str, Any]:
+        """
+        Unified chat method that chooses best available backend.
+        
+        Priority:
+        1. ClaudeCodeAgent (async, direct Claude CLI) - if available and enabled
+        2. ACPX (fallback, synchronous) - if Claude Agent fails or not available
+        
+        Args:
+            user_message: User's chat message
+            session_context: Previous conversation context
+            
+        Returns:
+            Dict with status, response, and any error info
+        """
+        # Try Claude Agent first (if enabled)
+        if USE_CLAUDE_AGENT:
+            logger.info(f"[ACP-CHAT] Using ClaudeCodeAgent backend (preferred)")
+            try:
+                result = await self.run_claude_chat(user_message, session_context)
+                if result.get("success"):
+                    return result
+                else:
+                    logger.warning(f"[ACP-CHAT] Claude Agent failed, falling back to ACPX: {result.get('error')}")
+            except Exception as e:
+                logger.warning(f"[ACP-CHAT] Claude Agent exception, falling back to ACPX: {e}")
+        
+        # Fallback to ACPX (synchronous, but wrapped in async)
+        logger.info(f"[ACP-CHAT] Using ACPX backend (fallback)")
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            self.run_acpx_chat,
+            user_message,
+            session_context
+        )
+        result["backend"] = "acpx"
+        return result
 
     def run_acpx_chat_streaming(self, user_message: str, session_context: str = ""):
         # Check if we have an enhanced prompt from preprocessor

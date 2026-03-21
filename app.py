@@ -95,10 +95,22 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
     
     session_context = "\n\n".join(context_lines) if context_lines else ""
     
-    # Run ACPX chat
-    result = handler.run_acpx_chat(user_content, session_context)
+    # Run chat (use unified method that prefers Claude Agent)
+    try:
+        # Try async version first
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(handler.run_chat_unified(user_content, session_context))
+        loop.close()
+    except RuntimeError:
+        # Fallback to sync ACPX if async fails
+        logger.warning("[ACP-CHAT] Async not available, using ACPX fallback")
+        result = handler.run_acpx_chat(user_content, session_context)
     
     if result.get('success'):
+        backend = result.get('backend', 'unknown')
+        logger.info(f"[ACP-CHAT] Chat completed successfully using {backend}")
         return result.get('response', 'Operation completed.')
     else:
         error_msg = result.get('error', 'Unknown error')
