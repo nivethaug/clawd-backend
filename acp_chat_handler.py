@@ -297,6 +297,7 @@ I've checked your app and everything looks great! Your NatureStream app has:
             "stdbuf", "-oL",  # Line-buffered output for real-time streaming
             "node", acpx_path,
             "claude", "exec",
+            "--no-thinking",  # Disable thinking/reasoning output
             str(prompt)
         ]
         
@@ -324,6 +325,12 @@ I've checked your app and everything looks great! Your NatureStream app has:
                 }
             logger.info(f"[ACP-CHAT] acpx found at: {acpx_check.stdout.strip()}")
             
+            # Set environment to disable thinking/reasoning output
+            env = os.environ.copy()
+            env["CLAUDE_DISABLE_THINKING"] = "1"
+            env["DISABLE_THINKING"] = "1"
+            env["NO_THINKING"] = "1"
+            
             # Run ACPX with timeout (matching telegram-acpx-devbot pattern)
             logger.info(f"[ACP-CHAT] Starting subprocess...")
             process = subprocess.Popen(
@@ -333,7 +340,8 @@ I've checked your app and everything looks great! Your NatureStream app has:
                 text=True,
                 bufsize=1,  # CRITICAL: Line-buffered for real-time streaming
                 cwd=str(self.frontend_src_path),
-                universal_newlines=True
+                universal_newlines=True,
+                env=env  # Pass environment with thinking disabled
             )
             
             logger.info(f"[ACP-CHAT] Subprocess started with PID: {process.pid}")
