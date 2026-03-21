@@ -2297,19 +2297,16 @@ async def chat_stream_endpoint(request: ChatRequest):
                 )
             # ── END PREPROCESSOR CHECK ────────────────────────────────────────
             
-            # Run ACPX with real-time streaming
-            logger.info(f"[ACP-STREAM] Starting ACPX streaming (timeout: 900s)...")
+            # Run streaming with unified backend (ClaudeCodeAgent or ACPX fallback)
+            logger.info(f"[ACP-STREAM] Starting unified streaming (timeout: 900s)...")
             
             async def acp_streaming_response():
-                """Stream ACPX output in real-time via SSE."""
+                """Stream output in real-time via SSE using best available backend."""
                 full_response = []
                 
                 try:
-                    # Run streaming in executor to avoid blocking
-                    loop = asyncio.get_event_loop()
-                    stream_gen = handler.run_acpx_chat_streaming(acp_user_content, session_context)
-                    
-                    for chunk in stream_gen:
+                    # Use unified streaming method
+                    async for chunk in handler.run_chat_streaming_unified(acp_user_content, session_context):
                         # Yield SSE event for each chunk
                         full_response.append(chunk)
                         event_data = json.dumps({'choices': [{'delta': {'content': chunk}}]})

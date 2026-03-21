@@ -638,6 +638,78 @@ I've checked your app and everything looks great! Your NatureStream app has:
         result["backend"] = "acpx"
         return result
 
+    async def run_claude_chat_streaming(self, user_message: str, session_context: str = ""):
+        """
+        Stream Claude Code Agent response.
+        
+        Yields text chunks as they arrive from Claude CLI.
+        """
+        # Check if we have an enhanced prompt from preprocessor
+        enhanced = getattr(self, '_enhanced_prompt', None)
+        if enhanced:
+            prompt = self._build_chat_prompt(enhanced, session_context)
+            self._enhanced_prompt = None  # Reset
+        else:
+            prompt = self._build_chat_prompt(user_message, session_context)
+        
+        logger.info(f"[ACP-CHAT] === CLAUDE STREAMING MODE ===")
+        logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars")
+        
+        full_response = []
+        
+        def on_chunk(text: str):
+            """Callback for streaming chunks."""
+            full_response.append(text)
+            logger.info(f"[ACP-CHAT] Chunk: {text[:80]}...")
+        
+        try:
+            async with ClaudeCodeAgent(
+                str(self.frontend_src_path),
+                on_text=on_chunk
+            ) as agent:
+                response = await agent.query(prompt)
+                
+                # Stream the response
+                if response:
+                    # Yield in chunks for SSE streaming
+                    chunk_size = 100  # chars per chunk
+                    for i in range(0, len(response), chunk_size):
+                        chunk = response[i:i+chunk_size]
+                        yield chunk
+                
+        except Exception as e:
+            logger.error(f"[ACP-CHAT] Claude streaming error: {e}")
+            yield f"Error: {str(e)}"
+
+    async def run_chat_streaming_unified(self, user_message: str, session_context: str = ""):
+        """
+        Unified streaming method that chooses best available backend.
+        
+        Priority:
+        1. ClaudeCodeAgent streaming (async) - if available and enabled
+        2. ACPX streaming (fallback, sync via executor)
+        """
+        use_claude = os.environ.get('ACP_USE_CLAUDE_AGENT', 'true').lower() == 'true'
+        
+        if use_claude and self.claude_agent:
+            logger.info(f"[ACP-CHAT] Using ClaudeCodeAgent streaming backend")
+            async for chunk in self.run_claude_chat_streaming(user_message, session_context):
+                yield chunk
+            return
+        
+        # Fallback to ACPX streaming
+        logger.info(f"[ACP-CHAT] Using ACPX streaming backend (fallback)")
+        loop = asyncio.get_event_loop()
+        stream_gen = self.run_acpx_chat_streaming(user_message, session_context)
+        
+        # Run sync generator in executor
+        def get_chunks():
+            return list(stream_gen)
+        
+        chunks = await loop.run_in_executor(None, get_chunks)
+        for chunk in chunks:
+            yield chunk
+
     def run_acpx_chat_streaming(self, user_message: str, session_context: str = ""):
         # Check if we have an enhanced prompt from preprocessor
         enhanced = getattr(self, '_enhanced_prompt', None)
