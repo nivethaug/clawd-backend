@@ -167,14 +167,16 @@ I've checked your app and everything looks great! Your NatureStream app has:
             
         # Skip structured protocol logs
         noise_patterns = [
+            '[acpx]', '[thinking]', '[done]', '[tool]', '[console]', '[client]',
             'sessionupdate:', 'session/update', 'usage_update', '_errors:',
             '[array]', '[object]', 'invalid params', 'invalid input',
-            'error handling notification', 'end_turn', '[done]', '[thinking]',
-            '[tool]', '[console]', '[client]', 'client] initialize', 'session/new',
+            'error handling notification', 'end_turn',
+            'client] initialize', 'session/new',
             'initialize (running)', 'session/new (running)', 'code:', 'message:',
             'method:', 'params:', 'data:', 'result:', 'id:', 'cost:', 'size:',
             'used:', 'entry:', 'availablecommands:', 'currentmodeid:',
-            'configoptions:', 'title:', 'toolcallid:', 'jsonrpc:'
+            'configoptions:', 'title:', 'toolcallid:', 'jsonrpc:',
+            'session cwd', 'agent needs reconnect'
         ]
         
         return any(pattern in line_lower for pattern in noise_patterns)
@@ -505,7 +507,7 @@ I've checked your app and everything looks great! Your NatureStream app has:
                     continue
 
                 raw_output.append(line)
-                logger.info(f"[ACP-CHAT] Line: {line[:80]}")
+                logger.info(f"[ACP-CHAT] Line: {line[:120]}")  # Log more chars to debug
 
                 stripped = line.strip()
                 lower = stripped.lower()
