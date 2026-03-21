@@ -2391,29 +2391,44 @@ async def chat_stream_endpoint(request: ChatRequest):
                     # Filter out progress messages from what we have so far
                     real_chunks = [c for c in full_response if not c.startswith('⏳ Still working')]
                     
-                    # Spawn background task that will wait and save
+                    # Spawn background task that will poll until query completes
                     async def wait_and_save():
-                        """Wait for query completion then save."""
+                        """Poll until query completion then save."""
                         try:
-                            # Give the query time to complete and collect chunks
-                            await asyncio.sleep(5)  # Initial wait
+                            max_wait = 600  # 10 minutes max
+                            poll_interval = 5  # Check every 5 seconds
+                            waited = 0
                             
-                            # Check handler for collected chunks
-                            if hasattr(handler, '_last_query_chunks'):
-                                chunks = handler._last_query_chunks
-                                real = [c for c in chunks if not c.startswith('⏳ Still working')]
-                                if real:
-                                    content = '\n'.join(real).strip()
-                                    if content:
-                                        logger.info(f"[ACP-STREAM] Background saved: {len(content)} chars")
+                            while waited < max_wait:
+                                await asyncio.sleep(poll_interval)
+                                waited += poll_interval
+                                
+                                # Check handler for collected chunks
+                                if hasattr(handler, '_last_query_chunks'):
+                                    chunks = handler._last_query_chunks
+                                    real = [c for c in chunks if not c.startswith('⏳ Still working')]
+                                    if real:
+                                        content = '\n'.join(real).strip()
+                                        if content and len(content) > 50:  # Ensure we have real content
+                                            logger.info(f"[ACP-STREAM] Background saved after {waited}s: {len(content)} chars")
+                                            await save_response_to_db(content)
+                                            return
+                                
+                                # Also check for direct response
+                                if hasattr(handler, '_last_query_response') and handler._last_query_response:
+                                    content = handler._last_query_response.strip()
+                                    if content and len(content) > 20:
+                                        logger.info(f"[ACP-STREAM] Background saved (response) after {waited}s: {len(content)} chars")
                                         await save_response_to_db(content)
                                         return
                             
                             # Fall back to what we collected before disconnect
                             if real_chunks:
                                 content = '\n'.join(real_chunks).strip()
-                                logger.info(f"[ACP-STREAM] Background saved (partial): {len(content)} chars")
+                                logger.info(f"[ACP-STREAM] Background saved (partial, timeout): {len(content)} chars")
                                 await save_response_to_db(content)
+                            else:
+                                logger.warning(f"[ACP-STREAM] Background save: no content after {max_wait}s")
                         except Exception as e:
                             logger.error(f"[ACP-STREAM] Background save error: {e}")
                     
