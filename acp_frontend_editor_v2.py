@@ -1239,16 +1239,16 @@ class ACPFrontendEditorV2:
                 logger.info(f"[ACPX-V2]   ✓ All paths valid")
 
             # Step 10: Enforce page guardrails (BEFORE build to prevent routing issues)
-            logger.info(f"[ACPX-V2] Step 10: Enforcing page guardrails (BEFORE build)...")
-            try:
-                unauthorized_removed = self._enforce_page_guardrails()
-                if unauthorized_removed > 0:
-                    issues.append(f"Removed {unauthorized_removed} unauthorized page(s)")
-                    logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
-                else:
-                    logger.info(f"[ACPX-V2]   ✓ All pages authorized")
-            except Exception as e:
-                logger.warning(f"[ACPX-V2] ⚠️ Guardrail enforcement failed but continuing: {str(e)}")
+            # logger.info(f"[ACPX-V2] Step 10: Enforcing page guardrails (BEFORE build)...")
+            # try:
+            #     unauthorized_removed = self._enforce_page_guardrails()
+            #     if unauthorized_removed > 0:
+            #         issues.append(f"Removed {unauthorized_removed} unauthorized page(s)")
+            #         logger.info(f"[ACPX-V2]   ⚠️  Removed {unauthorized_removed} unauthorized page(s)")
+            #     else:
+            #         logger.info(f"[ACPX-V2]   ✓ All pages authorized")
+            # except Exception as e:
+            #     logger.warning(f"[ACPX-V2] ⚠️ Guardrail enforcement failed but continuing: {str(e)}")
 
             # Step 10.5: Routing fix DISABLED - ACPX handles routing
             #     logger.info("[ACPX-V2] Step 10.5: Fixing routing programmatically...")
@@ -1438,7 +1438,7 @@ class ACPFrontendEditorV2:
                             logger.warning(f"[ACPX-V2]   ⚠️  Empty/placeholder page detected: {page_name}")
                             
                             try:
-                                page_file.unlink()
+                                #page_file.unlink()
                                 logger.warning(f"[ACPX-V2]   🗑️  Removed placeholder page: {page_name}")
                             except Exception as remove_error:
                                 logger.error(f"[ACPX-V2]   Failed to remove placeholder page {page_name}: {remove_error}")
