@@ -689,30 +689,54 @@ I've checked your app and everything looks great! Your NatureStream app has:
         logger.info(f"[ACP-CHAT] === CLAUDE STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars")
         
-        full_response = []
-        chunk_queue = []  # Queue for immediate yielding
+        # Use asyncio.Queue for real-time streaming
+        chunk_queue = asyncio.Queue()
+        query_complete = asyncio.Event()
         
-        def on_chunk(text: str):
-            """Callback for streaming chunks."""
-            full_response.append(text)
-            chunk_queue.append(text)
+        async def on_chunk(text: str):
+            """Callback for streaming chunks - puts in queue for real-time yielding."""
             logger.info(f"[ACP-CHAT] Chunk: {text[:80]}...")
+            await chunk_queue.put(text)
+        
+        async def run_query():
+            """Run the query in a separate task."""
+            try:
+                async with ClaudeCodeAgent(
+                    str(self.frontend_src_path),
+                    on_text=on_chunk
+                ) as agent:
+                    response = await agent.query(prompt)
+                    logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars")
+            except Exception as e:
+                logger.error(f"[ACP-CHAT] Query error: {e}")
+                await chunk_queue.put(f"Error: {str(e)}")
+            finally:
+                query_complete.set()
+        
+        # Start query task
+        query_task = asyncio.create_task(run_query())
         
         try:
-            async with ClaudeCodeAgent(
-                str(self.frontend_src_path),
-                on_text=on_chunk
-            ) as agent:
-                response = await agent.query(prompt)
-                
-                # Yield all collected chunks for SSE streaming
-                for chunk in full_response:
-                    if chunk.strip():  # Skip empty chunks
+            # Yield chunks as they arrive in real-time
+            while not query_complete.is_set() or not chunk_queue.empty():
+                try:
+                    # Wait for a chunk with timeout to check completion
+                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.5)
+                    if chunk.strip():
                         yield chunk
-                
-        except Exception as e:
-            logger.error(f"[ACP-CHAT] Claude streaming error: {e}")
-            yield f"Error: {str(e)}"
+                except asyncio.TimeoutError:
+                    # No chunk available, check if query is done
+                    if query_complete.is_set():
+                        break
+                    continue
+        finally:
+            # Ensure task is cleaned up
+            if not query_task.done():
+                query_task.cancel()
+                try:
+                    await query_task
+                except asyncio.CancelledError:
+                    pass
 
     async def run_chat_streaming_unified(self, user_message: str, session_context: str = ""):
         """
