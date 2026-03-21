@@ -294,9 +294,10 @@ I've checked your app and everything looks great! Your NatureStream app has:
         # Build command - use acpx directly with clean output format
         cmd = [
             "stdbuf", "-oL",  # Line-buffered output for real-time streaming
-            "acpx", "claude", "exec",
-            "--format", "text",  # Clean text output (no JSON noise)
+            "acpx",
+            "--format", "text",  # Clean text output (top-level option)
             "--approve-all",  # Auto-approve permission requests
+            "claude", "exec",
             str(prompt)
         ]
         
@@ -457,9 +458,10 @@ I've checked your app and everything looks great! Your NatureStream app has:
         # Use acpx directly with --format text for clean output
         cmd = [
             "stdbuf", "-oL",
-            "acpx", "claude", "exec",
+            "acpx",
             "--format", "text",
             "--approve-all",
+            "claude", "exec",
             str(prompt)
         ]
 
