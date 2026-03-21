@@ -457,7 +457,6 @@ Project Root: {self.frontend_src_path.parent.parent}
                 if time.time() - start_time > ACPX_TIMEOUT:
                     logger.warning(f"[ACP-CHAT] Timeout")
                     process.kill()
-                    yield "[TIMEOUT] Operation timed out\n"
                     return
                 
                 # Process exited
@@ -485,11 +484,11 @@ Project Root: {self.frontend_src_path.parent.parent}
             # Kill orphan processes
             self.kill_orphan_processes()
             
-            # Yield completion marker only (content already streamed)
-            yield "[COMPLETE]\n"
+            # No need for completion marker - user sees real-time output
                 
         except Exception as e:
             logger.error(f"[ACP-CHAT] Stream error: {e}")
+            yield f"Error: {str(e)}\n"
             yield f"\n[ERROR] {str(e)}\n"
 
 

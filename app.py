@@ -2260,10 +2260,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                         logger.info(f"[ACP-STREAM] Yielded chunk: {len(chunk)} chars")
                     
                     # Save complete response to database
-                    assistant_content = ''.join(full_response)
-                    # Remove [COMPLETE] and [ERROR] markers before saving
-                    assistant_content = assistant_content.replace('[COMPLETE]\n', '').replace('[ERROR] ', '').replace('[TIMEOUT] ', '')
-                    assistant_content = assistant_content.strip()
+                    assistant_content = ''.join(full_response).strip()
                     
                     if assistant_content:
                         try:
