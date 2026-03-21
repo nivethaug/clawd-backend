@@ -84,8 +84,12 @@ class ACPPreprocessor:
         Returns:
             PreprocessResult with classification and enhanced prompt
         """
+        logger.info(f"[ACP-PRE] Classifying intent for message (length={len(user_message)}) in project '{project_name}'")
+        
         if not self.enabled:
             # No preprocessing - always call ACPX
+            logger.warning("[ACP-PRE] Preprocessor disabled, defaulting to ACPX")
+            logger.info("[ACP-PRE] DECISION: Use ACPX (Claude) - preprocessor disabled")
             return PreprocessResult(
                 intent=IntentType.UNKNOWN,
                 should_call_acpx=True,
@@ -96,12 +100,23 @@ class ACPPreprocessor:
         
         # Detect if this is a code reading/checking request (not a change)
         is_read_only = self._is_read_only_request(user_message)
+        logger.debug(f"[ACP-PRE] Read-only detection: {is_read_only}")
+        logger.info(f"[ACP-PRE] Read-only check: {is_read_only}, project_path={bool(project_path)}, use_glm={self.use_glm}")
         
         if is_read_only and project_path and self.use_glm:
             # Use GLM with read tool to answer directly (no ACPX needed)
+            logger.info("[ACP-PRE] DECISION: Use Read Tool (GLM) - read-only request with project context")
+            logger.info("[ACP-PRE] Handling as read-only request with GLM tools")
             return await self._handle_read_only_with_tools(user_message, project_name, project_path)
         
         # For other cases, use simple classification
+        # Log why we're NOT using read tool
+        if is_read_only:
+            if not project_path:
+                logger.info("[ACP-PRE] Cannot use Read Tool: project_path not provided")
+            elif not self.use_glm:
+                logger.info("[ACP-PRE] Cannot use Read Tool: GLM not configured (using Groq)")
+        
         project_context = ""
         if project_path:
             project_context = self._read_project_context(project_path)
@@ -130,18 +145,29 @@ Examples:
         user_prompt = f'User message: "{user_message}"\n\nClassify and respond with JSON only:'
 
         try:
+            logger.debug(f"[ACP-PRE] Calling {'GLM' if self.use_glm else 'Groq'} for classification")
             if self.use_glm:
                 response = await self._call_glm(system_prompt, user_prompt)
             else:
                 response = await self._call_groq_fast(system_prompt, user_prompt)
             
+            logger.debug(f"[ACP-PRE] Classification response received (length={len(response)})")
+            
             # Parse JSON response
             result = self._parse_response(response, user_message)
-            logger.info(f"[ACP-PRE] Classified as {result.intent.value}, needs_acpx={result.should_call_acpx}")
+            
+            # Log final decision
+            if result.should_call_acpx:
+                logger.info(f"[ACP-PRE] DECISION: Use ACPX (Claude) - intent={result.intent.value}, confidence={result.confidence}")
+            else:
+                logger.info(f"[ACP-PRE] DECISION: Direct Response - intent={result.intent.value}, confidence={result.confidence}")
+            
+            logger.info(f"[ACP-PRE] Classified as {result.intent.value}, needs_acpx={result.should_call_acpx}, confidence={result.confidence}")
             return result
             
         except Exception as e:
             logger.error(f"[ACP-PRE] Classification failed: {e}")
+            logger.warning("[ACP-PRE] DECISION: Use ACPX (Claude) - classification failed, fallback for safety")
             # Fallback: call ACPX to be safe
             return PreprocessResult(
                 intent=IntentType.UNKNOWN,
@@ -239,6 +265,7 @@ Examples:
 
     async def _call_glm(self, system_prompt: str, user_prompt: str) -> str:
         """Call GLM-4-Flash via Z.ai API (simple, no tools)."""
+        logger.debug(f"[ACP-PRE] Calling GLM-4-Flash API at {Z_AI_API_BASE}")
         async with httpx.AsyncClient(timeout=PREPROCESSOR_TIMEOUT) as client:
             response = await client.post(
                 f"{Z_AI_API_BASE}/chat/completions",
@@ -258,10 +285,13 @@ Examples:
             )
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+            logger.debug(f"[ACP-PRE] GLM response received (tokens: {data.get('usage', {})})")
+            return content
     
     async def _call_groq_fast(self, system_prompt: str, user_prompt: str) -> str:
         """Call Llama-3.1-8B via Groq API (fast model)."""
+        logger.debug("[ACP-PRE] Calling Groq Llama-3.1-8B API")
         async with httpx.AsyncClient(timeout=PREPROCESSOR_TIMEOUT) as client:
             response = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
@@ -281,7 +311,9 @@ Examples:
             )
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+            logger.debug(f"[ACP-PRE] Groq response received (tokens: {data.get('usage', {})})")
+            return content
     
     def _read_project_context(self, project_path: str) -> str:
         """
@@ -393,6 +425,9 @@ Examples:
         
         GLM will read files and answer directly without ACPX.
         """
+        logger.info(f"[ACP-PRE] === READ TOOL MODE ACTIVATED ===")
+        logger.info(f"[ACP-PRE] Starting read-only tool call for project '{project_name}' at {project_path}")
+        logger.info(f"[ACP-PRE] User message: {user_message[:100]}...")
         system_prompt = f"""You are a helpful assistant for a web app builder called "{project_name}".
 
 The user is asking about their project. You have access to a "read" tool to examine files.
@@ -411,6 +446,8 @@ Use the read tool to answer the user's question. Start by reading the project st
         
         try:
             response = await self._call_glm_with_tools(system_prompt, user_prompt, project_path)
+            logger.info(f"[ACP-PRE] Read-only tool call completed successfully (response length={len(response)})")
+            logger.info(f"[ACP-PRE] DECISION: Direct Response (Read Tool) - successfully answered without ACPX")
             
             return PreprocessResult(
                 intent=IntentType.SIMPLE_QUESTION,
@@ -422,6 +459,7 @@ Use the read tool to answer the user's question. Start by reading the project st
             
         except Exception as e:
             logger.warning(f"[ACP-PRE] Read-only tool call failed: {e}, falling back to ACPX")
+            logger.warning("[ACP-PRE] DECISION: Use ACPX (Claude) - Read Tool failed, fallback for safety")
             return PreprocessResult(
                 intent=IntentType.SIMPLE_QUESTION,
                 should_call_acpx=True,  # Fallback to ACPX
@@ -432,11 +470,13 @@ Use the read tool to answer the user's question. Start by reading the project st
     
     def _parse_response(self, response: str, original_message: str) -> PreprocessResult:
         """Parse LLM response into PreprocessResult."""
+        logger.debug("[ACP-PRE] Parsing classification response")
         try:
             # Try to extract JSON from response
             response = response.strip()
             if response.startswith("```"):
                 # Remove code block markers
+                logger.debug("[ACP-PRE] Removing code block markers from response")
                 lines = response.split("\n")
                 response = "\n".join(lines[1:-1])
             
@@ -451,6 +491,7 @@ Use the read tool to answer the user's question. Start by reading the project st
             
             intent_str = data.get("intent", "UNKNOWN").upper()
             intent = intent_map.get(intent_str, IntentType.UNKNOWN)
+            logger.debug(f"[ACP-PRE] Parsed intent: {intent_str} -> {intent.value}")
             
             return PreprocessResult(
                 intent=intent,
@@ -480,6 +521,7 @@ def get_preprocessor() -> ACPPreprocessor:
     """Get or create the preprocessor singleton."""
     global _preprocessor
     if _preprocessor is None:
+        logger.info("[ACP-PRE] Creating new preprocessor singleton")
         _preprocessor = ACPPreprocessor()
     return _preprocessor
 
