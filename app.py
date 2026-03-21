@@ -2315,6 +2315,26 @@ async def chat_stream_endpoint(request: ChatRequest):
             async def acp_streaming_response():
                 """Stream output in real-time via SSE using best available backend."""
                 full_response = []
+                save_complete = asyncio.Event()
+                
+                async def save_response_to_db(content: str):
+                    """Save response to DB (shielded from cancellation)."""
+                    try:
+                        with get_db() as save_conn:
+                            save_conn.execute(
+                                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                                (session_id, 'assistant', content)
+                            )
+                            save_conn.execute(
+                                "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (session_id,)
+                            )
+                            save_conn.commit()
+                        logger.info(f"[ACP-STREAM] Saved assistant message ({len(content)} chars)")
+                    except Exception as save_err:
+                        logger.error(f"[ACP-STREAM] Failed to save message: {save_err}")
+                    finally:
+                        save_complete.set()
                 
                 try:
                     # Use unified streaming method
@@ -2329,20 +2349,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                     assistant_content = ''.join(full_response).strip()
                     
                     if assistant_content:
-                        try:
-                            with get_db() as save_conn:
-                                save_conn.execute(
-                                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                                    (session_id, 'assistant', assistant_content)
-                                )
-                                save_conn.execute(
-                                    "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (session_id,)
-                                )
-                                save_conn.commit()
-                            logger.info(f"[ACP-STREAM] Saved assistant message ({len(assistant_content)} chars)")
-                        except Exception as save_err:
-                            logger.error(f"[ACP-STREAM] Failed to save message: {save_err}")
+                        await save_response_to_db(assistant_content)
                     
                     # Cleanup temp image file
                     if image_path_for_context and os.path.exists(image_path_for_context):
@@ -2353,6 +2360,26 @@ async def chat_stream_endpoint(request: ChatRequest):
                             pass
                     
                     logger.info(f"[ACP-STREAM] === ACP STREAMING COMPLETED ===")
+                    
+                except asyncio.CancelledError:
+                    # Client disconnected - wait for query to complete and save anyway
+                    logger.warning(f"[ACP-STREAM] Client disconnected, waiting for query to complete...")
+                    
+                    # Get the response from handler (it continues in background)
+                    if hasattr(handler, '_last_query_response') and handler._last_query_response:
+                        assistant_content = handler._last_query_response
+                        logger.info(f"[ACP-STREAM] Got response from background query: {len(assistant_content)} chars")
+                        # Shield the save from cancellation
+                        await asyncio.shield(save_response_to_db(assistant_content))
+                    else:
+                        # Collect any chunks we already received
+                        assistant_content = ''.join(full_response).strip()
+                        if assistant_content:
+                            logger.info(f"[ACP-STREAM] Saving partial response: {len(assistant_content)} chars")
+                            await asyncio.shield(save_response_to_db(assistant_content))
+                    
+                    logger.info(f"[ACP-STREAM] === ACP STREAMING COMPLETED (client disconnected) ===")
+                    raise
                     
                 except Exception as stream_err:
                     logger.error(f"[ACP-STREAM] Streaming error: {stream_err}")

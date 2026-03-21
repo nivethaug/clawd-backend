@@ -713,16 +713,19 @@ I've checked your app and everything looks great! Your NatureStream app has:
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     response = await agent.query(prompt)
                     logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars")
+                    # Store response for later saving
+                    self._last_query_response = response
             except Exception as e:
                 logger.error(f"[ACP-CHAT] Query error: {e}")
                 import traceback
                 logger.error(f"[ACP-CHAT] Traceback: {traceback.format_exc()}")
                 await chunk_queue.put(f"Error: {str(e)}")
+                self._last_query_response = None
             finally:
                 logger.info(f"[ACP-CHAT] run_query task done, setting complete flag")
                 query_complete.set()
         
-        # Start query task
+        # Start query task (shielded from cancellation)
         logger.info(f"[ACP-CHAT] Creating query task...")
         query_task = asyncio.create_task(run_query())
         logger.info(f"[ACP-CHAT] Query task created, entering yield loop")
@@ -746,14 +749,23 @@ I've checked your app and everything looks great! Your NatureStream app has:
                         break
                     continue
             logger.info(f"[ACP-CHAT] Yield loop done, total chunks: {chunk_count}")
+        except asyncio.CancelledError:
+            # Client disconnected - log but DON'T cancel the query
+            logger.warning(f"[ACP-CHAT] Client disconnected, query continues in background...")
+            # Wait for query to complete (shielded from this cancellation)
+            try:
+                await asyncio.shield(query_task)
+            except asyncio.CancelledError:
+                pass
+            raise
         finally:
-            # Ensure task is cleaned up
-            if not query_task.done():
-                query_task.cancel()
-                try:
-                    await query_task
-                except asyncio.CancelledError:
-                    pass
+            # Only cancel if query is truly abandoned
+            if not query_complete.is_set() and query_task.done() and not query_task.cancelled():
+                logger.info(f"[ACP-CHAT] Query already completed, no cleanup needed")
+            elif query_complete.is_set():
+                logger.info(f"[ACP-CHAT] Query completed normally")
+            # Note: We intentionally do NOT cancel query_task here
+            # The query continues in background until complete
 
     async def run_chat_streaming_unified(self, user_message: str, session_context: str = ""):
         """
