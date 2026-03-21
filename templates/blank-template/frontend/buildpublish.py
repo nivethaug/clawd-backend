@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
 Frontend Build & Publish Script
-Run from frontend directory: python buildpublish.py [--skip-install] [--skip-build] [--restart]
+Run from frontend directory: python buildpublish.py [--skip-install] [--skip-build] [--no-restart]
+
+IMPORTANT: Call this script AFTER making ANY changes to the frontend code!
+- If you modified any files in frontend/, run: python3 buildpublish.py
+- This will rebuild the app and restart PM2 + nginx automatically
+- Only skip restart with --no-restart if you're just testing locally
 
 Matches infrastructure_manager.py build_frontend() process:
 1. Clean Vite caches
@@ -11,6 +16,7 @@ Matches infrastructure_manager.py build_frontend() process:
 5. Verify dist
 6. Fix permissions
 7. Cleanup node_modules
+8. Restart PM2 + nginx (default, use --no-restart to skip)
 """
 
 import subprocess

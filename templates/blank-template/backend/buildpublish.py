@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """
 Backend Build & Publish Script
-Run from backend directory: python buildpublish.py [--skip-deps] [--restart] [--domain example-com]
+Run from backend directory: python buildpublish.py [--skip-deps] [--no-restart]
+
+IMPORTANT: Call this script AFTER making ANY changes to the backend code!
+- If you modified any files in backend/, run: python3 buildpublish.py
+- This will install deps and restart PM2 + nginx automatically
+- Only skip restart with --no-restart if you're just testing locally
+
+Steps:
+1. Install Python dependencies (using shared venv)
+2. Verify main.py exists
+3. Run database migrations (if alembic.ini exists)
+4. Restart PM2 + nginx (default, use --no-restart to skip)
 """
 
 import subprocess
