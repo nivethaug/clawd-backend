@@ -516,7 +516,9 @@ I've checked your app and everything looks great! Your NatureStream app has:
         
         try:
             from acp_preprocessor import preprocess_message
-            result = await preprocess_message(user_message, self.project_name)
+            # Pass frontend_src_path for read tool access
+            logger.debug(f"[ACP-CHAT] Calling preprocessor with project_path={self.frontend_src_path}")
+            result = await preprocess_message(user_message, self.project_name, str(self.frontend_src_path))
             
             logger.info(f"[ACP-CHAT] Preprocessor: intent={result.intent.value}, needs_acpx={result.should_call_acpx}")
             
