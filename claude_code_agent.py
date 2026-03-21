@@ -336,16 +336,26 @@ class ClaudeCodeAgent:
             command.extend(["--model", self._settings["model"]])
             logger.debug(f"Using model from settings: {self._settings['model']}")
 
-        # Add auto-approve flag to skip permission prompts (only if NOT running as root)
-        # Claude CLI blocks --dangerously-skip-permissions with root/sudo for security
+        # Handle root/sudo: Claude CLI blocks --dangerously-skip-permissions with root
+        # Solution: Run as non-root user (dreampilot) via sudo -u
         is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
-        if not is_root:
-            command.append("--dangerously-skip-permissions")
-            logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
-        else:
-            logger.warning("Running as root - skipping --dangerously-skip-permissions (blocked by Claude CLI for security)")
+        run_as_user = None
+        
+        if is_root:
+            # Try to run as dreampilot user (has access to project directories)
+            run_as_user = "dreampilot"
+            logger.info(f"Running as root - will execute Claude CLI as user '{run_as_user}'")
+        
+        # Always add auto-approve flag (works when running as non-root via sudo -u)
+        command.append("--dangerously-skip-permissions")
+        logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
 
         command.extend(["-p", prompt])
+
+        # Wrap with sudo -u if running as root
+        if run_as_user:
+            command = ["sudo", "-u", run_as_user, *command]
+            logger.debug(f"Wrapped command with sudo -u {run_as_user}")
 
         logger.debug(f"Executing command: {' '.join(command[:3])}... (prompt truncated)")
         logger.debug(f"Working directory: {self.repo_path}")
