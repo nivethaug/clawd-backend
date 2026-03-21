@@ -450,37 +450,20 @@ I've checked your app and everything looks great! Your NatureStream app has:
             logger.warning(f"[ACP-CHAT] Failed to kill orphan processes: {e}")
     
     def run_acpx_chat_streaming(self, user_message: str, session_context: str = ""):
-        """
-        Run ACPX chat and yield progress in real-time (generator for SSE streaming).
-        
-        This method yields progress updates as ACPX produces output, providing
-        real-time feedback to users instead of waiting for completion.
-        
-        Args:
-            user_message: User's chat message
-            session_context: Previous conversation context
-            
-        Yields:
-            Str strings with filtered progress updates
-        """
         prompt = self._build_chat_prompt(user_message, session_context)
-        
-        # Log prompt structure
         logger.info(f"[ACP-CHAT] === STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars, timeout: {ACPX_TIMEOUT}s")
-        
-        # Build command (no --no-thinking flag - not supported by ACPX)
+
         acpx_path = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
         cmd = ["stdbuf", "-oL", "node", acpx_path, "claude", "exec", str(prompt)]
-        
-        # Set environment to disable thinking/reasoning output
+
         env = os.environ.copy()
         env["CLAUDE_DISABLE_THINKING"] = "1"
         env["DISABLE_THINKING"] = "1"
         env["NO_THINKING"] = "1"
-        
+
         logger.info(f"[ACP-CHAT] Starting streaming subprocess...")
-        
+
         try:
             process = subprocess.Popen(
                 cmd,
@@ -490,56 +473,82 @@ I've checked your app and everything looks great! Your NatureStream app has:
                 bufsize=1,
                 cwd=str(self.frontend_src_path),
                 universal_newlines=True,
-                env=env  # Pass environment with thinking disabled
+                env=env
             )
-            
+
             logger.info(f"[ACP-CHAT] Subprocess PID: {process.pid}")
-            
+
             raw_output = []
             start_time = time.time()
-            
-            # Stream output line by line
+
+            # Stateful block tracker — tracks depth across lines
+            brace_depth = 0
+            bracket_depth = 0
+            in_json_block = False
+
             while True:
                 line = process.stdout.readline()
-                
-                # Check timeout
+
                 if time.time() - start_time > ACPX_TIMEOUT:
                     logger.warning(f"[ACP-CHAT] Timeout")
                     process.kill()
                     return
-                
-                # Process exited
+
                 if process.poll() is not None:
                     remaining = process.stdout.read()
                     if remaining:
                         raw_output.append(remaining)
                     break
-                
+
                 line = line.rstrip('\n\r')
-                if line:
-                    raw_output.append(line)
-                    logger.info(f"[ACP-CHAT] Line: {line[:80]}")
-                    
-                    # Yield all lines EXCEPT noise (blacklist approach)
-                    if not self._is_inline_noise(line):
-                        yield line + "\n"
-            
-            # Process completed - apply block-level filtering
-            raw_text = '\n'.join(raw_output)
-            final_output = self._filter_blocks(raw_text)
-            
-            logger.info(f"[ACP-CHAT] Completed: {len(raw_text)} chars raw → {len(final_output)} chars filtered")
-            
-            # Kill orphan processes
+                if not line:
+                    continue
+
+                raw_output.append(line)
+                logger.info(f"[ACP-CHAT] Line: {line[:80]}")
+
+                stripped = line.strip()
+                lower = stripped.lower()
+
+                # ── Detect block entry triggers ──────────────────────────────
+                # Covers: "Error handling notification {", "} {", inline JSON starts
+                if (
+                    'error handling notification' in lower
+                    or lower in ('{', '[', '} {', '} [{', '] {')
+                    or (lower.endswith('{') and ':' not in lower and len(stripped) <= 6)
+                ):
+                    in_json_block = True
+                    brace_depth += stripped.count('{') - stripped.count('}')
+                    bracket_depth += stripped.count('[') - stripped.count(']')
+                    continue
+
+                # ── Track depth if already inside a block ────────────────────
+                if in_json_block:
+                    brace_depth += stripped.count('{') - stripped.count('}')
+                    bracket_depth += stripped.count('[') - stripped.count(']')
+                    if brace_depth <= 0 and bracket_depth <= 0:
+                        in_json_block = False
+                        brace_depth = 0
+                        bracket_depth = 0
+                    continue  # suppress all lines inside block
+
+                # ── Standard noise filter for non-block lines ────────────────
+                if self._is_inline_noise(line):
+                    continue
+
+                # ── Also suppress bare structural punctuation ────────────────
+                # Catches orphaned fragments like: "]," "  ]," "  }," etc.
+                if stripped in ('}', '{', ']', '[', '},', '],', '} {', '};', '];'):
+                    continue
+
+                yield line + "\n"
+
+            logger.info(f"[ACP-CHAT] Completed: {len(raw_output)} lines raw")
             self.kill_orphan_processes()
-            
-            # No need for completion marker - user sees real-time output
-                
+
         except Exception as e:
             logger.error(f"[ACP-CHAT] Stream error: {e}")
             yield f"Error: {str(e)}\n"
-            yield f"\n[ERROR] {str(e)}\n"
-
 
 def get_acp_chat_handler(session_key: str, project_path: str = None) -> Optional[ACPChatHandler]:
     """
