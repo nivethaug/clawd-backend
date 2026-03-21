@@ -476,7 +476,7 @@ Project Root: {self.frontend_src_path.parent.parent}
                     if self._is_useful_line(line) and not self._is_inline_noise(line):
                         yield line + "\n"
             
-            # Process completed - yield final filtered output
+            # Process completed - apply block-level filtering
             raw_text = '\n'.join(raw_output)
             final_output = self._filter_blocks(raw_text)
             
@@ -485,11 +485,8 @@ Project Root: {self.frontend_src_path.parent.parent}
             # Kill orphan processes
             self.kill_orphan_processes()
             
-            # Yield complete message
-            if final_output:
-                yield f"\n[COMPLETE]\n{final_output}\n"
-            else:
-                yield "\n[COMPLETE]\nOperation finished.\n"
+            # Yield completion marker only (content already streamed)
+            yield "[COMPLETE]\n"
                 
         except Exception as e:
             logger.error(f"[ACP-CHAT] Stream error: {e}")
