@@ -693,9 +693,13 @@ I've checked your app and everything looks great! Your NatureStream app has:
         chunk_queue = asyncio.Queue()
         query_complete = asyncio.Event()
         
+        # Store all chunks for later retrieval if client disconnects
+        all_chunks = []
+        
         async def on_chunk(text: str):
             """Callback for streaming chunks - puts in queue for real-time yielding."""
             logger.info(f"[ACP-CHAT] on_chunk called: {text[:80]}...")
+            all_chunks.append(text)  # Store for later
             try:
                 await chunk_queue.put(text)
                 logger.info(f"[ACP-CHAT] Chunk put in queue, size now: {chunk_queue.qsize()}")
@@ -755,8 +759,11 @@ I've checked your app and everything looks great! Your NatureStream app has:
             # Wait for query to complete (shielded from this cancellation)
             try:
                 await asyncio.shield(query_task)
+                logger.info(f"[ACP-CHAT] Background query completed, chunks collected: {len(all_chunks)}")
             except asyncio.CancelledError:
-                pass
+                logger.info(f"[ACP-CHAT] Shield cancelled, but query may still be running")
+            # Store all chunks for app.py to save
+            self._last_query_chunks = all_chunks
             raise
         finally:
             # Only cancel if query is truly abandoned

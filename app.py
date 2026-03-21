@@ -2315,10 +2315,9 @@ async def chat_stream_endpoint(request: ChatRequest):
             async def acp_streaming_response():
                 """Stream output in real-time via SSE using best available backend."""
                 full_response = []
-                save_complete = asyncio.Event()
                 
                 async def save_response_to_db(content: str):
-                    """Save response to DB (shielded from cancellation)."""
+                    """Save response to DB."""
                     try:
                         with get_db() as save_conn:
                             save_conn.execute(
@@ -2333,8 +2332,32 @@ async def chat_stream_endpoint(request: ChatRequest):
                         logger.info(f"[ACP-STREAM] Saved assistant message ({len(content)} chars)")
                     except Exception as save_err:
                         logger.error(f"[ACP-STREAM] Failed to save message: {save_err}")
-                    finally:
-                        save_complete.set()
+                
+                async def background_save_when_complete():
+                    """Wait for query to complete in background, then save to DB."""
+                    # Wait for the handler to signal completion
+                    max_wait = 600  # 10 minutes max
+                    waited = 0
+                    while waited < max_wait:
+                        await asyncio.sleep(1)
+                        waited += 1
+                        # Check if handler has collected all chunks
+                        if hasattr(handler, '_last_query_chunks'):
+                            chunks = handler._last_query_chunks
+                            # Filter out progress messages
+                            real_chunks = [c for c in chunks if not c.startswith('⏳ Still working')]
+                            if real_chunks:
+                                content = '\n'.join(real_chunks).strip()
+                                if content:
+                                    logger.info(f"[ACP-STREAM] Background save: {len(content)} chars after {waited}s")
+                                    await save_response_to_db(content)
+                                    return
+                        # Also check for direct response
+                        if hasattr(handler, '_last_query_response') and handler._last_query_response:
+                            logger.info(f"[ACP-STREAM] Background save from response: {len(handler._last_query_response)} chars")
+                            await save_response_to_db(handler._last_query_response)
+                            return
+                    logger.warning(f"[ACP-STREAM] Background save timed out after {max_wait}s")
                 
                 try:
                     # Use unified streaming method
@@ -2362,21 +2385,43 @@ async def chat_stream_endpoint(request: ChatRequest):
                     logger.info(f"[ACP-STREAM] === ACP STREAMING COMPLETED ===")
                     
                 except asyncio.CancelledError:
-                    # Client disconnected - wait for query to complete and save anyway
-                    logger.warning(f"[ACP-STREAM] Client disconnected, waiting for query to complete...")
+                    # Client disconnected - spawn background task to save when complete
+                    logger.warning(f"[ACP-STREAM] Client disconnected, spawning background save task...")
                     
-                    # Get the response from handler (it continues in background)
-                    if hasattr(handler, '_last_query_response') and handler._last_query_response:
-                        assistant_content = handler._last_query_response
-                        logger.info(f"[ACP-STREAM] Got response from background query: {len(assistant_content)} chars")
-                        # Shield the save from cancellation
-                        await asyncio.shield(save_response_to_db(assistant_content))
-                    else:
-                        # Collect any chunks we already received
-                        assistant_content = ''.join(full_response).strip()
-                        if assistant_content:
-                            logger.info(f"[ACP-STREAM] Saving partial response: {len(assistant_content)} chars")
-                            await asyncio.shield(save_response_to_db(assistant_content))
+                    # Filter out progress messages from what we have so far
+                    real_chunks = [c for c in full_response if not c.startswith('⏳ Still working')]
+                    
+                    # Spawn background task that will wait and save
+                    async def wait_and_save():
+                        """Wait for query completion then save."""
+                        try:
+                            # Give the query time to complete and collect chunks
+                            await asyncio.sleep(5)  # Initial wait
+                            
+                            # Check handler for collected chunks
+                            if hasattr(handler, '_last_query_chunks'):
+                                chunks = handler._last_query_chunks
+                                real = [c for c in chunks if not c.startswith('⏳ Still working')]
+                                if real:
+                                    content = '\n'.join(real).strip()
+                                    if content:
+                                        logger.info(f"[ACP-STREAM] Background saved: {len(content)} chars")
+                                        await save_response_to_db(content)
+                                        return
+                            
+                            # Fall back to what we collected before disconnect
+                            if real_chunks:
+                                content = '\n'.join(real_chunks).strip()
+                                logger.info(f"[ACP-STREAM] Background saved (partial): {len(content)} chars")
+                                await save_response_to_db(content)
+                        except Exception as e:
+                            logger.error(f"[ACP-STREAM] Background save error: {e}")
+                    
+                    # Create task that survives disconnection
+                    import asyncio
+                    asyncio.create_task(asyncio.shield(wait_and_save()))
+                    logger.info(f"[ACP-STREAM] Background save task spawned")
+                    
                     
                     logger.info(f"[ACP-STREAM] === ACP STREAMING COMPLETED (client disconnected) ===")
                     raise
