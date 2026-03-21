@@ -470,9 +470,15 @@ I've checked your app and everything looks great! Your NatureStream app has:
         logger.info(f"[ACP-CHAT] === STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars, timeout: {ACPX_TIMEOUT}s")
         
-        # Build command
+        # Build command - include --no-thinking flag
         acpx_path = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
-        cmd = ["stdbuf", "-oL", "node", acpx_path, "claude", "exec", str(prompt)]
+        cmd = ["stdbuf", "-oL", "node", acpx_path, "claude", "exec", "--no-thinking", str(prompt)]
+        
+        # Set environment to disable thinking/reasoning output
+        env = os.environ.copy()
+        env["CLAUDE_DISABLE_THINKING"] = "1"
+        env["DISABLE_THINKING"] = "1"
+        env["NO_THINKING"] = "1"
         
         logger.info(f"[ACP-CHAT] Starting streaming subprocess...")
         
@@ -484,7 +490,8 @@ I've checked your app and everything looks great! Your NatureStream app has:
                 text=True,
                 bufsize=1,
                 cwd=str(self.frontend_src_path),
-                universal_newlines=True
+                universal_newlines=True,
+                env=env  # Pass environment with thinking disabled
             )
             
             logger.info(f"[ACP-CHAT] Subprocess PID: {process.pid}")
