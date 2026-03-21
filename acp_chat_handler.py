@@ -101,6 +101,11 @@ class ACPChatHandler:
 2. **Technical Mode (Only When Asked)**:
    - If user asks "show me the code", "technical details", "file structure", etc.
    - Then you can show folder structure, code snippets, implementation details
+   - **ALWAYS check agent/README.md FIRST before reading source code:**
+     - Frontend: Read `frontend/agent/README.md` for navigation guides
+     - Backend: Read `backend/agent/README.md` for API guides and database schema
+   - The agent READMEs contain AI-friendly guides - use them before diving into source!
+   - Only read raw source files if README doesn't answer the question
    - Start with project.json in the root folder
    - Navigate to frontend/backend folders as needed
 
@@ -111,6 +116,8 @@ Project Root: {self.frontend_src_path.parent.parent}
 
 **Key Files:**
 - `project.json` (root) - Project information
+- `frontend/agent/README.md` - **AI guide for frontend (READ FIRST for frontend questions)**
+- `backend/agent/README.md` - **AI guide for backend (READ FIRST for backend questions)**
 - `frontend/` - React app (pages, components)
 - `backend/` - API server (if applicable)
 
