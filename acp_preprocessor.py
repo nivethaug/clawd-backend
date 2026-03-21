@@ -66,6 +66,14 @@ class ACPPreprocessor:
         self.use_glm = use_glm  # Always use GLM when requested
         self.use_groq = bool(GROQ_API_KEY)  # Groq as fallback
         
+        # Check if API keys are configured
+        self.glm_key_configured = bool(Z_AI_API_KEY)
+        
+        if not self.glm_key_configured:
+            logger.warning("[ACP-PRE] Z_AI_API_KEY not configured - GLM calls will fail")
+            if self.use_groq:
+                logger.info("[ACP-PRE] Falling back to Groq for classification")
+        
         # Always enable preprocessor (GLM doesn't require API key check)
         self.enabled = True
         logger.info(f"[ACP-PRE] Initialized with GLM-4-Flash (Z.ai) - always enabled")
@@ -143,8 +151,15 @@ Examples:
         user_prompt = f'User message: "{user_message}"\n\nClassify and respond with JSON only:'
 
         try:
-            logger.debug(f"[ACP-PRE] Calling {'GLM' if self.use_glm else 'Groq'} for classification")
-            if self.use_glm:
+            # Check if GLM API key is available, fallback to Groq if not
+            use_glm_for_call = self.use_glm and self.glm_key_configured
+            
+            if self.use_glm and not self.glm_key_configured:
+                logger.warning("[ACP-PRE] GLM API key not configured, falling back to Groq")
+            
+            logger.debug(f"[ACP-PRE] Calling {'GLM' if use_glm_for_call else 'Groq'} for classification")
+            
+            if use_glm_for_call:
                 response = await self._call_glm(system_prompt, user_prompt)
             else:
                 response = await self._call_groq_fast(system_prompt, user_prompt)
@@ -182,6 +197,9 @@ Examples:
         GLM can read files to answer questions without calling ACPX.
         Handles multi-turn tool call loops.
         """
+        if not Z_AI_API_KEY:
+            raise ValueError("Z_AI_API_KEY not configured")
+        
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -263,6 +281,9 @@ Examples:
 
     async def _call_glm(self, system_prompt: str, user_prompt: str) -> str:
         """Call GLM-4-Flash via Z.ai API (simple, no tools)."""
+        if not Z_AI_API_KEY:
+            raise ValueError("Z_AI_API_KEY not configured")
+        
         logger.debug(f"[ACP-PRE] Calling GLM-4-Flash API at {Z_AI_API_BASE}")
         async with httpx.AsyncClient(timeout=PREPROCESSOR_TIMEOUT) as client:
             response = await client.post(
