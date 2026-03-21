@@ -17,32 +17,34 @@ This folder helps AI assistants understand and modify the codebase efficiently.
 | **Entry Point** | `main:app` (uvicorn ASGI) |
 | **Default Port** | `8010` |
 
-### Common PM2 Commands
+### How to Publish Backend
+
+From the `backend/` directory:
 
 ```bash
-# Check status
-pm2 status
+# Install deps only (no restart)
+python3 buildpublish.py
 
-# View logs
-pm2 logs {domain}-backend
-
-# Restart after changes
-pm2 restart {domain}-backend
-
-# Stop service
-pm2 stop {domain}-backend
-
-# Start service
-pm2 start ecosystem.config.json --only {domain}-backend
-
-# Save process list (persist across reboot)
-pm2 save
+# Install deps + restart PM2 + reload nginx
+python3 buildpublish.py --restart
 ```
 
-### After Any Code Change
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--skip-deps` | Skip pip install |
+| `--skip-migrations` | Skip database migrations |
+| `--restart` | Restart PM2 and nginx |
+
+### Manual PM2 Commands
 
 ```bash
-pm2 restart {domain}-backend && pm2 logs {domain}-backend --lines 20
+pm2 status                          # Check status
+pm2 logs {domain}-backend           # View logs
+pm2 restart {domain}-backend        # Restart service
+pm2 stop {domain}-backend           # Stop service
+pm2 save                            # Persist across reboot
 ```
 
 ---
