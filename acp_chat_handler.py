@@ -12,7 +12,8 @@ import time
 import signal
 import threading
 import logging
-from typing import Dict, Any, Optional
+import asyncio
+from typing import Dict, Any, Optional, Generator
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 ACPX_TIMEOUT = 900  # 15 minutes for interactive chat
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
+USE_PREPROCESSOR = os.getenv("ACP_USE_PREPROCESSOR", "true").lower() == "true"
 
 
 class ACPChatHandler:
@@ -502,8 +504,48 @@ I've checked your app and everything looks great! Your NatureStream app has:
         except Exception as e:
             logger.warning(f"[ACP-CHAT] Failed to kill orphan processes: {e}")
     
+    async def _preprocess_message(self, user_message: str) -> Optional[str]:
+        """
+        Preprocess user message with fast LLM.
+        
+        Returns:
+            Direct response if no ACPX needed, None otherwise
+        """
+        if not USE_PREPROCESSOR:
+            return None
+        
+        try:
+            from acp_preprocessor import preprocess_message
+            result = await preprocess_message(user_message, self.project_name)
+            
+            logger.info(f"[ACP-CHAT] Preprocessor: intent={result.intent.value}, needs_acpx={result.should_call_acpx}")
+            
+            # If preprocessor says no ACPX needed, return direct response
+            if not result.should_call_acpx and result.direct_response:
+                logger.info(f"[ACP-CHAT] Using direct response from preprocessor")
+                return result.direct_response
+            
+            # If we have an enhanced prompt, we'll use it
+            if result.enhanced_prompt:
+                logger.info(f"[ACP-CHAT] Using enhanced prompt: {result.enhanced_prompt[:100]}...")
+                # Store for use in _build_chat_prompt
+                self._enhanced_prompt = result.enhanced_prompt
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"[ACP-CHAT] Preprocessor failed: {e}, continuing with ACPX")
+            return None
+
     def run_acpx_chat_streaming(self, user_message: str, session_context: str = ""):
-        prompt = self._build_chat_prompt(user_message, session_context)
+        # Check if we have an enhanced prompt from preprocessor
+        enhanced = getattr(self, '_enhanced_prompt', None)
+        if enhanced:
+            prompt = self._build_chat_prompt(enhanced, session_context)
+            self._enhanced_prompt = None  # Reset
+        else:
+            prompt = self._build_chat_prompt(user_message, session_context)
+        
         logger.info(f"[ACP-CHAT] === STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars, timeout: {ACPX_TIMEOUT}s")
 
@@ -609,6 +651,36 @@ I've checked your app and everything looks great! Your NatureStream app has:
         except Exception as e:
             logger.error(f"[ACP-CHAT] Stream error: {e}")
             yield f"Error: {str(e)}\n"
+
+
+async def check_preprocessor(user_message: str, project_name: str) -> Optional[str]:
+    """
+    Check if preprocessor can handle the message without ACPX.
+    
+    Args:
+        user_message: User's chat message
+        project_name: Name of the project
+        
+    Returns:
+        Direct response if preprocessor can handle it, None if ACPX needed
+    """
+    if not USE_PREPROCESSOR:
+        return None
+    
+    try:
+        from acp_preprocessor import preprocess_message
+        result = await preprocess_message(user_message, project_name)
+        
+        if not result.should_call_acpx and result.direct_response:
+            logger.info(f"[ACP-PRE] Direct response for: {user_message[:50]}...")
+            return result.direct_response
+        
+        return None
+        
+    except Exception as e:
+        logger.warning(f"[ACP-PRE] Preprocessor check failed: {e}")
+        return None
+
 
 def get_acp_chat_handler(session_key: str, project_path: str = None) -> Optional[ACPChatHandler]:
     """
