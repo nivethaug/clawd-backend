@@ -2362,9 +2362,9 @@ async def chat_stream_endpoint(request: ChatRequest):
                 try:
                     # Use unified streaming method
                     async for chunk in handler.run_chat_streaming_unified(acp_user_content, session_context):
-                        # Yield SSE event for each chunk
+                        # Yield SSE event for each chunk (with newline for chat display)
                         full_response.append(chunk)
-                        event_data = json.dumps({'choices': [{'delta': {'content': chunk}}]})
+                        event_data = json.dumps({'choices': [{'delta': {'content': chunk + "\n"}}]})
                         yield f"data: {event_data}\n\n"
                         logger.info(f"[ACP-STREAM] Yielded chunk: {len(chunk)} chars")
                     
