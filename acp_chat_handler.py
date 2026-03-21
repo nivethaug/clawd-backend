@@ -291,21 +291,19 @@ I've checked your app and everything looks great! Your NatureStream app has:
             logger.info(f"[ACP-CHAT] ... ({remaining} more lines)")
         logger.info(f"[ACP-CHAT] === END PROMPT PREVIEW ===")
         
-        # Build command - use stdbuf for line buffering (matching telegram-acpx-devbot)
-        # Direct node execution is more reliable than acpx wrapper
-        acpx_path = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
-        
+        # Build command - use acpx directly with clean output format
         cmd = [
             "stdbuf", "-oL",  # Line-buffered output for real-time streaming
-            "node", acpx_path,
-            "claude", "exec",
+            "acpx", "claude", "exec",
+            "--format", "text",  # Clean text output (no JSON noise)
+            "--approve-all",  # Auto-approve permission requests
             str(prompt)
         ]
         
         logger.info(f"[ACP-CHAT] Running ACPX for project: {self.project_name}")
         logger.info(f"[ACP-CHAT] Working directory: {self.frontend_src_path}")
         logger.info(f"[ACP-CHAT] User message: {user_message[:100]}...")
-        logger.info(f"[ACP-CHAT] Command: stdbuf -oL node {acpx_path} claude exec <prompt>")
+        logger.info(f"[ACP-CHAT] Command: acpx claude exec --format text --approve-all <prompt>")
         logger.info(f"[ACP-CHAT] Prompt length: {len(prompt)} chars")
         
         try:
@@ -456,13 +454,16 @@ I've checked your app and everything looks great! Your NatureStream app has:
         logger.info(f"[ACP-CHAT] === STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars, timeout: {ACPX_TIMEOUT}s")
 
-        acpx_path = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
-        cmd = ["stdbuf", "-oL", "node", acpx_path, "claude", "exec", str(prompt)]
+        # Use acpx directly with --format text for clean output
+        cmd = [
+            "stdbuf", "-oL",
+            "acpx", "claude", "exec",
+            "--format", "text",
+            "--approve-all",
+            str(prompt)
+        ]
 
         env = os.environ.copy()
-        env["CLAUDE_DISABLE_THINKING"] = "1"
-        env["DISABLE_THINKING"] = "1"
-        env["NO_THINKING"] = "1"
 
         logger.info(f"[ACP-CHAT] Starting streaming subprocess...")
 
