@@ -337,22 +337,27 @@ class ClaudeCodeAgent:
             logger.debug(f"Using model from settings: {self._settings['model']}")
 
         # Handle root/sudo: Claude CLI blocks --dangerously-skip-permissions with root
-        # Solution: Run as non-root user (dreampilot) via sudo -u
+        # Solution: Run as non-root user via sudo -u (configurable via env var)
         is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
         run_as_user = None
         
         if is_root:
-            # Try to run as dreampilot user (has access to project directories)
-            run_as_user = "dreampilot"
-            logger.info(f"Running as root - will execute Claude CLI as user '{run_as_user}'")
+            # Get username from environment variable (required when running as root)
+            run_as_user = os.environ.get("CLAUDE_RUN_AS_USER")
+            if run_as_user:
+                logger.info(f"Running as root - will execute Claude CLI as user '{run_as_user}' (from CLAUDE_RUN_AS_USER)")
+            else:
+                logger.error("Running as root but CLAUDE_RUN_AS_USER not set!")
+                logger.error("Set CLAUDE_RUN_AS_USER environment variable to a non-root username")
+                logger.error("Example: export CLAUDE_RUN_AS_USER=ubuntu")
         
-        # Always add auto-approve flag (works when running as non-root via sudo -u)
+        # Add auto-approve flag (works when running as non-root via sudo -u)
         command.append("--dangerously-skip-permissions")
         logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
 
         command.extend(["-p", prompt])
 
-        # Wrap with sudo -u if running as root
+        # Wrap with sudo -u if running as root and user is configured
         if run_as_user:
             command = ["sudo", "-u", run_as_user, *command]
             logger.debug(f"Wrapped command with sudo -u {run_as_user}")
