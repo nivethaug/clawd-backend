@@ -90,8 +90,9 @@ def npm_install():
     
     # Match infrastructure_manager.py approach
     # Note: --include=dev is not universally supported, dev deps install by default
+    # Use --prefer-offline to use npm cache when available
     result = subprocess.run(
-        ["npm", "install", "--legacy-peer-deps"],
+        ["npm", "install", "--prefer-offline", "--legacy-peer-deps"],
         capture_output=True,
         text=True,
         timeout=600

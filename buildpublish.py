@@ -64,10 +64,10 @@ class BuildPublisher:
             if clean:
                 self._clean_frontend_caches()
             
-            # Step 2: npm install
+            # Step 2: npm install (prefer cache)
             logger.info("📦 Installing dependencies...")
             install_result = subprocess.run(
-                ["npm", "install"],
+                ["npm", "install", "--prefer-offline", "--legacy-peer-deps"],
                 cwd=str(self.frontend_path),
                 capture_output=True,
                 text=True,
