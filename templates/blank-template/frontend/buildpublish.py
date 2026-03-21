@@ -83,21 +83,32 @@ def remove_node_modules():
 
 
 def npm_install():
-    """Install npm dependencies with dev deps and legacy peer deps"""
+    """Install npm dependencies with legacy peer deps (dev deps install by default)"""
     print("\n" + "="*50)
     print("NPM INSTALL")
     print("="*50)
     
-    # Match infrastructure_manager.py flags
+    # Match infrastructure_manager.py approach
+    # Note: --include=dev is not universally supported, dev deps install by default
     result = subprocess.run(
-        ["npm", "install", "--include=dev", "--legacy-peer-deps"],
+        ["npm", "install", "--legacy-peer-deps"],
         capture_output=True,
         text=True,
         timeout=600
     )
     
     if result.returncode != 0:
-        print(f"✗ npm install failed: {result.stderr[:300]}")
+        # Extract actual errors from stderr (npm warnings go to stderr but don't fail)
+        stderr_lines = result.stderr.split('\n')
+        error_lines = [line for line in stderr_lines if any(kw in line.lower() for kw in ['error', 'err!', 'econnrefused', 'eacces', 'enoent'])]
+        
+        print(f"✗ npm install failed with code {result.returncode}")
+        if error_lines:
+            print("Errors:")
+            for line in error_lines[-10:]:
+                print(f"  {line}")
+        else:
+            print(f"stderr: {result.stderr[:500]}")
         return False
     
     print("✓ npm install completed (including dev dependencies)")
