@@ -276,3 +276,78 @@ Use this to plan pages before implementation.
 2. **Always use `@/` imports** - Configured in tsconfig
 3. **Use Tailwind classes** - No inline styles or CSS files
 4. **Run `npm run build`** - Verify changes compile before committing
+
+---
+
+## 🚀 How to Publish Frontend
+
+### Quick Publish (Recommended)
+
+From the `frontend/` directory, run:
+
+```bash
+python3 buildpublish.py
+```
+
+This single command:
+1. Cleans Vite caches
+2. Removes stale node_modules
+3. Runs `npm install` (with dev dependencies)
+4. Runs `npm run build`
+5. Verifies dist/ directory
+6. Fixes file permissions (755/644)
+7. Cleans up node_modules (saves ~280MB)
+
+### Output Example
+
+```
+==================================================
+CLEAN VITE CACHES
+==================================================
+✓ Cleaned 0 cache directories
+
+==================================================
+NPM INSTALL
+==================================================
+✓ npm install completed (including dev dependencies)
+
+==================================================
+NPM RUN BUILD
+==================================================
+✓ npm run build completed
+
+==================================================
+VERIFY DIST
+==================================================
+✓ Dist verified: 6 items, index.html: 1203 bytes
+
+==================================================
+✓ BUILD & PUBLISH COMPLETE
+==================================================
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--skip-install` | Skip npm install |
+| `--skip-build` | Skip npm run build |
+| `--no-cleanup` | Keep node_modules after build |
+| `--project-name` | PM2 app name (uses `{project_name}` placeholder) |
+| `--restart` | Restart PM2 frontend service after build |
+
+### With PM2 Restart
+
+```bash
+python3 buildpublish.py --restart
+# Restarts {domain}-frontend PM2 process
+```
+
+### When to Use
+
+| Scenario | Command |
+|----------|---------|
+| After code changes | `python3 buildpublish.py` |
+| Deploy to production | `python3 buildpublish.py --restart` |
+| Quick rebuild (deps cached) | `python3 buildpublish.py --skip-install` |
+| Just install deps | `python3 buildpublish.py --skip-build --no-cleanup` |
