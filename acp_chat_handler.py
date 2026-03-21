@@ -689,13 +689,15 @@ I've checked your app and everything looks great! Your NatureStream app has:
         1. ClaudeCodeAgent streaming (async) - if available and enabled
         2. ACPX streaming (fallback, sync via executor)
         """
-        use_claude = os.environ.get('ACP_USE_CLAUDE_AGENT', 'true').lower() == 'true'
-        
-        if use_claude and self.claude_agent:
+        # Use same logic as run_chat_unified - check USE_CLAUDE_AGENT constant
+        if USE_CLAUDE_AGENT:
             logger.info(f"[ACP-CHAT] Using ClaudeCodeAgent streaming backend")
-            async for chunk in self.run_claude_chat_streaming(user_message, session_context):
-                yield chunk
-            return
+            try:
+                async for chunk in self.run_claude_chat_streaming(user_message, session_context):
+                    yield chunk
+                return
+            except Exception as e:
+                logger.warning(f"[ACP-CHAT] Claude Agent streaming failed, falling back to ACPX: {e}")
         
         # Fallback to ACPX streaming
         logger.info(f"[ACP-CHAT] Using ACPX streaming backend (fallback)")
