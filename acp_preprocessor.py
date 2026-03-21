@@ -2,7 +2,7 @@
 """
 ACP Preprocessor - Fast LLM preprocessing before ACPX calls.
 
-Uses GLM-4-Flash (via Zhipu AI or Groq) to:
+Uses GLM-4-Flash (via Z.ai or Groq) to:
 1. Classify user intent (simple question vs code changes needed)
 2. Enhance vague requests into clear instructions
 3. Skip ACPX for simple conversational messages
@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 PREPROCESSOR_TIMEOUT = 10  # Fast timeout for preprocessing
-ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
+Z_AI_API_KEY = os.getenv("Z_AI_API_KEY", "cffbf9f73de341da8e04197b2e72df48.wwX0uuQkgjOMuIqi")
+Z_AI_API_BASE = os.getenv("Z_AI_API_BASE", "https://api.z.ai/api/coding/paas/v4")
+Z_AI_MODEL = os.getenv("Z_AI_MODEL", "glm-4-flash")  # Fast model for preprocessing
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 
@@ -47,7 +49,7 @@ class ACPPreprocessor:
     """
     Fast LLM preprocessor for ACP chat.
     
-    Uses GLM-4-Flash (Zhipu AI) or Llama-3.1-8B (Groq) for fast classification.
+    Uses GLM-4-Flash (Z.ai) or Llama-3.1-8B (Groq) for fast classification.
     """
     
     def __init__(self, use_glm: bool = True):
@@ -57,7 +59,7 @@ class ACPPreprocessor:
         Args:
             use_glm: If True, prefer GLM-4-Flash. If False, use Groq Llama.
         """
-        self.use_glm = use_glm and bool(ZHIPU_API_KEY)
+        self.use_glm = use_glm and bool(Z_AI_API_KEY)
         self.use_groq = bool(GROQ_API_KEY)
         
         if not self.use_glm and not self.use_groq:
@@ -65,7 +67,7 @@ class ACPPreprocessor:
             self.enabled = False
         else:
             self.enabled = True
-            logger.info(f"[ACP-PRE] Initialized with {'GLM-4-Flash' if self.use_glm else 'Groq Llama'}")
+            logger.info(f"[ACP-PRE] Initialized with {'GLM-4-Flash (Z.ai)' if self.use_glm else 'Groq Llama'}")
     
     async def classify_intent(self, user_message: str, project_name: str) -> PreprocessResult:
         """
@@ -133,16 +135,16 @@ Examples:
             )
     
     async def _call_glm(self, system_prompt: str, user_prompt: str) -> str:
-        """Call GLM-4-Flash via Zhipu AI API."""
+        """Call GLM-4-Flash via Z.ai API (OpenAI-compatible)."""
         async with httpx.AsyncClient(timeout=PREPROCESSOR_TIMEOUT) as client:
             response = await client.post(
-                "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                f"{Z_AI_API_BASE}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {ZHIPU_API_KEY}",
+                    "Authorization": f"Bearer {Z_AI_API_KEY}",
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "glm-4-flash",
+                    "model": Z_AI_MODEL,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}

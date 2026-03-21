@@ -2240,6 +2240,50 @@ async def chat_stream_endpoint(request: ChatRequest):
             except Exception as ctx_err:
                 logger.warning(f"[ACP-STREAM] Could not load context: {ctx_err}")
             
+            # ── PREPROCESSOR CHECK ────────────────────────────────────────────
+            # Try fast LLM first to see if we can skip ACPX
+            direct_response = None
+            try:
+                from acp_chat_handler import check_preprocessor
+                project_name = handler.project_name if handler else "App"
+                direct_response = await check_preprocessor(acp_user_content, project_name)
+                if direct_response:
+                    logger.info(f"[ACP-STREAM] Using preprocessor direct response")
+            except Exception as pre_err:
+                logger.warning(f"[ACP-STREAM] Preprocessor check failed: {pre_err}")
+            
+            # If preprocessor handled it, return direct response
+            if direct_response:
+                async def preprocessor_response():
+                    """Return preprocessor's direct response."""
+                    event_data = json.dumps({'choices': [{'delta': {'content': direct_response + "\n"}}]})
+                    yield f"data: {event_data}\n\n"
+                    
+                    # Save to database
+                    try:
+                        with get_db() as save_conn:
+                            save_conn.execute(
+                                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                                (session_id, 'assistant', direct_response)
+                            )
+                            save_conn.commit()
+                            logger.info(f"[ACP-STREAM] Saved preprocessor response ({len(direct_response)} chars)")
+                    except Exception as save_err:
+                        logger.error(f"[ACP-STREAM] Failed to save preprocessor response: {save_err}")
+                    
+                    logger.info(f"[ACP-STREAM] === PREPROCESSOR RESPONSE COMPLETED ===")
+                
+                return StreamingResponse(
+                    preprocessor_response(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no"
+                    }
+                )
+            # ── END PREPROCESSOR CHECK ────────────────────────────────────────
+            
             # Run ACPX with real-time streaming
             logger.info(f"[ACP-STREAM] Starting ACPX streaming (timeout: 900s)...")
             
