@@ -10,8 +10,9 @@ This folder helps AI assistants understand and modify the codebase efficiently.
 
 | Property | Value |
 |----------|-------|
-| **PM2 Process Name** | `{domain}-api` |
+| **PM2 Process Name** | `{domain}-backend` |
 | **Domain** | `{domain}.dreambigwithai.com` |
+| **API Domain** | `{domain}-api.dreambigwithai.com` |
 | **PM2 Config File** | `ecosystem.config.json` |
 | **Entry Point** | `main:app` (uvicorn ASGI) |
 | **Default Port** | `8010` |
@@ -23,16 +24,16 @@ This folder helps AI assistants understand and modify the codebase efficiently.
 pm2 status
 
 # View logs
-pm2 logs {domain}-api
+pm2 logs {domain}-backend
 
 # Restart after changes
-pm2 restart {domain}-api
+pm2 restart {domain}-backend
 
 # Stop service
-pm2 stop {domain}-api
+pm2 stop {domain}-backend
 
 # Start service
-pm2 start ecosystem.config.json --only {domain}-api
+pm2 start ecosystem.config.json --only {domain}-backend
 
 # Save process list (persist across reboot)
 pm2 save
@@ -41,7 +42,7 @@ pm2 save
 ### After Any Code Change
 
 ```bash
-pm2 restart {domain}-api && pm2 logs {domain}-api --lines 20
+pm2 restart {domain}-backend && pm2 logs {domain}-backend --lines 20
 ```
 
 ---
