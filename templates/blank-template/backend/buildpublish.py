@@ -12,10 +12,14 @@ import re
 from pathlib import Path
 
 
-def run(cmd: str, cwd: str = None) -> bool:
+# Shared virtual environment path (same as infrastructure_manager.py)
+SHARED_VENV_PATH = "/root/dreampilot/dreampilotvenv"
+
+
+def run(cmd: str, cwd: str = None, env: dict = None) -> bool:
     """Run shell command, return True if success"""
     print(f"\n▶ {cmd}")
-    result = subprocess.run(cmd, shell=True, cwd=cwd)
+    result = subprocess.run(cmd, shell=True, cwd=cwd, env=env)
     if result.returncode != 0:
         print(f"✗ Failed: {cmd}")
         return False
@@ -23,8 +27,8 @@ def run(cmd: str, cwd: str = None) -> bool:
     return True
 
 
-def install_dependencies():
-    """Install Python dependencies"""
+def install_dependencies(venv_path: str = None):
+    """Install Python dependencies using shared venv with caching"""
     print("\n" + "="*50)
     print("PIP INSTALL")
     print("="*50)
@@ -34,7 +38,22 @@ def install_dependencies():
         print("⚠ No requirements.txt found, skipping")
         return True
     
-    return run("pip install -r requirements.txt")
+    # Determine venv path
+    venv = venv_path or SHARED_VENV_PATH
+    pip_path = Path(venv) / "bin" / "pip"
+    
+    # Check if venv exists
+    if pip_path.exists():
+        print(f"📦 Using shared venv: {venv}")
+        pip_cmd = str(pip_path)
+    else:
+        print("⚠ Shared venv not found, using system pip")
+        pip_cmd = "pip"
+    
+    # Install with caching options (optimized flags)
+    # --prefer-binary: Use binary wheels (faster, no compilation)
+    # --no-cache-dir: Disable cache to avoid stale packages (optional)
+    return run(f"{pip_cmd} install --prefer-binary -r requirements.txt")
 
 
 def verify_main():
@@ -47,16 +66,25 @@ def verify_main():
     return True
 
 
-def restart_pm2(project_name: str = None):
-    """Restart PM2 process"""
+def restart_pm2(domain: str = None):
+    """Restart PM2 process
+    
+    Args:
+        domain: Domain name (PM2 app name is {domain}-backend per infrastructure_manager.py)
+                Uses {project_name} placeholder by default, replaced by infra manager
+    """
     print("\n" + "="*50)
     print("PM2 RESTART")
     print("="*50)
     
-    if project_name:
-        return run(f"pm2 restart {project_name}-backend")
-    else:
-        return run("pm2 restart all")
+    # Use placeholder if not provided (will be replaced by infra manager)
+    if not domain:
+        domain = "{project_name}"
+    
+    # PM2 app name convention: {domain}-backend (matches infrastructure_manager.py)
+    app_name = f"{domain}-backend"
+    print(f"📦 Restarting PM2 app: {app_name}")
+    return run(f"pm2 restart {app_name}")
 
 
 def reload_nginx():
@@ -65,62 +93,6 @@ def reload_nginx():
     print("NGINX RELOAD")
     print("="*50)
     return run("sudo nginx -s reload") or run("nginx -s reload")
-
-
-def update_agent_readme(domain: str):
-    """Replace {domain} placeholder in agent/README.md with actual domain"""
-    print("\n" + "="*50)
-    print("UPDATE AGENT README")
-    print("="*50)
-    
-    readme_path = Path("agent/README.md")
-    if not readme_path.exists():
-        print("⚠ agent/README.md not found, skipping")
-        return True
-    
-    try:
-        content = readme_path.read_text(encoding="utf-8")
-        
-        # Replace {domain} placeholder
-        if "{domain}" in content:
-            content = content.replace("{domain}", domain)
-            readme_path.write_text(content, encoding="utf-8")
-            print(f"✓ Replaced {{domain}} → {domain} in agent/README.md")
-        else:
-            print("⚠ No {domain} placeholder found in agent/README.md")
-        
-        return True
-    except Exception as e:
-        print(f"✗ Failed to update agent/README.md: {e}")
-        return False
-
-
-def update_frontend_api_config(domain: str):
-    """Replace {domain} placeholder in frontend/src/lib/api-config.ts with actual domain"""
-    print("\n" + "="*50)
-    print("UPDATE FRONTEND API CONFIG")
-    print("="*50)
-    
-    api_config_path = Path("../frontend/src/lib/api-config.ts")
-    if not api_config_path.exists():
-        print("⚠ frontend/src/lib/api-config.ts not found, skipping")
-        return True
-    
-    try:
-        content = api_config_path.read_text(encoding="utf-8")
-        
-        # Replace {domain} placeholder
-        if "{domain}" in content:
-            content = content.replace("{domain}", domain)
-            api_config_path.write_text(content, encoding="utf-8")
-            print(f"✓ Replaced {{domain}} → {domain} in frontend/src/lib/api-config.ts")
-        else:
-            print("⚠ No {domain} placeholder found in api-config.ts")
-        
-        return True
-    except Exception as e:
-        print(f"✗ Failed to update frontend api-config.ts: {e}")
-        return False
 
 
 def run_migrations():
@@ -141,8 +113,8 @@ def main():
     parser.add_argument("--skip-deps", action="store_true", help="Skip pip install")
     parser.add_argument("--skip-migrations", action="store_true", help="Skip database migrations")
     parser.add_argument("--restart", action="store_true", help="Restart PM2 and nginx")
-    parser.add_argument("--project-name", type=str, help="Project name for PM2")
-    parser.add_argument("--domain", type=str, help="Domain for placeholder replacement (e.g., learninggrid-tyh612)")
+    parser.add_argument("--domain", type=str, help="Domain for PM2 app name (e.g., learninggrid-tyh612 -> learninggrid-tyh612-backend)")
+    parser.add_argument("--venv", type=str, help="Virtual environment path (default: /root/dreampilot/dreampilotvenv)")
     args = parser.parse_args()
     
     # Ensure we're in backend directory
@@ -154,7 +126,7 @@ def main():
     
     # Step 1: Install dependencies
     if not args.skip_deps:
-        if not install_dependencies():
+        if not install_dependencies(args.venv):
             success = False
     
     # Step 2: Verify main.py
@@ -169,13 +141,10 @@ def main():
     
     # Step 4: Restart services (optional)
     if args.restart and success:
-        restart_pm2(args.project_name)
+        restart_pm2(args.domain)
         reload_nginx()
     
-    # Step 5: Update placeholders with actual domain (if provided)
-    if args.domain and success:
-        update_agent_readme(args.domain)
-        update_frontend_api_config(args.domain)
+
     
     print("\n" + "="*50)
     if success:
