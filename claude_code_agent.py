@@ -360,8 +360,12 @@ class ClaudeCodeAgent:
             command = ["sudo", "-u", run_as_user, *command]
             logger.debug(f"Wrapped command with sudo -u {run_as_user}")
 
-        logger.debug(f"Executing command: {' '.join(command[:3])}... (prompt truncated)")
-        logger.debug(f"Working directory: {self.repo_path}")
+        # Log full command (truncate prompt for readability)
+        cmd_display = ' '.join(command)
+        if len(cmd_display) > 200:
+            cmd_display = cmd_display[:200] + '...(truncated)'
+        logger.info(f"[CLAUDE-AGENT] Executing: {cmd_display}")
+        logger.info(f"[CLAUDE-AGENT] Working directory: {self.repo_path}")
 
         # Run subprocess with cwd set to repo_path
         process = None
@@ -447,11 +451,16 @@ class ClaudeCodeAgent:
                     if line:
                         stderr_lines.append(line)
                 if stderr_lines:
-                    logger.debug(f"Received stderr ({len(stderr_lines)} lines): {' '.join(stderr_lines[:3])}")
+                    logger.info(f"[CLAUDE-AGENT] Received stderr ({len(stderr_lines)} lines): {' '.join(stderr_lines[:5])}")
+            else:
+                logger.info(f"[CLAUDE-AGENT] No stderr output")
 
             # Wait for process to complete
             returncode = await process.wait()
-            logger.debug(f"Subprocess exited with code: {returncode}")
+            logger.info(f"[CLAUDE-AGENT] Subprocess exited with code: {returncode}")
+            logger.info(f"[CLAUDE-AGENT] Total chunks received: {len(all_chunks)}")
+            if all_chunks:
+                logger.info(f"[CLAUDE-AGENT] Last 3 chunks: {all_chunks[-3:]}")
 
             # Check for errors
             if returncode != 0:
@@ -465,7 +474,7 @@ class ClaudeCodeAgent:
 
             # No output received
             if not all_chunks:
-                logger.warning("Query returned no output")
+                logger.error(f"[CLAUDE-AGENT] Query returned no output! returncode={returncode}, stderr={stderr_lines}")
                 return None
 
             # Extract final answer using heuristics
