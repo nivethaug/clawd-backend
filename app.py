@@ -95,6 +95,12 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
     
     session_context = "\n\n".join(context_lines) if context_lines else ""
     
+    # Log prompt framing before sending to Claude
+    logger.info(f"[ACP-CHAT] === PROMPT FRAMING ===")
+    logger.info(f"[ACP-CHAT] User message: {user_content[:200]}...")
+    logger.info(f"[ACP-CHAT] Session context ({len(context_lines)} messages): {session_context[:500]}...")
+    logger.info(f"[ACP-CHAT] ========================")
+    
     # Run chat (use unified method that prefers Claude Agent)
     try:
         # Try async version first
@@ -2252,6 +2258,12 @@ async def chat_stream_endpoint(request: ChatRequest):
             except Exception as ctx_err:
                 logger.warning(f"[ACP-STREAM] Could not load context: {ctx_err}")
             
+            # Log prompt framing before sending to Claude
+            logger.info(f"[ACP-STREAM] === PROMPT FRAMING ===")
+            logger.info(f"[ACP-STREAM] User message: {acp_user_content[:200]}...")
+            logger.info(f"[ACP-STREAM] Session context: {session_context[:500]}...")
+            logger.info(f"[ACP-STREAM] ========================")
+            
             # ── PREPROCESSOR CHECK ────────────────────────────────────────────
             # Try fast LLM first to see if we can skip ACPX
             direct_response = None
@@ -2580,6 +2592,12 @@ async def chat_endpoint(request: ChatRequest):
                             session_context = "\n\n".join(context_parts)
                 except Exception as ctx_err:
                     logger.warning(f"[ACP-MODE] Could not load context: {ctx_err}")
+                
+                # Log prompt framing before sending to Claude
+                logger.info(f"[ACP-MODE] === PROMPT FRAMING ===")
+                logger.info(f"[ACP-MODE] User message: {acp_user_content[:200]}...")
+                logger.info(f"[ACP-MODE] Session context: {session_context[:500]}...")
+                logger.info(f"[ACP-MODE] ========================")
                 
                 # Run ACPX (synchronous)
                 logger.info(f"[ACP-MODE] Starting ACPX execution (timeout: 300s)...")
