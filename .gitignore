@@ -8,6 +8,11 @@ __pycache__/
 venv/
 .env
 
+# Test files (may contain API keys)
+test_preprocessor_tools.py
+stress_test_glm.py
+test_models.py
+
 # PM2 ecosystem config (contains sensitive API keys)
 ecosystem.config.js
 

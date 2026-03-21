@@ -653,13 +653,14 @@ I've checked your app and everything looks great! Your NatureStream app has:
             yield f"Error: {str(e)}\n"
 
 
-async def check_preprocessor(user_message: str, project_name: str) -> Optional[str]:
+async def check_preprocessor(user_message: str, project_name: str, project_path: str = None) -> Optional[str]:
     """
     Check if preprocessor can handle the message without ACPX.
     
     Args:
         user_message: User's chat message
         project_name: Name of the project
+        project_path: Optional path to project root for reading context
         
     Returns:
         Direct response if preprocessor can handle it, None if ACPX needed
@@ -669,7 +670,7 @@ async def check_preprocessor(user_message: str, project_name: str) -> Optional[s
     
     try:
         from acp_preprocessor import preprocess_message
-        result = await preprocess_message(user_message, project_name)
+        result = await preprocess_message(user_message, project_name, project_path)
         
         if not result.should_call_acpx and result.direct_response:
             logger.info(f"[ACP-PRE] Direct response for: {user_message[:50]}...")

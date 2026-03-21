@@ -12,17 +12,20 @@ import os
 import logging
 import json
 import httpx
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass
 from enum import Enum
+
+# Import read tool for GLM
+from readtool import TOOL_DEFINITION, execute_read_tool
 
 logger = logging.getLogger(__name__)
 
 # Configuration
 PREPROCESSOR_TIMEOUT = 10  # Fast timeout for preprocessing
-Z_AI_API_KEY = os.getenv("Z_AI_API_KEY", "")  # REQUIRED - Set in environment
+Z_AI_API_KEY = os.getenv("Z_AI_API_KEY", "")  # Set in environment or .env
 Z_AI_API_BASE = os.getenv("Z_AI_API_BASE", "https://api.z.ai/api/coding/paas/v4")
-Z_AI_MODEL = os.getenv("Z_AI_MODEL", "glm-4-flash")  # Fast model for preprocessing
+Z_AI_MODEL = os.getenv("Z_AI_MODEL", "GLM-4.5-Air")  # Free tier model (fast + good quality)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Fallback option
 
 
@@ -91,7 +94,14 @@ class ACPPreprocessor:
                 confidence=0.0
             )
         
-        # Build project context from files (if path provided)
+        # Detect if this is a code reading/checking request (not a change)
+        is_read_only = self._is_read_only_request(user_message)
+        
+        if is_read_only and project_path and self.use_glm:
+            # Use GLM with read tool to answer directly (no ACPX needed)
+            return await self._handle_read_only_with_tools(user_message, project_name, project_path)
+        
+        # For other cases, use simple classification
         project_context = ""
         if project_path:
             project_context = self._read_project_context(project_path)
@@ -141,8 +151,94 @@ Examples:
                 confidence=0.0
             )
     
+    async def _call_glm_with_tools(self, system_prompt: str, user_prompt: str, project_path: str = None) -> str:
+        """
+        Call GLM-4-Flash with read tool support.
+        
+        GLM can read files to answer questions without calling ACPX.
+        Handles multi-turn tool call loops.
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        # Add project path hint if available
+        if project_path and os.path.exists(project_path):
+            messages[0]["content"] += f"\n\nProject path: {project_path}"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:  # Longer timeout for tool calls
+            max_iterations = 5  # Prevent infinite loops
+            
+            for iteration in range(max_iterations):
+                response = await client.post(
+                    f"{Z_AI_API_BASE}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {Z_AI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": Z_AI_MODEL,
+                        "messages": messages,
+                        "tools": [TOOL_DEFINITION],
+                        "tool_choice": "auto",
+                        "temperature": 0.1,
+                        "max_tokens": 1000
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                msg = data["choices"][0]["message"]
+                
+                # No tool calls - return final response
+                if not msg.get("tool_calls"):
+                    return msg.get("content", "")
+                
+                # Add assistant message with tool calls
+                messages.append({
+                    "role": "assistant",
+                    "content": msg.get("content", ""),
+                    "tool_calls": [
+                        {
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["function"]["name"],
+                                "arguments": tc["function"]["arguments"]
+                            }
+                        }
+                        for tc in msg["tool_calls"]
+                    ]
+                })
+                
+                # Execute each tool call
+                for tc in msg["tool_calls"]:
+                    try:
+                        args = json.loads(tc["function"]["arguments"])
+                        result = execute_read_tool(
+                            path=args.get("path", ""),
+                            max_lines=args.get("max_lines", 200),
+                            offset=args.get("offset", 1)
+                        )
+                        tool_result = result["content"] if result["success"] else f"Error: {result['content']}"
+                    except Exception as e:
+                        tool_result = f"Tool error: {e}"
+                    
+                    # Add tool result to messages
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": tool_result
+                    })
+                
+                logger.info(f"[ACP-PRE] GLM made {len(msg['tool_calls'])} tool call(s), continuing...")
+            
+            # Max iterations reached - return last content
+            return messages[-1].get("content", "Unable to complete analysis")
+
     async def _call_glm(self, system_prompt: str, user_prompt: str) -> str:
-        """Call GLM-4-Flash via Z.ai API (OpenAI-compatible)."""
+        """Call GLM-4-Flash via Z.ai API (simple, no tools)."""
         async with httpx.AsyncClient(timeout=PREPROCESSOR_TIMEOUT) as client:
             response = await client.post(
                 f"{Z_AI_API_BASE}/chat/completions",
@@ -186,6 +282,153 @@ Examples:
             response.raise_for_status()
             data = response.json()
             return data["choices"][0]["message"]["content"]
+    
+    def _read_project_context(self, project_path: str) -> str:
+        """
+        Read key project files to build context for the LLM.
+        
+        This allows the preprocessor to answer questions about code
+        WITHOUT calling ACPX (e.g., "check my app health", "what pages do I have").
+        
+        Args:
+            project_path: Path to project root
+            
+        Returns:
+            Context string with project information
+        """
+        if not project_path or not os.path.exists(project_path):
+            return ""
+        
+        context_parts = []
+        
+        try:
+            # 1. Read package.json for dependencies
+            pkg_json_path = os.path.join(project_path, "package.json")
+            if os.path.exists(pkg_json_path):
+                with open(pkg_json_path, "r", encoding="utf-8") as f:
+                    pkg = json.load(f)
+                    deps = pkg.get("dependencies", {})
+                    context_parts.append(f"Dependencies: {', '.join(deps.keys())}")
+            
+            # 2. List src directory structure
+            src_path = os.path.join(project_path, "src")
+            if os.path.exists(src_path):
+                files = []
+                for root, dirs, filenames in os.walk(src_path):
+                    # Skip node_modules and hidden dirs
+                    dirs[:] = [d for d in dirs if not d.startswith(".") and d != "node_modules"]
+                    for fname in filenames:
+                        if fname.endswith((".tsx", ".ts", ".jsx", ".js", ".css")):
+                            rel_path = os.path.relpath(os.path.join(root, fname), src_path)
+                            files.append(rel_path)
+                
+                if files:
+                    context_parts.append(f"Source files ({len(files)}): {', '.join(files[:20])}")
+                    if len(files) > 20:
+                        context_parts.append(f"  ... and {len(files) - 20} more files")
+            
+            # 3. Check for pages directory (common in Next.js/Remix)
+            pages_path = os.path.join(project_path, "src", "pages")
+            if os.path.exists(pages_path):
+                pages = [f for f in os.listdir(pages_path) if f.endswith((".tsx", ".ts", ".jsx", ".js"))]
+                if pages:
+                    context_parts.append(f"Pages: {', '.join(pages)}")
+            
+            # 4. Check for components
+            components_path = os.path.join(project_path, "src", "components")
+            if os.path.exists(components_path):
+                components = []
+                for root, dirs, filenames in os.walk(components_path):
+                    dirs[:] = [d for d in dirs if not d.startswith(".")]
+                    for fname in filenames:
+                        if fname.endswith((".tsx", ".ts", ".jsx", ".js")):
+                            components.append(fname)
+                if components:
+                    context_parts.append(f"Components ({len(components)}): {', '.join(components[:15])}")
+            
+        except Exception as e:
+            logger.warning(f"[ACP-PRE] Failed to read project context: {e}")
+            return ""
+        
+        if context_parts:
+            return "\nProject context:\n" + "\n".join(f"- {part}" for part in context_parts)
+        return ""
+    
+    def _is_read_only_request(self, user_message: str) -> bool:
+        """
+        Detect if the user wants to READ/CHECK code without changing it.
+        
+        These can be handled by GLM with read tool (no ACPX needed).
+        """
+        read_patterns = [
+            "check", "show", "list", "what", "explain", "describe",
+            "review", "analyze", "tell me", "how does", "what is",
+            "what are", "is there", "are there", "read", "view",
+            "health", "status", "structure", "architecture"
+        ]
+        
+        change_patterns = [
+            "add", "create", "make", "build", "fix", "update", "change",
+            "modify", "remove", "delete", "implement", "write", "edit",
+            "deploy", "publish", "refactor", "optimize", "improve"
+        ]
+        
+        msg_lower = user_message.lower()
+        
+        # If it has change words, it's not read-only
+        for pattern in change_patterns:
+            if pattern in msg_lower:
+                return False
+        
+        # If it has read words, it's read-only
+        for pattern in read_patterns:
+            if pattern in msg_lower:
+                return True
+        
+        return False
+    
+    async def _handle_read_only_with_tools(self, user_message: str, project_name: str, project_path: str) -> PreprocessResult:
+        """
+        Handle read-only requests using GLM with read tool.
+        
+        GLM will read files and answer directly without ACPX.
+        """
+        system_prompt = f"""You are a helpful assistant for a web app builder called "{project_name}".
+
+The user is asking about their project. You have access to a "read" tool to examine files.
+
+IMPORTANT: 
+1. First use the read tool to examine relevant files (package.json, src/, pages/, components/)
+2. Then provide a helpful, friendly response based on what you found
+3. Be concise but informative
+4. If you find any issues, mention them gently
+
+The project is located at: {project_path}
+
+Use the read tool to answer the user's question. Start by reading the project structure."""
+
+        user_prompt = f'User asks: "{user_message}"'
+        
+        try:
+            response = await self._call_glm_with_tools(system_prompt, user_prompt, project_path)
+            
+            return PreprocessResult(
+                intent=IntentType.SIMPLE_QUESTION,
+                should_call_acpx=False,  # Don't call ACPX - we answered directly
+                enhanced_prompt=None,
+                direct_response=response,
+                confidence=0.9
+            )
+            
+        except Exception as e:
+            logger.warning(f"[ACP-PRE] Read-only tool call failed: {e}, falling back to ACPX")
+            return PreprocessResult(
+                intent=IntentType.SIMPLE_QUESTION,
+                should_call_acpx=True,  # Fallback to ACPX
+                enhanced_prompt=user_message,
+                direct_response=None,
+                confidence=0.5
+            )
     
     def _parse_response(self, response: str, original_message: str) -> PreprocessResult:
         """Parse LLM response into PreprocessResult."""
@@ -242,15 +485,16 @@ def get_preprocessor() -> ACPPreprocessor:
 
 
 # Convenience function
-async def preprocess_message(user_message: str, project_name: str) -> PreprocessResult:
+async def preprocess_message(user_message: str, project_name: str, project_path: str = None) -> PreprocessResult:
     """
     Preprocess a user message before ACPX.
     
     Args:
         user_message: User's chat message
         project_name: Name of the project
+        project_path: Optional path to project root for reading context
         
     Returns:
         PreprocessResult with classification and recommendations
     """
-    return await get_preprocessor().classify_intent(user_message, project_name)
+    return await get_preprocessor().classify_intent(user_message, project_name, project_path)

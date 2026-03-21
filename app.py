@@ -2246,7 +2246,8 @@ async def chat_stream_endpoint(request: ChatRequest):
             try:
                 from acp_chat_handler import check_preprocessor
                 project_name = handler.project_name if handler else "App"
-                direct_response = await check_preprocessor(acp_user_content, project_name)
+                project_path = handler.frontend_src_path if handler else None
+                direct_response = await check_preprocessor(acp_user_content, project_name, project_path)
                 if direct_response:
                     logger.info(f"[ACP-STREAM] Using preprocessor direct response")
             except Exception as pre_err:
