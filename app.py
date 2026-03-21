@@ -2418,7 +2418,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                             logger.error(f"[ACP-STREAM] Background save error: {e}")
                     
                     # Create task that survives disconnection
-                    import asyncio
                     asyncio.create_task(asyncio.shield(wait_and_save()))
                     logger.info(f"[ACP-STREAM] Background save task spawned")
                     
