@@ -93,6 +93,7 @@ class ClaudeCodeAgent:
         
         # Progress interval (from env or param, default 30s)
         self.progress_interval = float(os.environ.get("CLAUDE_PROGRESS_INTERVAL_SECONDS", progress_interval))
+        logger.info(f"[CLAUDE-AGENT] progress_interval={self.progress_interval}s, on_text={'set' if on_text else 'NOT SET'}")
 
         # Internal state
         self._running = False
@@ -407,10 +408,14 @@ class ClaudeCodeAgent:
 
                     # Stream to callback if provided
                     if self.on_text:
+                        logger.info(f"[CLAUDE-AGENT] Calling on_text callback with {len(line_text)} chars")
                         if asyncio.iscoroutinefunction(self.on_text):
                             await self.on_text(line_text)
                         else:
                             self.on_text(line_text)
+                        logger.info(f"[CLAUDE-AGENT] on_text callback returned")
+                    else:
+                        logger.warning(f"[CLAUDE-AGENT] No on_text callback configured!")
                     
                     last_progress_time = datetime.now()
                     
@@ -418,13 +423,17 @@ class ClaudeCodeAgent:
                     # Timeout - send progress update if callback exists
                     elapsed = (datetime.now() - query_start_time).total_seconds()
                     progress_msg = f"⏳ Still working... ({int(elapsed)}s elapsed)"
-                    logger.info(progress_msg)
+                    logger.info(f"[CLAUDE-AGENT] Progress timeout: {progress_msg}")
                     
                     if self.on_text:
+                        logger.info(f"[CLAUDE-AGENT] Calling on_text with progress message")
                         if asyncio.iscoroutinefunction(self.on_text):
                             await self.on_text(progress_msg)
                         else:
                             self.on_text(progress_msg)
+                        logger.info(f"[CLAUDE-AGENT] Progress callback returned")
+                    else:
+                        logger.warning(f"[CLAUDE-AGENT] No on_text callback - progress not sent!")
                     
                     # Continue reading
                     continue

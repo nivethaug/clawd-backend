@@ -695,40 +695,57 @@ I've checked your app and everything looks great! Your NatureStream app has:
         
         async def on_chunk(text: str):
             """Callback for streaming chunks - puts in queue for real-time yielding."""
-            logger.info(f"[ACP-CHAT] Chunk: {text[:80]}...")
-            await chunk_queue.put(text)
+            logger.info(f"[ACP-CHAT] on_chunk called: {text[:80]}...")
+            try:
+                await chunk_queue.put(text)
+                logger.info(f"[ACP-CHAT] Chunk put in queue, size now: {chunk_queue.qsize()}")
+            except Exception as e:
+                logger.error(f"[ACP-CHAT] on_chunk error: {e}")
         
         async def run_query():
             """Run the query in a separate task."""
+            logger.info(f"[ACP-CHAT] run_query task starting...")
             try:
                 async with ClaudeCodeAgent(
                     str(self.frontend_src_path),
                     on_text=on_chunk
                 ) as agent:
+                    logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     response = await agent.query(prompt)
                     logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars")
             except Exception as e:
                 logger.error(f"[ACP-CHAT] Query error: {e}")
+                import traceback
+                logger.error(f"[ACP-CHAT] Traceback: {traceback.format_exc()}")
                 await chunk_queue.put(f"Error: {str(e)}")
             finally:
+                logger.info(f"[ACP-CHAT] run_query task done, setting complete flag")
                 query_complete.set()
         
         # Start query task
+        logger.info(f"[ACP-CHAT] Creating query task...")
         query_task = asyncio.create_task(run_query())
+        logger.info(f"[ACP-CHAT] Query task created, entering yield loop")
         
         try:
             # Yield chunks as they arrive in real-time
+            chunk_count = 0
             while not query_complete.is_set() or not chunk_queue.empty():
                 try:
                     # Wait for a chunk with timeout to check completion
                     chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.5)
                     if chunk.strip():
+                        chunk_count += 1
+                        logger.info(f"[ACP-CHAT] Yielding chunk #{chunk_count}: {chunk[:60]}...")
                         yield chunk
+                        logger.info(f"[ACP-CHAT] Chunk #{chunk_count} yielded")
                 except asyncio.TimeoutError:
                     # No chunk available, check if query is done
+                    logger.debug(f"[ACP-CHAT] Yield loop timeout, queue empty: {chunk_queue.empty()}, complete: {query_complete.is_set()}")
                     if query_complete.is_set():
                         break
                     continue
+            logger.info(f"[ACP-CHAT] Yield loop done, total chunks: {chunk_count}")
         finally:
             # Ensure task is cleaned up
             if not query_task.done():
