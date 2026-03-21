@@ -72,6 +72,7 @@ class ClaudeCodeAgent:
         settings_path: Optional[str] = None,
         on_text: Optional[Callable[[str], None]] = None,
         claude_path: Optional[str] = None,
+        progress_interval: float = 30.0,
     ):
         """
         Initialize Claude Code Agent.
@@ -81,6 +82,7 @@ class ClaudeCodeAgent:
             settings_path: Optional path to Claude Code settings (default: ~/.claude/settings.json)
             on_text: Optional callback for streaming text as it arrives (for logging/UI only)
             claude_path: Optional path to claude CLI (default: auto-detect via shutil.which)
+            progress_interval: Seconds between progress updates while waiting (default: 30s, env: CLAUDE_PROGRESS_INTERVAL_SECONDS)
         
         Note: Auto-approve is enabled via --dangerously-skip-permissions (runs as non-root via sudo -u)
         """
@@ -88,6 +90,9 @@ class ClaudeCodeAgent:
         self.settings_path = Path(settings_path or Path.home() / ".claude" / "settings.json")
         self.on_text = on_text
         self.claude_path = claude_path
+        
+        # Progress interval (from env or param, default 30s)
+        self.progress_interval = float(os.environ.get("CLAUDE_PROGRESS_INTERVAL_SECONDS", progress_interval))
 
         # Internal state
         self._running = False
@@ -374,29 +379,55 @@ class ClaudeCodeAgent:
             # Accumulate plain text lines from stdout (stderr kept separate)
             all_chunks = []
             stderr_lines = []
-            # Read stdout line by line (plain text, not JSON-RPC)
+            query_start_time = datetime.now()
+            last_progress_time = query_start_time
+            
+            # Read stdout line by line (plain text, not JSON-RPC) with progress updates
             while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
+                try:
+                    # Use timeout-based reading for progress updates
+                    line = await asyncio.wait_for(
+                        process.stdout.readline(),
+                        timeout=self.progress_interval
+                    )
+                    
+                    if not line:
+                        break
 
-                # Decode and strip the line
-                line_text = line.decode("utf-8", errors="replace").rstrip("\n\r")
+                    # Decode and strip the line
+                    line_text = line.decode("utf-8", errors="replace").rstrip("\n\r")
 
-                # Skip empty lines
-                if not line_text.strip():
+                    # Skip empty lines
+                    if not line_text.strip():
+                        continue
+
+                    # Accumulate the line
+                    all_chunks.append(line_text)
+                    logger.debug(f"Received stdout line ({len(line_text)} chars): {line_text[:100]}{'...' if len(line_text) > 100 else ''}")
+
+                    # Stream to callback if provided
+                    if self.on_text:
+                        if asyncio.iscoroutinefunction(self.on_text):
+                            await self.on_text(line_text)
+                        else:
+                            self.on_text(line_text)
+                    
+                    last_progress_time = datetime.now()
+                    
+                except asyncio.TimeoutError:
+                    # Timeout - send progress update if callback exists
+                    elapsed = (datetime.now() - query_start_time).total_seconds()
+                    progress_msg = f"⏳ Still working... ({int(elapsed)}s elapsed)"
+                    logger.info(progress_msg)
+                    
+                    if self.on_text:
+                        if asyncio.iscoroutinefunction(self.on_text):
+                            await self.on_text(progress_msg)
+                        else:
+                            self.on_text(progress_msg)
+                    
+                    # Continue reading
                     continue
-
-                # Accumulate the line
-                all_chunks.append(line_text)
-                logger.debug(f"Received stdout line ({len(line_text)} chars): {line_text[:100]}{'...' if len(line_text) > 100 else ''}")
-
-                # Stream to callback if provided
-                if self.on_text:
-                    if asyncio.iscoroutinefunction(self.on_text):
-                        await self.on_text(line_text)
-                    else:
-                        self.on_text(line_text)
 
             # Read any stderr output (kept separate from answer chunks)
             stderr_data = await process.stderr.read()
