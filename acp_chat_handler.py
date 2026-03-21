@@ -155,7 +155,7 @@ I've checked your app and everything looks great! Your NatureStream app has:
 
     
     def _is_inline_noise(self, line: str) -> bool:
-        """Check if a line is inline telemetry/noise (matching telegram-acpx-devbot)"""
+        """Check if a line is inline telemetry/noise - aggressively filter tool output"""
         if not line or not line.strip():
             return True
             
@@ -171,10 +171,10 @@ I've checked your app and everything looks great! Your NatureStream app has:
             return True
         
         # Skip indented file paths (in tool output blocks)
-        if stripped.startswith('  /') or stripped.startswith('    /'):
+        if stripped.startswith('/root/') or stripped.startswith('/home/'):
             return True
         
-        # Skip line number format: "1→", "21→", etc.
+        # Skip line number format: "1→", "21→", etc. (common in file reads)
         if stripped and stripped[0].isdigit() and '→' in stripped[:4]:
             return True
         
@@ -186,27 +186,52 @@ I've checked your app and everything looks great! Your NatureStream app has:
         if '<system-reminder>' in stripped or '</system-reminder>' in stripped:
             return True
         
+        # Skip console/code block markers
+        if stripped in ['```', '```console', '```json', '```bash']:
+            return True
+        
         # Skip lines that are ONLY structural (just punctuation)
         if stripped in ['},', '],', '}, {', '], [', '{ },', '[ ],']:
             return True
+        
+        # Skip shell/terminal output lines
+        if stripped.startswith('total ') and stripped[6:].isdigit():
+            return True
+        if stripped.startswith('drwx') or stripped.startswith('-rw'):
+            return True
+        if 'shell cwd' in line_lower:
+            return True
+        if 'unmet dependency' in line_lower:
+            return True
+        if stripped.startswith('├──') or stripped.startswith('└──'):
+            return True
             
-        # Skip structured protocol logs
+        # Skip structured protocol logs and tool output
         noise_patterns = [
             '[acpx]', '[thinking]', '[done]', '[tool]', '[console]', '[client]',
             'sessionupdate:', 'session/update', 'usage_update', '_errors:',
             '[array]', '[object]', 'invalid params', 'invalid input',
             'error handling notification', 'end_turn',
             'client] initialize', 'session/new',
-            'initialize (running)', 'session/new (running)', 'code:', 'message:',
+            'initialize (running)', 'session/new (running)',
             'method:', 'params:', 'data:', 'result:', 'id:', 'cost:', 'size:',
             'used:', 'entry:', 'availablecommands:', 'currentmodeid:',
             'configoptions:', 'title:', 'toolcallid:', 'jsonrpc:',
             'session cwd', 'agent needs reconnect',
             'kind:', 'input:', 'output:', 'files:', 'pending)', 'completed)',
-            'no files found'
+            'no files found', 'shell cwd was reset'
         ]
         
-        return any(pattern in line_lower for pattern in noise_patterns)
+        if any(pattern in line_lower for pattern in noise_patterns):
+            return True
+        
+        # Skip lines that start with these keywords (tool output format)
+        tool_keywords = ['kind:', 'input:', 'output:', 'files:']
+        for kw in tool_keywords:
+            if line_lower.startswith(kw):
+                return True
+        
+        return False
     
     def _is_useful_line(self, line: str) -> bool:
         """Check if line contains useful info (whitelist approach)"""
