@@ -125,7 +125,7 @@ Project Root: {self.frontend_src_path.parent.parent}
 - File paths or directory listings (e.g., `files: /root/...`, `output: /path/to/file`)
 - Tool execution logs (e.g., `input:`, `output:`, `files:`)
 - Shell commands (e.g., `ls -la`, `grep`, `ps aux`)
-- JSON-RPC or protocol messages (e.g., `{"jsonrpc":...}`)
+- JSON-RPC or protocol messages (e.g., `{{"jsonrpc":...}}`)
 - Code line numbers or diffs
 - Internal thinking or tool calls
 - Process information or system commands
