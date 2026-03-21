@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 PREPROCESSOR_TIMEOUT = 10  # Fast timeout for preprocessing
-Z_AI_API_KEY = os.getenv("Z_AI_API_KEY", "cffbf9f73de341da8e04197b2e72df48.wwX0uuQkgjOMuIqi")
+Z_AI_API_KEY = os.getenv("Z_AI_API_KEY", "")  # REQUIRED - Set in environment
 Z_AI_API_BASE = os.getenv("Z_AI_API_BASE", "https://api.z.ai/api/coding/paas/v4")
 Z_AI_MODEL = os.getenv("Z_AI_MODEL", "glm-4-flash")  # Fast model for preprocessing
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Fallback option
 
 
 class IntentType(Enum):
