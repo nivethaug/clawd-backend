@@ -71,6 +71,7 @@ class ClaudeCodeAgent:
         repo_path: str,
         settings_path: Optional[str] = None,
         on_text: Optional[Callable[[str], None]] = None,
+        on_progress: Optional[Callable[[str], None]] = None,
         claude_path: Optional[str] = None,
         progress_interval: float = 30.0,
     ):
@@ -80,7 +81,8 @@ class ClaudeCodeAgent:
         Args:
             repo_path: Path to repository/workspace to work in
             settings_path: Optional path to Claude Code settings (default: ~/.claude/settings.json)
-            on_text: Optional callback for streaming text as it arrives (for logging/UI only)
+            on_text: Optional callback for streaming text as it arrives (content - persisted to DB)
+            on_progress: Optional callback for progress updates (UI only - NOT persisted to DB)
             claude_path: Optional path to claude CLI (default: auto-detect via shutil.which)
             progress_interval: Seconds between progress updates while waiting (default: 30s, env: CLAUDE_PROGRESS_INTERVAL_SECONDS)
         
@@ -89,14 +91,16 @@ class ClaudeCodeAgent:
         self.repo_path = Path(repo_path).resolve()
         self.settings_path = Path(settings_path or Path.home() / ".claude" / "settings.json")
         self.on_text = on_text
+        self.on_progress = on_progress  # Separate callback for progress (not persisted to DB)
         self.claude_path = claude_path
         
         # Progress interval (from env or param, default 30s)
         self.progress_interval = float(os.environ.get("CLAUDE_PROGRESS_INTERVAL_SECONDS", progress_interval))
-        logger.info(f"[CLAUDE-AGENT] progress_interval={self.progress_interval}s, on_text={'set' if on_text else 'NOT SET'}")
+        logger.info(f"[CLAUDE-AGENT] progress_interval={self.progress_interval}s, on_text={'set' if on_text else 'NOT SET'}, on_progress={'set' if on_progress else 'NOT SET'}")
 
         # Internal state
         self._running = False
+        self._progress_dots_offset = 0  # For dot animation (1-2-3 cycling)
 
         # Load Claude Code settings
         self._settings = self._load_settings()
@@ -243,6 +247,39 @@ class ClaudeCodeAgent:
         
         return lines[-1] if lines else None
 
+    def _get_progress_message(self, elapsed: float) -> str:
+        """
+        Generate phase-appropriate progress message with dot animation.
+        
+        Args:
+            elapsed: Seconds since query started
+            
+        Returns:
+            Progress message with appropriate phase text and animated dots
+        """
+        # Base message by phase (optimized for 900s timeout)
+        if elapsed < 30:
+            base = "⏳ Analyzing your request"
+        elif elapsed < 120:
+            base = "⏳ Generating solution"
+        elif elapsed < 300:
+            base = "⏳ Applying fixes and improvements"
+        elif elapsed < 600:
+            base = "⏳ Processing complex task"
+        else:
+            base = "⏳ Finalizing — almost there"
+        
+        # Animate dots (cycle 1-2-3 based on offset)
+        self._progress_dots_offset = (self._progress_dots_offset + 1) % 3
+        dots = "." * (self._progress_dots_offset + 1)
+        
+        # Add reassurance for long runs
+        suffix = ""
+        if elapsed > 180:
+            suffix = "\n💡 Complex tasks may take several minutes"
+        
+        return f"{base}{dots}{suffix}"
+
     async def __aenter__(self) -> "ClaudeCodeAgent":
         """Start the Claude Code Agent."""
         await self.start()
@@ -274,7 +311,7 @@ class ClaudeCodeAgent:
         self._running = False
         logger.info("Agent stopped")
 
-    async def query(self, prompt: str, timeout: float = 500.0) -> Optional[str]:
+    async def query(self, prompt: str, timeout: float = 900.0) -> Optional[str]:
         """
         Send a query to Claude Code and return the final answer.
 
@@ -430,20 +467,21 @@ class ClaudeCodeAgent:
                     last_progress_time = datetime.now()
                     
                 except asyncio.TimeoutError:
-                    # Timeout - send progress update if callback exists
+                    # Timeout - send progress update via on_progress (NOT on_text - not persisted to DB)
                     elapsed = (datetime.now() - query_start_time).total_seconds()
-                    progress_msg = f"⏳ Still working... ({int(elapsed)}s elapsed)"
-                    logger.info(f"[CLAUDE-AGENT] Progress timeout: {progress_msg}")
+                    progress_msg = self._get_progress_message(elapsed)
+                    logger.info(f"[CLAUDE-AGENT] Progress: {progress_msg}")
                     
-                    if self.on_text:
-                        logger.info(f"[CLAUDE-AGENT] Calling on_text with progress message")
-                        if asyncio.iscoroutinefunction(self.on_text):
-                            await self.on_text(progress_msg)
+                    # Use on_progress callback for UI-only updates (not persisted to database)
+                    if self.on_progress:
+                        logger.info(f"[CLAUDE-AGENT] Calling on_progress callback")
+                        if asyncio.iscoroutinefunction(self.on_progress):
+                            await self.on_progress(progress_msg)
                         else:
-                            self.on_text(progress_msg)
-                        logger.info(f"[CLAUDE-AGENT] Progress callback returned")
+                            self.on_progress(progress_msg)
+                        logger.info(f"[CLAUDE-AGENT] on_progress callback returned")
                     else:
-                        logger.warning(f"[CLAUDE-AGENT] No on_text callback - progress not sent!")
+                        logger.debug(f"[CLAUDE-AGENT] No on_progress callback - progress not sent to UI")
                     
                     # Continue reading
                     continue
@@ -515,6 +553,7 @@ async def claude_code_agent(
     repo_path: str,
     settings_path: Optional[str] = None,
     on_text: Optional[Callable[[str], None]] = None,
+    on_progress: Optional[Callable[[str], None]] = None,
     claude_path: Optional[str] = None,
 ) -> AsyncIterator[ClaudeCodeAgent]:
     """
@@ -523,7 +562,8 @@ async def claude_code_agent(
     Args:
         repo_path: Path to repository/workspace to work in
         settings_path: Optional path to Claude Code settings
-        on_text: Optional callback for streaming text
+        on_text: Optional callback for streaming text (content - persisted to DB)
+        on_progress: Optional callback for progress updates (UI only - NOT persisted to DB)
         claude_path: Optional path to claude CLI
 
     Example:
@@ -531,7 +571,7 @@ async def claude_code_agent(
             response = await agent.query("Write a hello.py")
             print(response)
     """
-    agent = ClaudeCodeAgent(repo_path, settings_path, on_text, claude_path, auto_approve)
+    agent = ClaudeCodeAgent(repo_path, settings_path, on_text, on_progress, claude_path)
     await agent.start()
     try:
         yield agent
