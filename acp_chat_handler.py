@@ -379,12 +379,12 @@ I've checked your app and everything looks great! Your NatureStream app has:
                 full_prompt = f"Previous conversation:\n{session_context}\n\nCurrent request: {user_message}"
             
             logger.info(f"[CLAUDE-AGENT] Running for project: {self.project_name}")
-            logger.info(f"[CLAUDE-AGENT] Working directory: {self.frontend_src_path}")
+            logger.info(f"[CLAUDE-AGENT] Working directory: {self.project_path}")
             logger.info(f"[CLAUDE-AGENT] User message: {user_message[:100]}...")
             logger.info(f"[CLAUDE-AGENT] Prompt length: {len(full_prompt)} chars")
             
-            # Use ClaudeCodeAgent
-            async with ClaudeCodeAgent(str(self.frontend_src_path)) as agent:
+            # Use ClaudeCodeAgent with project_path for MCP config lookup
+            async with ClaudeCodeAgent(str(self.project_path)) as agent:
                 response = await agent.query(full_prompt)
                 
                 logger.info(f"[CLAUDE-AGENT] Response received ({len(response)} chars)")
@@ -710,8 +710,14 @@ I've checked your app and everything looks great! Your NatureStream app has:
             """Run the query in a separate task."""
             logger.info(f"[ACP-CHAT] run_query task starting...")
             try:
+                # Use project_path (e.g., /root/dreampilot/projects/website/PROJECT_NAME)
+                # instead of frontend_src_path because MCP servers are configured
+                # at parent paths like /root/dreampilot/projects/website
+                # Note: File operations use absolute paths, so cwd doesn't affect them
+                repo_path = str(self.project_path)
+                logger.info(f"[ACP-CHAT] Using repo_path={repo_path} for MCP config lookup")
                 async with ClaudeCodeAgent(
-                    str(self.frontend_src_path),
+                    repo_path,
                     on_text=on_chunk
                 ) as agent:
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
