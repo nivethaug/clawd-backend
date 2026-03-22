@@ -1450,6 +1450,7 @@ class InfrastructureManager:
         self.domain = domain or project_name  # Use domain if provided, otherwise fall back to project_name
         self.description = description  # Store project description for Phase 9
         self.template_id = template_id  # Store template for metadata
+        self.repo_url = None  # Will be loaded from database for GitHub push
         self.port_allocator = PortAllocator()
         self.db_provisioner = DatabaseProvisioner()
         self.service_manager = ServiceManager()
@@ -1461,6 +1462,29 @@ class InfrastructureManager:
         self.domains = {}
         self.database_info = {}
         self.dns_results = {}
+        
+        # Load repo_url from database for GitHub push at end
+        self._load_repo_url()
+
+    def _load_repo_url(self):
+        """Load repo_url from database for GitHub push at end of provisioning."""
+        try:
+            pool = get_connection_pool()
+            conn = pool.getconn()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT repo_url FROM projects WHERE project_path = ? OR domain = ?",
+                    (str(self.project_path), self.domain)
+                )
+                result = cursor.fetchone()
+                if result and result[0]:
+                    self.repo_url = result[0]
+                    logger.info(f"[GITHUB] Loaded repo_url: {self.repo_url}")
+            finally:
+                pool.putconn(conn)
+        except Exception as e:
+            logger.warning(f"[GITHUB] Could not load repo_url: {e}")
 
     def provision_all(self) -> bool:
         """
@@ -1725,6 +1749,22 @@ class InfrastructureManager:
             # Clean up orphaned claude-agent-acp processes from this project
             logger.info("🧹 Cleaning up orphaned ACPX processes...")
             self._cleanup_orphaned_acpx_processes()
+            
+            # PHASE_11: Push all code to GitHub (after all infrastructure is ready)
+            if self.repo_url:
+                try:
+                    logger.info("Phase 11: Push to GitHub")
+                    logger.info(f"📤 Pushing all project code to GitHub: {self.repo_url}")
+                    from github_service import get_github_service
+                    github = get_github_service()
+                    if github.push_to_github(str(self.project_path), branch="main"):
+                        logger.info("✓ All project code pushed to GitHub")
+                    else:
+                        logger.warning("⚠️ Failed to push to GitHub, continuing anyway")
+                except Exception as github_error:
+                    logger.warning(f"⚠️ GitHub push failed: {github_error}, continuing anyway")
+            else:
+                logger.info("Phase 11: Skipping GitHub push (no repo_url configured)")
             
             logger.info("DEPLOY: Project READY")
             logger.info("✅ All infrastructure provisioned and verified successfully!")

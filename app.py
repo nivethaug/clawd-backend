@@ -613,16 +613,8 @@ async def create_project(request: CreateProjectRequest):
                 )
                 conn.commit()
 
-    # Step 6: Push all code to GitHub (after all project creation steps complete)
-    if repo_url:
-        try:
-            logger.info(f"[GITHUB] Pushing final project code to GitHub...")
-            if github.push_to_github(project_folder_path, branch="main"):
-                logger.info(f"[GITHUB] All project code pushed to GitHub: {repo_url}")
-            else:
-                logger.warning(f"[GITHUB] Failed to push to GitHub, continuing anyway")
-        except Exception as e:
-            logger.warning(f"[GITHUB] Push failed: {e}, continuing anyway")
+    # Note: GitHub push happens at end of infrastructure_manager.provision_all()
+    # This ensures all template files, builds, and infrastructure are included
 
     # Fetch the final project data from database (includes status and session_key)
     with get_db() as conn:
