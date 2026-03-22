@@ -704,6 +704,15 @@ I've checked your app and everything looks great! Your NatureStream app has:
             except Exception as e:
                 logger.error(f"[ACP-CHAT] on_chunk error: {e}")
         
+        async def on_progress(text: str):
+            """Callback for progress updates - UI only, NOT persisted to DB."""
+            logger.info(f"[ACP-CHAT] on_progress called: {text[:80]}...")
+            try:
+                await chunk_queue.put(text)
+                logger.info(f"[ACP-CHAT] Progress put in queue, size now: {chunk_queue.qsize()}")
+            except Exception as e:
+                logger.error(f"[ACP-CHAT] on_progress error: {e}")
+        
         async def run_query():
             """Run the query in a separate task."""
             logger.info(f"[ACP-CHAT] run_query task starting...")
@@ -716,7 +725,8 @@ I've checked your app and everything looks great! Your NatureStream app has:
                 logger.info(f"[ACP-CHAT] Using repo_path={repo_path} for MCP config lookup")
                 async with ClaudeCodeAgent(
                     repo_path,
-                    on_text=on_chunk
+                    on_text=on_chunk,
+                    on_progress=on_progress
                 ) as agent:
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     response = await agent.query(prompt)
