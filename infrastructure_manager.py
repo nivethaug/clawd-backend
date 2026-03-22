@@ -1473,34 +1473,40 @@ class InfrastructureManager:
             conn = pool.getconn()
             try:
                 cursor = conn.cursor()
-                # Debug: log what we're searching for
-                logger.info(f"[GITHUB] Searching for repo_url with project_path={self.project_path}, domain={self.domain}")
+                # Convert Path to string for comparison
+                project_path_str = str(self.project_path)
                 
-                # PostgreSQL uses %s placeholders, not ?
+                # Debug: log what we're searching for
+                logger.info(f"[GITHUB] Searching for repo_url...")
+                logger.info(f"[GITHUB]   project_path: {project_path_str}")
+                logger.info(f"[GITHUB]   domain: {self.domain}")
+                
+                # Try domain first (more reliable match)
                 cursor.execute(
-                    "SELECT repo_url, project_path, domain FROM projects WHERE project_path = %s OR domain = %s",
-                    (str(self.project_path), self.domain)
+                    "SELECT repo_url FROM projects WHERE domain = %s",
+                    (self.domain,)
                 )
                 result = cursor.fetchone()
+                
                 if result and result[0]:
                     self.repo_url = result[0]
-                    logger.info(f"[GITHUB] ✓ Loaded repo_url: {self.repo_url}")
+                    logger.info(f"[GITHUB] ✓ Loaded repo_url by domain: {self.repo_url}")
                 else:
-                    # Try to find by domain only as fallback
+                    # Fallback: try project_path
                     cursor.execute(
-                        "SELECT repo_url, project_path, domain FROM projects WHERE domain = %s",
-                        (self.domain,)
+                        "SELECT repo_url FROM projects WHERE project_path = %s",
+                        (project_path_str,)
                     )
                     result = cursor.fetchone()
                     if result and result[0]:
                         self.repo_url = result[0]
-                        logger.info(f"[GITHUB] ✓ Loaded repo_url by domain: {self.repo_url}")
+                        logger.info(f"[GITHUB] ✓ Loaded repo_url by path: {self.repo_url}")
                     else:
-                        logger.warning(f"[GITHUB] No repo_url found for domain={self.domain}")
+                        logger.warning(f"[GITHUB] No repo_url found for domain={self.domain}, path={project_path_str}")
             finally:
                 pool.putconn(conn)
         except Exception as e:
-            logger.warning(f"[GITHUB] Could not load repo_url: {e}")
+            logger.error(f"[GITHUB] Could not load repo_url: {e}")
 
     def provision_all(self) -> bool:
         """
