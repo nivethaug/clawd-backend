@@ -1473,8 +1473,9 @@ class InfrastructureManager:
             conn = pool.getconn()
             try:
                 cursor = conn.cursor()
+                # PostgreSQL uses %s placeholders, not ?
                 cursor.execute(
-                    "SELECT repo_url FROM projects WHERE project_path = ? OR domain = ?",
+                    "SELECT repo_url FROM projects WHERE project_path = %s OR domain = %s",
                     (str(self.project_path), self.domain)
                 )
                 result = cursor.fetchone()
