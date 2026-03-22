@@ -333,18 +333,21 @@ class ClaudeCodeAgent:
             env.update(self._settings["env"])
             logger.debug(f"Applied custom env vars: {self._settings['env']}")
 
-        # Build command: claude --dangerously-skip-permissions -p "prompt"
+        # Build command: claude -p "prompt" --dangerously-skip-permissions
         # Using -p for one-shot prompt mode (non-interactive)
-        command = [claude_path, "--dangerously-skip-permissions"]
-        logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
+        command = [claude_path]
 
         # Apply model configuration if present in settings (as CLI flag, not env var)
         if "model" in self._settings:
             command.extend(["--model", self._settings["model"]])
             logger.debug(f"Using model from settings: {self._settings['model']}")
 
-        # Add prompt flag
+        # Add prompt flag first
         command.extend(["-p", prompt])
+
+        # Add auto-approve flag AFTER prompt (matches working CLI format)
+        command.append("--dangerously-skip-permissions")
+        logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
 
         # Check if running as root - need to run as non-root user for --dangerously-skip-permissions
         is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
