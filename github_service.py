@@ -276,10 +276,14 @@ class GitHubService:
         success, output = self._run_gh_command(args, timeout=30)
         
         if success:
-            logger.info(f"[GITHUB] Successfully deleted {repo_name}")
+            logger.info(f"[GITHUB] ✓ Successfully deleted {repo_name}")
             return True
         else:
-            logger.error(f"[GITHUB] Failed to delete {repo_name}: {output}")
+            # Check if repo doesn't exist (already deleted)
+            if "not found" in output.lower() or "does not exist" in output.lower():
+                logger.info(f"[GITHUB] Repository {repo_name} not found (already deleted?)")
+                return True  # Consider success if already gone
+            logger.error(f"[GITHUB] ✗ Failed to delete {repo_name}: {output}")
             return False
     
     def _get_username(self) -> Optional[str]:

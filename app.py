@@ -1422,13 +1422,21 @@ async def delete_project(project_id: int, force: bool = False):
             # Extract repo name from URL (owner/repo format)
             if "github.com/" in repo_url:
                 repo_name = repo_url.split("github.com/")[-1].strip("/")
-                logger.info(f"[GITHUB] Deleting repository: {repo_name}")
+                logger.info(f"[GITHUB] Attempting to delete repository: {repo_name}")
+                logger.info(f"[GITHUB] Full repo_url from DB: {repo_url}")
+                
                 if github.delete_repository(repo_name):
-                    logger.info(f"[GITHUB] Repository deleted: {repo_name}")
+                    logger.info(f"[GITHUB] ✓ Repository deleted: {repo_name}")
                 else:
-                    logger.warning(f"[GITHUB] Failed to delete repository: {repo_name}")
+                    logger.warning(f"[GITHUB] ✗ Failed to delete repository: {repo_name}")
+            else:
+                logger.warning(f"[GITHUB] Invalid repo_url format: {repo_url}")
         except Exception as e:
-            logger.warning(f"[GITHUB] Error deleting repository: {e}")
+            logger.error(f"[GITHUB] Error deleting repository: {e}")
+            import traceback
+            logger.error(f"[GITHUB] Traceback: {traceback.format_exc()}")
+    else:
+        logger.info(f"[GITHUB] No repo_url found for project {project_id}, skipping GitHub deletion")
 
     # Step 3: DELETE FROM DATABASE FIRST (so UI shows correct count immediately)
     with get_db() as conn:
