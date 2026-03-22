@@ -502,7 +502,7 @@ async def create_project(request: CreateProjectRequest):
         )
         conn.commit()
 
-    # Step 3.5: Create GitHub repository and push initial commit
+    # Step 3.5: Create GitHub repository (push happens at end of project creation)
     repo_url = None
     try:
         logger.info(f"[GITHUB] Creating repository for project: {domain}")
@@ -515,23 +515,17 @@ async def create_project(request: CreateProjectRequest):
         if repo_url:
             logger.info(f"[GITHUB] Repository created: {repo_url}")
             
-            # Add remote to local repo
+            # Add remote to local repo (push will happen after all project steps complete)
             if github.add_remote(project_folder_path, repo_url):
                 logger.info(f"[GITHUB] Remote added to local repo")
                 
-                # Push initial commit to GitHub
-                if github.push_to_github(project_folder_path, branch="main"):
-                    logger.info(f"[GITHUB] Initial commit pushed to GitHub")
-                    
-                    # Store repo_url in database
-                    with get_db() as conn:
-                        conn.execute(
-                            "UPDATE projects SET repo_url = ? WHERE id = ?",
-                            (repo_url, project_id)
-                        )
-                        conn.commit()
-                else:
-                    logger.warning(f"[GITHUB] Failed to push to GitHub, continuing anyway")
+                # Store repo_url in database
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE projects SET repo_url = ? WHERE id = ?",
+                        (repo_url, project_id)
+                    )
+                    conn.commit()
             else:
                 logger.warning(f"[GITHUB] Failed to add remote, continuing anyway")
         else:
@@ -618,6 +612,17 @@ async def create_project(request: CreateProjectRequest):
                     ("failed", project_id)
                 )
                 conn.commit()
+
+    # Step 6: Push all code to GitHub (after all project creation steps complete)
+    if repo_url:
+        try:
+            logger.info(f"[GITHUB] Pushing final project code to GitHub...")
+            if github.push_to_github(project_folder_path, branch="main"):
+                logger.info(f"[GITHUB] All project code pushed to GitHub: {repo_url}")
+            else:
+                logger.warning(f"[GITHUB] Failed to push to GitHub, continuing anyway")
+        except Exception as e:
+            logger.warning(f"[GITHUB] Push failed: {e}, continuing anyway")
 
     # Fetch the final project data from database (includes status and session_key)
     with get_db() as conn:
