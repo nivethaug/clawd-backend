@@ -373,10 +373,8 @@ I've checked your app and everything looks great! Your NatureStream app has:
             Dict with status, response, and any error info
         """
         try:
-            # Build prompt with context
-            full_prompt = user_message
-            if session_context:
-                full_prompt = f"Previous conversation:\n{session_context}\n\nCurrent request: {user_message}"
+            # Build prompt using the same comprehensive prompt builder as ACPX
+            full_prompt = self._build_chat_prompt(user_message, session_context)
             
             logger.info(f"[CLAUDE-AGENT] Running for project: {self.project_name}")
             logger.info(f"[CLAUDE-AGENT] Working directory: {self.project_path}")
