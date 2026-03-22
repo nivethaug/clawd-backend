@@ -2411,8 +2411,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                         # Check if handler has collected all chunks
                         if hasattr(handler, '_last_query_chunks'):
                             chunks = handler._last_query_chunks
-                            # Filter out progress messages
-                            real_chunks = [c for c in chunks if not c.startswith('⏳ Still working')]
+                            # Filter out progress messages (all start with ⏳)
+                            real_chunks = [c for c in chunks if not c.startswith('⏳')]
                             if real_chunks:
                                 content = '\n'.join(real_chunks).strip()
                                 if content:
@@ -2455,8 +2455,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                     # Client disconnected - spawn background task to save when complete
                     logger.warning(f"[ACP-STREAM] Client disconnected, spawning background save task...")
                     
-                    # Filter out progress messages from what we have so far
-                    real_chunks = [c for c in full_response if not c.startswith('⏳ Still working')]
+                    # Filter out progress messages from what we have so far (all start with ⏳)
+                    real_chunks = [c for c in full_response if not c.startswith('⏳')]
                     
                     # Spawn background task that will poll until query completes
                     async def wait_and_save():
@@ -2473,7 +2473,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 # Check handler for collected chunks
                                 if hasattr(handler, '_last_query_chunks'):
                                     chunks = handler._last_query_chunks
-                                    real = [c for c in chunks if not c.startswith('⏳ Still working')]
+                                    # Filter out progress messages (all start with ⏳)
+                                    real = [c for c in chunks if not c.startswith('⏳')]
                                     if real:
                                         content = '\n'.join(real).strip()
                                         if content and len(content) > 50:  # Ensure we have real content
