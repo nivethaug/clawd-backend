@@ -274,7 +274,7 @@ class ClaudeCodeAgent:
         self._running = False
         logger.info("Agent stopped")
 
-    async def query(self, prompt: str, timeout: float = 300.0) -> Optional[str]:
+    async def query(self, prompt: str, timeout: float = 500.0) -> Optional[str]:
         """
         Send a query to Claude Code and return the final answer.
 
