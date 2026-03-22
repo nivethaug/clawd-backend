@@ -1467,46 +1467,13 @@ class InfrastructureManager:
         self._load_repo_url()
 
     def _load_repo_url(self):
-        """Load repo_url from database for GitHub push at end of provisioning."""
-        try:
-            pool = get_connection_pool()
-            conn = pool.getconn()
-            try:
-                cursor = conn.cursor()
-                # Convert Path to string for comparison
-                project_path_str = str(self.project_path)
-                
-                # Debug: log what we're searching for
-                logger.info(f"[GITHUB] Searching for repo_url...")
-                logger.info(f"[GITHUB]   project_path: {project_path_str}")
-                logger.info(f"[GITHUB]   domain: {self.domain}")
-                
-                # Try domain first (more reliable match)
-                cursor.execute(
-                    "SELECT repo_url FROM projects WHERE domain = %s",
-                    (self.domain,)
-                )
-                result = cursor.fetchone()
-                
-                if result and result[0]:
-                    self.repo_url = result[0]
-                    logger.info(f"[GITHUB] ✓ Loaded repo_url by domain: {self.repo_url}")
-                else:
-                    # Fallback: try project_path
-                    cursor.execute(
-                        "SELECT repo_url FROM projects WHERE project_path = %s",
-                        (project_path_str,)
-                    )
-                    result = cursor.fetchone()
-                    if result and result[0]:
-                        self.repo_url = result[0]
-                        logger.info(f"[GITHUB] ✓ Loaded repo_url by path: {self.repo_url}")
-                    else:
-                        logger.warning(f"[GITHUB] No repo_url found for domain={self.domain}, path={project_path_str}")
-            finally:
-                pool.putconn(conn)
-        except Exception as e:
-            logger.error(f"[GITHUB] Could not load repo_url: {e}")
+        """Construct repo_url directly from domain (repo name = domain)."""
+        # GitHub org/user and repo URL pattern
+        github_org = os.getenv("GITHUB_ORG", "nivethaug")
+        
+        # Domain IS the repo name (e.g., designcanvas-wsb1fr -> https://github.com/nivethaug/designcanvas-wsb1fr)
+        self.repo_url = f"https://github.com/{github_org}/{self.domain}"
+        logger.info(f"[GITHUB] ✓ Constructed repo_url: {self.repo_url}")
 
     def provision_all(self) -> bool:
         """
