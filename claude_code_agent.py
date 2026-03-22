@@ -327,6 +327,13 @@ class ClaudeCodeAgent:
 
         # Build environment from settings
         env = os.environ.copy()
+        
+        # Ensure PATH includes common locations for MCP tools
+        if "PATH" in env:
+            paths_to_add = ["/usr/local/bin", "/usr/bin", "/root/.npm-global/bin"]
+            for p in paths_to_add:
+                if p not in env["PATH"]:
+                    env["PATH"] = f"{p}:{env['PATH']}"
 
         # Apply any custom environment variables from config
         if "env" in self._settings:
@@ -353,10 +360,11 @@ class ClaudeCodeAgent:
         is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
         
         # Wrap with sudo -u if running as root
+        # Use -E to preserve environment and -H to set HOME to target user
         if is_root:
             run_as_user = os.environ.get("CLAUDE_RUN_AS_USER", "dreampilot")
-            command = ["sudo", "-u", run_as_user, *command]
-            logger.info(f"Running as root - wrapped command with sudo -u {run_as_user}")
+            command = ["sudo", "-E", "-H", "-u", run_as_user, *command]
+            logger.info(f"Running as root - wrapped command with sudo -E -H -u {run_as_user}")
 
         # Log full command (truncate prompt for readability)
         cmd_display = ' '.join(command)
