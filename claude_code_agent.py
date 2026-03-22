@@ -333,32 +333,27 @@ class ClaudeCodeAgent:
             env.update(self._settings["env"])
             logger.debug(f"Applied custom env vars: {self._settings['env']}")
 
-        # Build command: claude [--model <model>] -p "prompt"
+        # Build command: claude --dangerously-skip-permissions -p "prompt"
         # Using -p for one-shot prompt mode (non-interactive)
-        command = [claude_path]
+        command = [claude_path, "--dangerously-skip-permissions"]
+        logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
 
         # Apply model configuration if present in settings (as CLI flag, not env var)
         if "model" in self._settings:
             command.extend(["--model", self._settings["model"]])
             logger.debug(f"Using model from settings: {self._settings['model']}")
 
-        # Check if running as root - need to run as non-root user for --dangerously-skip-permissions
-        is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
-        run_as_user = os.environ.get("CLAUDE_RUN_AS_USER", "dreampilot") if is_root else None
-        
-        if is_root and run_as_user:
-            logger.info(f"Running as root - will execute Claude CLI as user '{run_as_user}'")
-        
-        # Add auto-approve flag (works when running as non-root via sudo -u)
-        command.append("--dangerously-skip-permissions")
-        logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
-
+        # Add prompt flag
         command.extend(["-p", prompt])
 
+        # Check if running as root - need to run as non-root user for --dangerously-skip-permissions
+        is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
+        
         # Wrap with sudo -u if running as root
-        if run_as_user:
+        if is_root:
+            run_as_user = os.environ.get("CLAUDE_RUN_AS_USER", "dreampilot")
             command = ["sudo", "-u", run_as_user, *command]
-            logger.debug(f"Wrapped command with sudo -u {run_as_user}")
+            logger.info(f"Running as root - wrapped command with sudo -u {run_as_user}")
 
         # Log full command (truncate prompt for readability)
         cmd_display = ' '.join(command)
