@@ -2436,8 +2436,12 @@ async def chat_stream_endpoint(request: ChatRequest):
                         yield f"data: {event_data}\n\n"
                         logger.info(f"[ACP-STREAM] Yielded chunk: {len(chunk)} chars")
                     
-                    # Save complete response to database
-                    assistant_content = ''.join(full_response).strip()
+                    # Filter out progress messages before saving to database
+                    progress_icons = ('🔍', '✨', '🔧', '⚙️', '🎯', '⏳', '💡')
+                    real_chunks = [c for c in full_response if not c.startswith(progress_icons)]
+                    
+                    # Save complete response to database (with newlines between chunks)
+                    assistant_content = '\n'.join(real_chunks).strip()
                     
                     if assistant_content:
                         await save_response_to_db(assistant_content)
