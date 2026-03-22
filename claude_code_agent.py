@@ -257,17 +257,17 @@ class ClaudeCodeAgent:
         Returns:
             Progress message with appropriate phase text and animated dots
         """
-        # Base message by phase (optimized for 900s timeout)
+        # Base message by phase (optimized for 900s timeout) - different icons per phase
         if elapsed < 30:
-            base = "⏳ Analyzing your request"
+            base = "🔍 Analyzing your request"
         elif elapsed < 120:
-            base = "⏳ Generating solution"
+            base = "✨ Generating solution"
         elif elapsed < 300:
-            base = "⏳ Applying fixes and improvements"
+            base = "🔧 Applying fixes and improvements"
         elif elapsed < 600:
-            base = "⏳ Processing complex task"
+            base = "⚙️ Processing complex task"
         else:
-            base = "⏳ Finalizing — almost there"
+            base = "🎯 Finalizing — almost there"
         
         # Animate dots (cycle 1-2-3 based on offset)
         self._progress_dots_offset = (self._progress_dots_offset + 1) % 3
