@@ -190,13 +190,24 @@ class FastWrapper:
                 else:
                     logger.warning(f"⚠️ Template missing node_modules - npm install will be needed in Phase 5")
 
-                # Copy all contents of template to project path (including node_modules if exists)
+                # Copy all contents of template to project path (including hidden files like .gitignore)
+                # Use rsync for reliable copying of hidden files
                 result = subprocess.run(
-                    ["cp", "-r", f"{str(source_path)}/.", str(self.project_path)],
+                    ["rsync", "-a", f"{str(source_path)}/", f"{str(self.project_path)}/"],
                     capture_output=True,
                     text=True,
                     timeout=300
                 )
+                
+                # Fallback to cp if rsync not available
+                if result.returncode != 0 and "rsync" in result.stderr:
+                    logger.warning("rsync not available, falling back to cp")
+                    result = subprocess.run(
+                        ["cp", "-a", f"{str(source_path)}/.", str(self.project_path)],
+                        capture_output=True,
+                        text=True,
+                        timeout=300
+                    )
 
                 if result.returncode == 0:
                     logger.info(f"✅ Blank template copied successfully to project root")
