@@ -1473,15 +1473,30 @@ class InfrastructureManager:
             conn = pool.getconn()
             try:
                 cursor = conn.cursor()
+                # Debug: log what we're searching for
+                logger.info(f"[GITHUB] Searching for repo_url with project_path={self.project_path}, domain={self.domain}")
+                
                 # PostgreSQL uses %s placeholders, not ?
                 cursor.execute(
-                    "SELECT repo_url FROM projects WHERE project_path = %s OR domain = %s",
+                    "SELECT repo_url, project_path, domain FROM projects WHERE project_path = %s OR domain = %s",
                     (str(self.project_path), self.domain)
                 )
                 result = cursor.fetchone()
                 if result and result[0]:
                     self.repo_url = result[0]
-                    logger.info(f"[GITHUB] Loaded repo_url: {self.repo_url}")
+                    logger.info(f"[GITHUB] ✓ Loaded repo_url: {self.repo_url}")
+                else:
+                    # Try to find by domain only as fallback
+                    cursor.execute(
+                        "SELECT repo_url, project_path, domain FROM projects WHERE domain = %s",
+                        (self.domain,)
+                    )
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        self.repo_url = result[0]
+                        logger.info(f"[GITHUB] ✓ Loaded repo_url by domain: {self.repo_url}")
+                    else:
+                        logger.warning(f"[GITHUB] No repo_url found for domain={self.domain}")
             finally:
                 pool.putconn(conn)
         except Exception as e:
