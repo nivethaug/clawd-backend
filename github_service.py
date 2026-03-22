@@ -219,17 +219,97 @@ class GitHubService:
         
         Args:
             project_path: Path to local git repository
-            branch: Branch name to push
+            branch: Branch name to push (default: main, auto-detected if not found)
             remote_name: Remote name (default: origin)
             
         Returns:
             True if successful
         """
         try:
-            # Push with upstream tracking
-            logger.info(f"[GITHUB] Pushing {branch} to {remote_name}")
+            # Step 1: Check if there are any commits
             result = subprocess.run(
-                ["git", "push", "-u", remote_name, branch],
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=project_path,
+                timeout=10
+            )
+            
+            has_commits = result.returncode == 0
+            
+            if not has_commits:
+                # No commits yet - make initial commit
+                logger.info(f"[GITHUB] No commits found, creating initial commit")
+                
+                # Add all files
+                subprocess.run(
+                    ["git", "add", "-A"],
+                    cwd=project_path,
+                    capture_output=True,
+                    timeout=30
+                )
+                
+                # Create initial commit
+                result = subprocess.run(
+                    ["git", "commit", "-m", "Initial commit"],
+                    capture_output=True,
+                    text=True,
+                    cwd=project_path,
+                    timeout=30
+                )
+                
+                if result.returncode != 0:
+                    logger.warning(f"[GITHUB] Initial commit failed (might be empty): {result.stderr}")
+                else:
+                    logger.info(f"[GITHUB] Created initial commit")
+            
+            # Step 2: Detect actual branch name
+            result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                capture_output=True,
+                text=True,
+                cwd=project_path,
+                timeout=10
+            )
+            
+            actual_branch = result.stdout.strip() if result.returncode == 0 else ""
+            
+            # If no branch (detached HEAD or no commits), try to get default or use 'main'
+            if not actual_branch:
+                # Check for existing branches
+                result = subprocess.run(
+                    ["git", "branch"],
+                    capture_output=True,
+                    text=True,
+                    cwd=project_path,
+                    timeout=10
+                )
+                
+                if result.returncode == 0:
+                    branches = result.stdout.strip()
+                    # Parse branch names (remove * prefix)
+                    for line in branches.split('\n'):
+                        line = line.strip().lstrip('* ')
+                        if line:
+                            actual_branch = line
+                            break
+                
+                # Still no branch? Rename to main
+                if not actual_branch:
+                    actual_branch = "main"
+                    subprocess.run(
+                        ["git", "checkout", "-b", actual_branch],
+                        cwd=project_path,
+                        capture_output=True,
+                        timeout=10
+                    )
+            
+            logger.info(f"[GITHUB] Using branch: {actual_branch}")
+            
+            # Step 3: Push with upstream tracking
+            logger.info(f"[GITHUB] Pushing {actual_branch} to {remote_name}")
+            result = subprocess.run(
+                ["git", "push", "-u", remote_name, actual_branch],
                 capture_output=True,
                 text=True,
                 cwd=project_path,
@@ -237,7 +317,7 @@ class GitHubService:
             )
             
             if result.returncode == 0:
-                logger.info(f"[GITHUB] Successfully pushed to {remote_name}/{branch}")
+                logger.info(f"[GITHUB] Successfully pushed to {remote_name}/{actual_branch}")
                 return True
             else:
                 logger.error(f"[GITHUB] Push failed: {result.stderr}")
