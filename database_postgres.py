@@ -275,6 +275,11 @@ def init_schema():
                 logger.info("✓ Added error_code column for detailed failure reasons")
             _run_migration(migrate_error_code)
 
+            def migrate_repo_url():
+                cur.execute("ALTER TABLE projects ADD COLUMN repo_url TEXT")
+                logger.info("✓ Added repo_url column for GitHub repository URL")
+            _run_migration(migrate_repo_url)
+
             # Sessions table
             cur.execute("""CREATE TABLE IF NOT EXISTS sessions (
                 id SERIAL PRIMARY KEY,

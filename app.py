@@ -28,6 +28,7 @@ from chat_handlers import generate_sse_stream, generate_sse_stream_with_db_save,
 from file_utils import FileUtils
 from completion_service import CompletionService
 from claude_code_worker import run_claude_code_background
+from github_service import get_github_service
 
 
 # ============================================================================
@@ -383,16 +384,22 @@ async def get_projects():
 
 @app.post("/projects", response_model=ProjectResponse, status_code=201)
 async def create_project(request: CreateProjectRequest):
-    # Auto-generate domain if not provided
+    # Get GitHub service for repo name sanitization
+    github = get_github_service()
+    
+    # Auto-generate domain if not provided (use GitHub-compatible naming)
     domain = request.domain
     if not domain or not domain.strip():
-        # Clean the project name and create a subdomain
-        clean_name = re.sub(r'[^a-z0-9-]', '-', request.name.lower()).strip('-')
-        clean_name = re.sub(r'-+', '-', clean_name)  # Replace multiple hyphens with single
+        # Sanitize project name for GitHub repo format
+        domain = github.sanitize_repo_name(request.name)
+        
+        # Add random suffix to ensure uniqueness
         random_suffix = ''.join(__import__('random').choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
-        domain = f"{clean_name}-{random_suffix}"
+        domain = f"{domain}-{random_suffix}"
         logger.info(f"Auto-generated domain for project '{request.name}': {domain}")
     else:
+        # Sanitize user-provided domain for GitHub compatibility
+        domain = github.sanitize_repo_name(domain.strip())
         # Validate subdomain format if provided
         if not validate_subdomain(domain):
             raise HTTPException(
@@ -494,6 +501,43 @@ async def create_project(request: CreateProjectRequest):
             (project_folder_path, project_id)
         )
         conn.commit()
+
+    # Step 3.5: Create GitHub repository and push initial commit
+    repo_url = None
+    try:
+        logger.info(f"[GITHUB] Creating repository for project: {domain}")
+        repo_url = github.create_repository(
+            name=domain,
+            public=True,  # Public by default
+            description=f"Project: {request.name}"
+        )
+        
+        if repo_url:
+            logger.info(f"[GITHUB] Repository created: {repo_url}")
+            
+            # Add remote to local repo
+            if github.add_remote(project_folder_path, repo_url):
+                logger.info(f"[GITHUB] Remote added to local repo")
+                
+                # Push initial commit to GitHub
+                if github.push_to_github(project_folder_path, branch="main"):
+                    logger.info(f"[GITHUB] Initial commit pushed to GitHub")
+                    
+                    # Store repo_url in database
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE projects SET repo_url = ? WHERE id = ?",
+                            (repo_url, project_id)
+                        )
+                        conn.commit()
+                else:
+                    logger.warning(f"[GITHUB] Failed to push to GitHub, continuing anyway")
+            else:
+                logger.warning(f"[GITHUB] Failed to add remote, continuing anyway")
+        else:
+            logger.warning(f"[GITHUB] Failed to create repository, continuing without GitHub")
+    except Exception as e:
+        logger.warning(f"[GITHUB] GitHub integration failed: {e}, continuing without GitHub")
 
     # Step 4: Select template (if not provided)
     selected_template_id = request.template_id
@@ -1370,8 +1414,26 @@ async def delete_project(project_id: int, force: bool = False):
             (project_id,)
         ).fetchall()
         session_keys = [row['session_key'] for row in sessions_to_delete]
+        
+        # Get repo_url for GitHub deletion
+        repo_url = project.get('repo_url')
 
-    # Step 2: DELETE FROM DATABASE FIRST (so UI shows correct count immediately)
+    # Step 2: Delete GitHub repository (before database deletion)
+    if repo_url:
+        try:
+            github = get_github_service()
+            # Extract repo name from URL (owner/repo format)
+            if "github.com/" in repo_url:
+                repo_name = repo_url.split("github.com/")[-1].strip("/")
+                logger.info(f"[GITHUB] Deleting repository: {repo_name}")
+                if github.delete_repository(repo_name):
+                    logger.info(f"[GITHUB] Repository deleted: {repo_name}")
+                else:
+                    logger.warning(f"[GITHUB] Failed to delete repository: {repo_name}")
+        except Exception as e:
+            logger.warning(f"[GITHUB] Error deleting repository: {e}")
+
+    # Step 3: DELETE FROM DATABASE FIRST (so UI shows correct count immediately)
     with get_db() as conn:
         # Delete messages first (foreign key dependency)
         conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))

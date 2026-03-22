@@ -175,7 +175,7 @@ class ProjectFileManager:
 
     def create_gitignore(self, project_path: str) -> bool:
         """
-        Create .gitignore file in project folder.
+        Create comprehensive .gitignore file for full-stack project.
 
         Args:
             project_path: Absolute path to project folder
@@ -184,7 +184,7 @@ class ProjectFileManager:
             True if successful, False otherwise
         """
         gitignore_path = os.path.join(project_path, ".gitignore")
-        gitignore_content = """# Python
+        gitignore_content = """# Python (Backend)
 __pycache__/
 *.py[cod]
 *$py.class
@@ -211,6 +211,37 @@ venv/
 ENV/
 env/
 
+# Node.js (Frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# AI Agent folders (auto-generated, don't commit)
+frontend/agent/
+backend/agent/
+
 # IDEs
 .vscode/
 .idea/
@@ -221,10 +252,18 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+ehthumbs.db
 
-# Project specific
-node_modules/
-.env
+# Test coverage
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
 """
 
         try:
