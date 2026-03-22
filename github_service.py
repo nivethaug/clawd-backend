@@ -226,6 +226,15 @@ class GitHubService:
             True if successful
         """
         try:
+            # Step 0: Configure git to use gh CLI for authentication
+            logger.info(f"[GITHUB] Configuring git to use gh CLI for authentication")
+            subprocess.run(
+                ["gh", "auth", "setup-git"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
             # Step 1: Check if there are any commits
             result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
