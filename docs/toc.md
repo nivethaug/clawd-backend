@@ -25,6 +25,14 @@
 | `/projects/{id}` | PUT | `app.py:1357-1436` | [project_deletion.md](./project_deletion.md) |
 | `/projects/{id}` | DELETE | `app.py:1204-1357` | [project_deletion.md](./project_deletion.md) |
 
+### Recent Activity
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/projects/recent-activity` | GET | `app.py:3485-3545` | [recent_activity.md](./recent_activity.md) |
+| `/projects/recent-activity/simple` | GET | `app.py:3548-3560` | [recent_activity.md](./recent_activity.md) |
+| `/projects/{id}/activity` | GET | `app.py:3563-3590` | [recent_activity.md](./recent_activity.md) |
+
 ### Project Status
 
 | Endpoint | Method | File:Lines | Docs |
@@ -100,6 +108,7 @@
 | File | Description |
 |------|-------------|
 | [project_creation.md](./project_creation.md) | Complete reference: API, pipeline, ACPX, infrastructure |
+| [recent_activity.md](./recent_activity.md) | Recent work/activity API for Activity page |
 | [project_status.md](./project_status.md) | Status & AI status endpoints |
 | [project_deletion.md](./project_deletion.md) | Delete/update projects |
 | [project_sessions.md](./project_sessions.md) | Session management |
