@@ -70,11 +70,8 @@ class ACPChatHandler:
     def _load_project_metadata(self):
         """Load project domain from database to populate prompt placeholders."""
         # Set defaults first (will be overwritten if DB lookup succeeds)
-        safe_name = self.project_name.replace('-', '_').lower()
         self.frontend_domain = f"{self.project_name}.dreambigwithai.com"
         self.backend_domain = f"{self.project_name}-api.dreambigwithai.com"
-        self.db_name = f"{safe_name}_db"
-        self.db_user = f"{safe_name}_user"
         
         try:
             from database_adapter import get_db
@@ -307,8 +304,6 @@ Project Root: `{self.project_path}`
 **Project Details:**
 - Frontend URL: `https://{self.frontend_domain}`
 - Backend URL: `https://{self.backend_domain}`
-- Database: `{self.db_name}`
-- Database User: `{self.db_user}`
 
 ---
 
