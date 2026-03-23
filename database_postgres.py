@@ -280,6 +280,11 @@ def init_schema():
                 logger.info("✓ Added repo_url column for GitHub repository URL")
             _run_migration(migrate_repo_url)
 
+            def migrate_active_session_id():
+                cur.execute("ALTER TABLE projects ADD COLUMN active_session_id INTEGER")
+                logger.info("✓ Added active_session_id column for session locking")
+            _run_migration(migrate_active_session_id)
+
             # Sessions table
             cur.execute("""CREATE TABLE IF NOT EXISTS sessions (
                 id SERIAL PRIMARY KEY,

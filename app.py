@@ -29,6 +29,7 @@ from file_utils import FileUtils
 from completion_service import CompletionService
 from claude_code_worker import run_claude_code_background
 from github_service import get_github_service
+from services.session_lock_service import SessionLockService
 
 
 # ============================================================================
@@ -2053,6 +2054,101 @@ async def get_claude_session(project_id: int):
             "message": f"Could not determine process status: {str(e)}"
         }
 
+# ============================================================================
+# Session Locking Endpoints
+# ============================================================================
+
+class ActiveSessionResponse(BaseModel):
+    active_session_id: Optional[int] = None
+    session_name: Optional[str] = None
+
+@app.get("/projects/{project_id}/active-session", response_model=ActiveSessionResponse)
+async def get_active_session(project_id: int):
+    """
+    Get the active (locked) session for a project.
+    
+    Returns the session that currently holds the lock on this project,
+    or null if the project is unlocked.
+    
+    Args:
+        project_id: Project ID
+        
+    Returns:
+        Active session ID and name, or null if unlocked
+    """
+    result = SessionLockService.get_active_session(project_id)
+    return ActiveSessionResponse(
+        active_session_id=result["active_session_id"],
+        session_name=result["session_name"]
+    )
+
+@app.delete("/projects/{project_id}/lock")
+async def force_release_project_lock(project_id: int):
+    """
+    Force release any lock on a project (admin override).
+    
+    Use for crash recovery when a session didn't complete properly
+    and the lock is still held.
+    
+    Args:
+        project_id: Project ID to unlock
+        
+    Returns:
+        Released session ID if a lock was held
+    """
+    result = SessionLockService.force_release_lock(project_id)
+    
+    if result["released_session_id"]:
+        logger.warning(f"[ADMIN] Force released lock on project {project_id}, was held by session {result['released_session_id']}")
+        return {
+            "success": True,
+            "released_session_id": result["released_session_id"],
+            "message": f"Lock released from session {result['released_session_id']}"
+        }
+    else:
+        return {
+            "success": True,
+            "released_session_id": None,
+            "message": "Project was not locked"
+        }
+
+@app.post("/sessions/{session_id}/release-lock")
+async def release_session_lock(session_id: int):
+    """
+    Explicitly release lock held by a session.
+    
+    Allows frontend to end a session's lock without deleting the session.
+    Useful for "End Chat" buttons.
+    
+    Args:
+        session_id: Session ID to release lock for
+        
+    Returns:
+        Success status
+    """
+    # Get project_id from session
+    with get_db() as conn:
+        session = conn.execute(
+            "SELECT project_id FROM sessions WHERE id = ?",
+            (session_id,)
+        ).fetchone()
+        
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        project_id = session["project_id"]
+    
+    result = SessionLockService.release_lock(project_id, session_id)
+    
+    if result["released"]:
+        return {"success": True, "message": "Lock released"}
+    else:
+        return {"success": True, "message": "No lock held by this session"}
+
+# ============================================================================
+# Session Endpoints
+# ============================================================================
+
 @app.get("/projects/{project_id}/sessions", response_model=list[SessionResponse])
 async def get_sessions(project_id: int):
     with get_db() as conn:
@@ -2121,7 +2217,18 @@ async def create_session(project_id: int, request: CreateSessionRequest):
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: int):
+    # Get project_id before deletion to release lock
     with get_db() as conn:
+        session_info = conn.execute(
+            "SELECT project_id FROM sessions WHERE id = ?",
+            (session_id,)
+        ).fetchone()
+        
+        if session_info:
+            project_id = session_info['project_id']
+            # Release lock if held by this session
+            SessionLockService.release_lock(project_id, session_id)
+        
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         conn.commit()
@@ -2131,6 +2238,9 @@ async def delete_session(session_id: int):
 @app.delete("/projects/{project_id}/sessions/{session_id}")
 async def delete_project_session(project_id: int, session_id: int):
     """Delete a specific session within a project."""
+    # Release lock if held by this session
+    SessionLockService.release_lock(project_id, session_id)
+    
     # Step 1: Get session_key before deletion (needed for OpenClaw cleanup)
     with get_db() as conn:
         session_info = conn.execute(
@@ -2227,6 +2337,17 @@ async def chat_stream_endpoint(request: ChatRequest):
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_id = session['id']
+        project_id = session['project_id']
+        
+        # === SESSION LOCK CHECK ===
+        # Acquire lock for this project/session
+        lock_result = SessionLockService.acquire_lock(project_id, session_id)
+        if not lock_result["success"]:
+            raise HTTPException(
+                status_code=423,  # Locked
+                detail={"error": lock_result["error"], "active_session_id": lock_result.get("active_session_id")}
+            )
+        # === END SESSION LOCK CHECK ===
 
         user_messages = [msg for msg in request.messages if msg.role == 'user']
 
@@ -2662,6 +2783,17 @@ async def chat_endpoint(request: ChatRequest):
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_id = session['id']
+        project_id = session['project_id']
+        
+        # === SESSION LOCK CHECK ===
+        # Acquire lock for this project/session
+        lock_result = SessionLockService.acquire_lock(project_id, session_id)
+        if not lock_result["success"]:
+            raise HTTPException(
+                status_code=423,  # Locked
+                detail={"error": lock_result["error"], "active_session_id": lock_result.get("active_session_id")}
+            )
+        # === END SESSION LOCK CHECK ===
 
         user_messages = [msg for msg in request.messages if msg.role == 'user']
 

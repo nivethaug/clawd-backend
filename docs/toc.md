@@ -50,6 +50,14 @@
 | `/sessions/{sid}/messages` | GET | `app.py:2019-2035` | [project_sessions.md](./project_sessions.md) |
 | `/sessions/details` | GET | `app.py:2302-2415` | [project_sessions.md](./project_sessions.md) |
 
+### Session Locking
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/projects/{id}/active-session` | GET | `app.py:1888-1905` | [session_locking.md](./session_locking.md) |
+| `/projects/{id}/lock` | DELETE | `app.py:1908-1933` | [session_locking.md](./session_locking.md) |
+| `/sessions/{sid}/release-lock` | POST | `app.py:1936-1958` | [session_locking.md](./session_locking.md) |
+
 ### Chat
 
 | Endpoint | Method | File:Lines | Docs |
@@ -97,6 +105,7 @@
 | [project_sessions.md](./project_sessions.md) | Session management |
 | [chat.md](./chat.md) | Non-streaming chat |
 | [chat_stream.md](./chat_stream.md) | Streaming chat (SSE) |
+| [session_locking.md](./session_locking.md) | Session locking (single active session per project) |
 | [ai_completion.md](./ai_completion.md) | AI completion endpoint |
 | [publish_frontend.md](./publish_frontend.md) | Frontend build & publish |
 | [publish_backend.md](./publish_backend.md) | Backend build & publish |
