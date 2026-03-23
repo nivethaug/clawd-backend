@@ -3819,23 +3819,24 @@ async def execute_app_action(
     The action is applied to both {project_name}-frontend and {project_name}-backend.
     """
     try:
-        # Get project name
+        # Get project domain
         with get_db() as cur:
-            cur.execute("SELECT name FROM projects WHERE id = %s AND user_id = %s", (project_id, user_id))
+            cur.execute("SELECT name, domain FROM projects WHERE id = %s AND user_id = %s", (project_id, user_id))
             row = cur.fetchone()
             
             if not row:
                 raise HTTPException(status_code=404, detail="Project not found")
             
             project_name = row["name"] if isinstance(row, dict) else row[0]
+            project_domain = row["domain"] if isinstance(row, dict) else row[1]
         
         # Validate action
         valid_actions = ["start", "stop", "restart", "pause"]
         if request.action not in valid_actions:
             raise HTTPException(status_code=400, detail=f"Invalid action. Must be one of: {valid_actions}")
         
-        # Execute PM2 action
-        result = pm2_action(project_name, request.action)
+        # Execute PM2 action using domain (PM2 services are named by domain)
+        result = pm2_action(project_domain or project_name, request.action)
         
         if not result.get("success"):
             raise HTTPException(status_code=500, detail=result.get("error", "Action failed"))
