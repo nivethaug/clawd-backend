@@ -3752,6 +3752,103 @@ async def get_dashboard_home(
         raise HTTPException(status_code=500, detail=f"Failed to fetch dashboard: {str(e)}")
 
 
+# ============================================================================
+# Apps Endpoints (Running Apps Page)
+# ============================================================================
+
+from apps_service import (
+    get_apps_list,
+    pm2_action,
+    AppsListResponse,
+    AppItem,
+    Pm2ActionResponse
+)
+
+
+@app.get("/apps", response_model=AppsListResponse)
+async def get_apps(
+    user_id: int = 1,  # TODO: Get from auth token when auth is implemented
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Get apps list for Running Apps page.
+    
+    Returns running apps with uptime from PM2, and other apps (needs_fix, stopped).
+    
+    Response:
+        running: List of running apps with:
+            - project_id, name, type, status
+            - uptime: Uptime in seconds
+            - uptime_label: Human-readable (e.g., "5 days, 3 hours")
+            - domain: Project URL
+            - actions: ["open", "code", "pause"]
+        
+        others: List of non-running apps (needs_fix, stopped)
+            - actions vary by status
+    
+    Performance: PM2 data cached for 2 seconds.
+    """
+    try:
+        apps = get_apps_list(user_id=user_id)
+        return apps
+    except Exception as e:
+        logger.error(f"Failed to fetch apps: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch apps: {str(e)}")
+
+
+class AppActionRequest(BaseModel):
+    action: str = Field(..., description="Action to perform: start, stop, restart, pause")
+
+
+@app.post("/apps/{project_id}/action", response_model=Pm2ActionResponse)
+async def execute_app_action(
+    project_id: int,
+    request: AppActionRequest,
+    user_id: int = 1,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Execute an action on an app via PM2.
+    
+    Actions:
+        - start: Start the app
+        - stop: Stop the app
+        - pause: Same as stop
+        - restart: Restart the app
+    
+    The action is applied to both {project_name}-frontend and {project_name}-backend.
+    """
+    try:
+        # Get project name
+        with get_db() as cur:
+            cur.execute("SELECT name FROM projects WHERE id = %s AND user_id = %s", (project_id, user_id))
+            row = cur.fetchone()
+            
+            if not row:
+                raise HTTPException(status_code=404, detail="Project not found")
+            
+            project_name = row["name"] if isinstance(row, dict) else row[0]
+        
+        # Validate action
+        valid_actions = ["start", "stop", "restart", "pause"]
+        if request.action not in valid_actions:
+            raise HTTPException(status_code=400, detail=f"Invalid action. Must be one of: {valid_actions}")
+        
+        # Execute PM2 action
+        result = pm2_action(project_name, request.action)
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Action failed"))
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to execute app action: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     print(f"Starting Clawdbot Adapter API...")
