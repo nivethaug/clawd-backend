@@ -25,6 +25,12 @@
 | `/projects/{id}` | PUT | `app.py:1357-1436` | [project_deletion.md](./project_deletion.md) |
 | `/projects/{id}` | DELETE | `app.py:1204-1357` | [project_deletion.md](./project_deletion.md) |
 
+### Dashboard
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/dashboard/home` | GET | `app.py:3595-3680` | [dashboard.md](./dashboard.md) |
+
 ### Recent Activity
 
 | Endpoint | Method | File:Lines | Docs |
@@ -108,6 +114,7 @@
 | File | Description |
 |------|-------------|
 | [project_creation.md](./project_creation.md) | Complete reference: API, pipeline, ACPX, infrastructure |
+| [dashboard.md](./dashboard.md) | Dashboard home API (single-call for home page) |
 | [recent_activity.md](./recent_activity.md) | Recent work/activity API for Activity page |
 | [project_status.md](./project_status.md) | Status & AI status endpoints |
 | [project_deletion.md](./project_deletion.md) | Delete/update projects |
