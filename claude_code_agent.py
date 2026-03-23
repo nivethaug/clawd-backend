@@ -399,6 +399,8 @@ class ClaudeCodeAgent:
         process = None
 
         try:
+            # Create subprocess with larger buffer limit for screenshot data
+            # Default limit is 64KB which is too small for base64 screenshots
             process = await asyncio.create_subprocess_exec(
                 *command,
                 stdin=asyncio.subprocess.DEVNULL,
@@ -406,6 +408,7 @@ class ClaudeCodeAgent:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.repo_path),
                 env=env,
+                limit=10 * 1024 * 1024  # 10MB limit for large JSON lines (screenshots)
             )
             logger.debug(f"Subprocess started with PID: {process.pid}")
 
@@ -429,6 +432,12 @@ class ClaudeCodeAgent:
 
                     # Decode and strip the line
                     line_text = line.decode("utf-8", errors="replace").rstrip("\n\r")
+                    
+                    # Skip very long lines (likely screenshot data or large JSON)
+                    # These would be base64 encoded images in stream-json format
+                    if len(line_text) > 100000:  # 100KB threshold
+                        logger.debug(f"[CLAUDE-AGENT] Skipping large line ({len(line_text)} chars)")
+                        continue
 
                     # Skip empty lines
                     if not line_text.strip():
