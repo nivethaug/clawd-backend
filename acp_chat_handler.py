@@ -70,31 +70,48 @@ class ACPChatHandler:
     def _load_project_metadata(self):
         """Load project metadata from database to populate prompt placeholders."""
         # Set defaults first (will be overwritten if DB lookup succeeds)
+        # These follow the naming convention from project_manager.py
+        safe_name = self.project_name.replace('-', '_').lower()
         self.frontend_domain = f"{self.project_name}.dreambigwithai.com"
         self.backend_domain = f"{self.project_name}-api.dreambigwithai.com"
         self.frontend_port = 3011
         self.backend_port = 8011
-        self.db_name = f"{self.project_name}_db"
-        self.db_user = f"{self.project_name}_user"
+        self.db_name = f"{safe_name}_db"
+        self.db_user = f"{safe_name}_user"
         
         try:
             from database_adapter import get_db
             with get_db() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT frontend_domain, backend_domain, frontend_port, backend_port, db_name, db_user
-                        FROM projects
-                        WHERE project_name = %s
-                    """, (self.project_name,))
-                    row = cursor.fetchone()
+                # Query actual columns from projects table: domain, backend_port
+                # Note: column is 'name', not 'project_name'
+                conn.execute("""
+                    SELECT domain, backend_port
+                    FROM projects
+                    WHERE name = %s
+                """, (self.project_name,))
+                row = conn.fetchone()
             
             if row:
-                self.frontend_domain = row['frontend_domain'] or self.frontend_domain
-                self.backend_domain = row['backend_domain'] or self.backend_domain
-                self.frontend_port = row['frontend_port'] or self.frontend_port
-                self.backend_port = row['backend_port'] or self.backend_port
-                self.db_name = row['db_name'] or self.db_name
-                self.db_user = row['db_user'] or self.db_user
+                domain = row['domain'] if row else None
+                backend_port = row['backend_port'] if row else None
+                
+                # Derive frontend_domain and backend_domain from domain column
+                if domain:
+                    self.frontend_domain = domain
+                    # Backend domain convention: add "-api" suffix
+                    if '-api.' not in domain:
+                        parts = domain.split('.', 1)
+                        if len(parts) == 2:
+                            self.backend_domain = f"{parts[0]}-api.{parts[1]}"
+                        else:
+                            self.backend_domain = f"{domain}-api"
+                    else:
+                        self.backend_domain = domain.replace('-api.', '.').replace('.', '-api.', 1)
+                
+                if backend_port:
+                    self.backend_port = backend_port
+                    # Frontend port convention: backend_port - 5000
+                    self.frontend_port = backend_port - 5000
                 
                 logger.info(f"[ACP-CHAT] Loaded project metadata for {self.project_name}")
                 logger.info(f"  Frontend: {self.frontend_domain}")
