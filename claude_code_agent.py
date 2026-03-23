@@ -248,37 +248,17 @@ class ClaudeCodeAgent:
         return lines[-1] if lines else None
 
     def _get_progress_message(self, elapsed: float) -> str:
-        """
-        Generate phase-appropriate progress message with dot animation.
-        
-        Args:
-            elapsed: Seconds since query started
-            
-        Returns:
-            Progress message with appropriate phase text and animated dots
-        """
-        # Base message by phase (optimized for 900s timeout) - different icons per phase
+        """Generate phase-appropriate progress message."""
         if elapsed < 30:
-            base = "🔍 Analyzing your request"
+            return "🔍 Analyzing your request..."
         elif elapsed < 120:
-            base = "✨ Generating solution"
+            return "✨ Working on your changes..."
         elif elapsed < 300:
-            base = "🔧 Applying fixes and improvements"
+            return "🔧 Applying fixes and improvements..."
         elif elapsed < 600:
-            base = "⚙️ Processing complex task"
+            return "⚙️ Processing complex task..."
         else:
-            base = "🎯 Finalizing — almost there"
-        
-        # Animate dots (cycle 1-2-3 based on offset)
-        self._progress_dots_offset = (self._progress_dots_offset + 1) % 3
-        dots = "." * (self._progress_dots_offset + 1)
-        
-        # Add reassurance for long runs
-        suffix = ""
-        if elapsed > 180:
-            suffix = "\n💡 Complex tasks may take several minutes"
-        
-        return f"{base}{dots}{suffix}"
+            return "🎯 Almost there, finalizing..."
 
     async def __aenter__(self) -> "ClaudeCodeAgent":
         """Start the Claude Code Agent."""

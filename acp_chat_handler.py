@@ -62,6 +62,10 @@ class ACPChatHandler:
         
         # Load project metadata from database
         self._load_project_metadata()
+        
+        # Validate paths
+        if not self.frontend_src_path.exists():
+            raise ValueError(f"Frontend src path does not exist: {self.frontend_src_path}")
     
     def _load_project_metadata(self):
         """Load project metadata from database to populate prompt placeholders."""
@@ -171,10 +175,6 @@ class ACPChatHandler:
                 pass
             except Exception as e:
                 logger.warning(f"[ACP-CHAT] Failed to SIGKILL PID {pid}: {e}")
-        
-        # Validate paths
-        if not self.frontend_src_path.exists():
-            raise ValueError(f"Frontend src path does not exist: {self.frontend_src_path}")
     
     def _build_chat_prompt(self, user_message: str, session_context: str = "") -> str:
         """
@@ -713,6 +713,10 @@ Before sending ANY response to the user, mentally check every item:
         Returns:
             Dict with status, response, and any error info
         """
+        # Snapshot chrome PIDs before session starts
+        before_pids = self._get_chrome_devtools_pids()
+        logger.info(f"[CLAUDE-AGENT] Chrome PIDs before session: {before_pids}")
+        
         try:
             # Build prompt using the same comprehensive prompt builder as ACPX
             full_prompt = self._build_chat_prompt(user_message, session_context)
@@ -759,6 +763,15 @@ Before sending ANY response to the user, mentally check every item:
                 "error": str(e),
                 "backend": "claude-agent"
             }
+        finally:
+            # Kill only chrome processes spawned by THIS session
+            after_pids = self._get_chrome_devtools_pids()
+            new_pids = after_pids - before_pids
+            if new_pids:
+                logger.info(f"[CLAUDE-AGENT] Killing {len(new_pids)} orphan chrome PIDs from this session: {new_pids}")
+                self._kill_chrome_pids(new_pids)
+            else:
+                logger.info(f"[CLAUDE-AGENT] No new chrome PIDs to clean up")
     
     def run_acpx_chat(self, user_message: str, session_context: str = "") -> Dict[str, Any]:
         """
@@ -1041,6 +1054,10 @@ Before sending ANY response to the user, mentally check every item:
         logger.info(f"[ACP-CHAT] === CLAUDE STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars")
         
+        # Snapshot chrome PIDs before session starts
+        before_pids = self._get_chrome_devtools_pids()
+        logger.info(f"[ACP-CHAT] Chrome PIDs before session: {before_pids}")
+        
         # Reset progress mapper for new session
         self.progress_mapper.reset()
         query_start_time = datetime.now()
@@ -1053,34 +1070,37 @@ Before sending ANY response to the user, mentally check every item:
         all_chunks = []
         
         async def on_chunk(text: str):
-            """Callback for streaming chunks - puts in queue for real-time yielding."""
+            """Callback for streaming chunks."""
             logger.info(f"[ACP-CHAT] on_chunk called: {text[:80]}...")
-            all_chunks.append(text)  # Store for later
+            all_chunks.append(text)
             
-            # Get friendly message from keyword mapper
+            # Get friendly progress message from keyword mapper
             friendly = self.progress_mapper.get_friendly_message(text)
             if friendly:
-                logger.info(f"[ACP-CHAT] Progress: {friendly}")
+                logger.info(f"[ACP-CHAT] Progress mapped: {friendly}")
                 try:
-                    await chunk_queue.put(f"PROGRESS: {friendly}")
+                    await chunk_queue.put(f"PROGRESS:{friendly}")
                 except Exception as e:
-                    logger.error(f"[ACP-CHAT] Progress put error: {e}")
+                    logger.error(f"[ACP-CHAT] Progress queue error: {e}")
             
-            # Stream raw text to queue (persisted to DB)
-            try:
-                await chunk_queue.put(text)
-                logger.info(f"[ACP-CHAT] Chunk put in queue, size now: {chunk_queue.qsize()}")
-            except Exception as e:
-                logger.error(f"[ACP-CHAT] on_chunk error: {e}")
+            # Only stream meaningful text to UI (skip noise)
+            cleaned = text.strip()
+            if cleaned and cleaned not in ["null", "{}", "[]", "---"]:
+                # Skip lines that are pure JSON/telemetry
+                if not cleaned.startswith('{') and not cleaned.startswith('['):
+                    try:
+                        await chunk_queue.put(f"TEXT:{text}")
+                        logger.info(f"[ACP-CHAT] Text queued, size: {chunk_queue.qsize()}")
+                    except Exception as e:
+                        logger.error(f"[ACP-CHAT] on_chunk error: {e}")
         
         async def on_progress(text: str):
-            """Callback for progress updates - uses phase-based messages."""
-            # Use phase message based on elapsed time
+            """Callback for phase-based progress (timeout updates)."""
             elapsed = (datetime.now() - query_start_time).total_seconds()
             friendly = self.progress_mapper.get_phase_message(elapsed)
             logger.info(f"[ACP-CHAT] Phase progress ({elapsed:.0f}s): {friendly}")
             try:
-                await chunk_queue.put(f"PROGRESS: {friendly}")
+                await chunk_queue.put(f"PROGRESS:{friendly}")
             except Exception as e:
                 logger.error(f"[ACP-CHAT] on_progress error: {e}")
         
@@ -1151,6 +1171,15 @@ Before sending ANY response to the user, mentally check every item:
             self._last_query_chunks = all_chunks
             raise
         finally:
+            # Kill only chrome processes spawned by THIS session
+            after_pids = self._get_chrome_devtools_pids()
+            new_pids = after_pids - before_pids
+            if new_pids:
+                logger.info(f"[ACP-CHAT] Killing {len(new_pids)} orphan chrome PIDs from this session: {new_pids}")
+                self._kill_chrome_pids(new_pids)
+            else:
+                logger.info(f"[ACP-CHAT] No new chrome PIDs to clean up")
+            
             # Only cancel if query is truly abandoned
             if not query_complete.is_set() and query_task.done() and not query_task.cancelled():
                 logger.info(f"[ACP-CHAT] Query already completed, no cleanup needed")
