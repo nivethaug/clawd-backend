@@ -13,8 +13,12 @@ import signal
 import threading
 import logging
 import asyncio
+from datetime import datetime
 from typing import Dict, Any, Optional, Generator
 from pathlib import Path
+
+# Import progress mapper for user-friendly messages
+from acp_progress_mapper import ClaudeProgressMapper
 
 # Try to import ClaudeCodeAgent (preferred backend)
 try:
@@ -52,6 +56,9 @@ class ACPChatHandler:
         self.frontend_path = self.project_path / "frontend"
         self.frontend_src_path = self.frontend_path / "src"
         self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)
+        
+        # Progress mapper for user-friendly messages
+        self.progress_mapper = ClaudeProgressMapper()
         
         # Load project metadata from database
         self._load_project_metadata()
@@ -715,8 +722,21 @@ Before sending ANY response to the user, mentally check every item:
             logger.info(f"[CLAUDE-AGENT] User message: {user_message[:100]}...")
             logger.info(f"[CLAUDE-AGENT] Prompt length: {len(full_prompt)} chars")
             
+            # Reset progress mapper for new session
+            self.progress_mapper.reset()
+            
+            # Callback for progress messages
+            async def on_text_callback(text: str):
+                """Callback for text chunks - generates friendly progress messages."""
+                friendly = self.progress_mapper.get_friendly_message(text)
+                if friendly:
+                    logger.info(f"[CLAUDE-AGENT] Progress: {friendly}")
+            
             # Use ClaudeCodeAgent with project_path for MCP config lookup
-            async with ClaudeCodeAgent(str(self.project_path)) as agent:
+            async with ClaudeCodeAgent(
+                str(self.project_path),
+                on_text=on_text_callback
+            ) as agent:
                 response = await agent.query(full_prompt)
                 
                 logger.info(f"[CLAUDE-AGENT] Response received ({len(response)} chars)")
@@ -1021,6 +1041,10 @@ Before sending ANY response to the user, mentally check every item:
         logger.info(f"[ACP-CHAT] === CLAUDE STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars")
         
+        # Reset progress mapper for new session
+        self.progress_mapper.reset()
+        query_start_time = datetime.now()
+        
         # Use asyncio.Queue for real-time streaming
         chunk_queue = asyncio.Queue()
         query_complete = asyncio.Event()
@@ -1032,6 +1056,17 @@ Before sending ANY response to the user, mentally check every item:
             """Callback for streaming chunks - puts in queue for real-time yielding."""
             logger.info(f"[ACP-CHAT] on_chunk called: {text[:80]}...")
             all_chunks.append(text)  # Store for later
+            
+            # Get friendly message from keyword mapper
+            friendly = self.progress_mapper.get_friendly_message(text)
+            if friendly:
+                logger.info(f"[ACP-CHAT] Progress: {friendly}")
+                try:
+                    await chunk_queue.put(f"PROGRESS: {friendly}")
+                except Exception as e:
+                    logger.error(f"[ACP-CHAT] Progress put error: {e}")
+            
+            # Stream raw text to queue (persisted to DB)
             try:
                 await chunk_queue.put(text)
                 logger.info(f"[ACP-CHAT] Chunk put in queue, size now: {chunk_queue.qsize()}")
@@ -1039,11 +1074,13 @@ Before sending ANY response to the user, mentally check every item:
                 logger.error(f"[ACP-CHAT] on_chunk error: {e}")
         
         async def on_progress(text: str):
-            """Callback for progress updates - UI only, NOT persisted to DB."""
-            logger.info(f"[ACP-CHAT] on_progress called: {text[:80]}...")
+            """Callback for progress updates - uses phase-based messages."""
+            # Use phase message based on elapsed time
+            elapsed = (datetime.now() - query_start_time).total_seconds()
+            friendly = self.progress_mapper.get_phase_message(elapsed)
+            logger.info(f"[ACP-CHAT] Phase progress ({elapsed:.0f}s): {friendly}")
             try:
-                await chunk_queue.put(text)
-                logger.info(f"[ACP-CHAT] Progress put in queue, size now: {chunk_queue.qsize()}")
+                await chunk_queue.put(f"PROGRESS: {friendly}")
             except Exception as e:
                 logger.error(f"[ACP-CHAT] on_progress error: {e}")
         
