@@ -3517,6 +3517,151 @@ async def completion(request: CompletionRequest):
         logger.error(f"Completion unexpected error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
+# ============================================================================
+# Recent Activity Endpoints
+# ============================================================================
+
+from recent_activity_service import (
+    get_recent_activity_optimized,
+    get_recent_activity_simple,
+    get_project_activity_detail,
+    RecentActivityResponse,
+    RecentActivityItem,
+    ProjectActivityDetailResponse
+)
+
+
+@app.get("/projects/recent-activity", response_model=RecentActivityResponse)
+async def get_recent_activity(
+    limit: int = 20,
+    offset: int = 0,
+    include_preview: bool = True,
+    user_id: int = 1,  # TODO: Get from auth token when auth is implemented
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Get recent activity grouped by project.
+    
+    Returns projects sorted by latest message timestamp across all sessions.
+    Used for Activity page (Recent Work UI).
+    
+    Query params:
+        limit: Max projects to return (default 20, max 100)
+        offset: Pagination offset (default 0)
+        include_preview: Include last message preview (default True)
+    
+    Response:
+        items: List of project activity with:
+            - project_id, project_name, project_status
+            - last_activity: ISO timestamp of latest message
+            - total_messages, total_sessions
+            - last_message_preview (if include_preview=true)
+            - last_session_id, last_session_label
+            - active_session_id (for lock badge)
+        total: Total count for pagination
+        limit, offset: Current pagination state
+    
+    Performance:
+        - Uses PostgreSQL DISTINCT ON for single-pass query
+        - Indexed on messages(session_id, created_at)
+        - Lightweight response (preview truncated to 100 chars)
+    """
+    try:
+        # Validate params
+        limit = min(max(limit, 1), 100)  # Clamp to 1-100
+        offset = max(offset, 0)
+        
+        # Fetch activity
+        items = get_recent_activity_optimized(
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            include_preview=include_preview,
+            preview_length=100
+        )
+        
+        # Get total count for pagination (approximate - count projects with messages)
+        with get_db() as cur:
+            cur.execute("""
+                SELECT COUNT(DISTINCT p.id)
+                FROM projects p
+                INNER JOIN sessions s ON s.project_id = p.id
+                INNER JOIN messages m ON m.session_id = s.id
+                WHERE p.user_id = %s
+            """, (user_id,))
+            total = cur.fetchone()
+            total = total[0] if not isinstance(total, dict) else total['count']
+        
+        return RecentActivityResponse(
+            items=items,
+            total=total or 0,
+            limit=limit,
+            offset=offset
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch recent activity: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch recent activity: {str(e)}")
+
+
+@app.get("/projects/recent-activity/simple")
+async def get_recent_activity_simple_endpoint(
+    limit: int = 20,
+    user_id: int = 1,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Simplified recent activity (faster, no preview).
+    Use when preview text is not needed.
+    """
+    try:
+        limit = min(max(limit, 1), 100)
+        items = get_recent_activity_simple(user_id=user_id, limit=limit)
+        return {"items": items, "count": len(items)}
+    except Exception as e:
+        logger.error(f"Failed to fetch recent activity (simple): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_id}/activity", response_model=ProjectActivityDetailResponse)
+async def get_project_activity(
+    project_id: int,
+    message_limit: int = 10,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Get detailed activity for a single project.
+    
+    Includes:
+        - Project details (name, status, domain)
+        - Stats (total sessions, total messages)
+        - Recent messages across all sessions (up to message_limit)
+        - Active session ID (for lock badge)
+    
+    Query params:
+        message_limit: Max recent messages to include (default 10, max 50)
+    """
+    try:
+        message_limit = min(max(message_limit, 1), 50)
+        
+        result = get_project_activity_detail(
+            project_id=project_id,
+            message_limit=message_limit
+        )
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch project activity: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     print(f"Starting Clawdbot Adapter API...")
