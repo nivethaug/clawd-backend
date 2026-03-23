@@ -18,6 +18,28 @@ class ClaudeProgressMapper:
     """
     
     PROGRESS_MAP = [
+        # Tool names from stream-json (highest priority - match TOOL: prefix first)
+        ("TOOL:Bash",               "⚙️ Running a command..."),
+        ("TOOL:Read",               "📄 Reading project files..."),
+        ("TOOL:Edit",               "✏️ Making changes to your app..."),
+        ("TOOL:Write",              "📝 Writing new code..."),
+        ("TOOL:MultiEdit",          "✏️ Making multiple changes..."),
+        ("TOOL:Glob",               "🔍 Exploring your project files..."),
+        ("TOOL:Grep",               "🔎 Searching through your code..."),
+        ("TOOL:Task",               "📋 Planning changes..."),
+        ("TOOL:TodoWrite",          "📋 Updating task list..."),
+        ("TOOL:WebSearch",          "🔍 Searching the web..."),
+        ("TOOL:WebFetch",           "🌐 Fetching web content..."),
+        ("TOOL:mcp__chrome-devtools__new_page",              "🌐 Opening your live site..."),
+        ("TOOL:mcp__chrome-devtools__navigate_page",         "🧭 Navigating to page..."),
+        ("TOOL:mcp__chrome-devtools__take_screenshot",       "📸 Taking a screenshot..."),
+        ("TOOL:mcp__chrome-devtools__take_snapshot",         "📸 Capturing page state..."),
+        ("TOOL:mcp__chrome-devtools__list_console_messages", "🔍 Checking for errors..."),
+        ("TOOL:mcp__chrome-devtools__click",                 "🖱️ Testing interactions..."),
+        ("TOOL:mcp__chrome-devtools__fill",                  "📝 Testing your forms..."),
+        ("TOOL:mcp__chrome-devtools__press_key",             "⌨️ Testing keyboard input..."),
+        ("TOOL:mcp__chrome-devtools__close_page",            "✅ Browser testing complete!"),
+        
         # Agent README / Planning
         ("readme",                  "📖 Reading your project guide..."),
         ("agent/readme",            "📖 Reading your project guide..."),

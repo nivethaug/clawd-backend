@@ -372,6 +372,11 @@ class ClaudeCodeAgent:
         # Add auto-approve flag AFTER prompt (matches working CLI format)
         command.append("--dangerously-skip-permissions")
         logger.debug("Auto-approve enabled: --dangerously-skip-permissions")
+        
+        # Add stream-json output format for real-time tool call streaming
+        command.extend(["--output-format", "stream-json"])
+        command.append("--verbose")
+        logger.debug("Output format: stream-json with verbose")
 
         # Check if running as root - need to run as non-root user for --dangerously-skip-permissions
         is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
@@ -429,20 +434,54 @@ class ClaudeCodeAgent:
                     if not line_text.strip():
                         continue
 
-                    # Accumulate the line
-                    all_chunks.append(line_text)
-                    logger.debug(f"Received stdout line ({len(line_text)} chars): {line_text[:100]}{'...' if len(line_text) > 100 else ''}")
+                    # Parse stream-json format to extract meaningful content
+                    tool_name = None
+                    text_content = None
+                    result_text = None
 
-                    # Stream to callback if provided
-                    if self.on_text:
-                        logger.info(f"[CLAUDE-AGENT] Calling on_text callback with {len(line_text)} chars")
+                    try:
+                        data = json.loads(line_text)
+                        msg_type = data.get("type", "")
+
+                        if msg_type == "assistant":
+                            content = data.get("message", {}).get("content", [])
+                            for block in content:
+                                block_type = block.get("type", "")
+                                if block_type == "tool_use":
+                                    tool_name = block.get("name", "")
+                                    logger.info(f"[CLAUDE-AGENT] Tool call: {tool_name}")
+                                elif block_type == "text":
+                                    text_content = block.get("text", "").strip()
+
+                        elif msg_type == "result":
+                            result_text = data.get("result", "").strip()
+                            if result_text:
+                                all_chunks.append(result_text)
+                                logger.info(f"[CLAUDE-AGENT] Result: {result_text[:100]}")
+
+                        elif msg_type == "system":
+                            # Skip system init message
+                            continue
+
+                    except (json.JSONDecodeError, AttributeError):
+                        # Not JSON - plain text line, use as-is
+                        text_content = line_text
+
+                    # Send tool name to on_text for keyword mapping
+                    if tool_name and self.on_text:
+                        logger.info(f"[CLAUDE-AGENT] Sending tool to on_text: {tool_name}")
                         if asyncio.iscoroutinefunction(self.on_text):
-                            await self.on_text(line_text)
+                            await self.on_text(f"TOOL:{tool_name}")
                         else:
-                            self.on_text(line_text)
-                        logger.info(f"[CLAUDE-AGENT] on_text callback returned")
-                    else:
-                        logger.warning(f"[CLAUDE-AGENT] No on_text callback configured!")
+                            self.on_text(f"TOOL:{tool_name}")
+
+                    # Send text content to on_text
+                    if text_content and self.on_text:
+                        logger.info(f"[CLAUDE-AGENT] Sending text to on_text: {text_content[:80]}")
+                        if asyncio.iscoroutinefunction(self.on_text):
+                            await self.on_text(text_content)
+                        else:
+                            self.on_text(text_content)
                     
                     last_progress_time = datetime.now()
                     
