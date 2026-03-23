@@ -97,7 +97,7 @@ def npm_install(cwd: str = None):
     # Match infrastructure_manager.py approach
     # Use npm ci for faster, reproducible installs
     result = subprocess.run(
-        ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
+        ["npm", "install", "--prefer-offline", "--legacy-peer-deps"],
         capture_output=True,
         text=True,
         timeout=600,
