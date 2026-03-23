@@ -89,15 +89,21 @@ class ACPChatHandler:
             
             if row and row['domain']:
                 domain = row['domain']
-                self.frontend_domain = domain
-                # Backend domain convention: add "-api" suffix
-                parts = domain.split('.', 1)
-                if len(parts) == 2:
-                    self.backend_domain = f"{parts[0]}-api.{parts[1]}"
+                # Domain column contains subdomain only (e.g., "thinkai-likrt6")
+                # Build full domain if not already a full domain
+                if '.' not in domain:
+                    self.frontend_domain = f"{domain}.dreambigwithai.com"
+                    self.backend_domain = f"{domain}-api.dreambigwithai.com"
                 else:
-                    self.backend_domain = f"{domain}-api"
+                    # Already a full domain
+                    self.frontend_domain = domain
+                    parts = domain.split('.', 1)
+                    if len(parts) == 2:
+                        self.backend_domain = f"{parts[0]}-api.{parts[1]}"
+                    else:
+                        self.backend_domain = f"{domain}-api"
                 
-                logger.info(f"[ACP-CHAT] Loaded project domain: {domain}")
+                logger.info(f"[ACP-CHAT] Loaded project domain: {domain} -> {self.frontend_domain}")
             else:
                 logger.warning(f"[ACP-CHAT] Project '{self.project_name}' not found, using defaults")
                 
@@ -301,8 +307,6 @@ Project Root: `{self.project_path}`
 **Project Details:**
 - Frontend URL: `https://{self.frontend_domain}`
 - Backend URL: `https://{self.backend_domain}`
-- Frontend Port: {self.frontend_port}
-- Backend Port: {self.backend_port}
 - Database: `{self.db_name}`
 - Database User: `{self.db_user}`
 
@@ -329,7 +333,7 @@ Project Root: `{self.project_path}`
 - If ERR_NAME_NOT_RESOLVED → re-run buildpublish.py then retry live domain
 - NEVER use localhost under any circumstances
 - NEVER use 127.0.0.1 under any circumstances
-- NEVER use port-based URLs like http://localhost:{self.frontend_port}
+- NEVER use port-based URLs like http://localhost:3011
 
 ### Why Live Only
 - localhost may show old cached version
