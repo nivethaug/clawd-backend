@@ -1079,11 +1079,12 @@ Before sending ANY response to the user, mentally check every item:
                 except Exception as e:
                     logger.error(f"[ACP-CHAT] Progress queue error: {e}")
             
-            # Only stream meaningful text to UI (skip noise)
+            # Only stream meaningful text to UI (skip noise and TOOL: prefixes)
             cleaned = text.strip()
             if cleaned and cleaned not in ["null", "{}", "[]", "---"]:
+                # Skip TOOL: prefix lines (already mapped to progress above)
                 # Skip lines that are pure JSON/telemetry
-                if not cleaned.startswith('{') and not cleaned.startswith('['):
+                if not cleaned.startswith("TOOL:") and not cleaned.startswith('{') and not cleaned.startswith('['):
                     try:
                         await chunk_queue.put(f"TEXT:{text}")
                         logger.info(f"[ACP-CHAT] Text queued, size: {chunk_queue.qsize()}")
