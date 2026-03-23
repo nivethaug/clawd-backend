@@ -80,12 +80,23 @@ class ACPChatHandler:
         
         return f"""You are a friendly AI assistant helping a user build their **{self.project_name}** web application.
 
-{context_section}
-## USER'S REQUEST
-
-{user_message}
-
 ---
+
+## ⚡ BEFORE ANY CHANGE - RUN npm install FIRST (MANDATORY)
+
+**CRITICAL: Before touching ANY code, always run:**
+
+```bash
+cd frontend && python3 buildpublish.py --install-only
+```
+
+**Why:** `buildpublish.py` clears `node_modules` to save space after every publish.
+This means `node_modules` may be missing when you start — your changes will fail to build without running this first.
+
+✅ **Order:**
+1. `python3 buildpublish.py --install-only` → THEN make changes → THEN `python3 buildpublish.py`
+
+⛔ **Never skip this step — even if you think node_modules exists.**
 
 ---
 
@@ -209,7 +220,7 @@ Both agent folders have `ai_index/` with:
    | Edit endpoint | ✅ | - | - | - | - | - |
    | Remove endpoint | ✅ | - | - | - | - | - |
    | Add table/model | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-   | Add column | ✅ | - | - | - | - | ✅ |
+   | Add column | ✅ | - | - | - | ✅ | ✅ |
    | Add migration | ✅ | ✅ | ✅ | ✅ | ✅ | - |
 
 **⚠️ IMPORTANT: Always update agent folder BEFORE publishing changes!**
@@ -508,9 +519,15 @@ I've checked your app and everything looks great! Your TabWorkspace app has:
 9. PUBLISH with buildpublish.py
 10. TEST changes thoroughly via Chrome DevTools
 ```
+
+---
+{context_section}
+## USER'S REQUEST
+
+{user_message}
+
 ---
 """
-
     
     def _is_inline_noise(self, line: str) -> bool:
         """Check if a line is inline telemetry/noise - aggressively filter tool output"""

@@ -403,7 +403,7 @@ class ACPBuildGate:
             return False, f"Environment validation failed: {message}"
 
         try:
-            # Step 1: Install dependencies (pnpm first, npm fallback)
+            # Step 1: Install dependencies (npm only - pnpm disabled for consistency)
             output.append("\n--- Installing Dependencies ---")
             install_success, install_msg = install_dependencies(self.frontend_path)
             output.append(install_msg)
@@ -532,7 +532,7 @@ class ACPBuildGate:
 
 def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
     """
-    Install frontend dependencies using pnpm (fast) with npm fallback (safe).
+    Install frontend dependencies using npm ci (pnpm disabled for consistency).
     
     Args:
         frontend_path: Path to frontend directory containing package.json
@@ -590,40 +590,40 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
             print("=" * 60)
             return False, f"npm ci error: {e}"
 
-    # ⚡ NON-PM2 → TRY PNPM FIRST
-    try:
-        logger.info("⚡ Trying pnpm install (non-PM2 mode)...")
-        print("⚡ [DEPS] Trying pnpm install (non-PM2 mode)...", flush=True)
+    # ⚡ NON-PM2 → TRY PNPM FIRST (DISABLED - using npm only for consistency)
+    # try:
+    #     logger.info("⚡ Trying pnpm install (non-PM2 mode)...")
+    #     print("⚡ [DEPS] Trying pnpm install (non-PM2 mode)...", flush=True)
+    # 
+    #     result = subprocess.run(
+    #         ["pnpm", "install", "--prefer-offline"],
+    #         cwd=str(frontend_path),
+    #         stdin=subprocess.DEVNULL,
+    #         stdout=subprocess.DEVNULL,
+    #         stderr=subprocess.PIPE,
+    #         text=True,
+    #         timeout=BUILD_TIMEOUT
+    #     )
+    # 
+    #     if result.returncode == 0:
+    #         logger.info("✅ pnpm install successful")
+    #         print("✅ [DEPS] pnpm install successful", flush=True)
+    #         print("=" * 60, flush=True)
+    #         return True, "pnpm install successful"
+    # 
+    #     logger.warning(f"⚠️ pnpm install failed (code {result.returncode}), falling back to npm")
+    #     print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm", flush=True)
+    #     if result.stderr:
+    #         print(f"    [DEPS] stderr: {result.stderr[:200]}")
+    # 
+    # except FileNotFoundError:
+    #     logger.warning("⚠️ pnpm not found, falling back to npm")
+    #     print("⚠️  [DEPS] pnpm not found, falling back to npm", flush=True)
+    # except Exception as e:
+    #     logger.warning(f"⚠️ pnpm error: {e}, falling back to npm")
+    #     print(f"⚠️  [DEPS] pnpm error: {e}, falling back to npm", flush=True)
 
-        result = subprocess.run(
-            ["pnpm", "install", "--prefer-offline"],
-            cwd=str(frontend_path),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=BUILD_TIMEOUT
-        )
-
-        if result.returncode == 0:
-            logger.info("✅ pnpm install successful")
-            print("✅ [DEPS] pnpm install successful", flush=True)
-            print("=" * 60, flush=True)
-            return True, "pnpm install successful"
-
-        logger.warning(f"⚠️ pnpm install failed (code {result.returncode}), falling back to npm")
-        print(f"⚠️  [DEPS] pnpm failed (code {result.returncode}), falling back to npm", flush=True)
-        if result.stderr:
-            print(f"    [DEPS] stderr: {result.stderr[:200]}")
-
-    except FileNotFoundError:
-        logger.warning("⚠️ pnpm not found, falling back to npm")
-        print("⚠️  [DEPS] pnpm not found, falling back to npm", flush=True)
-    except Exception as e:
-        logger.warning(f"⚠️ pnpm error: {e}, falling back to npm")
-        print(f"⚠️  [DEPS] pnpm error: {e}, falling back to npm", flush=True)
-
-    # 🔁 FALLBACK TO NPM
+    # 🔁 USE NPM (pnpm disabled for consistency with infrastructure_manager.py)
     try:
         logger.info("📦 Running optimized npm ci...")
         print("📦 [DEPS] Running optimized npm ci...", flush=True)

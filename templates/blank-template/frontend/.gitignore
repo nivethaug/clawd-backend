@@ -1,9 +1,9 @@
 # Dependencies
 node_modules/
-.pnpm-store/
+# .pnpm-store/  # DISABLED - using npm only
 
 # Lock files (keep only one)
-# pnpm-lock.yaml
+# pnpm-lock.yaml  # DISABLED - using npm only
 package-lock.json
 
 # Build output

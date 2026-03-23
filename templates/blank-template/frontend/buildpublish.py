@@ -11,7 +11,7 @@ IMPORTANT: Call this script AFTER making ANY changes to the frontend code!
 Matches infrastructure_manager.py build_frontend() process:
 1. Clean Vite caches
 2. Remove existing node_modules
-3. npm install --include=dev --legacy-peer-deps
+3. npm ci --prefer-offline --no-audit --progress=false
 4. npm run build
 5. Verify dist
 6. Fix permissions
@@ -89,16 +89,15 @@ def remove_node_modules():
 
 
 def npm_install(cwd: str = None):
-    """Install npm dependencies with legacy peer deps (dev deps install by default)"""
+    """Install npm dependencies using npm ci (matches infrastructure_manager.py)"""
     print("\n" + "="*50)
-    print("NPM INSTALL")
+    print("NPM CI")
     print("="*50)
     
     # Match infrastructure_manager.py approach
-    # Note: --include=dev is not universally supported, dev deps install by default
-    # Use --prefer-offline to use npm cache when available
+    # Use npm ci for faster, reproducible installs
     result = subprocess.run(
-        ["npm", "install", "--prefer-offline", "--legacy-peer-deps"],
+        ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
         capture_output=True,
         text=True,
         timeout=600,
@@ -110,7 +109,7 @@ def npm_install(cwd: str = None):
         stderr_lines = result.stderr.split('\n')
         error_lines = [line for line in stderr_lines if any(kw in line.lower() for kw in ['error', 'err!', 'econnrefused', 'eacces', 'enoent'])]
         
-        print(f"✗ npm install failed with code {result.returncode}")
+        print(f"✗ npm ci failed with code {result.returncode}")
         if error_lines:
             print("Errors:")
             for line in error_lines[-10:]:
@@ -119,7 +118,7 @@ def npm_install(cwd: str = None):
             print(f"stderr: {result.stderr[:500]}")
         return False
     
-    print("✓ npm install completed (including dev dependencies)")
+    print("✓ npm ci completed")
     return True
 
 
@@ -248,6 +247,7 @@ def main():
     parser.add_argument("--path", type=str, help="Frontend directory path (default: current directory)")
     parser.add_argument("--skip-install", action="store_true", help="Skip npm install")
     parser.add_argument("--skip-build", action="store_true", help="Skip npm build")
+    parser.add_argument("--install-only", action="store_true", help="Run only npm ci (skip build, restart, cleanup)")
     parser.add_argument("--no-restart", action="store_true", help="Skip PM2 and nginx restart (restart is default)")
     args = parser.parse_args()
     
@@ -265,6 +265,26 @@ def main():
     print(f"Working directory: {frontend_dir}")
     
     success = True
+    
+    # --install-only mode: Run only npm ci and exit
+    if args.install_only:
+        print("\n" + "="*50)
+        print("INSTALL-ONLY MODE")
+        print("="*50)
+        
+        clean_vite_caches()
+        # Skip remove_node_modules - run npm ci on top of existing node_modules
+        
+        if npm_install(cwd=str(frontend_dir)):
+            print("\n" + "="*50)
+            print("✓ INSTALL-ONLY COMPLETE")
+            print("="*50)
+            sys.exit(0)
+        else:
+            print("\n" + "="*50)
+            print("✗ INSTALL FAILED")
+            print("="*50)
+            sys.exit(1)
     
     # Step 1: Clean Vite caches
     clean_vite_caches()
