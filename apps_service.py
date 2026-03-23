@@ -55,7 +55,7 @@ def get_pm2_processes(force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
             return _pm2_cache["data"]
     
     try:
-        # Call pm2 jlist for JSON output
+        # Try pm2 jlist first (JSON output)
         result = subprocess.run(
             ["pm2", "jlist"],
             capture_output=True,
@@ -63,8 +63,18 @@ def get_pm2_processes(force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
             timeout=5
         )
         
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning(f"PM2 jlist failed, trying prettylist: {result.stderr[:100]}")
+            # Fallback to pm2 prettylist
+            result = subprocess.run(
+                ["pm2", "prettylist"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+        
         if result.returncode != 0:
-            logger.warning(f"PM2 command failed: {result.stderr}")
+            logger.warning(f"PM2 command failed: {result.stderr[:100]}")
             return {}
         
         # Parse JSON
@@ -76,19 +86,26 @@ def get_pm2_processes(force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
             name = proc.get("name", "")
             pm2_env = proc.get("pm2_env", {})
             
+            # pm_uptime can be under pm2_env or at root level
+            pm_uptime = pm2_env.get("pm_uptime") or proc.get("pm_uptime", 0)
+            
             process_map[name] = {
                 "status": pm2_env.get("status", "unknown"),
-                "pm_uptime": pm2_env.get("pm_uptime", 0),
+                "pm_uptime": pm_uptime,
                 "cpu": proc.get("monit", {}).get("cpu", 0),
                 "memory": proc.get("monit", {}).get("memory", 0),
                 "restarts": pm2_env.get("restart_time", 0)
             }
+            
+            # Debug log first few processes
+            if len(process_map) <= 3:
+                logger.info(f"[PM2] Process: {name}, status: {pm2_env.get('status')}, pm_uptime: {pm_uptime}")
         
         # Update cache
         _pm2_cache["data"] = process_map
         _pm2_cache["timestamp"] = time.time()
         
-        logger.debug(f"PM2 data refreshed: {len(process_map)} processes")
+        logger.info(f"PM2 data refreshed: {len(process_map)} processes found")
         return process_map
         
     except subprocess.TimeoutExpired:
@@ -105,32 +122,40 @@ def get_pm2_processes(force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
         return {}
 
 
-def get_pm2_process_for_project(project_name: str, pm2_processes: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def get_pm2_process_for_project(project_domain: str, pm2_processes: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Get PM2 process data for a project.
     
-    Convention: {project_name}-frontend or {project_name}-backend
+    Convention: {project_domain}-frontend or {project_domain}-backend
     
     Args:
-        project_name: Project name (e.g., "crypto")
+        project_domain: Project domain (e.g., "crypto" from "crypto.dreambigwithai.com")
         pm2_processes: PM2 process map from get_pm2_processes()
     
     Returns:
         Process data dict or None
     """
+    # Extract subdomain from full domain if needed
+    if project_domain and "." in project_domain:
+        # Extract subdomain (e.g., "crypto" from "crypto.dreambigwithai.com")
+        project_domain = project_domain.split(".")[0]
+    
+    if not project_domain:
+        return None
+    
     # Try frontend first (for UI apps)
-    frontend_name = f"{project_name}-frontend"
+    frontend_name = f"{project_domain}-frontend"
     if frontend_name in pm2_processes:
         return pm2_processes[frontend_name]
     
     # Try backend
-    backend_name = f"{project_name}-backend"
+    backend_name = f"{project_domain}-backend"
     if backend_name in pm2_processes:
         return pm2_processes[backend_name]
     
     # Try exact name match
-    if project_name in pm2_processes:
-        return pm2_processes[project_name]
+    if project_domain in pm2_processes:
+        return pm2_processes[project_domain]
     
     return None
 
@@ -324,19 +349,32 @@ def build_app_item(
     # Map status
     ui_status = map_status(raw_status)
     
-    # Get PM2 data
-    pm2_data = get_pm2_process_for_project(project_name, pm2_processes)
+    # Get PM2 data using domain (PM2 services are named by domain, not project name)
+    pm2_data = get_pm2_process_for_project(project_domain, pm2_processes)
     
     # Calculate uptime
     uptime_seconds = 0
     if pm2_data and pm2_data.get("status") == "online":
         uptime_seconds = calculate_uptime_seconds(pm2_data.get("pm_uptime"))
     
-    # Build domain URL
+    # Build domain URL - add .dreambigwithai.com suffix if not already present
     domain_url = None
     if project_domain:
-        domain_url = f"https://{project_domain}" if not project_domain.startswith("http") else project_domain
+        if project_domain.startswith("http"):
+            domain_url = project_domain
+        elif "." not in project_domain:
+            # Domain is just subdomain (e.g., "thinkai-likrt6") - add full suffix
+            domain_url = f"https://{project_domain}.dreambigwithai.com"
+        else:
+            # Already has a dot but no http - add https
+            domain_url = f"https://{project_domain}"
     
+    # Debug logging for PM2 data
+    logger.info(f"[APPS] Project: {project_name}, Domain: {project_domain}")
+    logger.info(f"[APPS] PM2 data: {pm2_data}")
+    if pm2_data:
+        logger.info(f"[APPS] pm_uptime raw: {pm2_data.get('pm_uptime')}")
+
     return {
         "project_id": project["id"],
         "name": project_name,
@@ -398,17 +436,21 @@ def get_apps_list(user_id: int) -> Dict[str, List[Dict[str, Any]]]:
 # PM2 Control Actions
 # ============================================================================
 
-def pm2_action(project_name: str, action: str) -> Dict[str, Any]:
+def pm2_action(project_domain: str, action: str) -> Dict[str, Any]:
     """
     Execute a PM2 action on a project.
     
     Args:
-        project_name: Project name
+        project_domain: Project domain (e.g., "crypto" or "crypto.dreambigwithai.com")
         action: Action to perform (start, stop, restart)
     
     Returns:
         Dict with success status and message
     """
+    # Extract subdomain from full domain if needed
+    if project_domain and "." in project_domain:
+        project_domain = project_domain.split(".")[0]
+    
     # Map action to PM2 command
     action_map = {
         "start": "start",
@@ -421,10 +463,10 @@ def pm2_action(project_name: str, action: str) -> Dict[str, Any]:
     if not pm2_cmd:
         return {"success": False, "error": f"Unknown action: {action}"}
     
-    # Try frontend first, then backend
+    # Build process names using domain
     process_names = [
-        f"{project_name}-frontend",
-        f"{project_name}-backend"
+        f"{project_domain}-frontend",
+        f"{project_domain}-backend"
     ]
     
     results = []
