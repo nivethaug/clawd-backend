@@ -68,61 +68,41 @@ class ACPChatHandler:
             raise ValueError(f"Frontend src path does not exist: {self.frontend_src_path}")
     
     def _load_project_metadata(self):
-        """Load project metadata from database to populate prompt placeholders."""
+        """Load project domain from database to populate prompt placeholders."""
         # Set defaults first (will be overwritten if DB lookup succeeds)
-        # These follow the naming convention from project_manager.py
         safe_name = self.project_name.replace('-', '_').lower()
         self.frontend_domain = f"{self.project_name}.dreambigwithai.com"
         self.backend_domain = f"{self.project_name}-api.dreambigwithai.com"
-        self.frontend_port = 3011
-        self.backend_port = 8011
         self.db_name = f"{safe_name}_db"
         self.db_user = f"{safe_name}_user"
         
         try:
             from database_adapter import get_db
             with get_db() as conn:
-                # Query actual columns from projects table: domain, backend_port
-                # Note: column is 'name', not 'project_name'
+                # Query domain column from projects table
                 conn.execute("""
-                    SELECT domain, backend_port
+                    SELECT domain
                     FROM projects
                     WHERE name = %s
                 """, (self.project_name,))
                 row = conn.fetchone()
             
-            if row:
-                domain = row['domain'] if row else None
-                backend_port = row['backend_port'] if row else None
+            if row and row['domain']:
+                domain = row['domain']
+                self.frontend_domain = domain
+                # Backend domain convention: add "-api" suffix
+                parts = domain.split('.', 1)
+                if len(parts) == 2:
+                    self.backend_domain = f"{parts[0]}-api.{parts[1]}"
+                else:
+                    self.backend_domain = f"{domain}-api"
                 
-                # Derive frontend_domain and backend_domain from domain column
-                if domain:
-                    self.frontend_domain = domain
-                    # Backend domain convention: add "-api" suffix
-                    if '-api.' not in domain:
-                        parts = domain.split('.', 1)
-                        if len(parts) == 2:
-                            self.backend_domain = f"{parts[0]}-api.{parts[1]}"
-                        else:
-                            self.backend_domain = f"{domain}-api"
-                    else:
-                        self.backend_domain = domain.replace('-api.', '.').replace('.', '-api.', 1)
-                
-                if backend_port:
-                    self.backend_port = backend_port
-                    # Frontend port convention: backend_port - 5000
-                    self.frontend_port = backend_port - 5000
-                
-                logger.info(f"[ACP-CHAT] Loaded project metadata for {self.project_name}")
-                logger.info(f"  Frontend: {self.frontend_domain}")
-                logger.info(f"  Backend: {self.backend_domain}")
-                logger.info(f"  Ports: {self.frontend_port}/{self.backend_port}")
+                logger.info(f"[ACP-CHAT] Loaded project domain: {domain}")
             else:
-                logger.warning(f"[ACP-CHAT] Project '{self.project_name}' not found in database, using defaults")
+                logger.warning(f"[ACP-CHAT] Project '{self.project_name}' not found, using defaults")
                 
         except Exception as e:
             logger.warning(f"[ACP-CHAT] Could not load project metadata: {e}")
-            logger.warning(f"[ACP-CHAT] Using default metadata for {self.project_name}")
     
     def _get_chrome_devtools_pids(self) -> set:
         """
