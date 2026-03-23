@@ -2411,9 +2411,10 @@ async def chat_stream_endpoint(request: ChatRequest):
                         # Check if handler has collected all chunks
                         if hasattr(handler, '_last_query_chunks'):
                             chunks = handler._last_query_chunks
-                            # Filter out progress messages (start with progress icons)
-                            progress_icons = ('🔍', '✨', '🔧', '⚙️', '🎯', '⏳', '💡')
-                            real_chunks = [c for c in chunks if not c.startswith(progress_icons)]
+                            # Filter out PROGRESS: messages, keep TEXT: and unprefixed
+                            real_chunks = [c for c in chunks if not c.startswith('PROGRESS:')]
+                            # Strip TEXT: prefix from actual content
+                            real_chunks = [c[5:] if c.startswith('TEXT:') else c for c in real_chunks]
                             if real_chunks:
                                 content = '\n'.join(real_chunks).strip()
                                 if content:
@@ -2436,9 +2437,10 @@ async def chat_stream_endpoint(request: ChatRequest):
                         yield f"data: {event_data}\n\n"
                         logger.info(f"[ACP-STREAM] Yielded chunk: {len(chunk)} chars")
                     
-                    # Filter out progress messages before saving to database
-                    progress_icons = ('🔍', '✨', '🔧', '⚙️', '🎯', '⏳', '💡')
-                    real_chunks = [c for c in full_response if not c.startswith(progress_icons)]
+                    # Filter out PROGRESS: messages, keep TEXT: and unprefixed
+                    real_chunks = [c for c in full_response if not c.startswith('PROGRESS:')]
+                    # Strip TEXT: prefix from actual content
+                    real_chunks = [c[5:] if c.startswith('TEXT:') else c for c in real_chunks]
                     
                     # Save complete response to database (with newlines between chunks)
                     assistant_content = '\n'.join(real_chunks).strip()
@@ -2460,9 +2462,10 @@ async def chat_stream_endpoint(request: ChatRequest):
                     # Client disconnected - spawn background task to save when complete
                     logger.warning(f"[ACP-STREAM] Client disconnected, spawning background save task...")
                     
-                    # Filter out progress messages from what we have so far (start with progress icons)
-                    progress_icons = ('🔍', '✨', '🔧', '⚙️', '🎯', '⏳', '💡')
-                    real_chunks = [c for c in full_response if not c.startswith(progress_icons)]
+                    # Filter out PROGRESS: messages from what we have so far
+                    real_chunks = [c for c in full_response if not c.startswith('PROGRESS:')]
+                    # Strip TEXT: prefix from actual content
+                    real_chunks = [c[5:] if c.startswith('TEXT:') else c for c in real_chunks]
                     
                     # Spawn background task that will poll until query completes
                     async def wait_and_save():
@@ -2479,9 +2482,10 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 # Check handler for collected chunks
                                 if hasattr(handler, '_last_query_chunks'):
                                     chunks = handler._last_query_chunks
-                                    # Filter out progress messages (start with progress icons)
-                                    progress_icons = ('🔍', '✨', '🔧', '⚙️', '🎯', '⏳', '💡')
-                                    real = [c for c in chunks if not c.startswith(progress_icons)]
+                                    # Filter out PROGRESS: messages, keep TEXT: and unprefixed
+                                    real = [c for c in chunks if not c.startswith('PROGRESS:')]
+                                    # Strip TEXT: prefix from actual content
+                                    real = [c[5:] if c.startswith('TEXT:') else c for c in real]
                                     if real:
                                         content = '\n'.join(real).strip()
                                         if content and len(content) > 50:  # Ensure we have real content
