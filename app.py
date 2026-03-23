@@ -3662,6 +3662,96 @@ async def get_project_activity(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# Dashboard Endpoints
+# ============================================================================
+
+from dashboard_service import (
+    get_home_dashboard,
+    HomeDashboardResponse
+)
+
+
+@app.get("/dashboard/home", response_model=HomeDashboardResponse)
+async def get_dashboard_home(
+    project_limit: int = 50,
+    user_id: int = 1,  # TODO: Get from auth token when auth is implemented
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Get complete dashboard data for home page.
+    
+    SINGLE API CALL - returns everything needed for the home page:
+    - server: Server status and performance metrics
+    - stats: Project counts by status (running, needs_fix, stopped, creating)
+    - projects: User's projects with last activity
+    - highlight: Needs fix project highlight
+    - suggestions: Action suggestions
+    
+    Performance: <100ms target, single aggregated queries.
+    
+    Query params:
+        project_limit: Max projects to return (default 50, max 100)
+    
+    Response example:
+    {
+      "server": {
+        "status": "connected",
+        "label": "My Server",
+        "message": "Connected and running smoothly",
+        "metrics": {
+          "cpu_usage": 21.4,
+          "ram_usage": 65.2,
+          "ram_total": 16384,
+          "ram_used": 10680,
+          "uptime_seconds": 92000
+        }
+      },
+      "stats": {
+        "running": 1,
+        "needs_fix": 1,
+        "stopped": 1,
+        "creating": 1
+      },
+      "projects": [
+        {
+          "id": 1,
+          "name": "Crypto Price Website",
+          "description": "Live cryptocurrency prices",
+          "status": "running",
+          "status_label": "Running",
+          "domain": "https://crypto.mysite.com",
+          "last_active": "2026-03-23T12:00:00Z",
+          "actions": ["view", "pause", "code", "publish", "delete"]
+        }
+      ],
+      "highlight": {
+        "needs_fix_project_id": 2
+      },
+      "suggestions": [
+        {"type": "fix", "title": "Fix the Trading Bot", "project_id": 2},
+        {"type": "create", "title": "Create something new"},
+        {"type": "activity", "title": "Review recent activity"}
+      ]
+    }
+    """
+    try:
+        # Validate params
+        project_limit = min(max(project_limit, 1), 100)
+        
+        # Get complete dashboard
+        dashboard = get_home_dashboard(
+            user_id=user_id,
+            project_limit=project_limit
+        )
+        
+        return dashboard
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch dashboard: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch dashboard: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     print(f"Starting Clawdbot Adapter API...")
