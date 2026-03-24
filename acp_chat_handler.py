@@ -317,7 +317,10 @@ After approval:
 
 **Screenshot Format (Chrome DevTools MCP):**
 ```javascript
-// WebP 20% = ~3KB (BEST)
+// WebP 75% = ~5KB (BEST - 60-70% smaller than PNG)
+await page.screenshot({ type: 'webp', quality: 75, path: 'screenshot.webp' });
+
+// Alternative: WebP 20% = ~3KB (low quality, only if needed)
 await page.screenshot({ type: 'webp', quality: 20, path: 'screenshot.webp' });
 ```
 
@@ -345,7 +348,7 @@ await page.screenshot({ type: 'webp', quality: 20, path: 'screenshot.webp' });
 6. CHECK console errors only
 7. CHECK network failures only
 8. ACTUALLY test the feature
-9. SCREENSHOT only if needed (WebP 20%)
+9. SCREENSHOT only if needed (WebP 75%)
 10. CLOSE the page
 11. THEN say "changes are ready"
 
@@ -393,14 +396,21 @@ await page.screenshot({ type: 'webp', quality: 20, path: 'screenshot.webp' });
 
 **Screenshot Format (Chrome DevTools MCP only):**
 ```javascript
-// WebP 20% = ~3KB (BEST for tokens)
+// WebP 75% = ~5KB (BEST - 60-70% smaller than PNG)
+await page.screenshot({ 
+  type: 'webp', 
+  quality: 75, 
+  path: 'screenshot.webp' 
+});
+
+// Alternative: WebP 20% = ~3KB (low quality, only if needed)
 await page.screenshot({ 
   type: 'webp', 
   quality: 20, 
   path: 'screenshot.webp' 
 });
 
-// Alternative: JPEG 20% = ~5KB
+// Alternative: JPEG 20% = ~5KB (if WebP unavailable)
 await page.screenshot({ 
   type: 'jpeg', 
   quality: 20, 
@@ -428,9 +438,64 @@ await page.screenshot({
 | Method | Tokens | When to Use |
 |--------|--------|-------------|
 | **snapshot** | ~500 chars | Default for verification |
-| **WebP 20%** | ~750 tokens | Visual proof needed |
+| **WebP 75%** | ~1,500 tokens | Visual proof needed |
+| **WebP 20%** | ~750 tokens | Low quality acceptable |
 | **JPEG 20%** | ~1,025 tokens | WebP unavailable |
 | **PNG** | ~12,000 tokens | ❌ NEVER |
+
+---
+
+## 🌐 CHROME DEVTOOLS MCP - 7 CONSOLIDATED RULES
+
+**ALWAYS test on LIVE site - never localhost.**
+
+### 1. USE WEBP 75% (MANDATORY)
+```javascript
+take_screenshot(format: "webp", quality: 75)
+```
+Saves 60-70% tokens vs PNG. Never use PNG for routine testing.
+
+### 2. ALWAYS FILTER RESULTS
+```javascript
+// Console - errors only
+list_console_messages(level: "error")
+
+// Network - API calls only
+list_network_requests(includeStatic: false)
+```
+Never query all messages/requests (10k+ tokens wasted).
+
+### 3. VIEWPORT ONLY (DEFAULT)
+```javascript
+take_screenshot(format: "webp", quality: 75)  // ~1,500 tokens
+```
+Full page screenshots cost 600k+ tokens. Use only when necessary.
+
+### 4. TEST ACTUAL FEATURE
+Don't just check for errors. Click buttons, fill forms, verify redirects work.
+
+### 5. CLOSE PAGES (MANDATORY)
+```javascript
+close_page(pageId: 0)
+```
+If you open it, you MUST close it. No exceptions.
+
+### 6. LIVE SITE ONLY
+```javascript
+new_page(url: "https://{self.frontend_domain}")
+```
+NEVER use localhost, 127.0.0.1, or port-based URLs.
+
+### 7. QUICK HEALTH CHECK
+```javascript
+new_page(url)
+take_snapshot()  // Use snapshot instead of screenshot
+list_console_messages(level: "error")
+list_network_requests(includeStatic: false)
+// Test feature here
+close_page(pageId)
+```
+Open → Snapshot → Check console → Check network → Test feature → Close.
 
 ---
 
@@ -632,7 +697,7 @@ Before sending ANY response to the user, mentally check every item:
 - [ ] Did I run list_network_requests with `includeStatic: false`?
 - [ ] Did I test the specific feature I changed?
 - [ ] Did I only screenshot if visual proof absolutely required?
-- [ ] If screenshot needed, did I use WebP 20% (~3KB)?
+- [ ] If screenshot needed, did I use WebP 75% (~5KB)?
 - [ ] Did I call close_page when done?
  
 ### Agent Folder Checklist
@@ -696,7 +761,7 @@ Before sending ANY response to the user, mentally check every item:
 **If you catch yourself saying "it should work" → STOP and go test it.**
 **If you catch yourself skipping Chrome DevTools → STOP and open it.**
 **If you catch yourself testing on localhost → STOP and use the live site.**
-**If you catch yourself taking PNG screenshots → STOP and use WebP 20%.**
+**If you catch yourself taking PNG screenshots → STOP and use WebP 75%.**
 **If you catch yourself taking screenshots for initial verification → STOP and use snapshots.**
 
 **No exceptions. No shortcuts. Every single time. Token-efficient always.**
