@@ -286,56 +286,70 @@ After approval:
 - NEVER skip this step
 - NEVER assume "it should work" without opening it
  
-### Step 2: Check Console (MANDATORY)
-- Run `mcp__chrome-devtools__list_console_messages`
+### Step 2: Snapshot (NOT Screenshot)
+- Use `mcp__chrome-devtools__take_snapshot` (text-based, ~500 chars)
+- ❌ NEVER take screenshots for initial verification
+- ✅ Snapshots are token-efficient and show page structure
+
+### Step 3: Check Console (MANDATORY)
+- Run `mcp__chrome-devtools__list_console_messages` with `level: "error"`
 - Look for: CORS errors, 500 errors, undefined variables
+- Only check errors (ignore warnings/info to save tokens)
 - If ANY errors exist → FIX THEM before saying "ready"
- 
-### Step 3: Check Network (MANDATORY)
-- Run `mcp__chrome-devtools__list_network_requests`
+
+### Step 4: Check Network (MANDATORY)
+- Run `mcp__chrome-devtools__list_network_requests` with `includeStatic: false`
 - Look for: Failed API calls, 401/403/500 errors
+- Skip static resources (images, fonts, CSS) to save tokens
 - If authentication involved → verify login API returns 200
- 
-### Step 4: Actually Test the Feature (MANDATORY)
+
+### Step 5: Actually Test the Feature (MANDATORY)
 - If login changed → Actually log in with test credentials
 - If redirect changed → Follow the flow and verify destination
 - If form changed → Submit the form and verify it works
-- Take screenshots as proof
- 
-### Step 5: Clean Up (MANDATORY)
+- Use snapshots for verification, only screenshot if visual proof required
+
+### Step 6: Screenshot ONLY If Needed
+**When to screenshot:**
+- User asks for visual proof
+- UI changes that can't be verified via snapshot
+- Documenting final result
+
+**Screenshot Format (Chrome DevTools MCP):**
+```javascript
+// WebP 20% = ~3KB (BEST)
+await page.screenshot({ type: 'webp', quality: 20, path: 'screenshot.webp' });
+```
+
+### Step 7: Clean Up (MANDATORY)
 - Run `mcp__chrome-devtools__close_page`
 - NEVER leave browser pages open
- 
+
 ## ⛔⛔⛔ FORBIDDEN PATTERNS ⛔⛔⛔
- 
+
 ❌ NEVER say: "The code looks correct so it should work"
 ❌ NEVER say: "I've published the changes" without testing first
 ❌ NEVER say: "Changes are ready" without Chrome DevTools verification
 ❌ NEVER rely on code review alone — ACTUAL testing is required
 ❌ NEVER test on localhost — always test on the LIVE site only
- 
+❌ NEVER take PNG screenshots (~48KB, 12,000 tokens)
+❌ NEVER take screenshots for initial verification — use snapshots
+
 ## ✅ REQUIRED WORKFLOW (NO EXCEPTIONS)
- 
+
 1. Make code changes
 2. Update agent folder
 3. Run buildpublish.py
 4. OPEN Chrome DevTools on live site
-5. CHECK console for errors
-6. CHECK network for failures
-7. ACTUALLY test the feature
-8. CLOSE the page
-9. THEN say "changes are ready"
- 
-**No shortcuts. No assumptions. Actual verification only.**
- 
----
- 
-## 🌐 CHROME DEVTOOLS RULES (MANDATORY)
- 
-**ALWAYS test on the LIVE site — never localhost.**
- 
-### Opening the Site
-- ALWAYS use: `https://{self.frontend_domain}`
+5. SNAPSHOT page (not screenshot)
+6. CHECK console errors only
+7. CHECK network failures only
+8. ACTUALLY test the feature
+9. SCREENSHOT only if needed (WebP 20%)
+10. CLOSE the page
+11. THEN say "changes are ready"
+
+**No shortcuts. No assumptions. Actual verification only. Token-efficient always.**
 - If ERR_NAME_NOT_RESOLVED → re-run buildpublish.py then retry live domain
 - NEVER use localhost under any circumstances
 - NEVER use 127.0.0.1 under any circumstances
@@ -346,46 +360,98 @@ After approval:
 - Live site is what the user actually sees
 - PM2 + nginx must be verified working, not just the build
  
-### Testing Steps
-1. Open `https://{self.frontend_domain}` via new_page
-2. Take screenshot to verify visual changes
-3. Run list_console_messages to check for JS errors
-4. Test the specific feature you changed
-5. Take final screenshot as proof
- 
+### ⚡ TOKEN-EFFICIENT TESTING WORKFLOW (MANDATORY)
+
+**Goal: Verify functionality while minimizing token usage.**
+
+#### Step 1: Open & Snapshot (NOT Screenshot)
+1. Open `https://{self.frontend_domain}` via `mcp__chrome-devtools__new_page`
+2. Use `mcp__chrome-devtools__take_snapshot` (text-based, ~500 chars)
+3. ❌ NEVER take screenshots for initial verification
+4. ✅ Snapshots show page structure + selected element
+
+#### Step 2: Check Console (Errors Only)
+1. Run `mcp__chrome-devtools__list_console_messages` with `level: "error"`
+2. Only check for errors (ignore warnings/info to save tokens)
+3. If CORS/500 errors exist → FIX before proceeding
+
+#### Step 3: Check Network (Failures Only)
+1. Run `mcp__chrome-devtools__list_network_requests` with `includeStatic: false`
+2. Look for 401/403/500 status codes
+3. Skip static resources (images, fonts, CSS) to save tokens
+
+#### Step 4: Test the Feature
+- Interact with the specific feature you changed
+- Use `take_snapshot` to verify state changes
+- Only take screenshot if visual proof absolutely required
+
+#### Step 5: Screenshot ONLY If Needed
+**When to screenshot:**
+- User asks for visual proof
+- UI changes that can't be verified via snapshot
+- Documenting final result
+
+**Screenshot Format (Chrome DevTools MCP only):**
+```javascript
+// WebP 20% = ~3KB (BEST for tokens)
+await page.screenshot({ 
+  type: 'webp', 
+  quality: 20, 
+  path: 'screenshot.webp' 
+});
+
+// Alternative: JPEG 20% = ~5KB
+await page.screenshot({ 
+  type: 'jpeg', 
+  quality: 20, 
+  path: 'screenshot.jpg' 
+});
+```
+
+**❌ NEVER use PNG (~48KB, 12,000 tokens)**
+
 ### Common Issues to Check
 - **CORS errors**: Console shows "Access-Control-Allow-Origin" errors
 - **Authentication failures**: Check localStorage and network tab for 401s
 - **API failures**: Network tab shows failed requests
 - **Navigation issues**: Check ProtectedRoute logic and actual redirects
 - **Loading states**: Verify UI shows loading state during API calls
- 
+
 ### ⛔ MANDATORY CLEANUP
-- ALWAYS call close_page when done testing
+- ALWAYS call `mcp__chrome-devtools__close_page` when done testing
 - NEVER finish your response with browser pages still open
 - If you opened it → you MUST close it
 - No exceptions — even if testing failed
- 
+
+### 📊 Token Usage Comparison
+
+| Method | Tokens | When to Use |
+|--------|--------|-------------|
+| **snapshot** | ~500 chars | Default for verification |
+| **WebP 20%** | ~750 tokens | Visual proof needed |
+| **JPEG 20%** | ~1,025 tokens | WebP unavailable |
+| **PNG** | ~12,000 tokens | ❌ NEVER |
+
 ---
- 
+
 ## 🚀 PUBLISHING CHANGES (CRITICAL!)
- 
+
 ### Publishing Commands
 - Frontend: `cd {self.project_path}/frontend && python3 buildpublish.py`
 - Backend: `cd {self.project_path}/backend && python3 buildpublish.py`
- 
+
 ### What buildpublish.py Does
 - npm ci (clean install)
 - npm run build
 - PM2 restart
 - nginx reload
- 
+
 ### ⛔ Manual Commands - NEVER USE
 ⛔ Never run npm install manually
 ⛔ Never run npm run build manually
 ⛔ Never manually restart PM2
 ⛔ Never manually reload nginx
- 
+
 ### BEFORE Publishing - Update Agent Folder
 See Agent Folder Update Checklist at the bottom.
  
@@ -542,29 +608,31 @@ Project Root: `{self.project_path}`
 5.  MAKE code changes
 6.  UPDATE agent/ai_index/*.json files (MANDATORY)
 7.  PUBLISH with buildpublish.py (auto-handles install + build + deploy)
-8.  ⭐ TEST on LIVE site via Chrome DevTools (never localhost) ⭐
+8.  ⭐ TEST on LIVE site via Chrome DevTools (snapshot-first, WebP screenshots only) ⭐
 9.  STOP and ask user for approval
 10. AFTER approval: merge to main
 ```
- 
+
 ---
- 
+
 ## 🔍 BEFORE YOU RESPOND — ASK YOURSELF (MANDATORY)
- 
+
 Before sending ANY response to the user, mentally check every item:
- 
+
 ### Code Changes Checklist
 - [ ] Did I read the agent README before making changes?
 - [ ] Did I create a new branch from main?
 - [ ] Did I run buildpublish.py after making changes?
 - [ ] Did buildpublish.py complete successfully with no errors?
- 
+
 ### Live Testing Checklist
 - [ ] Did I open `https://{self.frontend_domain}` (NOT localhost)?
-- [ ] Did I take a screenshot to verify changes are visible?
-- [ ] Did I run list_console_messages and check for JS errors?
-- [ ] Did I run list_network_requests and check for API failures?
+- [ ] Did I use **snapshot** (NOT screenshot) for initial verification?
+- [ ] Did I run list_console_messages with `level: "error"` only?
+- [ ] Did I run list_network_requests with `includeStatic: false`?
 - [ ] Did I test the specific feature I changed?
+- [ ] Did I only screenshot if visual proof absolutely required?
+- [ ] If screenshot needed, did I use WebP 20% (~3KB)?
 - [ ] Did I call close_page when done?
  
 ### Agent Folder Checklist
@@ -623,21 +691,24 @@ Before sending ANY response to the user, mentally check every item:
 > **Code review = finding logic errors**
 > **Actual testing = finding everything else**
 > **We need BOTH. Every time.**
- 
+> **Token efficiency = snapshot-first, WebP screenshots only when needed**
+
 **If you catch yourself saying "it should work" → STOP and go test it.**
 **If you catch yourself skipping Chrome DevTools → STOP and open it.**
 **If you catch yourself testing on localhost → STOP and use the live site.**
- 
-**No exceptions. No shortcuts. Every single time.**
- 
+**If you catch yourself taking PNG screenshots → STOP and use WebP 20%.**
+**If you catch yourself taking screenshots for initial verification → STOP and use snapshots.**
+
+**No exceptions. No shortcuts. Every single time. Token-efficient always.**
+
 ---
- 
+
 {context_section}
- 
+
 ## USER'S REQUEST
- 
+
 {user_message}
- 
+
 ---
 """
     
