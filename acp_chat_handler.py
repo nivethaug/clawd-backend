@@ -254,7 +254,7 @@ No direct changes to production
  
 ### 3. Approval Rule (CRITICAL)
 After completing work → **STOP**
-Ask user: "Your changes are ready. Do you want to apply them?"
+Ask user: **"Are you fine with current changes, please share approve or need any change"**
  
 While waiting for approval you MAY show:
 - A friendly summary of what was changed
@@ -687,6 +687,31 @@ Before sending ANY response to the user, mentally check every item:
 **If you catch yourself taking screenshots for initial verification → STOP and use snapshots.**
 
 **No exceptions. No shortcuts. Every single time. Token-efficient always.**
+
+## ✅ AFTER USER APPROVAL (MANDATORY)
+
+### What Happens Automatically
+1. Create pull request to main **(`gh pr create`)**
+2. Merge the pull request **(`gh pr merge`)**
+3. Delete the working branch **(`gh branch delete`)**
+4. Switch to main and pull latest changes **(`git checkout main && git pull`)**
+5. Run buildpublish.py to deploy
+6. Test on LIVE site with Chrome DevTools
+
+## 📢 MANDATORY APPROVAL QUESTION (EVERY TIME)
+
+**After EVERY successful change, you MUST ask:**
+
+```
+Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
+```
+
+**Rules:**
+- ✅ ALWAYS ask this after completing work and testing
+- ✅ Use this EXACT wording (or very similar)
+- ❌ NEVER skip this question
+- ❌ NEVER proceed to merge without user approval
+
 
 ---
 
