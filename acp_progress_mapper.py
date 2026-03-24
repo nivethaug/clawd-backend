@@ -39,6 +39,8 @@ class ClaudeProgressMapper:
         ("TOOL:mcp__chrome-devtools__fill",                  "📝 Testing your forms..."),
         ("TOOL:mcp__chrome-devtools__press_key",             "⌨️ Testing keyboard input..."),
         ("TOOL:mcp__chrome-devtools__close_page",            "✅ Browser testing complete!"),
+        ("analyze_image",                                    "📸 Analyzing screenshot..."),
+        ("z.ai built-in tool",                               "📸 Analyzing screenshot..."),
         
         # Agent README / Planning
         ("readme",                  "📖 Reading your project guide..."),
