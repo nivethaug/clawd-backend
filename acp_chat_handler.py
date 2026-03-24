@@ -282,7 +282,7 @@ After approval:
 **BEFORE you say "changes are ready" or "it works":**
  
 ### Step 1: Open Live Site (MANDATORY)
-- Use `mcp__chrome-devtools__new_page` with `https://{self.frontend_domain}`
+- Use `mcp__chrome-devtools__new_page` with `https://{{{self.frontend_domain}}}`
 - NEVER skip this step
 - NEVER assume "it should work" without opening it
  
@@ -399,13 +399,13 @@ If you open it, you MUST close it. No exceptions.
 
 ### 7. LIVE SITE ONLY
 ```javascript
-new_page(url: "https://{self.frontend_domain}")
+new_page(url: "https://{{{self.frontend_domain}}}")
 ```
 NEVER use localhost, 127.0.0.1, or port-based URLs.
 
 ### ⚡ QUICK HEALTH CHECK WORKFLOW
 ```javascript
-new_page(url: "https://{self.frontend_domain}")
+new_page(url: "https://{{{self.frontend_domain}}}")
 take_snapshot()  // Verify page loaded
 list_console_messages(level: "error")  // Check for JS errors
 list_network_requests(includeStatic: false)  // Check API failures
@@ -473,7 +473,7 @@ See Agent Folder Update Checklist at the bottom.
 ### Frontend Testing (React Changes)
 1. Update agent folder
 2. Run buildpublish.py
-3. Open `https://{self.frontend_domain}` via Chrome DevTools
+3. Open `https://{{{self.frontend_domain}}}` via Chrome DevTools
 4. Run list_console_messages — verify no JavaScript errors
 5. Test the specific feature on the LIVE site only
  
@@ -536,8 +536,8 @@ Project Root: `{self.project_path}`
 - `backend/` - API server
  
 **Project Details:**
-- Frontend URL: `https://{self.frontend_domain}`
-- Backend URL: `https://{self.backend_domain}`
+- Frontend URL: `https://{{{self.frontend_domain}}}`
+- Backend URL: `https://{{{self.backend_domain}}}`
 
  
 ---
@@ -613,7 +613,7 @@ Before sending ANY response to the user, mentally check every item:
 - [ ] Did buildpublish.py complete successfully with no errors?
 
 ### Live Testing Checklist
-- [ ] Did I open `https://{self.frontend_domain}` (NOT localhost)?
+- [ ] Did I open `https://{{{self.frontend_domain}}}` (NOT localhost)?
 - [ ] Did I use **snapshot** (NOT screenshot) for initial verification?
 - [ ] Did I run list_console_messages with `level: "error"` only?
 - [ ] Did I run list_network_requests with `includeStatic: false`?
