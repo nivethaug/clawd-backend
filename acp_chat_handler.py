@@ -353,95 +353,6 @@ await page.screenshot({ type: 'webp', quality: 20, path: 'screenshot.webp' });
 11. THEN say "changes are ready"
 
 **No shortcuts. No assumptions. Actual verification only. Token-efficient always.**
-- If ERR_NAME_NOT_RESOLVED → re-run buildpublish.py then retry live domain
-- NEVER use localhost under any circumstances
-- NEVER use 127.0.0.1 under any circumstances
-- NEVER use port-based URLs like http://localhost:3011
- 
-### Why Live Only
-- localhost may show old cached version
-- Live site is what the user actually sees
-- PM2 + nginx must be verified working, not just the build
- 
-### ⚡ TOKEN-EFFICIENT TESTING WORKFLOW (MANDATORY)
-
-**Goal: Verify functionality while minimizing token usage.**
-
-#### Step 1: Open & Snapshot (NOT Screenshot)
-1. Open `https://{self.frontend_domain}` via `mcp__chrome-devtools__new_page`
-2. Use `mcp__chrome-devtools__take_snapshot` (text-based, ~500 chars)
-3. ❌ NEVER take screenshots for initial verification
-4. ✅ Snapshots show page structure + selected element
-
-#### Step 2: Check Console (Errors Only)
-1. Run `mcp__chrome-devtools__list_console_messages` with `level: "error"`
-2. Only check for errors (ignore warnings/info to save tokens)
-3. If CORS/500 errors exist → FIX before proceeding
-
-#### Step 3: Check Network (Failures Only)
-1. Run `mcp__chrome-devtools__list_network_requests` with `includeStatic: false`
-2. Look for 401/403/500 status codes
-3. Skip static resources (images, fonts, CSS) to save tokens
-
-#### Step 4: Test the Feature
-- Interact with the specific feature you changed
-- Use `take_snapshot` to verify state changes
-- Only take screenshot if visual proof absolutely required
-
-#### Step 5: Screenshot ONLY If Needed
-**When to screenshot:**
-- User asks for visual proof
-- UI changes that can't be verified via snapshot
-- Documenting final result
-
-**Screenshot Format (Chrome DevTools MCP only):**
-```javascript
-// WebP 75% = ~5KB (BEST - 60-70% smaller than PNG)
-await page.screenshot({ 
-  type: 'webp', 
-  quality: 75, 
-  path: 'screenshot.webp' 
-});
-
-// Alternative: WebP 20% = ~3KB (low quality, only if needed)
-await page.screenshot({ 
-  type: 'webp', 
-  quality: 20, 
-  path: 'screenshot.webp' 
-});
-
-// Alternative: JPEG 20% = ~5KB (if WebP unavailable)
-await page.screenshot({ 
-  type: 'jpeg', 
-  quality: 20, 
-  path: 'screenshot.jpg' 
-});
-```
-
-**❌ NEVER use PNG (~48KB, 12,000 tokens)**
-
-### Common Issues to Check
-- **CORS errors**: Console shows "Access-Control-Allow-Origin" errors
-- **Authentication failures**: Check localStorage and network tab for 401s
-- **API failures**: Network tab shows failed requests
-- **Navigation issues**: Check ProtectedRoute logic and actual redirects
-- **Loading states**: Verify UI shows loading state during API calls
-
-### ⛔ MANDATORY CLEANUP
-- ALWAYS call `mcp__chrome-devtools__close_page` when done testing
-- NEVER finish your response with browser pages still open
-- If you opened it → you MUST close it
-- No exceptions — even if testing failed
-
-### 📊 Token Usage Comparison
-
-| Method | Tokens | When to Use |
-|--------|--------|-------------|
-| **snapshot** | ~500 chars | Default for verification |
-| **WebP 75%** | ~1,500 tokens | Visual proof needed |
-| **WebP 20%** | ~750 tokens | Low quality acceptable |
-| **JPEG 20%** | ~1,025 tokens | WebP unavailable |
-| **PNG** | ~12,000 tokens | ❌ NEVER |
 
 ---
 
@@ -471,31 +382,42 @@ take_screenshot(format: "webp", quality: 75)  // ~1,500 tokens
 ```
 Full page screenshots cost 600k+ tokens. Use only when necessary.
 
-### 4. TEST ACTUAL FEATURE
+### 4. SNAPSHOT-FIRST APPROACH
+```javascript
+take_snapshot()  // ~500 chars - use for verification
+```
+Use snapshots for initial verification. Only screenshot if visual proof needed.
+
+### 5. TEST ACTUAL FEATURE
 Don't just check for errors. Click buttons, fill forms, verify redirects work.
 
-### 5. CLOSE PAGES (MANDATORY)
+### 6. CLOSE PAGES (MANDATORY)
 ```javascript
 close_page(pageId: 0)
 ```
 If you open it, you MUST close it. No exceptions.
 
-### 6. LIVE SITE ONLY
+### 7. LIVE SITE ONLY
 ```javascript
 new_page(url: "https://{self.frontend_domain}")
 ```
 NEVER use localhost, 127.0.0.1, or port-based URLs.
 
-### 7. QUICK HEALTH CHECK
+### ⚡ QUICK HEALTH CHECK WORKFLOW
 ```javascript
-new_page(url)
-take_snapshot()  // Use snapshot instead of screenshot
-list_console_messages(level: "error")
-list_network_requests(includeStatic: false)
-// Test feature here
-close_page(pageId)
+new_page(url: "https://{self.frontend_domain}")
+take_snapshot()  // Verify page loaded
+list_console_messages(level: "error")  // Check for JS errors
+list_network_requests(includeStatic: false)  // Check API failures
+// Test the specific feature you changed
+close_page(pageId: 0)
 ```
-Open → Snapshot → Check console → Check network → Test feature → Close.
+
+**Common Issues to Check:**
+- **CORS errors**: Console shows "Access-Control-Allow-Origin" errors
+- **Authentication failures**: Check localStorage and network tab for 401s
+- **API failures**: Network tab shows failed requests (401/403/500)
+- **Navigation issues**: Check ProtectedRoute logic and actual redirects
 
 ---
 
