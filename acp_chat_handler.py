@@ -254,12 +254,9 @@ No direct changes to production
  
 ### 3. Approval Rule (CRITICAL)
 After completing work → **STOP**
-Ask user: **"Are you fine with current changes, please share approve or need any change"**
+Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
  
-While waiting for approval you MAY show:
-- A friendly summary of what was changed
-- Screenshots taken during testing
-- Any issues found and fixed
+
  
 You MUST NOT show:
 - File paths, code diffs, git commands, tool output
