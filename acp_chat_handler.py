@@ -1265,7 +1265,19 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
             if cleaned and cleaned not in ["null", "{}", "[]", "---"]:
                 # Skip TOOL: prefix lines (already mapped to progress above)
                 # Skip lines that are pure JSON/telemetry
-                if not cleaned.startswith("TOOL:") and not cleaned.startswith('{') and not cleaned.startswith('['):
+                # Skip built-in tool outputs (analyze_image, etc.)
+                skip_patterns = [
+                    cleaned.startswith("TOOL:"),
+                    cleaned.startswith('{'),
+                    cleaned.startswith('['),
+                    "z.ai built-in tool" in cleaned.lower(),
+                    "analyze_image" in cleaned.lower(),
+                    cleaned == "**Input:**",
+                    cleaned == "**Output:**",
+                    cleaned.startswith("```json"),
+                    cleaned.startswith("```"),
+                ]
+                if not any(skip_patterns):
                     try:
                         await chunk_queue.put(f"TEXT:{text}")
                         logger.info(f"[ACP-CHAT] Text queued, size: {chunk_queue.qsize()}")
