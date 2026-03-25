@@ -473,15 +473,15 @@ class ToolExecutor:
             
             project = dict(result)
         
-        # Update session
+        # Update session (store domain, not numeric ID)
         session_manager = get_session_manager()
-        await session_manager.set_active_project(session_key, project["id"])
+        await session_manager.set_active_project(session_key, project["domain"])
         
         return {
             "status": "success",
             "message": f"Switched to {project['name']} project ✅",
             "result": {
-                "project_id": project["id"],
+                "project_id": project["domain"],
                 "project_name": project["name"],
                 "project_domain": project["domain"]
             }

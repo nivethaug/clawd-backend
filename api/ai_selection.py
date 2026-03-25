@@ -68,19 +68,9 @@ async def ai_selection(request: AISelectionRequest):
         
         logger.info(f"[AI-SELECTION] Executing {tool_name} with project_id={request.selection}")
         
-        # Update session's active project
+        # Update session's active project (store domain, not numeric ID)
         session_manager = get_session_manager()
-        
-        # Find project ID from domain
-        from database_postgres import get_db
-        with get_db() as conn:
-            result = conn.execute(
-                "SELECT id FROM projects WHERE domain = %s",
-                (request.selection,)
-            ).fetchone()
-            
-            if result:
-                await session_manager.set_active_project(request.session_id, result["id"])
+        await session_manager.set_active_project(request.session_id, request.selection)
         
         # Execute tool
         executor = get_tool_executor()

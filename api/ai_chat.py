@@ -5,7 +5,7 @@ Main chat endpoint for LLM-powered DevOps assistant
 
 import json
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -38,7 +38,7 @@ class AIChatRequest(BaseModel):
     """Chat request model."""
     message: str = Field(..., description="User message")
     session_id: str = Field(..., description="Session identifier (UUID)")
-    active_project: Optional[str] = Field(None, description="Active project domain or ID")
+    active_project: Optional[Union[str, int]] = Field(None, description="Active project domain or ID (string preferred)")
 
 
 class AIChatResponse(BaseModel):
@@ -310,30 +310,48 @@ async def ai_chat(request: AIChatRequest):
         
         logger.debug(f"[AI-CHAT] Loaded {len(projects)} projects")
         
-        # 3. Get active project
+        # 3. Normalize active_project to string (CRITICAL)
+        active_project_value = None
+        if request.active_project is not None:
+            active_project_value = str(request.active_project)
+        
+        # 4. Get active project - prefer domain, with numeric ID fallback
         active_project = None
-        if request.active_project:
-            # Use explicitly provided active project
+        if active_project_value:
+            # First try: exact domain match (preferred)
             for project in projects:
-                if project["domain"] == request.active_project or str(project["id"]) == request.active_project:
+                if project["domain"] == active_project_value:
                     active_project = project
+                    logger.debug(f"[AI-CHAT] Matched by domain: {project['domain']}")
                     break
-        elif session.get("active_project_id"):
-            # Use session's active project
+            
+            # Second try: numeric ID fallback
+            if not active_project and active_project_value.isdigit():
+                numeric_id = int(active_project_value)
+                for project in projects:
+                    if project["id"] == numeric_id:
+                        active_project = project
+                        logger.debug(f"[AI-CHAT] Matched by numeric ID {numeric_id}, using domain: {project['domain']}")
+                        break
+        
+        # 5. Check session's active project (stored as domain string)
+        if not active_project and session.get("active_project_id"):
+            session_project_domain = session["active_project_id"]
             for project in projects:
-                if project["id"] == session["active_project_id"]:
+                if project["domain"] == session_project_domain:
                     active_project = project
+                    logger.debug(f"[AI-CHAT] Matched from session: {session_project_domain}")
                     break
         
-        # 4. Build messages for GLM
+        # 6. Build messages for GLM
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": request.message}
         ]
         
-        # Add project context if available
+        # Add project context if available (always use domain)
         if active_project:
-            messages[0]["content"] += f"\n\nCurrent active project: {active_project['name']} ({active_project['domain']})"
+            messages[0]["content"] += f"\n\nCurrent active project: {active_project['name']} (domain: {active_project['domain']})"
         
         # 5. Call GLM with tools
         glm_client = get_glm_client()

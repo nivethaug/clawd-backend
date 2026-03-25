@@ -64,21 +64,21 @@ class AISessionManager:
                 "pending_intent": None
             }
     
-    async def set_active_project(self, session_key: str, project_id: int) -> None:
+    async def set_active_project(self, session_key: str, project_domain: str) -> None:
         """
         Update active project for session.
         
         Args:
             session_key: Session identifier
-            project_id: Project database ID
+            project_domain: Project domain (string identifier)
         """
         with get_db() as conn:
             conn.execute(
                 "UPDATE ai_sessions SET active_project_id = %s, updated_at = NOW() WHERE session_key = %s",
-                (project_id, session_key)
+                (project_domain, session_key)
             )
             conn.commit()
-            logger.info(f"[AI-SESSION] Set active project {project_id} for session {session_key}")
+            logger.info(f"[AI-SESSION] Set active project '{project_domain}' for session {session_key}")
     
     async def get_active_project(self, session_key: str) -> Optional[Dict[str, Any]]:
         """
@@ -91,10 +91,11 @@ class AISessionManager:
             Project dict or None
         """
         with get_db() as conn:
+            # Match by domain (active_project_id stores domain string)
             result = conn.execute("""
                 SELECT p.*
                 FROM ai_sessions s
-                JOIN projects p ON s.active_project_id = p.id
+                JOIN projects p ON s.active_project_id = p.domain
                 WHERE s.session_key = %s
             """, (session_key,)).fetchone()
             

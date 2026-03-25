@@ -317,10 +317,11 @@ def init_schema():
             _run_migration(migrate_image)
 
             # AI Sessions table (for AI chat system)
+            # active_project_id stores project domain (TEXT), not numeric ID
             cur.execute("""CREATE TABLE IF NOT EXISTS ai_sessions (
                 id SERIAL PRIMARY KEY,
                 session_key TEXT UNIQUE NOT NULL,
-                active_project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                active_project_id TEXT,
                 pending_intent JSONB,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

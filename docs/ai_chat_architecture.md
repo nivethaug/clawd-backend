@@ -255,12 +255,14 @@ Retrieve Pending Intent (AISessionManager)
 CREATE TABLE ai_sessions (
     id SERIAL PRIMARY KEY,
     session_key TEXT UNIQUE NOT NULL,
-    active_project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    active_project_id TEXT,
     pending_intent JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+**Note:** The `active_project_id` field stores the project domain string (e.g., "myapp-abc123") rather than the numeric database ID. This ensures consistent project identification across the system.
 
 **Indexes:**
 - `idx_ai_sessions_session_key` on `session_key` (fast lookups)

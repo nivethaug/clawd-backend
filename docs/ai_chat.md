@@ -237,7 +237,7 @@ Handle user confirmation/cancel for dangerous operations.
 CREATE TABLE ai_sessions (
     id SERIAL PRIMARY KEY,
     session_key TEXT UNIQUE NOT NULL,
-    active_project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    active_project_id TEXT,
     pending_intent JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -246,8 +246,10 @@ CREATE TABLE ai_sessions (
 
 **Fields:**
 - `session_key`: Unique session identifier (e.g., "user-123")
-- `active_project_id`: Currently selected project
+- `active_project_id`: Currently selected project domain (TEXT, not numeric ID)
 - `pending_intent`: Stored intent awaiting confirmation (JSONB)
+
+**Note:** The `active_project_id` field stores the project domain string (e.g., "myapp-abc123") rather than the numeric database ID. This ensures consistent project identification across the system.
 
 ## Environment Variables
 
