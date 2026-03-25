@@ -63,13 +63,9 @@ class ProjectResolver:
                     project=project,
                     message=f"Using project: {project['name']}"
                 )
-            else:
-                # Explicit ID not found - return not_found
-                logger.warning(f"[PROJECT-RESOLVER] Explicit project ID not found: {explicit_project_id}")
-                return ResolutionResult(
-                    status="not_found",
-                    message=f"Project '{explicit_project_id}' not found"
-                )
+            # Explicit ID not found - fall through to fuzzy matching
+            # This provides better UX by showing similar projects
+            logger.info(f"[PROJECT-RESOLVER] Explicit project ID not found, trying fuzzy match: {explicit_project_id}")
         
         # 2. Use active project if available
         if active_project:
@@ -104,9 +100,12 @@ class ProjectResolver:
                 project_map[name.lower()] = project
                 search_strings.append(name.lower())
         
+        # Use explicit_project_id as search text if provided, otherwise use user_text
+        search_text = (explicit_project_id or user_text).lower()
+        
         # Get close matches
         matches = get_close_matches(
-            user_text.lower(),
+            search_text,
             search_strings,
             n=3,  # Max 3 candidates
             cutoff=0.6  # Similarity threshold
@@ -144,10 +143,17 @@ class ProjectResolver:
         else:
             # No matches - show all projects for selection
             logger.info("[PROJECT-RESOLVER] No matches, showing all projects for selection")
+            
+            # Better message if explicit ID was provided
+            if explicit_project_id:
+                message = f"Project '{explicit_project_id}' not found. Please select a project:"
+            else:
+                message = "Which project would you like to use?"
+            
             return ResolutionResult(
                 status="selection",
                 candidates=projects[:10],  # Limit to 10
-                message="Which project would you like to use?"
+                message=message
             )
     
     def _find_by_id(self, project_id: str, projects: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
