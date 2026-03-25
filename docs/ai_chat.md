@@ -21,10 +21,11 @@ User Message → GLM LLM → Tool Decision → Core Functions → Response
    - Automatic retry logic with timeout handling
 
 2. **Tool Registry** (`services/ai/tool_registry.py`)
-   - Defines 13 DevOps tools with JSON Schema
-   - Categorizes tools: auto-execute (6), confirm-required (7)
+   - Defines 16 DevOps tools with JSON Schema
+   - Categorizes tools: auto-execute (9), confirm-required (7)
    - Validates tool arguments before execution
    - All destructive operations require explicit confirmation
+   - Context management tools for project switching
 
 3. **Tool Executor** (`services/ai/tool_executor.py`)
    - Direct Python function calls (no HTTP)
@@ -41,6 +42,7 @@ User Message → GLM LLM → Tool Decision → Core Functions → Response
    - PostgreSQL-backed session persistence
    - Tracks active project per session
    - Stores pending intents for confirmation flow
+   - Methods: `set_active_project()`, `get_active_project()`, `clear_active_project()`
 
 6. **Response Formatter** (`utils/ai_response_formatter.py`)
    - Consistent response types across all endpoints
@@ -175,33 +177,51 @@ Handle user confirmation/cancel for dangerous operations.
    - Retrieves project logs
    - Args: `project_id` (string), `lines` (number, optional), `filter` (string, optional)
 
+7. **set_active_project**
+   - Sets the active project context for the session
+   - Args: `project_id` (string)
+   - Use when user says "switch to X", "use X project"
+   - Updates `session.active_project_id`
+
+8. **get_active_project**
+   - Gets the current active project context
+   - Args: none
+   - Use when user asks "which project am I using?"
+   - Returns project details or prompts selection
+
+9. **clear_active_project**
+   - Clears the active project context
+   - Args: none
+   - Use when user says "clear project", "forget project"
+   - Sets `active_project_id = null`
+
 ### Confirmation Required
 
-7. **create_project**
-   - Creates new project
-   - Args: `name` (string), `domain` (string, optional), `description` (string, optional), `project_type` (enum: website, telegram_bot, discord_bot, trading_bot, scheduler, custom)
+10. **create_project**
+    - Creates new project
+    - Args: `name` (string), `domain` (string, optional), `description` (string, optional), `project_type` (enum: website, telegram_bot, discord_bot, trading_bot, scheduler, custom)
 
-8. **start_all_projects**
-   - Starts all active projects
-   - Args: none
+11. **start_all_projects**
+    - Starts all active projects
+    - Args: none
 
-9. **stop_all_projects**
-   - Stops all running projects
-   - Args: none
+12. **stop_all_projects**
+    - Stops all running projects
+    - Args: none
 
-10. **restart_all_projects**
+13. **restart_all_projects**
     - Restarts all projects (bulk operation)
     - Args: none
 
-11. **delete_project**
+14. **delete_project**
     - Deletes a project permanently (destructive operation)
     - Args: `project_id` (string)
 
-12. **uninstall_project**
+15. **uninstall_project**
     - Uninstalls/removes a project (destructive operation)
     - Args: `project_id` (string)
 
-13. **remove_all_projects**
+16. **remove_all_projects**
     - Removes ALL projects (destructive bulk operation)
     - Args: none
 
@@ -400,10 +420,11 @@ curl -X POST http://localhost:8000/api/ai/confirm \
    - SSL certificate renewal
    - DNS record updates
 
-2. **Context Awareness**
-   - Remember previous commands
-   - Multi-step workflows
-   - Project-specific preferences
+2. **Context Awareness** ✅ IMPLEMENTED
+   - Remember previous commands via session persistence
+   - Multi-step workflows with active project context
+   - Project-specific preferences stored per session
+   - Explicit switching via `set_active_project`, `get_active_project`, `clear_active_project`
 
 3. **Safety Features**
    - Rate limiting
