@@ -17,7 +17,7 @@ TOOLS_AUTO = [
                 "properties": {
                     "project_id": {
                         "type": "string",
-                        "description": "Project domain or ID (e.g., 'crypto-bot', 'my-website')"
+                        "description": "Project domain or ID"
                     }
                 },
                 "required": ["project_id"]
@@ -106,6 +106,47 @@ TOOLS_AUTO = [
                     }
                 },
                 "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_active_project",
+            "description": "Set or switch the active project context for the conversation. Use when user says 'switch to X', 'use X project', or explicitly wants to change context.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID to set as active"
+                    }
+                },
+                "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clear_active_project",
+            "description": "Clear the active project context. Use when user says 'clear project', 'forget project', or wants to reset context.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_active_project",
+            "description": "Get the current active project context. Use when user asks 'which project am I using', 'what's the current project', or wants to check context.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
             }
         }
     }

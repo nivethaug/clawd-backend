@@ -100,6 +100,21 @@ class AISessionManager:
             
             return dict(result) if result else None
     
+    async def clear_active_project(self, session_key: str) -> None:
+        """
+        Clear active project for session.
+        
+        Args:
+            session_key: Session identifier
+        """
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE ai_sessions SET active_project_id = NULL, updated_at = NOW() WHERE session_key = %s",
+                (session_key,)
+            )
+            conn.commit()
+            logger.info(f"[AI-SESSION] Cleared active project for session {session_key}")
+    
     async def set_pending_intent(self, session_key: str, intent: Dict[str, Any]) -> None:
         """
         Store intent awaiting confirmation.

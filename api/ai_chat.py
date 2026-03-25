@@ -276,7 +276,7 @@ async def ai_chat(request: AIChatRequest):
         
         # 11. Execute tool
         executor = get_tool_executor()
-        result = await executor.execute(tool_name, args)
+        result = await executor.execute(tool_name, args, session_key=request.session_id)
         
         # 12. Handle result
         if result["status"] == "confirmation_required":

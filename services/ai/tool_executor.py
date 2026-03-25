@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional
 from database_postgres import get_db
 from apps_service import pm2_action, get_pm2_processes
 from services.ai.tool_registry import is_safe_tool, requires_confirmation, is_disabled
+from utils.ai_session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ class ToolExecutor:
     async def execute(
         self,
         tool_name: str,
-        args: Dict[str, Any]
+        args: Dict[str, Any],
+        session_key: str = None
     ) -> Dict[str, Any]:
         """
         Execute a tool with given arguments.
@@ -35,6 +37,7 @@ class ToolExecutor:
         Args:
             tool_name: Name of tool to execute
             args: Tool arguments
+            session_key: Session identifier (required for context management tools)
             
         Returns:
             {
@@ -95,6 +98,12 @@ class ToolExecutor:
                 return await self._execute_stop_all_projects(args)
             elif tool_name == "remove_all_projects":
                 return await self._execute_remove_all_projects(args)
+            elif tool_name == "set_active_project":
+                return await self._execute_set_active_project(args, session_key)
+            elif tool_name == "clear_active_project":
+                return await self._execute_clear_active_project(args, session_key)
+            elif tool_name == "get_active_project":
+                return await self._execute_get_active_project(args, session_key)
             else:
                 return {
                     "status": "error",
@@ -421,6 +430,117 @@ class ToolExecutor:
                     "failed": failed
                 }
             }
+    
+    async def _execute_set_active_project(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None
+    ) -> Dict[str, Any]:
+        """
+        Set active project for session.
+        
+        Args:
+            args: Must contain project_id
+            session_key: Session identifier (injected by caller)
+        """
+        project_id = args.get("project_id")
+        if not project_id:
+            return {"status": "error", "message": "Missing project_id"}
+        
+        if not session_key:
+            return {"status": "error", "message": "Missing session context"}
+        
+        # Resolve project from DB
+        domain = project_id.split(".")[0] if "." in project_id else project_id
+        
+        with get_db() as conn:
+            result = conn.execute(
+                "SELECT id, name, domain FROM projects WHERE domain = %s OR id = %s",
+                (domain, project_id)
+            ).fetchone()
+            
+            if not result:
+                return {
+                    "status": "error",
+                    "message": f"Project '{project_id}' not found"
+                }
+            
+            project = dict(result)
+        
+        # Update session
+        session_manager = get_session_manager()
+        await session_manager.set_active_project(session_key, project["id"])
+        
+        return {
+            "status": "success",
+            "message": f"Switched to {project['name']} project ✅",
+            "result": {
+                "project_id": project["id"],
+                "project_name": project["name"],
+                "project_domain": project["domain"]
+            }
+        }
+    
+    async def _execute_clear_active_project(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None
+    ) -> Dict[str, Any]:
+        """
+        Clear active project for session.
+        
+        Args:
+            args: No parameters required
+            session_key: Session identifier (injected by caller)
+        """
+        if not session_key:
+            return {"status": "error", "message": "Missing session context"}
+        
+        session_manager = get_session_manager()
+        await session_manager.clear_active_project(session_key)
+        
+        return {
+            "status": "success",
+            "message": "Cleared active project. I'll ask when needed.",
+            "result": {"active_project_id": None}
+        }
+    
+    async def _execute_get_active_project(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None
+    ) -> Dict[str, Any]:
+        """
+        Get active project for session.
+        
+        Args:
+            args: No parameters required
+            session_key: Session identifier (injected by caller)
+        """
+        if not session_key:
+            return {"status": "error", "message": "Missing session context"}
+        
+        session_manager = get_session_manager()
+        project = await session_manager.get_active_project(session_key)
+        
+        if not project:
+            return {
+                "status": "success",
+                "message": "No active project set. Please select a project first.",
+                "result": {"active_project": None}
+            }
+        
+        return {
+            "status": "success",
+            "message": f"Active project: {project['name']}",
+            "result": {
+                "active_project": {
+                    "id": project.get("id"),
+                    "name": project.get("name"),
+                    "domain": project.get("domain")
+                }
+            }
+        }
 
 
 # Singleton instance

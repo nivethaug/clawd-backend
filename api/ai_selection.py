@@ -84,7 +84,7 @@ async def ai_selection(request: AISelectionRequest):
         
         # Execute tool
         executor = get_tool_executor()
-        result = await executor.execute(tool_name, args)
+        result = await executor.execute(tool_name, args, session_key=request.session_id)
         
         # Return result
         if result["status"] == "success":

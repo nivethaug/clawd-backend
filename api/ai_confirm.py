@@ -160,7 +160,7 @@ async def ai_confirm(request: AIConfirmRequest):
             
             else:
                 # Generic execution
-                result = await executor.execute(tool_name, args)
+                result = await executor.execute(tool_name, args, session_key=request.session_id)
                 await session_manager.clear_pending_intent(request.session_id)
                 
                 if result["status"] == "success":
