@@ -1,0 +1,286 @@
+"""
+Tool Registry
+Define all tool schemas for GLM function calling
+"""
+
+from typing import List, Dict, Any
+
+# Tool categories
+TOOLS_AUTO = [
+    {
+        "type": "function",
+        "function": {
+            "name": "start_project",
+            "description": "Start PM2 services for a project (frontend and backend)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID (e.g., 'crypto-bot', 'my-website')"
+                    }
+                },
+                "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_project",
+            "description": "Stop PM2 services for a project (frontend and backend)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID"
+                    }
+                },
+                "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "restart_project",
+            "description": "Restart PM2 services for a project (frontend and backend)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID"
+                    }
+                },
+                "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_projects",
+            "description": "List all active projects with their status",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "project_status",
+            "description": "Get detailed status of a specific project (DB + PM2 services)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID"
+                    }
+                },
+                "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_logs",
+            "description": "Get PM2 logs for a project (frontend and backend)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID"
+                    },
+                    "lines": {
+                        "type": "integer",
+                        "description": "Number of log lines to retrieve (default: 50)",
+                        "default": 50
+                    }
+                },
+                "required": ["project_id"]
+            }
+        }
+    }
+]
+
+TOOLS_CONFIRM = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_project",
+            "description": "Create a new project with specified type and configuration",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Project name (e.g., 'My Crypto Bot')"
+                    },
+                    "domain": {
+                        "type": "string",
+                        "description": "Project domain (e.g., 'crypto-bot', 'my-website')"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Project description"
+                    },
+                    "project_type": {
+                        "type": "string",
+                        "enum": ["website", "telegram_bot", "discord_bot", "trading_bot", "scheduler", "custom"],
+                        "description": "Type of project to create"
+                    }
+                },
+                "required": ["name", "project_type"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_all_projects",
+            "description": "Start PM2 services for ALL projects (bulk operation)",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_all_projects",
+            "description": "Stop PM2 services for ALL projects (bulk operation)",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    }
+]
+
+TOOLS_DISABLED = ["delete_project"]
+
+
+def get_all_tools() -> List[Dict[str, Any]]:
+    """
+    Get all tool definitions for GLM API.
+    
+    Returns:
+        Combined list of auto-execute and confirmation-required tools
+    """
+    return TOOLS_AUTO + TOOLS_CONFIRM
+
+
+def is_safe_tool(tool_name: str) -> bool:
+    """
+    Check if tool can be executed without confirmation.
+    
+    Args:
+        tool_name: Name of the tool
+        
+    Returns:
+        True if tool is safe to auto-execute
+    """
+    return any(
+        tool["function"]["name"] == tool_name
+        for tool in TOOLS_AUTO
+    )
+
+
+def requires_confirmation(tool_name: str) -> bool:
+    """
+    Check if tool requires user confirmation before execution.
+    
+    Args:
+        tool_name: Name of the tool
+        
+    Returns:
+        True if tool requires confirmation
+    """
+    return any(
+        tool["function"]["name"] == tool_name
+        for tool in TOOLS_CONFIRM
+    )
+
+
+def is_disabled(tool_name: str) -> bool:
+    """
+    Check if tool is disabled and should never be executed.
+    
+    Args:
+        tool_name: Name of the tool
+        
+    Returns:
+        True if tool is disabled
+    """
+    return tool_name in TOOLS_DISABLED
+
+
+def get_tool_description(tool_name: str) -> str:
+    """
+    Get description of a tool by name.
+    
+    Args:
+        tool_name: Name of the tool
+        
+    Returns:
+        Tool description or empty string if not found
+    """
+    for tool in TOOLS_AUTO + TOOLS_CONFIRM:
+        if tool["function"]["name"] == tool_name:
+            return tool["function"]["description"]
+    return ""
+
+
+def validate_tool_args(tool_name: str, args: Dict[str, Any]) -> tuple[bool, str]:
+    """
+    Validate tool arguments against schema.
+    
+    Args:
+        tool_name: Name of the tool
+        args: Arguments to validate
+        
+    Returns:
+        (is_valid, error_message)
+    """
+    # Find tool definition
+    tool_def = None
+    for tool in TOOLS_AUTO + TOOLS_CONFIRM:
+        if tool["function"]["name"] == tool_name:
+            tool_def = tool["function"]
+            break
+    
+    if not tool_def:
+        return False, f"Unknown tool: {tool_name}"
+    
+    # Check required parameters
+    params = tool_def["parameters"]
+    required = params.get("required", [])
+    properties = params.get("properties", {})
+    
+    for req_param in required:
+        if req_param not in args:
+            return False, f"Missing required parameter: {req_param}"
+    
+    # Check parameter types (basic validation)
+    for key, value in args.items():
+        if key in properties:
+            expected_type = properties[key].get("type")
+            if expected_type == "string" and not isinstance(value, str):
+                return False, f"Parameter '{key}' must be a string"
+            elif expected_type == "integer" and not isinstance(value, int):
+                return False, f"Parameter '{key}' must be an integer"
+            elif expected_type == "array" and not isinstance(value, list):
+                return False, f"Parameter '{key}' must be an array"
+    
+    return True, ""

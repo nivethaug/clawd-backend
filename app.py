@@ -31,6 +31,11 @@ from claude_code_worker import run_claude_code_background
 from github_service import get_github_service
 from services.session_lock_service import SessionLockService
 
+# AI Chat System
+from api.ai_chat import router as ai_chat_router
+from api.ai_selection import router as ai_selection_router
+from api.ai_confirm import router as ai_confirm_router
+
 
 # ============================================================================
 # ACP Chat Handler
@@ -340,6 +345,12 @@ app.add_middleware(
 )
 
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
+
+# Register AI Chat routers
+app.include_router(ai_chat_router, tags=["ai-chat"])
+app.include_router(ai_selection_router, tags=["ai-selection"])
+app.include_router(ai_confirm_router, tags=["ai-confirm"])
+
 
 @app.get("/projects", response_model=list[ProjectResponse])
 async def get_projects():

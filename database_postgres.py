@@ -316,6 +316,23 @@ def init_schema():
                 cur.execute("ALTER TABLE messages ADD COLUMN image TEXT")
             _run_migration(migrate_image)
 
+            # AI Sessions table (for AI chat system)
+            cur.execute("""CREATE TABLE IF NOT EXISTS ai_sessions (
+                id SERIAL PRIMARY KEY,
+                session_key TEXT UNIQUE NOT NULL,
+                active_project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                pending_intent JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.commit()
+            
+            # AI Sessions indexes
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_ai_sessions_session_key ON ai_sessions(session_key)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_ai_sessions_active_project_id ON ai_sessions(active_project_id)")
+            conn.commit()
+            logger.info("✓ Added ai_sessions table with indexes")
+
             logger.info("✓ Database schema initialized")
     finally:
         pool.putconn(conn)

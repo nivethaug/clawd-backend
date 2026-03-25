@@ -79,6 +79,14 @@
 | `/chat` | POST | `app.py:2081-2155` | [chat.md](./chat.md) |
 | `/chat/stream` | POST | `app.py:2038-2081` | [chat_stream.md](./chat_stream.md) |
 
+### AI Chat System
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/api/ai/chat` | POST | `api/ai_chat.py:1-240` | [ai_chat.md](./ai_chat.md) |
+| `/api/ai/selection` | POST | `api/ai_selection.py:1-100` | [ai_chat.md](./ai_chat.md) |
+| `/api/ai/confirm` | POST | `api/ai_confirm.py:1-180` | [ai_chat.md](./ai_chat.md) |
+
 ### AI Completion
 
 | Endpoint | Method | File:Lines | Docs |
@@ -121,6 +129,8 @@
 | [project_sessions.md](./project_sessions.md) | Session management |
 | [chat.md](./chat.md) | Non-streaming chat |
 | [chat_stream.md](./chat_stream.md) | Streaming chat (SSE) |
+| [ai_chat.md](./ai_chat.md) | LLM-powered DevOps chat system |
+| [ai_chat_architecture.md](./ai_chat_architecture.md) | AI chat system architecture |
 | [session_locking.md](./session_locking.md) | Session locking (single active session per project) |
 | [ai_completion.md](./ai_completion.md) | AI completion endpoint |
 | [publish_frontend.md](./publish_frontend.md) | Frontend build & publish |
