@@ -346,7 +346,19 @@ def init_schema():
                 """)
                 result = cur.fetchone()
                 
-                if result and result[0] == 'integer':
+                if not result:
+                    logger.warning("⚠️ Column active_project_id not found in ai_sessions")
+                    return
+                
+                # Handle both RealDictCursor (dict) and regular cursor (tuple)
+                if isinstance(result, dict):
+                    current_type = result['data_type']
+                else:
+                    current_type = result[0]
+                
+                logger.info(f"🔍 ai_sessions.active_project_id current type: {current_type}")
+                
+                if current_type == 'integer':
                     logger.info("🔄 Migrating ai_sessions.active_project_id from INTEGER to TEXT...")
                     
                     # Create temporary column
@@ -365,7 +377,7 @@ def init_schema():
                     conn.commit()
                     
                     # Drop old column
-                    cur.execute("ALTER TABLE ai_sessions DROP COLUMN IF EXISTS active_project_id")
+                    cur.execute("ALTER TABLE ai_sessions DROP COLUMN active_project_id")
                     conn.commit()
                     
                     # Rename temp column
@@ -377,9 +389,9 @@ def init_schema():
                     cur.execute("CREATE INDEX idx_ai_sessions_active_project_id ON ai_sessions(active_project_id)")
                     conn.commit()
                     
-                    logger.info(f"✓ Migrated {migrated_count} sessions from INTEGER to TEXT (domain-based)")
+                    logger.info(f"✅ Migrated {migrated_count} sessions from INTEGER to TEXT (domain-based)")
                 else:
-                    logger.debug("✓ ai_sessions.active_project_id already TEXT (migration not needed)")
+                    logger.info("✓ ai_sessions.active_project_id already TEXT (migration not needed)")
             
             _run_migration(migrate_ai_sessions_domain)
 
