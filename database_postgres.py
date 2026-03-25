@@ -334,6 +334,55 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added ai_sessions table with indexes")
 
+            # Migration: Change active_project_id from INTEGER to TEXT (domain-based)
+            def migrate_ai_sessions_domain():
+                """Migrate ai_sessions.active_project_id from INTEGER to TEXT."""
+                # Check current column type
+                cur.execute("""
+                    SELECT data_type 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'ai_sessions' 
+                    AND column_name = 'active_project_id'
+                """)
+                result = cur.fetchone()
+                
+                if result and result[0] == 'integer':
+                    logger.info("🔄 Migrating ai_sessions.active_project_id from INTEGER to TEXT...")
+                    
+                    # Create temporary column
+                    cur.execute("ALTER TABLE ai_sessions ADD COLUMN IF NOT EXISTS active_project_domain TEXT")
+                    conn.commit()
+                    
+                    # Migrate data: INTEGER ID → domain string
+                    cur.execute("""
+                        UPDATE ai_sessions s
+                        SET active_project_domain = p.domain
+                        FROM projects p
+                        WHERE s.active_project_id = p.id
+                        AND s.active_project_id IS NOT NULL
+                    """)
+                    migrated_count = cur.rowcount
+                    conn.commit()
+                    
+                    # Drop old column
+                    cur.execute("ALTER TABLE ai_sessions DROP COLUMN IF EXISTS active_project_id")
+                    conn.commit()
+                    
+                    # Rename temp column
+                    cur.execute("ALTER TABLE ai_sessions RENAME COLUMN active_project_domain TO active_project_id")
+                    conn.commit()
+                    
+                    # Recreate index
+                    cur.execute("DROP INDEX IF EXISTS idx_ai_sessions_active_project_id")
+                    cur.execute("CREATE INDEX idx_ai_sessions_active_project_id ON ai_sessions(active_project_id)")
+                    conn.commit()
+                    
+                    logger.info(f"✓ Migrated {migrated_count} sessions from INTEGER to TEXT (domain-based)")
+                else:
+                    logger.debug("✓ ai_sessions.active_project_id already TEXT (migration not needed)")
+            
+            _run_migration(migrate_ai_sessions_domain)
+
             logger.info("✓ Database schema initialized")
     finally:
         pool.putconn(conn)
