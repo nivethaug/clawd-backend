@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 
 from database_postgres import get_db
 from apps_service import pm2_action, get_pm2_processes
-from tool_registry import is_safe_tool, requires_confirmation, is_disabled
+from services.ai.tool_registry import is_safe_tool, requires_confirmation, is_disabled
 
 logger = logging.getLogger(__name__)
 
