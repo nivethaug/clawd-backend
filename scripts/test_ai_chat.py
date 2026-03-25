@@ -304,11 +304,11 @@ class AIChatTester:
         results["chat_list"] = response is not None and response.get("type") == "execution"
         print()
         
-        # Test 5: Ambiguous project name (should trigger selection)
-        log_test("TEST 5: Ambiguous Project Name (Selection Flow)")
+        # Test 5: Non-existent project name (should trigger selection)
+        log_test("TEST 5: Non-existent Project Name (Selection Flow)")
         response = self.chat(
-            message="start project test",
-            session_id="test-selection"
+            message="show logs for project myproject",  # Realistic name that doesn't exist
+            session_id="test-selection-5"
         )
         results["chat_selection"] = response is not None and response.get("type") == "selection"
         print()
@@ -372,7 +372,7 @@ class AIChatTester:
         print("=" * 70)
         
         for test_name, passed in results.items():
-            status = "✓ PASS" if passed else "✗ FAIL"
+            status = "[PASS]" if passed else "[FAIL]"
             print(f"  {test_name:30} {status}")
         
         print()
