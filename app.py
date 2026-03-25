@@ -347,9 +347,9 @@ app.add_middleware(
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 # Register AI Chat routers
-app.include_router(ai_chat_router, tags=["ai-chat"])
-app.include_router(ai_selection_router, tags=["ai-selection"])
-app.include_router(ai_confirm_router, tags=["ai-confirm"])
+app.include_router(ai_chat_router, prefix="/api/ai", tags=["ai-chat"])
+app.include_router(ai_selection_router, prefix="/api/ai", tags=["ai-selection"])
+app.include_router(ai_confirm_router, prefix="/api/ai", tags=["ai-confirm"])
 
 
 @app.get("/projects", response_model=list[ProjectResponse])
