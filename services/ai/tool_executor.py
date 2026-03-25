@@ -87,6 +87,14 @@ class ToolExecutor:
                 return await self._execute_project_status(args)
             elif tool_name == "get_logs":
                 return await self._execute_get_logs(args)
+            elif tool_name == "delete_project":
+                return await self._execute_delete_project(args)
+            elif tool_name == "start_all_projects":
+                return await self._execute_start_all_projects(args)
+            elif tool_name == "stop_all_projects":
+                return await self._execute_stop_all_projects(args)
+            elif tool_name == "remove_all_projects":
+                return await self._execute_remove_all_projects(args)
             else:
                 return {
                     "status": "error",
@@ -280,6 +288,139 @@ class ToolExecutor:
             "message": f"Logs for project: {domain}",
             "result": {"logs": logs}
         }
+    
+    async def _execute_delete_project(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Delete a project (soft delete)."""
+        project_id = args.get("project_id")
+        if not project_id:
+            return {"status": "error", "message": "Missing project_id"}
+        
+        domain = project_id.split(".")[0] if "." in project_id else project_id
+        
+        with get_db() as conn:
+            # Check if project exists
+            result = conn.execute(
+                "SELECT id, name FROM projects WHERE domain = %s OR id = %s",
+                (domain, project_id)
+            ).fetchone()
+            
+            if not result:
+                return {
+                    "status": "error",
+                    "message": f"Project '{project_id}' not found"
+                }
+            
+            # Soft delete
+            conn.execute(
+                "UPDATE projects SET status = 'deleted' WHERE id = %s",
+                (result["id"],)
+            )
+            
+            # Stop PM2 services if running
+            pm2_action(domain, "delete")
+            
+            return {
+                "status": "success",
+                "message": f"Deleted project: {result['name']}",
+                "result": {"project_id": result["id"]}
+            }
+    
+    async def _execute_start_all_projects(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Start all projects."""
+        with get_db() as conn:
+            result = conn.execute(
+                "SELECT domain FROM projects WHERE status != 'deleted'"
+            ).fetchall()
+            
+            domains = [row["domain"] for row in result]
+            started = []
+            failed = []
+            
+            for domain in domains:
+                try:
+                    pm2_result = pm2_action(domain, "start")
+                    if pm2_result.get("success"):
+                        started.append(domain)
+                    else:
+                        failed.append(domain)
+                except Exception as e:
+                    logger.error(f"Failed to start {domain}: {e}")
+                    failed.append(domain)
+            
+            return {
+                "status": "success",
+                "message": f"Started {len(started)} projects. Failed: {len(failed)}",
+                "result": {
+                    "started": started,
+                    "failed": failed
+                }
+            }
+    
+    async def _execute_stop_all_projects(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Stop all projects."""
+        with get_db() as conn:
+            result = conn.execute(
+                "SELECT domain FROM projects WHERE status != 'deleted'"
+            ).fetchall()
+            
+            domains = [row["domain"] for row in result]
+            stopped = []
+            failed = []
+            
+            for domain in domains:
+                try:
+                    pm2_result = pm2_action(domain, "stop")
+                    if pm2_result.get("success"):
+                        stopped.append(domain)
+                    else:
+                        failed.append(domain)
+                except Exception as e:
+                    logger.error(f"Failed to stop {domain}: {e}")
+                    failed.append(domain)
+            
+            return {
+                "status": "success",
+                "message": f"Stopped {len(stopped)} projects. Failed: {len(failed)}",
+                "result": {
+                    "stopped": stopped,
+                    "failed": failed
+                }
+            }
+    
+    async def _execute_remove_all_projects(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove all projects (soft delete)."""
+        with get_db() as conn:
+            result = conn.execute(
+                "SELECT id, domain FROM projects WHERE status != 'deleted'"
+            ).fetchall()
+            
+            removed = []
+            failed = []
+            
+            for row in result:
+                try:
+                    # Soft delete
+                    conn.execute(
+                        "UPDATE projects SET status = 'deleted' WHERE id = %s",
+                        (row["id"],)
+                    )
+                    
+                    # Stop PM2
+                    pm2_action(row["domain"], "delete")
+                    
+                    removed.append(row["domain"])
+                except Exception as e:
+                    logger.error(f"Failed to remove {row['domain']}: {e}")
+                    failed.append(row["domain"])
+            
+            return {
+                "status": "success",
+                "message": f"Removed {len(removed)} projects. Failed: {len(failed)}",
+                "result": {
+                    "removed": removed,
+                    "failed": failed
+                }
+            }
 
 
 # Singleton instance

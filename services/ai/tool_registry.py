@@ -146,7 +146,7 @@ TOOLS_CONFIRM = [
         "type": "function",
         "function": {
             "name": "start_all_projects",
-            "description": "Start PM2 services for ALL projects (bulk operation)",
+            "description": "Start PM2 services for ALL projects (bulk operation - requires confirmation)",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -158,7 +158,36 @@ TOOLS_CONFIRM = [
         "type": "function",
         "function": {
             "name": "stop_all_projects",
-            "description": "Stop PM2 services for ALL projects (bulk operation)",
+            "description": "Stop PM2 services for ALL projects (bulk operation - requires confirmation)",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_project",
+            "description": "Delete a project permanently (destructive operation - requires confirmation)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID to delete"
+                    }
+                },
+                "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_all_projects",
+            "description": "Remove/delete ALL projects (destructive bulk operation - requires confirmation)",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -168,7 +197,7 @@ TOOLS_CONFIRM = [
     }
 ]
 
-TOOLS_DISABLED = ["delete_project"]
+TOOLS_DISABLED = []  # Remove delete_project from disabled - now requires confirmation
 
 
 def get_all_tools() -> List[Dict[str, Any]]:

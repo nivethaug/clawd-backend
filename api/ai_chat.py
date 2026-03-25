@@ -216,10 +216,18 @@ async def ai_chat(request: AIChatRequest):
             
             if resolution.status == "selection":
                 # Return selection response
+                # Ensure candidates exist and have at least one item
+                if not resolution.candidates or len(resolution.candidates) == 0:
+                    logger.warning(f"[AI-CHAT] Selection status but no candidates provided")
+                    await session_manager.update_last_used(request.session_id)
+                    return error_response("No projects available for selection")
+                
                 options = [
                     {"label": f"{p['name']} ({p['domain']})", "value": p["domain"]}
                     for p in resolution.candidates
                 ]
+                
+                logger.info(f"[AI-CHAT] Returning selection with {len(options)} options")
                 
                 await session_manager.update_last_used(request.session_id)
                 return selection_response(
