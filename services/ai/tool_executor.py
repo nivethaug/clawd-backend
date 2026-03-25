@@ -453,11 +453,17 @@ class ToolExecutor:
         # Resolve project from DB
         domain = project_id.split(".")[0] if "." in project_id else project_id
         
+        # Try to parse as integer ID, otherwise use as domain only
+        try:
+            numeric_id = int(project_id)
+            query = "SELECT id, name, domain FROM projects WHERE domain = %s OR id = %s"
+            params = (domain, numeric_id)
+        except (ValueError, TypeError):
+            query = "SELECT id, name, domain FROM projects WHERE domain = %s"
+            params = (domain,)
+        
         with get_db() as conn:
-            result = conn.execute(
-                "SELECT id, name, domain FROM projects WHERE domain = %s OR id = %s",
-                (domain, project_id)
-            ).fetchone()
+            result = conn.execute(query, params).fetchone()
             
             if not result:
                 return {
