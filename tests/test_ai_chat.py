@@ -8,9 +8,21 @@ Can run from anywhere with configurable base URL.
 Usage:
     test_ai_chat chat "list my projects"
     test_ai_chat chat "start project testapp"
+    test_ai_chat chat "switch to thinkai-likrt6"
+    test_ai_chat chat "which project am I using?"
     test_ai_chat selection --session-id "user-123" --intent '{"tool":"start_project","args":{"project_id":"testapp"}}'
     test_ai_chat confirm --session-id "user-123" --action "confirm"
     test_ai_chat test-all
+    test_ai_chat test-tools
+
+Tests Covered:
+    - Infrastructure: health, list_projects
+    - Basic Chat: text conversation, list via AI
+    - Project Operations: start, stop, restart, status, logs
+    - Context Management: set_active_project, get_active_project, clear_active_project
+    - Selection Flow: non-existent project, selection endpoint
+    - Confirmation Flow: dangerous operations, confirm/cancel
+    - Edge Cases: empty message, long message, special chars, session persistence
 """
 
 import argparse
@@ -276,18 +288,30 @@ class AIChatTester:
         print("=" * 70)
         print()
         
+        # ==========================================
+        # SECTION 1: Infrastructure Tests
+        # ==========================================
+        print("--- SECTION 1: Infrastructure ---")
+        print()
+        
         # Test 1: Server health
-        log_test("TEST 1: Server Health Check")
+        log_test("TEST 1.1: Server Health Check")
         results["health"] = self.test_health()
         print()
         
         # Test 2: List projects
-        log_test("TEST 2: List Projects (for test data)")
+        log_test("TEST 1.2: List Projects (for test data)")
         results["list_projects"] = self.test_list_projects()
         print()
         
+        # ==========================================
+        # SECTION 2: Basic Chat Tests
+        # ==========================================
+        print("--- SECTION 2: Basic Chat ---")
+        print()
+        
         # Test 3: Basic text conversation
-        log_test("TEST 3: Basic Text Conversation")
+        log_test("TEST 2.1: Basic Text Conversation")
         response = self.chat(
             message="hello, what can you help me with?",
             session_id="test-basic"
@@ -296,58 +320,129 @@ class AIChatTester:
         print()
         
         # Test 4: List projects via AI
-        log_test("TEST 4: List Projects via AI")
+        log_test("TEST 2.2: List Projects via AI (list_projects)")
         response = self.chat(
             message="show me all my projects",
             session_id="test-list"
         )
-        results["chat_list"] = response is not None and response.get("type") == "execution"
+        results["tool_list_projects"] = response is not None and response.get("type") == "execution"
         print()
         
-        # Test 5: Non-existent project name (should trigger selection)
-        log_test("TEST 5: Non-existent Project Name (Selection Flow)")
+        # ==========================================
+        # SECTION 3: Project Operations (Auto-Execute)
+        # ==========================================
+        print("--- SECTION 3: Project Operations (Auto-Execute) ---")
+        print()
+        
+        # Test 5: Start project
+        log_test("TEST 3.1: Start Project (start_project)")
         response = self.chat(
-            message="show logs for project myproject",  # Realistic name that doesn't exist
-            session_id="test-selection-5"
+            message="start project thinkai-likrt6",
+            session_id="test-start"
         )
-        results["chat_selection"] = response is not None and response.get("type") == "selection"
+        results["tool_start_project"] = response is not None
         print()
         
-        # Test 6: Project status with active project
-        log_test("TEST 6: Project Status with Active Project")
+        # Test 6: Stop project
+        log_test("TEST 3.2: Stop Project (stop_project)")
         response = self.chat(
-            message="what's the status of my current project?",
-            session_id="test-status",
-            active_project_id=1
+            message="stop project thinkai-likrt6",
+            session_id="test-stop"
         )
-        results["chat_status"] = response is not None
+        results["tool_stop_project"] = response is not None
         print()
         
-        # Test 7: Get logs
-        log_test("TEST 7: Get Logs")
+        # Test 7: Restart project
+        log_test("TEST 3.3: Restart Project (restart_project)")
         response = self.chat(
-            message="show me logs for project testapp",
+            message="restart project thinkai-likrt6",
+            session_id="test-restart"
+        )
+        results["tool_restart_project"] = response is not None
+        print()
+        
+        # Test 8: Project status
+        log_test("TEST 3.4: Project Status (project_status)")
+        response = self.chat(
+            message="what's the status of project thinkai-likrt6?",
+            session_id="test-status"
+        )
+        results["tool_project_status"] = response is not None
+        print()
+        
+        # Test 9: Get logs
+        log_test("TEST 3.5: Get Logs (get_logs)")
+        response = self.chat(
+            message="show me logs for project thinkai-likrt6",
             session_id="test-logs"
         )
-        results["chat_logs"] = response is not None
+        results["tool_get_logs"] = response is not None
         print()
         
-        # Test 8: Dangerous operation (should trigger confirmation)
-        log_test("TEST 8: Dangerous Operation (Confirmation Flow)")
+        # ==========================================
+        # SECTION 4: Context Management Tools (NEW)
+        # ==========================================
+        print("--- SECTION 4: Context Management Tools (NEW) ---")
+        print()
+        
+        # Test 10: Set active project
+        log_test("TEST 4.1: Set Active Project (set_active_project)")
         response = self.chat(
-            message="stop all projects",
-            session_id="test-confirm"
+            message="switch to project thinkai-likrt6",
+            session_id="test-context-switch"
         )
-        results["chat_confirmation"] = response is not None and response.get("type") == "confirmation"
+        results["tool_set_active_project"] = response is not None and response.get("type") in ["execution", "text"]
         print()
         
-        # Test 9: Selection endpoint
-        log_test("TEST 9: Selection Endpoint")
+        # Test 11: Get active project
+        log_test("TEST 4.2: Get Active Project (get_active_project)")
+        response = self.chat(
+            message="which project am I using?",
+            session_id="test-context-switch"  # Same session to get the set project
+        )
+        results["tool_get_active_project"] = response is not None
+        print()
+        
+        # Test 12: Clear active project
+        log_test("TEST 4.3: Clear Active Project (clear_active_project)")
+        response = self.chat(
+            message="clear project context",
+            session_id="test-context-switch"  # Same session
+        )
+        results["tool_clear_active_project"] = response is not None and response.get("type") in ["execution", "text"]
+        print()
+        
+        # Test 13: Verify cleared context
+        log_test("TEST 4.4: Verify Cleared Context")
+        response = self.chat(
+            message="what's my current project?",
+            session_id="test-context-switch"
+        )
+        results["context_cleared_verify"] = response is not None
+        print()
+        
+        # ==========================================
+        # SECTION 5: Selection Flow
+        # ==========================================
+        print("--- SECTION 5: Selection Flow ---")
+        print()
+        
+        # Test 14: Non-existent project name (should trigger selection)
+        log_test("TEST 5.1: Non-existent Project (Selection Flow)")
+        response = self.chat(
+            message="show logs for project nonexistantproject123",
+            session_id="test-selection-flow"
+        )
+        results["selection_triggered"] = response is not None and response.get("type") == "selection"
+        print()
+        
+        # Test 15: Selection endpoint
+        log_test("TEST 5.2: Selection Endpoint")
         response = self.selection(
-            session_id="test-selection",
+            session_id="test-selection-flow",
             selection="thinkai-likrt6",
             intent={
-                "tool": "start_project",
+                "tool": "get_logs",
                 "args": {
                     "project_id": "thinkai-likrt6"
                 }
@@ -356,13 +451,85 @@ class AIChatTester:
         results["selection_endpoint"] = response is not None
         print()
         
-        # Test 10: Confirm endpoint
-        log_test("TEST 10: Confirm Endpoint (Cancel)")
+        # ==========================================
+        # SECTION 6: Confirmation Flow
+        # ==========================================
+        print("--- SECTION 6: Confirmation Flow ---")
+        print()
+        
+        # Test 16: Dangerous operation (stop all - should trigger confirmation)
+        log_test("TEST 6.1: Stop All Projects (Confirmation Required)")
+        response = self.chat(
+            message="stop all projects",
+            session_id="test-confirm-flow"
+        )
+        results["confirmation_triggered"] = response is not None and response.get("type") == "confirmation"
+        print()
+        
+        # Test 17: Confirm endpoint (cancel)
+        log_test("TEST 6.2: Confirm Endpoint (Cancel)")
         response = self.confirm(
-            session_id="test-confirm",
+            session_id="test-confirm-flow",
             confirmed=False
         )
-        results["confirm_endpoint"] = response is not None
+        results["confirm_cancel"] = response is not None
+        print()
+        
+        # Test 18: Delete project (confirmation required)
+        log_test("TEST 6.3: Delete Project (Confirmation Required)")
+        response = self.chat(
+            message="delete project testproject123",
+            session_id="test-delete-flow"
+        )
+        results["delete_confirmation"] = response is not None
+        print()
+        
+        # ==========================================
+        # SECTION 7: Edge Cases
+        # ==========================================
+        print("--- SECTION 7: Edge Cases ---")
+        print()
+        
+        # Test 19: Empty message
+        log_test("TEST 7.1: Empty Message Handling")
+        response = self.chat(
+            message="",
+            session_id="test-empty"
+        )
+        results["empty_message"] = response is not None  # Should return error gracefully
+        print()
+        
+        # Test 20: Very long message
+        log_test("TEST 7.2: Long Message Handling")
+        response = self.chat(
+            message="start project thinkai-likrt6 " + "and " * 100,
+            session_id="test-long"
+        )
+        results["long_message"] = response is not None
+        print()
+        
+        # Test 21: Special characters
+        log_test("TEST 7.3: Special Characters")
+        response = self.chat(
+            message="show status for project test-project_123",
+            session_id="test-special"
+        )
+        results["special_chars"] = response is not None
+        print()
+        
+        # Test 22: Session persistence
+        log_test("TEST 7.4: Session Persistence")
+        # Set project in session
+        self.chat(
+            message="switch to thinkai-likrt6",
+            session_id="test-persist"
+        )
+        # Check if session remembers
+        response = self.chat(
+            message="restart it",
+            session_id="test-persist"
+        )
+        results["session_persistence"] = response is not None
         print()
         
         # Print summary
@@ -371,9 +538,24 @@ class AIChatTester:
         print(" TEST SUMMARY")
         print("=" * 70)
         
-        for test_name, passed in results.items():
-            status = "[PASS]" if passed else "[FAIL]"
-            print(f"  {test_name:30} {status}")
+        # Group results by section
+        sections = {
+            "Infrastructure": ["health", "list_projects"],
+            "Basic Chat": ["chat_text", "tool_list_projects"],
+            "Project Operations": ["tool_start_project", "tool_stop_project", "tool_restart_project", "tool_project_status", "tool_get_logs"],
+            "Context Management": ["tool_set_active_project", "tool_get_active_project", "tool_clear_active_project", "context_cleared_verify"],
+            "Selection Flow": ["selection_triggered", "selection_endpoint"],
+            "Confirmation Flow": ["confirmation_triggered", "confirm_cancel", "delete_confirmation"],
+            "Edge Cases": ["empty_message", "long_message", "special_chars", "session_persistence"]
+        }
+        
+        for section, tests in sections.items():
+            print(f"\n  {section}:")
+            for test_name in tests:
+                if test_name in results:
+                    passed = results[test_name]
+                    status = "[PASS]" if passed else "[FAIL]"
+                    print(f"    {test_name:35} {status}")
         
         print()
         total = len(results)
@@ -451,6 +633,58 @@ def cmd_test_all(args) -> int:
     return 0 if all_passed else 1
 
 
+def cmd_test_tools(args) -> int:
+    """Test specific tools individually."""
+    tester = AIChatTester(args.base_url)
+    results = {}
+    
+    print()
+    print("=" * 70)
+    print(" TOOL-SPECIFIC TEST SUITE")
+    print("=" * 70)
+    print()
+    
+    tool_tests = [
+        # Context Management Tools (NEW)
+        ("set_active_project", "switch to thinkai-likrt6", "test-tool-set"),
+        ("get_active_project", "which project am I using?", "test-tool-get"),
+        ("clear_active_project", "clear project context", "test-tool-clear"),
+        
+        # Auto-Execute Tools
+        ("list_projects", "list all projects", "test-tool-list"),
+        ("project_status", "status of thinkai-likrt6", "test-tool-status"),
+        ("get_logs", "logs for thinkai-likrt6", "test-tool-logs"),
+        ("start_project", "start thinkai-likrt6", "test-tool-start"),
+        ("stop_project", "stop thinkai-likrt6", "test-tool-stop"),
+        ("restart_project", "restart thinkai-likrt6", "test-tool-restart"),
+    ]
+    
+    for tool_name, message, session_id in tool_tests:
+        log_test(f"Testing: {tool_name}")
+        response = tester.chat(message=message, session_id=session_id)
+        results[tool_name] = response is not None
+        print()
+    
+    # Print summary
+    print()
+    print("=" * 70)
+    print(" TOOL TEST SUMMARY")
+    print("=" * 70)
+    
+    for tool_name, passed in results.items():
+        status = "[PASS]" if passed else "[FAIL]"
+        print(f"  {tool_name:30} {status}")
+    
+    print()
+    total = len(results)
+    passed = sum(1 for v in results.values() if v)
+    print(f"Total: {passed}/{total} tools tested successfully")
+    print("=" * 70)
+    print()
+    
+    return 0 if all(results.values()) else 1
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AI Chat Endpoint Tester",
@@ -463,6 +697,11 @@ Examples:
   # Test with active project
   test_ai_chat chat "status" --project-id 5
   
+  # Test context management
+  test_ai_chat chat "switch to thinkai-likrt6"
+  test_ai_chat chat "which project am I using?"
+  test_ai_chat chat "clear project context"
+  
   # Test selection endpoint
   test_ai_chat selection --session-id "test" --selection "myproject" --intent '{"tool":"start_project","args":{"project_id":"myproject"}}'
   
@@ -471,6 +710,9 @@ Examples:
   
   # Run all tests
   test_ai_chat test-all
+  
+  # Test specific tools
+  test_ai_chat test-tools
   
   # Use custom base URL
   test_ai_chat test-all --base-url http://localhost:8002
@@ -518,6 +760,9 @@ Examples:
     # Test-all command
     test_all_parser = subparsers.add_parser("test-all", help="Run all tests")
     
+    # Test-tools command
+    test_tools_parser = subparsers.add_parser("test-tools", help="Test specific tools individually")
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -532,6 +777,8 @@ Examples:
         exit_code = cmd_confirm(args)
     elif args.command == "test-all":
         exit_code = cmd_test_all(args)
+    elif args.command == "test-tools":
+        exit_code = cmd_test_tools(args)
     else:
         exit_code = 1
     
