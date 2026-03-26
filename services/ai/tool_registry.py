@@ -149,6 +149,23 @@ TOOLS_AUTO = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_project_info",
+            "description": "Get detailed information about a project. Use when user asks 'what is X', 'tell me about X', 'project details', or wants to know about a specific project. Returns natural language response.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain (e.g., thinkai-likrt6). Optional - uses active project if not provided."
+                    }
+                },
+                "required": []
+            }
+        }
     }
 ]
 

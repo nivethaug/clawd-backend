@@ -143,6 +143,23 @@ Context tools must ONLY be used for explicit context queries.
 
 ---
 
+### ✅ Use get_project_info when user asks about a project:
+
+* "what is X"
+* "tell me about X"
+* "project details"
+* "what does this project do"
+* "info about X"
+
+Rules:
+* Use domain as project_id (e.g., "thinkai-likrt6")
+* If not provided, use active project
+* Respond naturally in text
+* Do NOT show raw JSON
+* Do NOT use execution UI
+
+---
+
 ### ❌ NEVER use context tools for ACTION requests
 
 Examples:
@@ -498,6 +515,12 @@ async def ai_chat(request: AIChatRequest):
             )
         
         elif result["status"] == "success":
+            # Check if this is a text response (for get_project_info)
+            if result.get("type") == "text":
+                await session_manager.update_last_used(request.session_id)
+                return text_response(result["message"])
+            
+            # Default: execution response
             await session_manager.update_last_used(request.session_id)
             return execution_response(
                 progress=[result],

@@ -104,6 +104,8 @@ class ToolExecutor:
                 return await self._execute_clear_active_project(args, session_key)
             elif tool_name == "get_active_project":
                 return await self._execute_get_active_project(args, session_key)
+            elif tool_name == "get_project_info":
+                return await self._execute_get_project_info(args, session_key)
             else:
                 return {
                     "status": "error",
@@ -563,6 +565,128 @@ class ToolExecutor:
                     "id": project.get("id"),
                     "name": project.get("name"),
                     "domain": project.get("domain")
+                }
+            }
+        }
+    
+    async def _execute_get_project_info(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None
+    ) -> Dict[str, Any]:
+        """
+        Get detailed information about a project.
+        
+        Uses domain-only identification and returns natural language response.
+        
+        Args:
+            args: Optional project_id (domain string)
+            session_key: Session identifier for active project fallback
+        """
+        project_id = args.get("project_id")
+        
+        # Fallback to active project if not provided
+        if not project_id and session_key:
+            session_manager = get_session_manager()
+            active_project = await session_manager.get_active_project(session_key)
+            if active_project:
+                project_id = active_project.get("domain")
+        
+        if not project_id:
+            return {
+                "status": "error",
+                "message": "No project selected. Please specify a project or set an active project first."
+            }
+        
+        # Extract domain (remove full domain if provided)
+        domain = project_id.split(".")[0] if "." in project_id else project_id
+        
+        # Query project by domain ONLY (no numeric ID support)
+        with get_db() as conn:
+            result = conn.execute("""
+                SELECT p.*, pt.display_name as type_name, pt.type as type_slug
+                FROM projects p
+                LEFT JOIN project_types pt ON p.type_id = pt.id
+                WHERE p.domain = %s
+                LIMIT 1
+            """, (domain,)).fetchone()
+            
+            if not result:
+                return {
+                    "status": "error",
+                    "message": f"Project '{domain}' not found"
+                }
+            
+            project = dict(result)
+        
+        # Get PM2 status for additional context
+        pm2_processes = get_pm2_processes()
+        running = pm2_processes.get("running", [])
+        
+        frontend_running = any(proc.get("name") == f"{domain}-frontend" for proc in running)
+        backend_running = any(proc.get("name") == f"{domain}-backend" for proc in running)
+        
+        # Determine overall status
+        if frontend_running and backend_running:
+            service_status = "running"
+        elif frontend_running or backend_running:
+            service_status = "partially running"
+        else:
+            service_status = "stopped"
+        
+        # Build natural language response
+        project_name = project.get("name", domain)
+        project_type = project.get("type_name", "project")
+        description = project.get("description", "")
+        status = project.get("status", service_status)
+        
+        # Generate human-friendly text
+        text_parts = [f"{project_name} is a {project_type} project"]
+        
+        # Add status
+        if status == "running":
+            text_parts.append("that is currently running")
+        elif status == "stopped":
+            text_parts.append("that is currently stopped")
+        elif status == "creating":
+            text_parts.append("that is currently being created")
+        else:
+            text_parts.append(f"with status: {status}")
+        
+        # Add frontend URL if available
+        frontend_url = f"https://{domain}.yourdomain.com"  # Adjust based on your domain
+        text_parts.append(f"Access it at {frontend_url}")
+        
+        # Add description if available
+        if description:
+            text_parts.append(description)
+        
+        # Add services info
+        if frontend_running and backend_running:
+            text_parts.append("Both frontend and backend services are running")
+        elif frontend_running:
+            text_parts.append("Frontend is running, backend is stopped")
+        elif backend_running:
+            text_parts.append("Backend is running, frontend is stopped")
+        
+        text = ". ".join(text_parts) + "."
+        
+        return {
+            "status": "success",
+            "type": "text",  # Important: return text, not execution
+            "message": text,
+            "result": {
+                "project": {
+                    "name": project_name,
+                    "domain": domain,
+                    "type": project_type,
+                    "description": description,
+                    "status": status,
+                    "frontend_url": frontend_url,
+                    "services": {
+                        "frontend": "running" if frontend_running else "stopped",
+                        "backend": "running" if backend_running else "stopped"
+                    }
                 }
             }
         }
