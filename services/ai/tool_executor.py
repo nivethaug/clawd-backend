@@ -269,7 +269,7 @@ class ToolExecutor:
             }
     
     async def _execute_get_logs(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Get PM2 logs for a project."""
+        """Get PM2 logs for a project by reading log files directly."""
         project_id = args.get("project_id")
         lines = args.get("lines", 50)
         
@@ -278,36 +278,109 @@ class ToolExecutor:
         
         domain = project_id.split(".")[0] if "." in project_id else project_id
         
-        logs = {"frontend": "", "backend": ""}
+        logs = {"frontend": {"out": "", "error": ""}, "backend": {"out": "", "error": ""}}
         
-        # Get frontend logs
+        # Read log files directly from PM2 log directory
+        log_dir = "/root/.pm2/logs"
+        
+        # Frontend logs
         try:
+            # Frontend out log
+            frontend_out_file = f"{log_dir}/{domain}-frontend-out.log"
             result = subprocess.run(
-                ["pm2", "logs", f"{domain}-frontend", "--lines", str(lines), "--nostream"],
+                ["tail", f"-n{lines}", frontend_out_file],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=5
             )
-            logs["frontend"] = result.stdout[-5000:]  # Limit size
-        except Exception as e:
-            logs["frontend"] = f"Error retrieving logs: {e}"
-        
-        # Get backend logs
-        try:
+            if result.returncode == 0 and result.stdout.strip():
+                logs["frontend"]["out"] = result.stdout.strip()
+            
+            # Frontend error log
+            frontend_err_file = f"{log_dir}/{domain}-frontend-error.log"
             result = subprocess.run(
-                ["pm2", "logs", f"{domain}-backend", "--lines", str(lines), "--nostream"],
+                ["tail", f"-n{lines}", frontend_err_file],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=5
             )
-            logs["backend"] = result.stdout[-5000:]  # Limit size
+            if result.returncode == 1 and result.stdout.strip():
+                logs["frontend"]["error"] = result.stdout.strip()
+                
         except Exception as e:
-            logs["backend"] = f"Error retrieving logs: {e}"
+            logger.error(f"Error reading frontend logs: {e}")
+            logs["frontend"]["error"] = f"Error reading logs: {e}"
+        
+        # Backend logs
+        try:
+            # Find backend log file (may have a number suffix)
+            import os
+            backend_out_files = []
+            backend_err_files = []
+            
+            # List all log files to find backend logs
+            try:
+                all_files = os.listdir(log_dir)
+                for f in all_files:
+                    if f.startswith(f"{domain}-backend-out"):
+                        backend_out_files.append(f)
+                    elif f.startswith(f"{domain}-backend-error"):
+                        backend_err_files.append(f)
+            except Exception as e:
+                logger.error(f"Error listing log directory: {e}")
+            
+            # Read the most recent backend out log
+            if backend_out_files:
+                backend_out_files.sort(reverse=True)  # Most recent first
+                latest_out = backend_out_files[0]
+                result = subprocess.run(
+                    ["tail", f"-n{lines}", f"{log_dir}/{latest_out}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 1 and result.stdout.strip():
+                    logs["backend"]["out"] = result.stdout.strip()
+            
+            # Read the most recent backend error log
+            if backend_err_files:
+                backend_err_files.sort(reverse=True)  # Most recent first
+                latest_err = backend_err_files[0]
+                result = subprocess.run(
+                    ["tail", f"-n{lines}", f"{log_dir}/{latest_err}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 1 and result.stdout.strip():
+                    logs["backend"]["error"] = result.stdout.strip()
+                
+        except Exception as e:
+            logger.error(f"Error reading backend logs: {e}")
+            logs["backend"]["error"] = f"Error reading logs: {e}"
+        
+        # Format log summary
+        log_summary = []
+        if logs["frontend"]["out"]:
+            log_summary.append(f"Frontend (stdout):\n{logs['frontend']['out']}")
+        if logs["frontend"]["error"]:
+            log_summary.append(f"Frontend (stderr):\n{logs['frontend']['error']}")
+        if logs["backend"]["out"]:
+            log_summary.append(f"Backend (stdout):\n{logs['backend']['out']}")
+        if logs["backend"]["error"]:
+            log_summary.append(f"Backend (stderr):\n{logs['backend']['error']}")
+        
+        if not log_summary:
+            log_summary = ["No logs found"]
         
         return {
             "status": "success",
-            "message": f"Logs for project: {domain}",
-            "result": {"logs": logs}
+            "message": f"Logs for {domain} (last {lines} lines)",
+            "result": {
+                "logs": "\n\n".join(log_summary),
+                "lines_requested": lines,
+                "domain": domain
+            }
         }
     
     async def _execute_delete_project(self, args: Dict[str, Any]) -> Dict[str, Any]:
