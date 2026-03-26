@@ -120,7 +120,7 @@ class ToolExecutor:
             }
     
     async def _execute_start_project(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Start PM2 services for a project."""
+        """Start PM2 services for a project (uses restart for robustness)."""
         project_id = args.get("project_id")
         if not project_id:
             return {"status": "error", "message": "Missing project_id"}
@@ -128,7 +128,8 @@ class ToolExecutor:
         # Extract domain (remove full domain if provided)
         domain = project_id.split(".")[0] if "." in project_id else project_id
         
-        result = pm2_action(domain, "start")
+        # Use restart instead of start - works whether process is running or stopped
+        result = pm2_action(domain, "restart")
         
         if result.get("success"):
             return {
