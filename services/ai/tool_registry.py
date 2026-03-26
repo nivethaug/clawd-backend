@@ -113,16 +113,16 @@ TOOLS_AUTO = [
         "type": "function",
         "function": {
             "name": "set_active_project",
-            "description": "Set or switch the active project context for the conversation. Use when user says 'switch to X', 'use X project', or explicitly wants to change context.",
+            "description": "Set or switch the active project context for the conversation. Use when user says 'switch to X', 'use X project', 'switch project' (without X), or explicitly wants to change context. If project_id is not provided, will show selection UI.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "project_id": {
                         "type": "string",
-                        "description": "Project domain or ID to set as active"
+                        "description": "Project domain to set as active (optional - if not provided, will show selection)"
                     }
                 },
-                "required": ["project_id"]
+                "required": []
             }
         }
     },

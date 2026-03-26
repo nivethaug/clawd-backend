@@ -186,6 +186,9 @@ You have:
 
 * "switch to X"
 * "use X project"
+* "switch project" (without X → will show selection)
+* "change project"
+* "set active project"
 
 ---
 
@@ -310,7 +313,12 @@ User: "restart it"
 ---
 
 User: "switch to thinkai"
-→ set_active_project
+→ set_active_project(project_id="thinkai-likrt6")
+
+---
+
+User: "switch project"
+→ set_active_project(project_id=null) → selection UI
 
 ---
 
@@ -475,7 +483,11 @@ async def ai_chat(request: AIChatRequest):
             return error_response(error_msg)
         
         # 10. Resolve project if needed
-        tools_needing_project = ["start_project", "stop_project", "restart_project", "project_status", "get_logs"]
+        tools_needing_project = [
+            "start_project", "stop_project", "restart_project", 
+            "project_status", "get_logs", "set_active_project",
+            "delete_project"
+        ]
         
         if tool_name in tools_needing_project:
             project_id = args.get("project_id")
