@@ -5,10 +5,19 @@ Main chat endpoint for LLM-powered DevOps assistant
 
 import json
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles datetime objects."""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
 
 # Import AI services
 from services.ai.glm_client import get_glm_client
@@ -533,7 +542,7 @@ async def ai_chat(request: AIChatRequest):
                     "type": "function",
                     "function": {
                         "name": tool_name,
-                        "arguments": json.dumps(args)
+                        "arguments": json.dumps(args, cls=DateTimeEncoder)
                     }
                 }]
             })
@@ -542,7 +551,7 @@ async def ai_chat(request: AIChatRequest):
                 "role": "tool",
                 "tool_call_id": tool_call.get("id", "call_1"),
                 "name": tool_name,
-                "content": json.dumps(result)
+                "content": json.dumps(result, cls=DateTimeEncoder)
             })
             
             # Call LLM again to generate natural language response
@@ -591,7 +600,7 @@ async def ai_chat(request: AIChatRequest):
                     "type": "function",
                     "function": {
                         "name": tool_name,
-                        "arguments": json.dumps(args)
+                        "arguments": json.dumps(args, cls=DateTimeEncoder)
                     }
                 }]
             })
@@ -600,7 +609,7 @@ async def ai_chat(request: AIChatRequest):
                 "role": "tool",
                 "tool_call_id": tool_call.get("id", "call_1"),
                 "name": tool_name,
-                "content": json.dumps(result)
+                "content": json.dumps(result, cls=DateTimeEncoder)
             })
             
             try:
