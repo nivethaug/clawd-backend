@@ -142,11 +142,22 @@ If the user wants to:
 
 ---
 
+### Action Verb Mapping:
+
+* "start" → start_project
+* "stop" → stop_project  
+* "restart" → restart_project
+* "logs" → get_logs
+* "status" → project_status
+
+---
+
 ### Examples:
 
-* "start my project"
-* "show logs"
-* "restart it"
+* "start" → start_project
+* "start my project" → start_project
+* "show logs" → get_logs
+* "restart it" → restart_project
 
 ---
 
@@ -167,6 +178,41 @@ User: "get my project logs"
 ❌ DO NOT call get_active_project
 ❌ DO NOT call get_project_info
 ✅ MUST call get_logs
+
+---
+
+### Single-Word Actions (CRITICAL):
+
+User: "start"
+✅ MUST call start_project (NOT get_active_project)
+
+User: "stop"  
+✅ MUST call stop_project
+
+User: "restart"
+✅ MUST call restart_project
+
+User: "logs"
+✅ MUST call get_logs
+
+User: "status"
+✅ MUST call project_status
+
+---
+
+User: "start"
+
+❌ DO NOT call get_active_project
+❌ DO NOT call get_project_info
+✅ MUST call start_project
+
+---
+
+User: "restart"
+
+❌ DO NOT call get_active_project  
+❌ DO NOT call get_project_info
+✅ MUST call restart_project
 
 ---
 

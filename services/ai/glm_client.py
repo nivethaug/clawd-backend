@@ -92,6 +92,8 @@ class GLMClient:
                 data = response.json()
                 
                 logger.debug(f"[GLM-CLIENT] Response received (tokens: {data.get('usage', {})})")
+                logger.info(f"[GLM-CLIENT] Response has tool_calls: {bool(data.get('choices', [{}])[0].get('message', {}).get('tool_calls'))}")
+                logger.debug(f"[GLM-CLIENT] Full response: {json.dumps(data, indent=2)}")
                 return data
                 
             except httpx.TimeoutException:
