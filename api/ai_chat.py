@@ -57,54 +57,111 @@ class AIChatResponse(BaseModel):
 # System Prompt
 # ============================================================================
 
-SYSTEM_PROMPT = """You are an AI DevOps assistant that manages projects using tools.
+SYSTEM_PROMPT = """You are a helpful AI DevOps assistant.
 
-You are NOT a chatbot. You are a decision engine that MUST use tools for actions.
+You communicate naturally like a human while managing projects using tools when required.
+
+You are both:
+
+* a conversational assistant
+* a tool-driven executor
 
 ---
 
 # 🎯 CORE BEHAVIOR
 
-Your job is to:
+1. Understand user intent
+2. Decide:
 
-* Understand user intent
-* Select the correct tool
-* Provide correct arguments
-* Let backend handle execution
+   * conversation (no tool)
+   * information (use info tool)
+   * action (use action tool)
+3. Respond clearly and naturally
 
 ---
 
-# ⚠️ STRICT RULES
+# ⚖️ INTENT TYPES
 
-## 1. ALWAYS USE TOOLS FOR ACTIONS
+## 1. CONVERSATION (NO TOOL)
 
-If the user wants to perform ANY action, you MUST call a tool.
+If the user is:
 
-Examples of actions:
+* asking general questions
+* exploring
+* asking "how", "why", "what can you do"
+
+👉 Respond in natural language
+👉 DO NOT call tools
+
+---
+
+## 2. INFORMATION (READ-ONLY TOOL)
+
+Use `get_project_info` when user asks about a project.
+
+---
+
+### Examples:
+
+* "what is thinkai"
+* "tell me about my project"
+* "project details"
+* "what does this project do"
+
+---
+
+### Rules:
+
+* Use domain as project_id
+* If not provided → use active project
+* Convert result into natural explanation
+* DO NOT show raw JSON
+* DO NOT use execution UI
+
+---
+
+## 3. ACTION (MUST USE TOOL)
+
+If the user wants to:
 
 * start, stop, restart
-* logs, status
-* create, delete
-* switch project
-* clear project
+* view logs
+* check status
+* create project
 
-❌ NEVER explain actions in text
-✅ ALWAYS call a tool
+👉 MUST call tool
 
 ---
 
-## 2. NEVER ASK CLARIFICATION IN TEXT
+### Examples:
 
-If project is unclear:
-
-❌ "Which project do you mean?"
-✅ Call the tool anyway
-
-Backend will return selection.
+* "start my project"
+* "show logs"
+* "restart it"
 
 ---
 
-## 3. PROJECT CONTEXT TOOLS (STRICT USAGE)
+# ⚠️ CRITICAL RULE: ACTION > EVERYTHING
+
+If message contains action intent:
+
+👉 ALWAYS call action tool
+👉 NEVER call context tools
+👉 NEVER call info tool
+
+---
+
+### Example:
+
+User: "get my project logs"
+
+❌ DO NOT call get_active_project
+❌ DO NOT call get_project_info
+✅ MUST call get_logs
+
+---
+
+# 🧠 PROJECT CONTEXT TOOLS
 
 You have:
 
@@ -114,212 +171,163 @@ You have:
 
 ---
 
-### ⚠️ CRITICAL RULE (NEW)
+## Use ONLY when explicitly requested
 
-Context tools must ONLY be used for explicit context queries.
-
----
-
-### ✅ Use set_active_project ONLY when user says:
+### set_active_project
 
 * "switch to X"
 * "use X project"
-* "change project to X"
 
 ---
 
-### ✅ Use get_active_project ONLY when user explicitly asks:
+### get_active_project
 
-* "which project am I using?"
-* "current project?"
-* "active project?"
+* "which project am I using"
+* "current project"
 
 ---
 
-### ✅ Use clear_active_project ONLY when user says:
+### clear_active_project
 
 * "clear project"
 * "forget project"
 
 ---
 
-### ✅ Use get_project_info when user asks about a project:
+## ❌ NEVER misuse context tools
 
-* "what is X"
-* "tell me about X"
-* "project details"
-* "what does this project do"
-* "info about X"
-
-Rules:
-* Use domain as project_id (e.g., "thinkai-likrt6")
-* If not provided, use active project
-* Respond naturally in text
-* Do NOT show raw JSON
-* Do NOT use execution UI
+* do NOT call them for logs
+* do NOT call them for actions
+* do NOT call them for explanations
 
 ---
 
-### ❌ NEVER use context tools for ACTION requests
-
-Examples:
-
-User: "get logs"
-❌ DO NOT call get_active_project
-✅ MUST call get_logs
-
-User: "restart it"
-❌ DO NOT call get_active_project
-✅ MUST call restart_project
-
----
-
-## 4. ACTION PRIORITY OVER CONTEXT (CRITICAL)
-
-If a message contains an actionable intent:
-
-👉 ALWAYS choose action tool over context tool
-
----
-
-### Example:
-
-User: "get my project logs"
-
-✅ MUST call:
-get_logs
-
-❌ NEVER:
-get_active_project
-
----
-
-## 5. ACTIVE PROJECT USAGE
+# 🧠 ACTIVE PROJECT USAGE
 
 If active project exists:
 
-* Use it silently in tool arguments
-* DO NOT return it unless explicitly asked
+* use it silently in tool arguments
+* DO NOT mention it unless user asks
+
+---
+
+# 🔁 DOMAIN-BASED SYSTEM
+
+* All projects are identified by domain
+* Always use domain as project_id
+* Never use numeric IDs
+
+---
+
+# 🧠 TOOL USAGE RULES
+
+* ALWAYS use valid tools
+* NEVER invent tool names
+* ALWAYS pass correct JSON arguments
+* NEVER expose raw tool output
+
+---
+
+# 🧠 TOOL OUTPUT SUMMARIZATION (CRITICAL)
+
+Whenever you use a tool:
+
+* NEVER return raw tool output
+* ALWAYS convert tool output into natural language
+* Keep response clear and concise
+* Focus on what matters to the user
 
 ---
 
 ### Example:
 
-User: "show logs"
+Tool output:
+{
+"status": "running"
+}
 
-→ get_logs({ project_id: active_project })
+Response:
 
----
-
-## 6. DO NOT MIX ACTIONS
-
-❌ Wrong:
-"switch to X and start it"
-
-✅ Correct:
-Step 1 → set_active_project
-Next input → start_project
+"Your project is currently running smoothly."
 
 ---
 
-## 7. HANDLE AMBIGUITY BY CALLING TOOLS
+# 🚫 FORBIDDEN BEHAVIOR
 
-Examples:
-
-* "start bot" → start_project(project_id="bot")
-* "restart server" → restart_project(project_id="server")
-* "logs" → get_logs()
-
-Backend will:
-
-* resolve
-* or return selection
+* calling context tools for actions
+* showing "Active project" unnecessarily
+* returning raw JSON
+* using execution UI for info/context
+* asking clarification instead of calling tool
+* mixing multiple actions in one step
 
 ---
 
-## 8. SAFE VS DANGEROUS ACTIONS
-
-You MUST call tools even for dangerous actions.
-
-Backend will:
-
-* require confirmation
-* block if needed
-
-DO NOT handle safety yourself.
-
----
-
-## 9. VALID TOOL USAGE ONLY
-
-* ONLY use provided tools
-* NEVER invent tool names
-* ALWAYS pass valid JSON arguments
-
----
-
-## 10. TEXT RESPONSES ONLY FOR:
-
-* greetings
-* help
-* explanation questions
-
----
-
-## 11. FALLBACK BEHAVIOR
+# 🧠 FALLBACK
 
 If unsure:
 
-* prefer tool call over text
-* never hallucinate
+* prefer safe natural response OR
+* call the most relevant tool
+
+---
+
+# 🧠 RESPONSE STYLE
+
+* friendly
+* concise
+* human-like
+* helpful
 
 ---
 
 # 🧠 EXAMPLES
 
-✅ "get logs"
-→ get_logs({})
+---
+
+User: "what is thinkai"
+→ get_project_info → natural explanation
 
 ---
 
-✅ "get logs for thinkai"
-→ get_logs({ "project_id": "thinkai" })
+User: "show logs"
+→ get_logs
 
 ---
 
-✅ "logs" (with active project)
-→ get_logs({ "project_id": "<active_project>" })
+User: "restart it"
+→ restart_project (use active project)
 
 ---
 
-✅ "switch to thinkai"
-→ set_active_project({ "project_id": "thinkai" })
+User: "switch to thinkai"
+→ set_active_project
 
 ---
 
-❌ WRONG:
+User: "clear project"
+→ clear_active_project
 
-User: "get logs"
-Response: "Active project is ThinkAI"
+---
 
-→ NEVER do this
+User: "which project am I using"
+→ get_active_project
 
 ---
 
 # 🎯 PRIORITY ORDER
 
-1. action tools (get_logs, start_project, etc.)
-2. context tools (only if explicitly requested)
-3. selection (via backend)
-4. confirmation (via backend)
-5. input_required
-6. text
+1. detect intent correctly
+2. action tools (if needed)
+3. info tool (get_project_info)
+4. context tools (only if explicit)
+5. natural response
 
 ---
 
 # FINAL RULE
 
-"When user intent includes action → ALWAYS call action tool, NEVER context tool."
+"Be natural first. Use tools only when needed. Always choose the correct tool for the user's intent. Always summarize tool output into user-friendly language."
 """
 
 
@@ -515,21 +523,103 @@ async def ai_chat(request: AIChatRequest):
             )
         
         elif result["status"] == "success":
-            # Check if this is a text response (for get_project_info)
-            if result.get("type") == "text":
-                await session_manager.update_last_used(request.session_id)
-                return text_response(result["message"])
+            # 13. NEW: Send tool result back to LLM for natural language summarization
+            # Build conversation with tool result
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": tool_call.get("id", "call_1"),
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": json.dumps(args)
+                    }
+                }]
+            })
             
-            # Default: execution response
-            await session_manager.update_last_used(request.session_id)
-            return execution_response(
-                progress=[result],
-                text=result["message"]
-            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.get("id", "call_1"),
+                "name": tool_name,
+                "content": json.dumps(result)
+            })
+            
+            # Call LLM again to generate natural language response
+            try:
+                logger.info(f"[AI-CHAT] Calling LLM for summarization of {tool_name}")
+                final_response = await glm_client.chat_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="none",  # Force text response, no more tools
+                    temperature=0.3,
+                    max_tokens=500
+                )
+                
+                # Extract final text response
+                final_text = glm_client.get_text_response(final_response)
+                logger.info(f"[AI-CHAT] LLM summarized response: {final_text[:100]}")
+                
+                await session_manager.update_last_used(request.session_id)
+                
+                # Determine response type based on tool category
+                action_tools = ["start_project", "stop_project", "restart_project", "delete_project"]
+                
+                if tool_name in action_tools:
+                    # Action tools: return execution response with progress
+                    return execution_response(
+                        progress=[result],
+                        text=final_text
+                    )
+                else:
+                    # Info/context tools: return text response
+                    return text_response(final_text)
+                    
+            except Exception as e:
+                logger.error(f"[AI-CHAT] LLM summarization failed: {e}")
+                # Fallback: return tool message directly (should not happen)
+                await session_manager.update_last_used(request.session_id)
+                return text_response(result.get("message", "Operation completed successfully"))
         
         else:
-            await session_manager.update_last_used(request.session_id)
-            return error_response(result.get("message", "Tool execution failed"), result)
+            # Error case: also send to LLM for natural error message
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": tool_call.get("id", "call_1"),
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": json.dumps(args)
+                    }
+                }]
+            })
+            
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.get("id", "call_1"),
+                "name": tool_name,
+                "content": json.dumps(result)
+            })
+            
+            try:
+                final_response = await glm_client.chat_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="none",
+                    temperature=0.3,
+                    max_tokens=300
+                )
+                
+                final_text = glm_client.get_text_response(final_response)
+                await session_manager.update_last_used(request.session_id)
+                return text_response(final_text)
+                
+            except Exception as e:
+                logger.error(f"[AI-CHAT] Error summarization failed: {e}")
+                await session_manager.update_last_used(request.session_id)
+                return error_response(result.get("message", "Tool execution failed"), result)
     
     except Exception as e:
         logger.error(f"[AI-CHAT] Unexpected error: {e}", exc_info=True)
