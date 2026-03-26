@@ -476,7 +476,7 @@ def pm2_action(project_domain: str, action: str) -> Dict[str, Any]:
                 ["pm2", pm2_cmd, proc_name],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=30  # Increased from 10s to allow graceful shutdowns
             )
             
             if result.returncode == 0:
