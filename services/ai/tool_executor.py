@@ -213,14 +213,24 @@ class ToolExecutor:
             return {"status": "error", "message": "Missing project_id"}
         
         with get_db() as conn:
-            # Get project from DB
+            # Get project from DB - try domain first, then numeric ID if applicable
             result = conn.execute("""
                 SELECT p.*, pt.display_name as type_name
                 FROM projects p
                 LEFT JOIN project_types pt ON p.type_id = pt.id
-                WHERE p.domain = %s OR p.id = %s
+                WHERE p.domain = %s
                 LIMIT 1
-            """, (project_id, project_id)).fetchone()
+            """, (project_id,)).fetchone()
+            
+            # Fallback: try numeric ID if domain not found and input is numeric
+            if not result and project_id.isdigit():
+                result = conn.execute("""
+                    SELECT p.*, pt.display_name as type_name
+                    FROM projects p
+                    LEFT JOIN project_types pt ON p.type_id = pt.id
+                    WHERE p.id = %s
+                    LIMIT 1
+                """, (int(project_id),)).fetchone()
             
             if not result:
                 return {
@@ -307,11 +317,18 @@ class ToolExecutor:
         domain = project_id.split(".")[0] if "." in project_id else project_id
         
         with get_db() as conn:
-            # Check if project exists
+            # Check if project exists - try domain first
             result = conn.execute(
-                "SELECT id, name FROM projects WHERE domain = %s OR id = %s",
-                (domain, project_id)
+                "SELECT id, name, domain FROM projects WHERE domain = %s",
+                (domain,)
             ).fetchone()
+            
+            # Fallback: try numeric ID if domain not found and input is numeric
+            if not result and domain.isdigit():
+                result = conn.execute(
+                    "SELECT id, name, domain FROM projects WHERE id = %s",
+                    (int(domain),)
+                ).fetchone()
             
             if not result:
                 return {
@@ -453,17 +470,19 @@ class ToolExecutor:
         # Resolve project from DB
         domain = project_id.split(".")[0] if "." in project_id else project_id
         
-        # Try to parse as integer ID, otherwise use as domain only
-        try:
-            numeric_id = int(project_id)
-            query = "SELECT id, name, domain FROM projects WHERE domain = %s OR id = %s"
-            params = (domain, numeric_id)
-        except (ValueError, TypeError):
-            query = "SELECT id, name, domain FROM projects WHERE domain = %s"
-            params = (domain,)
-        
+        # Try domain first, then numeric ID if applicable
         with get_db() as conn:
-            result = conn.execute(query, params).fetchone()
+            result = conn.execute(
+                "SELECT id, name, domain FROM projects WHERE domain = %s",
+                (domain,)
+            ).fetchone()
+            
+            # Fallback: try numeric ID if domain not found and input is numeric
+            if not result and domain.isdigit():
+                result = conn.execute(
+                    "SELECT id, name, domain FROM projects WHERE id = %s",
+                    (int(domain),)
+                ).fetchone()
             
             if not result:
                 return {
