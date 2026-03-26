@@ -492,11 +492,15 @@ async def ai_chat(request: AIChatRequest):
         if tool_name in tools_needing_project:
             project_id = args.get("project_id")
             
+            # For set_active_project, don't use active project as fallback
+            # User wants to SWITCH projects, not use current one
+            use_active_as_fallback = tool_name != "set_active_project"
+            
             resolver = get_project_resolver()
             resolution = resolver.resolve(
                 user_text=request.message,
                 projects=projects,
-                active_project=active_project,
+                active_project=active_project if use_active_as_fallback else None,
                 explicit_project_id=project_id
             )
             
