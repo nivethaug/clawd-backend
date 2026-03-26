@@ -62,10 +62,11 @@ The AI Chat System follows a modular, service-oriented architecture with clear s
 - Integrates all services
 - Returns formatted responses
 
-**ai_selection.py** (~100 lines)
+**ai_selection.py** (~150 lines)
 - Handles project selection
 - Updates tool arguments
 - Executes resolved tools
+- LLM summarization for natural language responses
 
 **ai_confirm.py** (~180 lines)
 - Manages confirmation flow
@@ -175,12 +176,219 @@ Responsibilities:
 - Ensure consistent structure
 - Type-safe response building
 
+## Two-Step LLM Flow
+
+### Overview
+
+The system uses a two-step LLM interaction pattern for tool execution:
+
+1. **Step 1: Tool Execution** - LLM decides to call a tool → Backend executes it
+2. **Step 2: Summarization** - Backend sends tool result back to LLM → LLM generates natural language response
+
+### Why Two Steps?
+
+**Problem:** Raw tool outputs are JSON objects that aren't user-friendly
+```json
+{
+  "status": "success",
+  "domain": "thinkai-likrt6",
+  "pm2_process": "thinkai-likrt6",
+  "uptime": 3600
+}
+```
+
+**Solution:** LLM converts to natural language
+```
+"Your ThinkAI project is running smoothly and has been up for 1 hour."
+```
+
+### Implementation
+
+**In `api/ai_chat.py` (lines 543-590):**
+```python
+# After tool execution
+messages.append({
+    "role": "assistant",
+    "content": None,
+    "tool_calls": [{ ... }]  # Original tool call
+})
+
+messages.append({
+    "role": "tool",
+    "tool_call_id": "call_1",
+    "name": tool_name,
+    "content": json.dumps(result, cls=DateTimeEncoder)  # Tool result
+})
+
+# Second LLM call
+final_response = await glm_client.chat_with_tools(
+    messages=messages,
+    tools=tools,
+    tool_choice="none",  # Force text response, no more tools
+    temperature=0.3,
+    max_tokens=500
+)
+
+final_text = glm_client.get_text_response(final_response)
+```
+
+**In `api/ai_selection.py` (lines 89-129):**
+- Same pattern for selection responses
+- Ensures consistent UX across all flows
+
+### Benefits
+
+1. **User-Friendly Responses** - Natural language instead of JSON
+2. **Contextual Understanding** - LLM can explain what happened
+3. **Error Handling** - Friendly error messages
+4. **Consistency** - All responses follow same pattern
+
+### Response Type Determination
+
+After LLM summarization, the system determines the response type:
+
+```python
+action_tools = ["start_project", "stop_project", "restart_project", "delete_project"]
+
+if tool_name in action_tools:
+    # Action tools: return execution response with progress
+    return execution_response(progress=[result], text=final_text)
+else:
+    # Info/context tools: return plain text
+    return text_response(final_text)
+```
+
+### Selection Response Bypass
+
+**Important:** Selection responses bypass LLM summarization to preserve structure:
+
+```python
+# In api/ai_chat.py (lines 517-525)
+if result.get("type") == "selection" or result.get("status") == "selection":
+    logger.info(f"[AI-CHAT] Selection response, returning structured data")
+    await session_manager.update_last_used(request.session_id)
+    return result  # Return immediately, no LLM processing
+```
+
+This ensures the frontend receives the structured data needed to render selection UI.
+
+## Frontend Integration
+
+### Component Hierarchy
+
+```
+Chat.tsx (Page)
+    │
+    ├─► ActiveProjectBadge (Shows current project)
+    │
+    ├─► ChatQuickActions (Quick action buttons)
+    │
+    ├─► ClawdbotMessageList
+    │     │
+    │     └─► ClawdbotMessageBubble (Per message)
+    │           │
+    │           ├─► ChatTextBlock (type: "text")
+    │           ├─► ChatSelectionBlock (type: "selection")
+    │           ├─► ChatExecutionBlock (type: "execution")
+    │           └─► ChatErrorBlock (type: "error")
+    │
+    └─► ClawdbotChatInput (Message input)
+```
+
+### Response Type Handling
+
+**Text Response**
+```typescript
+{
+  type: "text",
+  text: "Your project is running smoothly."
+}
+```
+→ Rendered as plain text with markdown support
+
+**Selection Response**
+```typescript
+{
+  type: "selection",
+  message: "Which project?",
+  options: [
+    { label: "ThinkAI (thinkai-likrt6)", value: "thinkai-likrt6" },
+    { label: "AssetBrain (assetbrain-kfpa4x)", value: "assetbrain-kfpa4x" }
+  ],
+  intent: { tool: "set_active_project", args: {} }
+}
+```
+→ Rendered as radio buttons in `ChatSelectionBlock`
+
+**Execution Response**
+```typescript
+{
+  type: "execution",
+  text: "Project started successfully!",
+  progress: [
+    { status: "success", message: "Started PM2 process" }
+  ]
+}
+```
+→ Rendered with progress indicators and action buttons
+
+### State Management (useAIChat Hook)
+
+```typescript
+const {
+  messages,           // AIChatMessage[]
+  isLoading,          // boolean
+  sendMessage,        // (msg: string, activeProject?: string) => void
+  handleSelection,    // (value: string) => void
+  handleConfirmation, // (confirmed: boolean) => void
+  activeProjectName,  // string | null
+  setActiveProject,   // (project) => void
+} = useAIChat();
+```
+
+### API Client Functions
+
+**Send Chat Message**
+```typescript
+// src/lib/aiChatApi.ts
+export async function postChatMessage(
+  sessionId: string,
+  message: string,
+  activeProject?: string
+): Promise<AIChatResponse>
+```
+
+**Submit Selection**
+```typescript
+export async function postSelection(
+  sessionId: string,
+  selection: string,
+  intent: { tool: string; args: Record<string, unknown> }
+): Promise<AIChatResponse>
+```
+
+**Submit Confirmation**
+```typescript
+export async function postConfirm(
+  sessionId: string,
+  confirmed: boolean
+): Promise<AIChatResponse>
+```
+
 ## Data Flow
 
 ### 1. Chat Flow
 
 ```
-User Message
+Frontend Message (ClawdbotChatInput)
+    │
+    ▼
+POST /api/chat
+{
+  message: "switch project",
+  session_id: "uuid",
+  active_project: "thinkai-likrt6"
+}
     │
     ▼
 Load Session (AISessionManager)
@@ -211,23 +419,59 @@ Call GLM API (GLMClient)
               ├─► No Match → Return error_response
               │
               ├─► Single Match → Execute
+              │                      │
+              │                      ▼
+              │                   Build Conversation with Tool Result
+              │                      │
+              │                      ▼
+              │                   Call GLM API (LLM Summarization)
+              │                      │
+              │                      ▼
+              │                   Return Natural Language Response
               │
               └─► Multiple Matches → Return selection_response
+                                        {
+                                          type: "selection",
+                                          options: [...],
+                                          intent: {...}
+                                        }
 ```
 
 ### 2. Selection Flow
 
 ```
-User Selection
+Frontend Selection (ChatSelectionBlock)
     │
     ▼
-Update Intent Args
+POST /api/selection
+{
+  session_id: "uuid",
+  selection: "thinkai-likrt6",
+  intent: { tool: "set_active_project", args: {} }
+}
+    │
+    ▼
+Update Intent Args with selection
+    │
+    ▼
+Update Session (set_active_project)
     │
     ▼
 Execute Tool (ToolExecutor)
     │
     ▼
-Return execution_response
+Build Conversation with Tool Result
+    │
+    ▼
+Call GLM API (LLM Summarization)
+    │
+    ▼
+Return Natural Language Response
+{
+  type: "execution" | "text",
+  text: "I've switched to ThinkAI for you!",
+  progress: [...]
+}
 ```
 
 ### 3. Confirmation Flow
