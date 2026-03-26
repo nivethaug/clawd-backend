@@ -4,6 +4,7 @@ Direct API calls to GLM-4.6 with tool support
 """
 
 import os
+import json
 import logging
 import httpx
 from typing import Dict, Any, List, Optional
