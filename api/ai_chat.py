@@ -522,6 +522,12 @@ async def ai_chat(request: AIChatRequest):
         result = await executor.execute(tool_name, args, session_key=request.session_id)
         
         # 12. Handle result
+        # SELECTION RESPONSE: Return immediately, bypass LLM summarization
+        if result.get("type") == "selection" or result.get("status") == "selection":
+            logger.info(f"[AI-CHAT] Selection response, returning structured data")
+            await session_manager.update_last_used(request.session_id)
+            return result
+        
         if result["status"] == "confirmation_required":
             # Store pending intent in session
             await session_manager.set_pending_intent(request.session_id, result["intent"])
