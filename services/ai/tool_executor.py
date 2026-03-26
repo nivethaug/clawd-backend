@@ -5,6 +5,7 @@ Execute tools via direct Python function calls to PM2 and database
 
 import json
 import logging
+import os
 import subprocess
 from typing import Dict, Any, Optional
 
@@ -304,7 +305,7 @@ class ToolExecutor:
                 text=True,
                 timeout=5
             )
-            if result.returncode == 1 and result.stdout.strip():
+            if result.returncode == 0 and result.stdout.strip():
                 logs["frontend"]["error"] = result.stdout.strip()
                 
         except Exception as e:
@@ -314,7 +315,6 @@ class ToolExecutor:
         # Backend logs
         try:
             # Find backend log file (may have a number suffix)
-            import os
             backend_out_files = []
             backend_err_files = []
             
@@ -339,7 +339,7 @@ class ToolExecutor:
                     text=True,
                     timeout=5
                 )
-                if result.returncode == 1 and result.stdout.strip():
+                if result.returncode == 0 and result.stdout.strip():
                     logs["backend"]["out"] = result.stdout.strip()
             
             # Read the most recent backend error log
@@ -352,7 +352,7 @@ class ToolExecutor:
                     text=True,
                     timeout=5
                 )
-                if result.returncode == 1 and result.stdout.strip():
+                if result.returncode == 0 and result.stdout.strip():
                     logs["backend"]["error"] = result.stdout.strip()
                 
         except Exception as e:
