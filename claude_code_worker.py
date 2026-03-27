@@ -78,22 +78,54 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             import os
             env = os.environ.copy()
             env["EMPTY_TEMPLATE_MODE"] = os.getenv("EMPTY_TEMPLATE_MODE", "false")
+            env["PYTHONUNBUFFERED"] = "1"
 
-            result = subprocess.run(
+            # Use Popen for REAL-TIME streaming (subprocess.run buffers until complete)
+            import threading as th
+            
+            def stream_output(pipe, prefix):
+                """Stream output line by line in real-time."""
+                try:
+                    for line in iter(pipe.readline, ''):
+                        if line:
+                            print(f"{prefix}{line.rstrip()}", flush=True)
+                            logger.info(f"{prefix}{line.rstrip()}")
+                except Exception as e:
+                    logger.error(f"Stream error: {e}")
+                finally:
+                    pipe.close()
+            
+            process = subprocess.Popen(
                 cmd_args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,
                 text=True,
-                timeout=3600,  # 60 minutes total
-                close_fds=True,
+                bufsize=1,  # Line buffered
                 env=env
             )
+            
+            # Start streaming threads
+            stdout_thread = th.Thread(target=stream_output, args=(process.stdout, "[FAST-WRAPPER] "), daemon=True)
+            stderr_thread = th.Thread(target=stream_output, args=(process.stderr, "[FAST-WRAPPER-ERR] "), daemon=True)
+            stdout_thread.start()
+            stderr_thread.start()
+            
+            # Wait for process with timeout
+            try:
+                returncode = process.wait(timeout=3600)  # 60 minutes total
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                raise
+            
+            # Wait for streaming threads to finish
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
 
-            if result.returncode != 0:
+            if returncode != 0:
                 logger.error(f"Fast wrapper failed for project {project_id}")
-                logger.error(f"Return code: {result.returncode}")
-                logger.error(f"Error output: {result.stderr[-500:]}")
+                logger.error(f"Return code: {returncode}")
                 return
 
             logger.info(f"Fast wrapper completed successfully for project {project_id}")
@@ -114,40 +146,74 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
             ]
 
             # Robust logging before execution
-            print("=" * 60)
-            print("WORKER: launching wrapper:", " ".join(cmd_args))
-            print("WORKER: project_id:", project_id)
-            print("WORKER: project_path:", project_path)
-            print("WORKER: project_name:", project_name)
-            print("=" * 60)
+            print("=" * 60, flush=True)
+            print("WORKER: launching wrapper:", " ".join(cmd_args), flush=True)
+            print("WORKER: project_id:", project_id, flush=True)
+            print("WORKER: project_path:", project_path, flush=True)
+            print("WORKER: project_name:", project_name, flush=True)
+            print("=" * 60, flush=True)
             logger.info(f"Executing: {' '.join(cmd_args)}")
 
             try:
-                result = subprocess.run(
+                # Use Popen for REAL-TIME streaming (subprocess.run buffers until complete)
+                import select
+                
+                env = os.environ.copy()
+                env["PYTHONUNBUFFERED"] = "1"
+                
+                process = subprocess.Popen(
                     cmd_args,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     stdin=subprocess.DEVNULL,
                     text=True,
-                    timeout=900,  # 15 minutes max
-                    close_fds=True,
-                    env=os.environ.copy()
+                    bufsize=1,  # Line buffered
+                    env=env
                 )
-
+                
+                # Stream stdout in real-time
+                import threading as th
+                
+                def stream_output(pipe, prefix):
+                    """Stream output line by line in real-time."""
+                    try:
+                        for line in iter(pipe.readline, ''):
+                            if line:
+                                print(f"{prefix}{line.rstrip()}", flush=True)
+                                logger.info(f"{prefix}{line.rstrip()}")
+                    except Exception as e:
+                        logger.error(f"Stream error: {e}")
+                    finally:
+                        pipe.close()
+                
+                # Start streaming threads
+                stdout_thread = th.Thread(target=stream_output, args=(process.stdout, ""), daemon=True)
+                stderr_thread = th.Thread(target=stream_output, args=(process.stderr, "STDERR: "), daemon=True)
+                stdout_thread.start()
+                stderr_thread.start()
+                
+                # Wait for process with timeout
+                try:
+                    returncode = process.wait(timeout=900)  # 15 minutes max
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                    raise
+                
+                # Wait for streaming threads to finish
+                stdout_thread.join(timeout=5)
+                stderr_thread.join(timeout=5)
+                
                 # Robust logging after execution
-                print("=" * 60)
-                print("WRAPPER STDOUT:", result.stdout)
-                print("WRAPPER STDERR:", result.stderr)
-                print("WRAPPER RETURN CODE:", result.returncode)
-                print("=" * 60)
+                print("=" * 60, flush=True)
+                print("WRAPPER RETURN CODE:", returncode, flush=True)
+                print("=" * 60, flush=True)
 
-                if result.returncode != 0:
-                    raise RuntimeError(f"Wrapper failed with code {result.returncode}: {result.stderr}")
+                if returncode != 0:
+                    raise RuntimeError(f"Wrapper failed with code {returncode}")
 
                 # Success (wrapper updates status internally)
                 logger.info(f"Claude Code wrapper completed successfully for project {project_id}")
-                logger.info(f"Output (last 2000 chars):\n{result.stdout[-2000:]}")
-                logger.info(f"Full stdout length: {len(result.stdout)} characters")
 
             except subprocess.TimeoutExpired:
                 print("WRAPPER ERROR: execution timeout")
