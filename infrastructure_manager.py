@@ -1842,11 +1842,27 @@ RULES:
 
 CRITICAL: Fix the errors and ensure npm run build succeeds."""
             
-            # Run Claude Code Agent
+            # Run Claude Code Agent as background task (shielded from cancellation)
             logger.info(f"CLAUDE_FIX: Running ClaudeCodeAgent on {frontend_src_path}")
             
-            async with ClaudeCodeAgent(str(frontend_src_path)) as agent:
-                response = await agent.query(fix_prompt, timeout=CLAUDE_FIX_TIMEOUT)
+            response = None
+            
+            async def run_background_query():
+                """Run the query in a background task (shielded from cancellation)."""
+                nonlocal response
+                async with ClaudeCodeAgent(str(frontend_src_path)) as agent:
+                    response = await agent.query(fix_prompt, timeout=CLAUDE_FIX_TIMEOUT)
+                return response
+            
+            # Create background task (shielded from cancellation)
+            query_task = asyncio.create_task(run_background_query())
+            
+            try:
+                await asyncio.shield(query_task)
+            except asyncio.CancelledError:
+                # Caller disconnected - query continues in background
+                logger.info("CLAUDE_FIX: Caller disconnected, query continues in background")
+                await asyncio.shield(query_task)
             
             if response:
                 logger.info(f"✓ CLAUDE_FIX: Attempt {attempt}/{max_attempts} completed successfully")
