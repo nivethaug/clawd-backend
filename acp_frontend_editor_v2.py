@@ -1189,9 +1189,10 @@ class ACPFrontendEditorV2:
 
     async def _run_claude_agent(self, prompt: str) -> Tuple[int, str, str]:
         """
-        Run Claude Code Agent to execute the prompt.
+        Run Claude Code Agent to execute the prompt as a background task.
 
-        This replaces the ACPX subprocess call with direct Claude CLI integration.
+        Uses asyncio.create_task() with asyncio.shield() pattern from chat handler
+        to ensure the query runs to completion even if caller disconnects.
 
         Args:
             prompt: The prompt to send to Claude
@@ -1209,12 +1210,14 @@ class ACPFrontendEditorV2:
         from datetime import datetime
         from acp_progress_mapper import ClaudeProgressMapper
 
+        # Shared state for background task
         stdout_lines = []
         stderr_lines = []
         chunk_count = 0
         query_start_time = datetime.now()
         progress_mapper = ClaudeProgressMapper()
-
+        query_result = {"return_code": 1, "stdout": "", "stderr": "", "completed": False}
+        
         def on_text(text: str) -> None:
             """Callback for streaming text output (persisted to DB)."""
             nonlocal chunk_count
@@ -1251,69 +1254,109 @@ class ACPFrontendEditorV2:
             logger.info(f"[ACPX-V2] Phase progress ({elapsed:.0f}s): {friendly}")
             print(f"⏱️ [{elapsed:.0f}s] {friendly}", flush=True)
 
-        logger.info(f"[ACPX-V2] === CLAUDE CODE AGENT STARTING ===")
+        async def run_background_query():
+            """Run the query in a background task (shielded from cancellation)."""
+            nonlocal query_result
+            
+            logger.info(f"[ACPX-V2] Background query task starting...")
+            
+            try:
+                # Create Claude Code Agent instance
+                async with ClaudeCodeAgent(
+                    repo_path=str(self.frontend_src_path),
+                    on_text=on_text,
+                    on_progress=on_progress,
+                ) as agent:
+                    logger.info(f"[ACPX-V2] ClaudeCodeAgent created, calling query...")
+                    
+                    # Execute the query with timeout
+                    result = await agent.query(prompt, timeout=CLAUDE_TIMEOUT)
+
+                    # Determine return code based on result
+                    return_code = 0 if result is not None else 1
+                    elapsed = (datetime.now() - query_start_time).total_seconds()
+
+                    logger.info(f"[ACPX-V2] === BACKGROUND QUERY COMPLETED ===")
+                    logger.info(f"[ACPX-V2] Return code: {return_code}")
+                    logger.info(f"[ACPX-V2] Total chunks: {chunk_count}")
+                    logger.info(f"[ACPX-V2] Elapsed time: {elapsed:.1f}s")
+
+                    print("=" * 80, flush=True)
+                    print("✅ CLAUDE CODE AGENT - COMPLETED", flush=True)
+                    print(f"   Return code: {return_code}", flush=True)
+                    print(f"   Total chunks: {chunk_count}", flush=True)
+                    print(f"   Elapsed time: {elapsed:.1f}s", flush=True)
+                    print("=" * 80, flush=True)
+
+                    query_result = {
+                        "return_code": return_code,
+                        "stdout": '\n'.join(stdout_lines),
+                        "stderr": '\n'.join(stderr_lines),
+                        "completed": True
+                    }
+
+            except asyncio.TimeoutError:
+                elapsed = (datetime.now() - query_start_time).total_seconds()
+                logger.error(f"[ACPX-V2] BACKGROUND TIMEOUT after {CLAUDE_TIMEOUT}s")
+                print(f"🔴 CLAUDE-AGENT-TIMEOUT: Exceeded {CLAUDE_TIMEOUT}s", flush=True)
+                query_result = {
+                    "return_code": 124,
+                    "stdout": '\n'.join(stdout_lines),
+                    "stderr": f"Timeout after {CLAUDE_TIMEOUT}s",
+                    "completed": True
+                }
+
+            except Exception as e:
+                elapsed = (datetime.now() - query_start_time).total_seconds()
+                logger.error(f"[ACPX-V2] BACKGROUND ERROR: {type(e).__name__}: {str(e)}")
+                print(f"🔴 CLAUDE-AGENT-ERROR: {type(e).__name__}: {str(e)}", flush=True)
+                import traceback
+                logger.error(f"[ACPX-V2] Traceback: {traceback.format_exc()}")
+                query_result = {
+                    "return_code": 1,
+                    "stdout": '\n'.join(stdout_lines),
+                    "stderr": str(e),
+                    "completed": True
+                }
+
+        logger.info(f"[ACPX-V2] === CLAUDE CODE AGENT STARTING (BACKGROUND MODE) ===")
         logger.info(f"[ACPX-V2] Working directory: {self.frontend_src_path}")
         logger.info(f"[ACPX-V2] Prompt length: {len(prompt)} chars")
         logger.info(f"[ACPX-V2] Timeout: {CLAUDE_TIMEOUT}s")
 
         print("=" * 80, flush=True)
-        print("🤖 CLAUDE CODE AGENT - STARTING", flush=True)
+        print("🤖 CLAUDE CODE AGENT - STARTING (BACKGROUND MODE)", flush=True)
         print(f"   Working directory: {self.frontend_src_path}", flush=True)
         print(f"   Prompt length: {len(prompt)} chars", flush=True)
         print(f"   Timeout: {CLAUDE_TIMEOUT}s", flush=True)
         print("=" * 80, flush=True)
 
+        # Create background task (shielded from cancellation)
+        logger.info(f"[ACPX-V2] Creating background query task...")
+        query_task = asyncio.create_task(run_background_query())
+        
         try:
-            # Create Claude Code Agent instance
-            logger.info(f"[ACPX-V2] Creating ClaudeCodeAgent instance...")
-            async with ClaudeCodeAgent(
-                repo_path=str(self.frontend_src_path),
-                on_text=on_text,
-                on_progress=on_progress,
-            ) as agent:
-                logger.info(f"[ACPX-V2] ClaudeCodeAgent created, calling query...")
-                
-                # Execute the query with timeout
-                result = await agent.query(prompt, timeout=CLAUDE_TIMEOUT)
-
-                # Determine return code based on result
-                return_code = 0 if result is not None else 1
-                elapsed = (datetime.now() - query_start_time).total_seconds()
-
-                logger.info(f"[ACPX-V2] === EXECUTION COMPLETED ===")
-                logger.info(f"[ACPX-V2] Return code: {return_code}")
-                logger.info(f"[ACPX-V2] Total chunks: {chunk_count}")
-                logger.info(f"[ACPX-V2] Elapsed time: {elapsed:.1f}s")
-                if result:
-                    logger.info(f"[ACPX-V2] Result length: {len(result)} chars")
-                    logger.info(f"[ACPX-V2] Result preview: {result[:200]}{'...' if len(result) > 200 else ''}")
-
-                print("=" * 80, flush=True)
-                print("✅ CLAUDE CODE AGENT - COMPLETED", flush=True)
-                print(f"   Return code: {return_code}", flush=True)
-                print(f"   Total chunks: {chunk_count}", flush=True)
-                print(f"   Output lines: {len(stdout_lines)}", flush=True)
-                print(f"   Elapsed time: {elapsed:.1f}s", flush=True)
-                print("=" * 80, flush=True)
-
-                return (return_code, '\n'.join(stdout_lines), '\n'.join(stderr_lines))
-
-        except asyncio.TimeoutError:
-            elapsed = (datetime.now() - query_start_time).total_seconds()
-            logger.error(f"[ACPX-V2] TIMEOUT after {CLAUDE_TIMEOUT}s (elapsed: {elapsed:.1f}s)")
-            print(f"🔴 CLAUDE-AGENT-TIMEOUT: Exceeded {CLAUDE_TIMEOUT}s (elapsed: {elapsed:.1f}s)", flush=True)
-            # Return timeout as non-zero exit code
-            return (124, '\n'.join(stdout_lines), f"Timeout after {CLAUDE_TIMEOUT}s")
-
-        except Exception as e:
-            elapsed = (datetime.now() - query_start_time).total_seconds()
-            logger.error(f"[ACPX-V2] EXECUTION FAILED: {type(e).__name__}: {str(e)}")
-            logger.error(f"[ACPX-V2] Elapsed time before failure: {elapsed:.1f}s")
-            print(f"🔴 CLAUDE-AGENT-ERROR: {type(e).__name__}: {str(e)}", flush=True)
-            import traceback
-            logger.error(f"[ACPX-V2] Traceback: {traceback.format_exc()}")
-            # Return error as non-zero exit code
-            return (1, '\n'.join(stdout_lines), str(e))
+            # Wait for the background task to complete
+            # Using shield to protect from cancellation
+            await asyncio.shield(query_task)
+            logger.info(f"[ACPX-V2] Background task completed normally")
+            
+        except asyncio.CancelledError:
+            # Caller disconnected - log but DON'T cancel the query
+            logger.warning(f"[ACPX-V2] Caller disconnected, query continues in background...")
+            # Wait for query to complete (shielded from this cancellation)
+            try:
+                await asyncio.shield(query_task)
+                logger.info(f"[ACPX-V2] Background query completed after caller disconnect")
+            except asyncio.CancelledError:
+                logger.info(f"[ACPX-V2] Shield cancelled, but query completed")
+        
+        # Return the result from the background task
+        return (
+            query_result["return_code"],
+            query_result["stdout"],
+            query_result["stderr"]
+        )
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
