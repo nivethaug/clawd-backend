@@ -1206,65 +1206,112 @@ class ACPFrontendEditorV2:
             raise RuntimeError("ClaudeCodeAgent not available - check claude_code_agent.py import")
 
         import asyncio
+        from datetime import datetime
+        from acp_progress_mapper import ClaudeProgressMapper
 
         stdout_lines = []
         stderr_lines = []
+        chunk_count = 0
+        query_start_time = datetime.now()
+        progress_mapper = ClaudeProgressMapper()
 
         def on_text(text: str) -> None:
             """Callback for streaming text output (persisted to DB)."""
+            nonlocal chunk_count
+            chunk_count += 1
             stdout_lines.append(text)
-            # Also print to stdout for PM2 logs
-            print(text, flush=True)
+            
+            # Verbose logging for PM2
+            logger.info(f"[ACPX-V2] on_text chunk #{chunk_count}: {text[:100]}{'...' if len(text) > 100 else ''}")
+            
+            # Get friendly progress message from keyword mapper
+            friendly = progress_mapper.get_friendly_message(text)
+            if friendly:
+                logger.info(f"[ACPX-V2] Progress mapped: {friendly}")
+                print(f"🔧 {friendly}", flush=True)
+            
+            # Print meaningful text to stdout for PM2 logs (skip noise)
+            cleaned = text.strip()
+            if cleaned and cleaned not in ["null", "{}", "[]", "---"]:
+                skip_patterns = [
+                    cleaned.startswith('{'),
+                    cleaned.startswith('['),
+                    cleaned.startswith("```json"),
+                    cleaned.startswith("```"),
+                    cleaned == "**Input:**",
+                    cleaned == "**Output:**",
+                ]
+                if not any(skip_patterns):
+                    print(f"📄 {text}", flush=True)
 
         def on_progress(progress: str) -> None:
-            """Callback for progress updates (UI only - NOT persisted)."""
-            # Print progress to stdout for PM2 visibility
-            print(f"[CLAUDE-PROGRESS] {progress}", flush=True)
+            """Callback for phase-based progress (timeout updates)."""
+            elapsed = (datetime.now() - query_start_time).total_seconds()
+            friendly = progress_mapper.get_phase_message(elapsed)
+            logger.info(f"[ACPX-V2] Phase progress ({elapsed:.0f}s): {friendly}")
+            print(f"⏱️ [{elapsed:.0f}s] {friendly}", flush=True)
 
-        logger.info(f"[CLAUDE-AGENT] Starting Claude Code Agent execution...")
-        logger.info(f"[CLAUDE-AGENT] Working directory: {self.frontend_src_path}")
-        logger.info(f"[CLAUDE-AGENT] Timeout: {CLAUDE_TIMEOUT}s")
+        logger.info(f"[ACPX-V2] === CLAUDE CODE AGENT STARTING ===")
+        logger.info(f"[ACPX-V2] Working directory: {self.frontend_src_path}")
+        logger.info(f"[ACPX-V2] Prompt length: {len(prompt)} chars")
+        logger.info(f"[ACPX-V2] Timeout: {CLAUDE_TIMEOUT}s")
 
         print("=" * 80, flush=True)
         print("🤖 CLAUDE CODE AGENT - STARTING", flush=True)
         print(f"   Working directory: {self.frontend_src_path}", flush=True)
+        print(f"   Prompt length: {len(prompt)} chars", flush=True)
         print(f"   Timeout: {CLAUDE_TIMEOUT}s", flush=True)
         print("=" * 80, flush=True)
 
         try:
             # Create Claude Code Agent instance
+            logger.info(f"[ACPX-V2] Creating ClaudeCodeAgent instance...")
             async with ClaudeCodeAgent(
                 repo_path=str(self.frontend_src_path),
                 on_text=on_text,
                 on_progress=on_progress,
             ) as agent:
+                logger.info(f"[ACPX-V2] ClaudeCodeAgent created, calling query...")
+                
                 # Execute the query with timeout
                 result = await agent.query(prompt, timeout=CLAUDE_TIMEOUT)
 
                 # Determine return code based on result
                 return_code = 0 if result is not None else 1
+                elapsed = (datetime.now() - query_start_time).total_seconds()
 
-                logger.info(f"[CLAUDE-AGENT] Execution completed with return code: {return_code}")
+                logger.info(f"[ACPX-V2] === EXECUTION COMPLETED ===")
+                logger.info(f"[ACPX-V2] Return code: {return_code}")
+                logger.info(f"[ACPX-V2] Total chunks: {chunk_count}")
+                logger.info(f"[ACPX-V2] Elapsed time: {elapsed:.1f}s")
                 if result:
-                    logger.info(f"[CLAUDE-AGENT] Result length: {len(result)} chars")
+                    logger.info(f"[ACPX-V2] Result length: {len(result)} chars")
+                    logger.info(f"[ACPX-V2] Result preview: {result[:200]}{'...' if len(result) > 200 else ''}")
 
                 print("=" * 80, flush=True)
                 print("✅ CLAUDE CODE AGENT - COMPLETED", flush=True)
                 print(f"   Return code: {return_code}", flush=True)
+                print(f"   Total chunks: {chunk_count}", flush=True)
                 print(f"   Output lines: {len(stdout_lines)}", flush=True)
+                print(f"   Elapsed time: {elapsed:.1f}s", flush=True)
                 print("=" * 80, flush=True)
 
                 return (return_code, '\n'.join(stdout_lines), '\n'.join(stderr_lines))
 
         except asyncio.TimeoutError:
-            logger.error(f"[CLAUDE-AGENT] Timeout after {CLAUDE_TIMEOUT}s")
-            print(f"🔴 CLAUDE-AGENT-TIMEOUT: Exceeded {CLAUDE_TIMEOUT}s", flush=True)
+            elapsed = (datetime.now() - query_start_time).total_seconds()
+            logger.error(f"[ACPX-V2] TIMEOUT after {CLAUDE_TIMEOUT}s (elapsed: {elapsed:.1f}s)")
+            print(f"🔴 CLAUDE-AGENT-TIMEOUT: Exceeded {CLAUDE_TIMEOUT}s (elapsed: {elapsed:.1f}s)", flush=True)
             # Return timeout as non-zero exit code
             return (124, '\n'.join(stdout_lines), f"Timeout after {CLAUDE_TIMEOUT}s")
 
         except Exception as e:
-            logger.error(f"[CLAUDE-AGENT] Execution failed: {e}")
+            elapsed = (datetime.now() - query_start_time).total_seconds()
+            logger.error(f"[ACPX-V2] EXECUTION FAILED: {type(e).__name__}: {str(e)}")
+            logger.error(f"[ACPX-V2] Elapsed time before failure: {elapsed:.1f}s")
             print(f"🔴 CLAUDE-AGENT-ERROR: {type(e).__name__}: {str(e)}", flush=True)
+            import traceback
+            logger.error(f"[ACPX-V2] Traceback: {traceback.format_exc()}")
             # Return error as non-zero exit code
             return (1, '\n'.join(stdout_lines), str(e))
 
