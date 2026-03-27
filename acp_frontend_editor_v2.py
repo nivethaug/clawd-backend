@@ -32,15 +32,10 @@ try:
 except ImportError:
     CLAUDE_AGENT_AVAILABLE = False
 
-# Configure logging - WARNING level to suppress INFO messages
-# Set root logger to WARNING to suppress INFO from all modules
-logging.getLogger().setLevel(logging.WARNING)
-logging.basicConfig(
-    level=logging.WARNING,
-    format='[%(levelname)s] %(name)s - %(message)s'
-)
+# Configure logging - only set level for THIS module's logger
+# DO NOT modify root logger as it affects the entire process (including openclaw_wrapper)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)  # Explicitly set level for this logger
+logger.setLevel(logging.INFO)  # Allow INFO for this module's logs
 
 
 # =============================================================================
