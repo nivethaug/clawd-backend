@@ -4,7 +4,7 @@ ACP Frontend Editor v2 - Filesystem Diff Architecture
 
 Implements safe, validated frontend editing using filesystem diffing:
 - Snapshot before changes
-- Run ACPX (lets AI edit files naturally)
+- Run Claude Code Agent (lets AI edit files naturally)
 - Detect changes via filesystem comparison
 - Validate paths and file limits
 - Build gate and rollback on failure
@@ -24,6 +24,13 @@ from typing import Dict, List, Optional, Tuple, Any, Set
 
 # Page manifest system
 from page_manifest import PageManifest, create_page_manifest, scaffold_pages
+
+# Claude Code Agent - direct Claude CLI wrapper (replaces ACPX)
+try:
+    from claude_code_agent import ClaudeCodeAgent
+    CLAUDE_AGENT_AVAILABLE = True
+except ImportError:
+    CLAUDE_AGENT_AVAILABLE = False
 
 # Configure logging - WARNING level to suppress INFO messages
 # Set root logger to WARNING to suppress INFO from all modules
@@ -70,6 +77,9 @@ MAX_NEW_FILES = 15  # Maximum new files per execution
 
 # Build settings
 BUILD_TIMEOUT = 1800  # 30 minutes
+
+# Claude Code Agent settings
+CLAUDE_TIMEOUT = int(os.getenv("CLAUDE_TIMEOUT", "900"))  # 15 minutes default
 
 # =============================================================================
 # PATH VALIDATION
@@ -863,13 +873,13 @@ class ACPFrontendEditorV2:
         # to avoid path doubling in PageManifest which appends frontend/src/
         self.manifest_manager = PageManifest(str(self.frontend_path.parent))
 
-    async def apply_changes_via_acpx(
+    async def apply_changes(
         self,
         goal_description: str,
         execution_id: str
     ) -> Dict[str, Any]:
         """
-        Apply frontend changes by running ACPX and detecting filesystem changes.
+        Apply frontend changes by running Claude Code Agent and detecting filesystem changes.
 
         Implements 3-state outcome system:
         - "success": All validations passed, clean execution
@@ -893,33 +903,33 @@ class ACPFrontendEditorV2:
         status = "success"  # Default to success, downgrade as needed
 
         try:
-            logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Starting Phase 9 (Partial Commit System)")
-            logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Project: {self.project_name}")
-            logger.info(f"[ACPX-V2] 🔴 HEARTBEAT: Execution ID: {execution_id}")
+            logger.info(f"[CLAUDE-AGENT] 🔴 HEARTBEAT: Starting Phase 9 (Claude Code Agent)")
+            logger.info(f"[CLAUDE-AGENT] 🔴 HEARTBEAT: Project: {self.project_name}")
+            logger.info(f"[CLAUDE-AGENT] 🔴 HEARTBEAT: Execution ID: {execution_id}")
 
             # Step 1: Create snapshot (safe - continues on failure)
-            logger.info(f"[ACPX-V2] Step 1: Creating filesystem snapshot...")
+            logger.info(f"[CLAUDE-AGENT] Step 1: Creating filesystem snapshot...")
             snapshot_success, snapshot_msg = safe_snapshot(self.snapshot_manager, max_retries=1)
             if not snapshot_success or "warning" in snapshot_msg.lower():
                 issues.append(f"Snapshot warning: {snapshot_msg}")
-                logger.warning(f"[ACPX-V2] ⚠️ Snapshot issue (continuing): {snapshot_msg}")
+                logger.warning(f"[CLAUDE-AGENT] ⚠️ Snapshot issue (continuing): {snapshot_msg}")
             else:
-                logger.info(f"[ACPX-V2] ✓ Snapshot created")
+                logger.info(f"[CLAUDE-AGENT] ✓ Snapshot created")
 
             # Step 2: Generate page manifest from planner (Phase 5 - NEW)
-            logger.info(f"[ACPX-V2] Step 2: Generating page manifest (Phase 5)...")
+            logger.info(f"[CLAUDE-AGENT] Step 2: Generating page manifest (Phase 5)...")
             required_pages = await self._extract_required_pages_from_prompt(goal_description)
-            logger.info(f"[ACPX-V2]   Planner detected pages: {required_pages}")
+            logger.info(f"[CLAUDE-AGENT]   Planner detected pages: {required_pages}")
 
             # Write manifest to project directory
             manifest_success = self.manifest_manager.write_manifest(required_pages)
             if not manifest_success:
                 issues.append("Failed to write page manifest")
-                logger.warning(f"[ACPX-V2] ⚠️ Failed to write page manifest (continuing)")
+                logger.warning(f"[CLAUDE-AGENT] ⚠️ Failed to write page manifest (continuing)")
 
             # Update allowed_pages with manifest pages (source of truth)
             self.allowed_pages = set(required_pages)
-            logger.info(f"[ACPX-V2]   Manifest pages set as allowed: {required_pages}")
+            logger.info(f"[CLAUDE-AGENT]   Manifest pages set as allowed: {required_pages}")
             
             # 🎯 FINALIZED PAGES - Clear PM2 log visibility
             print("=" * 80)
@@ -928,287 +938,132 @@ class ACPFrontendEditorV2:
                 print(f"   {i}. {page}.tsx")
             print(f"   Total: {len(required_pages)} pages")
             print("=" * 80)
-            logger.info(f"[ACPX-V2] 🎯 FINALIZED PAGES: {required_pages}")
+            logger.info(f"[CLAUDE-AGENT] 🎯 FINALIZED PAGES: {required_pages}")
 
-            # Step 3: Capture filesystem state BEFORE ACPX (moved before scaffold)
-            logger.info(f"[ACPX-V2] Step 3: Capturing filesystem state before ACPX...")
+            # Step 3: Capture filesystem state BEFORE execution (moved before scaffold)
+            logger.info(f"[CLAUDE-AGENT] Step 3: Capturing filesystem state before execution...")
             try:
                 hashes_before = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
-                logger.info(f"[ACPX-V2]   Found {len(hashes_before)} files before ACPX")
+                logger.info(f"[CLAUDE-AGENT]   Found {len(hashes_before)} files before execution")
             except Exception as e:
-                logger.warning(f"[ACPX-V2] ⚠️ Failed to capture pre-ACPX state: {e}")
+                logger.warning(f"[CLAUDE-AGENT] ⚠️ Failed to capture pre-execution state: {e}")
                 hashes_before = {}
-                issues.append(f"Pre-ACPX snapshot failed: {e}")
+                issues.append(f"Pre-execution snapshot failed: {e}")
 
             # Step 4: Scaffold pages from manifest (Phase 5 - NEW)
-            logger.info(f"[ACPX-V2] Step 4: Scaffolding pages from manifest...")
+            logger.info(f"[CLAUDE-AGENT] Step 4: Scaffolding pages from manifest...")
             scaffold_result = self.manifest_manager.scaffold_pages(required_pages, create_placeholder=True)
             if not scaffold_result:
                 issues.append("Some pages failed to scaffold")
-                logger.warning(f"[ACPX-V2] ⚠️ Some pages failed to scaffold, continuing...")
+                logger.warning(f"[CLAUDE-AGENT] ⚠️ Some pages failed to scaffold, continuing...")
 
-            # Step 5: Build ACPX prompt using manifest pages
-            logger.info(f"[ACPX-V2] Step 5: Building ACPX prompt (using manifest pages)...")
+            # Step 5: Build prompt using manifest pages
+            logger.info(f"[CLAUDE-AGENT] Step 5: Building prompt (using manifest pages)...")
             prompt = await self._build_acpx_prompt(goal_description)
 
-            # Step 6: Run ACPX with Idle + Hard Timeout Protection
+            # Step 6: Run Claude Code Agent (replaces ACPX subprocess)
             try:
                 print("=" * 60)
                 print("PHASE_9_APPLY")
-                logger.info(f"[ACPX-V2] Step 5b: Running ACPX with idle + hard timeout protection...")
-                
-                # Build command: acpx --format quiet claude exec "<prompt>"
-                # cwd is set in Popen, not in command args
-                cmd = [
-                    "acpx",
-                    "--format", "quiet",
-                    "claude",
-                    "exec",
-                    str(prompt)
-                ]
-                
-                HARD_TIMEOUT = 900  # 15 minutes max (strict failure)
-                IDLE_TIMEOUT = 450  # 7.5 minutes without output (tolerant - check edits)
+                logger.info(f"[CLAUDE-AGENT] Step 6: Running Claude Code Agent...")
 
-                logger.info(f"[ACPX-V2]   Command: acpx --format quiet claude exec <prompt>")
-                logger.info(f"[ACPX-V2]   Working directory: {self.frontend_src_path}")
-                logger.info(f"[ACPX-V2]   Hard timeout: {HARD_TIMEOUT}s, Idle timeout: {IDLE_TIMEOUT}s")
+                logger.info(f"[CLAUDE-AGENT]   Working directory: {self.frontend_src_path}")
+                logger.info(f"[CLAUDE-AGENT]   Timeout: {CLAUDE_TIMEOUT}s")
 
                 # Robust debug logging
-                print("ACPX CMD:", " ".join(cmd[:4]) + " <prompt>")
-                print("[ACPX] cwd:", str(self.frontend_src_path))
-                print(f"[ACPX] running with idle={IDLE_TIMEOUT}s, hard={HARD_TIMEOUT}s timeouts")
+                print("[CLAUDE-AGENT] cwd:", str(self.frontend_src_path))
+                print(f"[CLAUDE-AGENT] timeout: {CLAUDE_TIMEOUT}s")
 
-                import os
-                import signal
-                import time
-                import threading
-                
-                # Use Popen with process group for clean timeout handling
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.DEVNULL,
-                    text=True,
-                    cwd=str(self.frontend_src_path),
-                    start_new_session=True  # new process group
-                )
-                
-                stdout_lines = []
-                stderr_lines = []
-                last_output_time = time.time()
-                start_time = time.time()
-                hard_timeout_killed = False
-                idle_timeout_killed = False
-                
-                def read_stream(stream, lines_list):
-                    """Read from stream line by line."""
-                    try:
-                        for line in iter(stream.readline, ''):
-                            if line:
-                                lines_list.append(line)
-                        stream.close()
-                    except:
-                        pass
-                
-                # Start reader threads for stdout and stderr
-                stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, stdout_lines), daemon=True)
-                stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, stderr_lines), daemon=True)
-                stdout_thread.start()
-                stderr_thread.start()
-                
-                # Watchdog loop
-                prev_stdout_len = 0
-                prev_stderr_len = 0
-                
-                while process.poll() is None:
-                    current_time = time.time()
-                    elapsed = current_time - start_time
-                    
-                    # Check for NEW output (length changed)
-                    current_stdout_len = len(stdout_lines)
-                    current_stderr_len = len(stderr_lines)
-                    
-                    if current_stdout_len > prev_stdout_len or current_stderr_len > prev_stderr_len:
-                        last_output_time = current_time
-                        prev_stdout_len = current_stdout_len
-                        prev_stderr_len = current_stderr_len
-                    
-                    idle_time = current_time - last_output_time
-                    
-                    # Hard timeout check (STRICT FAILURE)
-                    if elapsed > HARD_TIMEOUT:
-                        logger.error(f"[ACPX-V2] 🔴 HARD TIMEOUT: {elapsed:.1f}s > {HARD_TIMEOUT}s — killing process group")
-                        print(f"🔴 ACPX-V2-HARD-TIMEOUT: Killing process group {process.pid}", flush=True)
-                        try:
-                            os.killpg(process.pid, signal.SIGKILL)
-                            # Reap process to avoid zombies
-                            stdout_remain, stderr_remain = process.communicate()
-                            stdout_lines.append(stdout_remain or '')
-                            stderr_lines.append(stderr_remain or '')
-                        except (ProcessLookupError, OSError, AttributeError) as e:
-                            logger.warning(f"[ACPX-V2] Process group kill failed: {e}")
-                        hard_timeout_killed = True
-                        break
-                    
-                    # Idle timeout check (TOLERANT - check if edits succeeded)
-                    if idle_time > IDLE_TIMEOUT:
-                        logger.warning(f"[ACPX-V2] ⚠️ IDLE TIMEOUT: {idle_time:.1f}s > {IDLE_TIMEOUT}s — killing process group")
-                        print(f"⚠️ ACPX-V2-IDLE-TIMEOUT: Killing process group {process.pid}", flush=True)
-                        try:
-                            # Send SIGTERM to process group
-                            os.killpg(process.pid, signal.SIGTERM)
-                            # Wait 5 seconds for graceful shutdown
-                            try:
-                                stdout_remain, stderr_remain = process.communicate(timeout=5)
-                                stdout_lines.append(stdout_remain or '')
-                                stderr_lines.append(stderr_remain or '')
-                                logger.info(f"[ACPX-V2] Process group exited after SIGTERM")
-                            except subprocess.TimeoutExpired:
-                                # Escalate to SIGKILL
-                                logger.warning(f"[ACPX-V2] Process still alive after 5s, sending SIGKILL")
-                                print(f"🔴 ACPX-V2-SIGKILL: Escalating to SIGKILL for process group {process.pid}", flush=True)
-                                try:
-                                    os.killpg(process.pid, signal.SIGKILL)
-                                except (ProcessLookupError, OSError, AttributeError):
-                                    pass
-                                # Final communicate() to reap process
-                                stdout_remain, stderr_remain = process.communicate()
-                                stdout_lines.append(stdout_remain or '')
-                                stderr_lines.append(stderr_remain or '')
-                        except (ProcessLookupError, OSError, AttributeError) as e:
-                            logger.warning(f"[ACPX-V2] Process group kill failed: {e}")
-                        
-                        # Verify process actually died
-                        try:
-                            # Check if process still exists
-                            os.kill(process.pid, 0)  # Doesn't actually kill, just checks
-                            logger.warning(f"[ACPX-V2] Process {process.pid} still alive after kill, using aggressive cleanup")
-                            self._kill_process_tree(process.pid)
-                        except (ProcessLookupError, OSError):
-                            # Process is dead, good
-                            pass
-                        
-                        idle_timeout_killed = True
-                        break
-                    
-                    time.sleep(0.5)
-                
-                # Wait for reader threads to finish
-                stdout_thread.join(timeout=2)
-                stderr_thread.join(timeout=2)
-                
-                # Collect output
-                stdout_output = ''.join(stdout_lines)
-                stderr_output = ''.join(stderr_lines)
-                return_code = process.returncode
+                # Execute Claude Code Agent
+                return_code, stdout_output, stderr_output = await self._run_claude_agent(prompt)
 
                 # Robust debug logging after execution - FULL OUTPUT
                 print("=" * 80, flush=True)
-                print("ACPX RETURN CODE:", return_code, flush=True)
+                print("CLAUDE-AGENT RETURN CODE:", return_code, flush=True)
                 print("=" * 80, flush=True)
-                print("ACPX STDOUT:", flush=True)
+                print("CLAUDE-AGENT STDOUT:", flush=True)
                 print(stdout_output if stdout_output else "(empty)", flush=True)
                 print("=" * 80, flush=True)
-                print("ACPX STDERR:", flush=True)
+                print("CLAUDE-AGENT STDERR:", flush=True)
                 print(stderr_output if stderr_output else "(empty)", flush=True)
                 print("=" * 80, flush=True)
                 
                 # =============================================
-                # PARTIAL COMMIT: Timeout handling (NO ROLLBACK)
+                # PARTIAL COMMIT: Timeout/error handling (NO ROLLBACK if files exist)
                 # =============================================
                 
-                # Handle HARD timeout kills (PARTIAL_SUCCESS - keep files if any exist)
-                if hard_timeout_killed:
-                    self._kill_process_tree(process.pid)
+                # Handle timeout (return code 124) or error (non-zero return code)
+                if return_code != 0:
                     # Check if any files were created
                     created_files = list(self.frontend_src_path.glob("**/*.tsx"))
                     if created_files:
-                        issues.append(f"Hard timeout exceeded ({HARD_TIMEOUT}s)")
-                        logger.warning(f"[ACPX-V2] ⚠️ Hard timeout ({HARD_TIMEOUT}s) — keeping {len(created_files)} generated files")
-                        print(f"⚠️ ACPX-HARD-TIMEOUT: Keeping {len(created_files)} generated files (partial success)", flush=True)
+                        if return_code == 124:
+                            issues.append(f"Timeout exceeded ({CLAUDE_TIMEOUT}s)")
+                            logger.warning(f"[CLAUDE-AGENT] ⚠️ Timeout ({CLAUDE_TIMEOUT}s) — keeping {len(created_files)} generated files")
+                            print(f"⚠️ CLAUDE-AGENT-TIMEOUT: Keeping {len(created_files)} generated files (partial success)", flush=True)
+                        else:
+                            issues.append(f"Claude Agent exited with code {return_code}")
+                            logger.warning(f"[CLAUDE-AGENT] ⚠️ Non-zero exit ({return_code}) — keeping {len(created_files)} generated files")
+                            print(f"⚠️ CLAUDE-AGENT-ERROR: Keeping {len(created_files)} generated files (partial success)", flush=True)
                         status = "partial_success"
                     else:
-                        logger.error(f"[ACPX-V2] 🔴 Hard timeout and NO files created — rollback")
-                        print(f"🔴 ACPX-HARD-TIMEOUT: No files created, rolling back", flush=True)
+                        logger.error(f"[CLAUDE-AGENT] 🔴 Execution failed (code {return_code}) and NO files created — rollback")
+                        print(f"🔴 CLAUDE-AGENT-FAILED: No files created, rolling back", flush=True)
                         self.snapshot_manager.rollback_and_cleanup()
                         return {
                             "status": "failed",
                             "success": False,
-                            "message": f"Hard timeout ({HARD_TIMEOUT}s) and no files created",
+                            "message": f"Claude Agent failed (code {return_code}): {stderr_output}",
                             "rollback": True
                         }
-                
-                # Handle IDLE timeout kills (PARTIAL_SUCCESS - keep files if any exist)
-                elif idle_timeout_killed:
-                    # Check if any files were created
-                    created_files = list(self.frontend_src_path.glob("**/*.tsx"))
-                    if created_files:
-                        issues.append(f"Idle timeout exceeded ({IDLE_TIMEOUT}s)")
-                        logger.warning(f"[ACPX-V2] ⚠️ Idle timeout — keeping {len(created_files)} generated files")
-                        print(f"⚠️ ACPX-IDLE-TIMEOUT: Keeping {len(created_files)} generated files (partial success)", flush=True)
-                        status = "partial_success"
-                    else:
-                        logger.error(f"[ACPX-V2] 🔴 Idle timeout and NO files created — rollback")
-                        print(f"🔴 ACPX-IDLE-TIMEOUT: No files created, rolling back", flush=True)
-                        self.snapshot_manager.rollback_and_cleanup()
-                        return {
-                            "status": "failed",
-                            "success": False,
-                            "message": f"Idle timeout ({IDLE_TIMEOUT}s) and no files created",
-                            "rollback": True
-                        }
-                    print(f"⚠️ ACPX-IDLE-TIMEOUT: Keeping generated files (partial success)", flush=True)
-                    status = "partial_success"
 
             except RuntimeError as e:
-                # ACPX execution exception - THIS IS THE ONLY CASE FOR ROLLBACK
-                logger.error(f"[ACPX-V2] 🔴 ACPX execution CRASHED: {e}")
+                # Claude Agent execution exception - ROLLBACK
+                logger.error(f"[CLAUDE-AGENT] 🔴 Execution CRASHED: {e}")
                 traceback.print_exc()
                 self.snapshot_manager.rollback_and_cleanup()
                 return {
                     "status": "failed",
                     "success": False,
-                    "message": f"ACPX execution crashed: {str(e)}",
+                    "message": f"Claude Agent execution crashed: {str(e)}",
                     "rollback": True
                 }
 
-            # Step 6: Capture filesystem state AFTER ACPX (safe - continues on failure)
-            logger.info(f"[ACPX-V2] Step 6: Capturing filesystem state after ACPX...")
+            # Step 7: Capture filesystem state AFTER Claude Agent (safe - continues on failure)
+            logger.info(f"[CLAUDE-AGENT] Step 7: Capturing filesystem state after execution...")
             try:
                 hashes_after = FilesystemSnapshot.get_file_hashes(self.frontend_src_path)
-                logger.info(f"[ACPX-V2]   Found {len(hashes_after)} files after ACPX")
+                logger.info(f"[CLAUDE-AGENT]   Found {len(hashes_after)} files after execution")
             except Exception as e:
-                logger.warning(f"[ACPX-V2] ⚠️ Failed to capture post-ACPX state: {e}")
+                logger.warning(f"[CLAUDE-AGENT] ⚠️ Failed to capture post-execution state: {e}")
                 hashes_after = {}
-                issues.append(f"Post-ACPX snapshot failed: {e}")
+                issues.append(f"Post-execution snapshot failed: {e}")
 
-            # Step 7: Compute changes (safe_diff - returns empty on failure)
-            logger.info(f"[ACPX-V2] Step 7: Computing filesystem diff...")
+            # Step 8: Compute changes (safe_diff - returns empty on failure)
+            logger.info(f"[CLAUDE-AGENT] Step 8: Computing filesystem diff...")
             diff = safe_diff(hashes_before, hashes_after)
 
             files_added = diff['added']
             files_removed = diff['removed']
             files_modified = diff['modified']
 
-            logger.info(f"[ACPX-V2]   Files added: {len(files_added)}")
+            logger.info(f"[CLAUDE-AGENT]   Files added: {len(files_added)}")
             for f in files_added[:10]:
-                logger.info(f"[ACPX-V2]     + {f}")
+                logger.info(f"[CLAUDE-AGENT]     + {f}")
             if len(files_added) > 10:
-                logger.info(f"[ACPX-V2]     ... and {len(files_added) - 10} more")
+                logger.info(f"[CLAUDE-AGENT]     ... and {len(files_added) - 10} more")
 
-            logger.info(f"[ACPX-V2]   Files removed: {len(files_removed)}")
+            logger.info(f"[CLAUDE-AGENT]   Files removed: {len(files_removed)}")
             for f in files_removed[:10]:
-                logger.info(f"[ACPX-V2]     - {f}")
+                logger.info(f"[CLAUDE-AGENT]     - {f}")
             if len(files_removed) > 10:
-                logger.info(f"[ACPX-V2]     ... and {len(files_removed) - 10} more")
+                logger.info(f"[CLAUDE-AGENT]     ... and {len(files_removed) - 10} more")
 
-            logger.info(f"[ACPX-V2]   Files modified: {len(files_modified)}")
+            logger.info(f"[CLAUDE-AGENT]   Files modified: {len(files_modified)}")
             for f in files_modified[:10]:
-                logger.info(f"[ACPX-V2]     ~ {f}")
+                logger.info(f"[CLAUDE-AGENT]     ~ {f}")
             if len(files_modified) > 10:
-                logger.info(f"[ACPX-V2]     ... and {len(files_modified) - 10} more")
+                logger.info(f"[CLAUDE-AGENT]     ... and {len(files_modified) - 10} more")
 
             # =============================================
             # FINAL RESULT (3-state outcome)
@@ -1216,9 +1071,9 @@ class ACPFrontendEditorV2:
             
             # Determine final message based on status
             if status == "success":
-                message = "ACPX changes applied successfully"
+                message = "Claude Agent changes applied successfully"
             else:
-                message = f"ACPX changes applied with issues: {'; '.join(issues[:5])}"
+                message = f"Claude Agent changes applied with issues: {'; '.join(issues[:5])}"
             
             result = {
                 "status": status,
@@ -1232,10 +1087,10 @@ class ACPFrontendEditorV2:
                 "rollback": False
             }
             
-            logger.info(f"[ACPX-V2] ✅ Final status: {status}")
+            logger.info(f"[CLAUDE-AGENT] ✅ Final status: {status}")
             if issues:
-                logger.info(f"[ACPX-V2]   Issues: {issues}")
-            logger.info(f"[ACPX-V2]   Files: +{len(files_added)} ~{len(files_modified)} -{len(files_removed)}")
+                logger.info(f"[CLAUDE-AGENT]   Issues: {issues}")
+            logger.info(f"[CLAUDE-AGENT]   Files: +{len(files_added)} ~{len(files_modified)} -{len(files_removed)}")
             
             return result
 
@@ -1243,20 +1098,20 @@ class ACPFrontendEditorV2:
             # =============================================
             # GLOBAL EXCEPTION HANDLER (ONLY case for rollback)
             # =============================================
-            logger.error(f"[ACPX-V2] 🔴 FATAL ERROR: {type(e).__name__}: {str(e)}")
+            logger.error(f"[CLAUDE-AGENT] 🔴 FATAL ERROR: {type(e).__name__}: {str(e)}")
             traceback.print_exc()
 
             # Attempt to rollback
             try:
                 self.snapshot_manager.rollback_and_cleanup()
-                logger.info("[ACPX-V2] Rollback completed")
+                logger.info("[CLAUDE-AGENT] Rollback completed")
             except Exception as rollback_error:
-                logger.warning(f"[ACPX-V2] Rollback also failed: {rollback_error}")
+                logger.warning(f"[CLAUDE-AGENT] Rollback also failed: {rollback_error}")
 
             return {
                 "status": "failed",
                 "success": False,
-                "message": f"FATAL ERROR in apply_changes_via_acpx: {str(e)}",
+                "message": f"FATAL ERROR in apply_changes: {str(e)}",
                 "issues": [str(e)],
                 "files_added": 0,
                 "files_modified": 0,
@@ -1266,10 +1121,16 @@ class ACPFrontendEditorV2:
         finally:
             # Cleanup snapshot to prevent leaks
             try:
-                logger.info(f"[ACPX-V2] Step 13: Cleanup snapshot...")
+                logger.info(f"[CLAUDE-AGENT] Step 13: Cleanup snapshot...")
                 self.snapshot_manager.cleanup_snapshot()
             except Exception as e:
-                logger.warning(f"[ACPX-V2] Snapshot cleanup failed: {str(e)}")
+                logger.warning(f"[CLAUDE-AGENT] Snapshot cleanup failed: {str(e)}")
+
+    # Backwards compatibility alias (deprecated - use apply_changes instead)
+    async def apply_changes_via_acpx(self, goal_description: str, execution_id: str) -> Dict[str, Any]:
+        """Deprecated: Use apply_changes() instead."""
+        logger.warning("[DEPRECATED] apply_changes_via_acpx() is deprecated, use apply_changes()")
+        return await self.apply_changes(goal_description, execution_id)
 
     async def _extract_required_pages_from_prompt(self, goal_description: str) -> List[str]:
         """
@@ -1317,6 +1178,95 @@ class ACPFrontendEditorV2:
         print("="*60, flush=True)
         print("🔍 PAGE INFERENCE COMPLETE", flush=True)
         print("="*60 + "\n", flush=True)
+
+        # Phase 9: Store allowed pages whitelist for guardrails
+        self.allowed_pages = set(required_pages)
+
+        # Cache pages to prevent double LLM calls
+        self._cached_pages = required_pages
+
+        return required_pages
+
+    async def _run_claude_agent(self, prompt: str) -> Tuple[int, str, str]:
+        """
+        Run Claude Code Agent to execute the prompt.
+
+        This replaces the ACPX subprocess call with direct Claude CLI integration.
+
+        Args:
+            prompt: The prompt to send to Claude
+
+        Returns:
+            Tuple of (return_code, stdout, stderr)
+
+        Raises:
+            RuntimeError: If ClaudeCodeAgent is not available or execution fails
+        """
+        if not CLAUDE_AGENT_AVAILABLE:
+            raise RuntimeError("ClaudeCodeAgent not available - check claude_code_agent.py import")
+
+        import asyncio
+
+        stdout_lines = []
+        stderr_lines = []
+
+        def on_text(text: str) -> None:
+            """Callback for streaming text output (persisted to DB)."""
+            stdout_lines.append(text)
+            # Also print to stdout for PM2 logs
+            print(text, flush=True)
+
+        def on_progress(progress: str) -> None:
+            """Callback for progress updates (UI only - NOT persisted)."""
+            # Print progress to stdout for PM2 visibility
+            print(f"[CLAUDE-PROGRESS] {progress}", flush=True)
+
+        logger.info(f"[CLAUDE-AGENT] Starting Claude Code Agent execution...")
+        logger.info(f"[CLAUDE-AGENT] Working directory: {self.frontend_src_path}")
+        logger.info(f"[CLAUDE-AGENT] Timeout: {CLAUDE_TIMEOUT}s")
+
+        print("=" * 80, flush=True)
+        print("🤖 CLAUDE CODE AGENT - STARTING", flush=True)
+        print(f"   Working directory: {self.frontend_src_path}", flush=True)
+        print(f"   Timeout: {CLAUDE_TIMEOUT}s", flush=True)
+        print("=" * 80, flush=True)
+
+        try:
+            # Create Claude Code Agent instance
+            async with ClaudeCodeAgent(
+                repo_path=str(self.frontend_src_path),
+                on_text=on_text,
+                on_progress=on_progress,
+            ) as agent:
+                # Execute the query with timeout
+                result = await agent.query(prompt, timeout=CLAUDE_TIMEOUT)
+
+                # Determine return code based on result
+                return_code = 0 if result is not None else 1
+
+                logger.info(f"[CLAUDE-AGENT] Execution completed with return code: {return_code}")
+                if result:
+                    logger.info(f"[CLAUDE-AGENT] Result length: {len(result)} chars")
+
+                print("=" * 80, flush=True)
+                print("✅ CLAUDE CODE AGENT - COMPLETED", flush=True)
+                print(f"   Return code: {return_code}", flush=True)
+                print(f"   Output lines: {len(stdout_lines)}", flush=True)
+                print("=" * 80, flush=True)
+
+                return (return_code, '\n'.join(stdout_lines), '\n'.join(stderr_lines))
+
+        except asyncio.TimeoutError:
+            logger.error(f"[CLAUDE-AGENT] Timeout after {CLAUDE_TIMEOUT}s")
+            print(f"🔴 CLAUDE-AGENT-TIMEOUT: Exceeded {CLAUDE_TIMEOUT}s", flush=True)
+            # Return timeout as non-zero exit code
+            return (124, '\n'.join(stdout_lines), f"Timeout after {CLAUDE_TIMEOUT}s")
+
+        except Exception as e:
+            logger.error(f"[CLAUDE-AGENT] Execution failed: {e}")
+            print(f"🔴 CLAUDE-AGENT-ERROR: {type(e).__name__}: {str(e)}", flush=True)
+            # Return error as non-zero exit code
+            return (1, '\n'.join(stdout_lines), str(e))
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
@@ -1833,169 +1783,6 @@ Complete in order before marking task complete:
             logger.error(f"[Phase4] Error loading page specs: {e}")
             # Fallback: return empty section
             return "\n## Page Specifications\n\nNote: Page specs not available, using page templates only.\n"
-
-    
-
-    def _kill_process_tree(self, pid: int):
-        """
-        Kill a process and all its children aggressively.
-        Handles npx child processes that may be in different process groups.
-        
-        IMPORTANT: Only kills processes that are descendants of THIS session's PID.
-        Multiple projects may run ACPX sessions in parallel - DO NOT use global pkill!
-        
-        Args:
-            pid: Process ID to kill (will also kill all children)
-        """
-        import signal
-        
-        def get_all_descendants(parent_pid: int, max_depth: int = 10) -> list:
-            """Recursively find all descendant PIDs using pgrep -P."""
-            descendants = []
-            pids_to_check = [parent_pid]
-            visited = set()
-            depth = 0
-            
-            while pids_to_check and depth < max_depth:
-                depth += 1
-                new_pids = []
-                for check_pid in pids_to_check:
-                    if check_pid in visited:
-                        continue
-                    visited.add(check_pid)
-                    try:
-                        result = subprocess.run(
-                            ["pgrep", "-P", str(check_pid)],
-                            capture_output=True,
-                            text=True,
-                            timeout=1
-                        )
-                        if result.returncode == 0:
-                            children = [int(p.strip()) for p in result.stdout.strip().split('\n') if p.strip()]
-                            descendants.extend(children)
-                            new_pids.extend(children)
-                    except Exception:
-                        pass
-                pids_to_check = new_pids
-            
-            return descendants
-        
-        def is_descendant_of(child_pid: int, ancestor_pid: int) -> bool:
-            """Check if child_pid is a descendant of ancestor_pid by walking parent chain."""
-            try:
-                current_pid = child_pid
-                max_walk = 20  # Prevent infinite loop
-                
-                while current_pid and max_walk > 0:
-                    max_walk -= 1
-                    
-                    # Read parent PID from /proc
-                    try:
-                        stat_path = f"/proc/{current_pid}/stat"
-                        with open(stat_path, 'r') as f:
-                            # /proc/[pid]/stat format: pid (comm) state ppid ...
-                            parts = f.read().split()
-                            if len(parts) >= 4:
-                                ppid = int(parts[3])
-                                if ppid == ancestor_pid:
-                                    return True
-                                if ppid <= 1:  # Reached init
-                                    return False
-                                current_pid = ppid
-                            else:
-                                return False
-                    except (FileNotFoundError, PermissionError, ValueError):
-                        return False
-            except Exception:
-                pass
-            return False
-        
-        def find_claude_agent_descendants(ancestor_pid: int) -> list:
-            """Find claude-agent-acp processes that are descendants of ancestor_pid."""
-            claude_pids = []
-            try:
-                # Find all claude-agent-acp processes
-                result = subprocess.run(
-                    ["pgrep", "-f", "claude-agent-acp"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    for p in result.stdout.strip().split('\n'):
-                        if p.strip():
-                            try:
-                                child_pid = int(p.strip())
-                                # Verify it's a descendant of our session
-                                if is_descendant_of(child_pid, ancestor_pid):
-                                    claude_pids.append(child_pid)
-                                    logger.info(f"[ACPX-V2] Found claude-agent-acp descendant: {child_pid}")
-                            except ValueError:
-                                pass
-            except Exception as e:
-                logger.debug(f"[ACPX-V2] Failed to find claude-agent processes: {e}")
-            return claude_pids
-        
-        try:
-            # Step 1: Get all descendant PIDs (fully recursive via pgrep -P)
-            all_pids = get_all_descendants(pid)
-            logger.info(f"[ACPX-V2] Found {len(all_pids)} descendant processes via pgrep")
-            
-            # Step 1b: Also find claude-agent-acp processes that are descendants
-            claude_pids = find_claude_agent_descendants(pid)
-            if claude_pids:
-                logger.info(f"[ACPX-V2] Found {len(claude_pids)} claude-agent-acp descendants")
-                all_pids.extend(claude_pids)
-                all_pids = list(set(all_pids))  # Remove duplicates
-            
-        except Exception as e:
-            logger.warning(f"[ACPX-V2] Failed to get descendant PIDs: {e}")
-            all_pids = []
-        
-        try:
-            # Step 2: Try to kill process group first
-            try:
-                os.killpg(pid, signal.SIGKILL)
-                logger.info(f"[ACPX-V2] Killed process group {pid}")
-            except (ProcessLookupError, OSError, AttributeError) as e:
-                logger.debug(f"[ACPX-V2] Process group kill skipped: {e}")
-            
-            # Step 3: Kill all descendants (SIGKILL)
-            for child_pid in all_pids:
-                try:
-                    os.kill(child_pid, signal.SIGKILL)
-                    logger.info(f"[ACPX-V2] Killed descendant process {child_pid}")
-                except (ProcessLookupError, OSError) as e:
-                    logger.debug(f"[ACPX-V2] Descendant process {child_pid} already dead: {e}")
-            
-            # Step 4: Kill main process (SIGKILL)
-            try:
-                os.kill(pid, signal.SIGKILL)
-                logger.info(f"[ACPX-V2] Killed main process {pid}")
-            except (ProcessLookupError, OSError) as e:
-                logger.debug(f"[ACPX-V2] Main process {pid} already dead: {e}")
-            
-            # NOTE: DO NOT use global pkill for claude-agent-acp!
-            # Multiple projects may run ACPX sessions in parallel.
-            # We only kill processes that are descendants of THIS session's PID.
-            
-            # Step 5: Verify all processes are dead
-            time.sleep(0.5)
-            check_pids = [pid] + all_pids
-            alive_count = 0
-            for check_pid in check_pids:
-                try:
-                    os.kill(check_pid, 0)  # Check if process exists
-                    logger.warning(f"[ACPX-V2] ⚠️  Process {check_pid} STILL ALIVE after SIGKILL!")
-                    alive_count += 1
-                except (ProcessLookupError, OSError):
-                    logger.debug(f"[ACPX-V2] ✓ Process {check_pid} confirmed dead")
-            
-            if alive_count > 0:
-                logger.warning(f"[ACPX-V2] ⚠️ {alive_count} processes still alive after cleanup")
-            
-        except Exception as e:
-            logger.error(f"[ACPX-V2] Failed to kill process tree: {e}")
 
 
 

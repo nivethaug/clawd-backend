@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+import asyncio
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -37,6 +38,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Claude Code Agent integration for build error fixing
+try:
+    from claude_code_agent import ClaudeCodeAgent
+    CLAUDE_AGENT_AVAILABLE = True
+except ImportError:
+    CLAUDE_AGENT_AVAILABLE = False
+    logger.warning("ClaudeCodeAgent not available for build fixes")
+
+CLAUDE_FIX_TIMEOUT = int(os.getenv("CLAUDE_FIX_TIMEOUT", "180"))  # 3 minutes for build fixes
 
 # Database path
 DB_PATH = "/root/clawd-backend/clawdbot_adapter.db"
@@ -1716,7 +1727,7 @@ class InfrastructureManager:
             logger.info("[VERIFY] ✓ Deployment verified successfully")
             logger.info("PHASE_9_VERIFY_COMPLETE: success")
             
-            # PHASE_10: Final Cleanup (node_modules removal + orphaned ACPX processes)
+            # PHASE_10: Final Cleanup (node_modules removal)
             logger.info("Phase 8/8: Final cleanup")
             logger.info("🧹 Cleaning up node_modules to save disk space...")
             try:
@@ -1734,10 +1745,6 @@ class InfrastructureManager:
             except Exception as cleanup_error:
                 logger.warning(f"⚠️ Could not remove node_modules: {cleanup_error}")
                 # Don't fail the deployment, just warn
-            
-            # Clean up orphaned claude-agent-acp processes from this project
-            logger.info("🧹 Cleaning up orphaned ACPX processes...")
-            self._cleanup_orphaned_acpx_processes()
             
             # PHASE_11: Push all code to GitHub (after all infrastructure is ready)
             if self.repo_url:
@@ -1765,74 +1772,9 @@ class InfrastructureManager:
             self._rollback()
             return False
     
-    def _cleanup_orphaned_acpx_processes(self):
+    async def _claude_fix_build_error(self, build_error: str, attempt: int, max_attempts: int = 3) -> bool:
         """
-        Clean up orphaned claude-agent-acp processes.
-        
-        Only kills processes whose parent process has died (orphaned).
-        This ensures we don't kill processes from other active projects.
-        """
-        try:
-            # Find all claude-agent-acp processes
-            result = subprocess.run(
-                ["pgrep", "-f", "claude-agent-acp"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode != 0 or not result.stdout.strip():
-                logger.info("✓ No claude-agent-acp processes found")
-                return
-            
-            pids = [int(p.strip()) for p in result.stdout.strip().split('\n') if p.strip()]
-            killed_count = 0
-            
-            for pid in pids:
-                try:
-                    # Check if this process is orphaned (parent is dead or init)
-                    try:
-                        stat_path = f"/proc/{pid}/stat"
-                        with open(stat_path, 'r') as f:
-                            parts = f.read().split()
-                            if len(parts) >= 4:
-                                ppid = int(parts[3])
-                                
-                                # Check if parent process exists
-                                try:
-                                    os.kill(ppid, 0)
-                                    # Parent exists, don't kill this one
-                                    logger.debug(f"claude-agent-acp {pid} has parent {ppid}, skipping")
-                                    continue
-                                except (ProcessLookupError, OSError):
-                                    # Parent is dead - this is an orphan!
-                                    logger.info(f"Found orphaned claude-agent-acp {pid} (parent {ppid} dead)")
-                    except (FileNotFoundError, PermissionError, ValueError) as e:
-                        # Can't read /proc, try to kill anyway
-                        logger.debug(f"Could not check parent for {pid}: {e}")
-                    
-                    # Kill the orphaned process
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                        logger.info(f"✓ Killed orphaned claude-agent-acp process {pid}")
-                        killed_count += 1
-                    except (ProcessLookupError, OSError) as e:
-                        logger.debug(f"Process {pid} already dead: {e}")
-                        
-                except Exception as e:
-                    logger.debug(f"Failed to check/kill process {pid}: {e}")
-            
-            if killed_count > 0:
-                logger.info(f"✓ Cleaned up {killed_count} orphaned ACPX processes")
-            else:
-                logger.info("✓ No orphaned ACPX processes to clean up")
-                
-        except Exception as e:
-            logger.warning(f"⚠️ ACPX cleanup failed: {e}")
-
-    def _acpx_fix_build_error(self, build_error: str, attempt: int, max_attempts: int = 3) -> bool:
-        """
-        Use ACPX to automatically fix build errors.
+        Use Claude Code Agent to automatically fix build errors.
         
         Args:
             build_error: The build error message
@@ -1842,15 +1784,20 @@ class InfrastructureManager:
         Returns:
             True if fix was applied successfully, False otherwise
         """
+        if not CLAUDE_AGENT_AVAILABLE:
+            logger.error("CLAUDE_FIX: ClaudeCodeAgent not available for build fix")
+            print("🔴 CLAUDE_FIX-ERROR: ClaudeCodeAgent not available")
+            return False
+            
         try:
-            logger.info(f"🔧 ACPX_AUTO_FIX: Attempt {attempt}/{max_attempts} - Calling ACPX to fix build error")
-            print(f"🔴 ACPX_AUTO_FIX: Attempt {attempt}/{max_attempts} - Analyzing build errors...")
+            logger.info(f"🔧 CLAUDE_FIX: Attempt {attempt}/{max_attempts} - Calling Claude to fix build error")
+            print(f"🔴 CLAUDE_FIX: Attempt {attempt}/{max_attempts} - Analyzing build errors...")
             
             frontend_src_path = self.project_path / "frontend" / "src"
             
             if not frontend_src_path.exists():
-                logger.error("ACPX_AUTO_FIX: Frontend src path not found")
-                print("🔴 ACPX_AUTO_FIX-ERROR: Frontend src path not found")
+                logger.error("CLAUDE_FIX: Frontend src path not found")
+                print("🔴 CLAUDE_FIX-ERROR: Frontend src path not found")
                 return False
             
             # Enhanced error extraction - get more context
@@ -1864,12 +1811,12 @@ class InfrastructureManager:
             # Use critical errors if found, otherwise use full error (truncated to 4000 chars)
             error_context = '\n'.join(critical_errors[-20:]) if critical_errors else build_error[-4000:]
             
-            logger.info(f"🔧 ACPX_AUTO_FIX: Extracted {len(critical_errors)} critical error lines")
-            logger.info(f"🔧 ACPX_AUTO_FIX: Error context length: {len(error_context)} chars")
+            logger.info(f"🔧 CLAUDE_FIX: Extracted {len(critical_errors)} critical error lines")
+            logger.info(f"🔧 CLAUDE_FIX: Error context length: {len(error_context)} chars")
             if not error_context or error_context.strip() == "":
-                logger.warning("ACPX_AUTO_FIX: Error context is empty, using generic fix prompt")
+                logger.warning("CLAUDE_FIX: Error context is empty, using generic fix prompt")
                 error_context = "Build failed - please run npm run build and fix any errors"
-            print(f"🔴 ACPX_AUTO_FIX: Found {len(critical_errors)} critical errors to fix")
+            print(f"🔴 CLAUDE_FIX: Found {len(critical_errors)} critical errors to fix")
             
             # Build fix prompt with enhanced error context
             fix_prompt = f"""You are fixing a build error in a React + Vite + TypeScript application.
@@ -1895,51 +1842,29 @@ RULES:
 
 CRITICAL: Fix the errors and ensure npm run build succeeds."""
             
-            # Run ACPX with fix prompt
-            cmd = [
-                "acpx",
-                "--cwd", str(frontend_src_path),
-                "--format", "quiet",
-                "claude",
-                "exec",
-                str(fix_prompt)
-            ]
+            # Run Claude Code Agent
+            logger.info(f"CLAUDE_FIX: Running ClaudeCodeAgent on {frontend_src_path}")
             
-            # Log with truncated prompt for debugging
-            prompt_preview = fix_prompt[:200] + "..." if len(fix_prompt) > 200 else fix_prompt
-            logger.info(f"ACPX_AUTO_FIX: Running: acpx --cwd {frontend_src_path} --format quiet claude exec")
-            logger.info(f"ACPX_AUTO_FIX: Prompt preview: {prompt_preview}")
+            async with ClaudeCodeAgent(str(frontend_src_path)) as agent:
+                response = await agent.query(fix_prompt, timeout=CLAUDE_FIX_TIMEOUT)
             
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=180  # 3 minutes for fix
-            )
+            if response:
+                logger.info(f"✓ CLAUDE_FIX: Attempt {attempt}/{max_attempts} completed successfully")
+                logger.info(f"CLAUDE_FIX: Response length: {len(response)} chars")
+                print(f"🔴 CLAUDE_FIX-SUCCESS: AI has analyzed and fixed build errors")
+                return True
+            else:
+                logger.error("CLAUDE_FIX: No response received from Claude")
+                print("🔴 CLAUDE_FIX-ERROR: No response from Claude")
+                return False
             
-            # Check if ACPX succeeded (tolerant of harmless errors)
-            if result.returncode != 0:
-                stderr = result.stderr or ""
-                # Ignore JSON-RPC notification errors
-                if "session/update" in stderr and "Invalid params" in stderr:
-                    logger.warning("ACPX_AUTO_FIX: Ignoring JSON-RPC notification error")
-                elif result.returncode != 0:
-                    logger.error(f"ACPX_AUTO_FIX: Failed with code {result.returncode}")
-                    logger.error(f"ACPX_AUTO_FIX: stderr: {stderr[:500]}")
-                    return False
-            
-            logger.info(f"✓ ACPX_AUTO_FIX: Attempt {attempt}/{max_attempts} completed successfully")
-            logger.info(f"ACPX_AUTO_FIX: stdout: {result.stdout[:300] if result.stdout else '(empty)'}")
-            print(f"🔴 ACPX_AUTO_FIX-SUCCESS: AI has analyzed and fixed build errors")
-            return True
-            
-        except subprocess.TimeoutExpired:
-            logger.error("ACPX_AUTO_FIX: Timeout after 180 seconds")
-            print("🔴 ACPX_AUTO_FIX-ERROR: AI fix timeout after 180 seconds")
+        except asyncio.TimeoutError:
+            logger.error(f"CLAUDE_FIX: Timeout after {CLAUDE_FIX_TIMEOUT} seconds")
+            print(f"🔴 CLAUDE_FIX-ERROR: AI fix timeout after {CLAUDE_FIX_TIMEOUT} seconds")
             return False
         except Exception as e:
-            logger.error(f"ACPX_AUTO_FIX: Exception: {type(e).__name__}: {str(e)}")
-            print(f"🔴 ACPX_AUTO_FIX-ERROR: Exception - {type(e).__name__}: {str(e)}")
+            logger.error(f"CLAUDE_FIX: Exception: {type(e).__name__}: {str(e)}")
+            print(f"🔴 CLAUDE_FIX-ERROR: Exception - {type(e).__name__}: {str(e)}")
             return False
 
     def _phase_5_build(self) -> bool:
@@ -1952,7 +1877,7 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
         - Verify dist directory exists
         - Clean Vite caches to prevent corruption issues
         - Retry with clean reinstall on build failure
-        - Auto-fix with ACPX (max 2 attempts) on build errors
+        - Auto-fix with Claude Code Agent (max 3 attempts) on build errors
         
         Does NOT:
         - Create PM2 services
@@ -2051,32 +1976,32 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 pass  # npm install succeeded
                 # logger.info("✓ npm install completed (including dev dependencies)")  # Commented for cleaner logs
             
-            # Step 2.5: ⚡ Skip build if dist exists (ACPX already built)
+            # Step 2.5: ⚡ Skip build if dist exists (already built)
             dist_path = frontend_path / "dist"
             if dist_path.exists():
                 dist_contents = list(dist_path.iterdir())
                 index_html = dist_path / "index.html"
                 if dist_contents and index_html.exists():
-                    logger.info("⚡ Skipping npm build (dist exists - ACPX already built)")
-                    print("⚡ Skipping npm build (dist already exists from ACPX)")
+                    logger.info("⚡ Skipping npm build (dist exists - already built)")
+                    print("⚡ Skipping npm build (dist already exists)")
                     logger.info("✓ npm run build completed (skipped - dist exists)")
                     return True
             
-            # Step 3: npm run build with retry logic (max 3 ACPX auto-fix attempts)
-            MAX_ACPX_RETRIES = 3
+            # Step 3: npm run build with retry logic (max 3 Claude auto-fix attempts)
+            MAX_CLAUDE_RETRIES = 3
             build_attempt = 0
             
             # logger.info("🔧 Starting autonomous fix loop (max 3 AI fix attempts)")  # Commented for cleaner logs
             print("=" * 80)
             print("🔧 AUTONOMOUS FIX LOOP: Starting build with AI auto-fix capability")
-            print(f"   Max AI fix attempts: {MAX_ACPX_RETRIES}")
+            print(f"   Max AI fix attempts: {MAX_CLAUDE_RETRIES}")
             print("=" * 80)
             
-            while build_attempt < MAX_ACPX_RETRIES:
+            while build_attempt < MAX_CLAUDE_RETRIES:
                 build_attempt += 1
                 
-                # logger.info(f"[BUILD] Running npm build (attempt {build_attempt}/{MAX_ACPX_RETRIES}) in {frontend_path}")  # Commented for cleaner logs
-                print(f"🔴 BUILD-ATTEMPT: {build_attempt}/{MAX_ACPX_RETRIES}")
+                # logger.info(f"[BUILD] Running npm build (attempt {build_attempt}/{MAX_CLAUDE_RETRIES}) in {frontend_path}")  # Commented for cleaner logs
+                print(f"🔴 BUILD-ATTEMPT: {build_attempt}/{MAX_CLAUDE_RETRIES}")
                 build_result = subprocess.run(
                     ["npm", "run", "build"],
                     cwd=str(frontend_path),
@@ -2088,34 +2013,34 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 
                 if build_result.returncode == 0:
                     # logger.info(f"✓ npm run build succeeded on attempt {build_attempt}")  # Commented for cleaner logs
-                    print(f"🔴 BUILD-SUCCESS: Build succeeded on attempt {build_attempt}/{MAX_ACPX_RETRIES}")
+                    print(f"🔴 BUILD-SUCCESS: Build succeeded on attempt {build_attempt}/{MAX_CLAUDE_RETRIES}")
                     if build_attempt > 1:
                         print(f"🔴 AUTONOMOUS-FIX-LOOP: AI successfully fixed build errors after {build_attempt - 1} attempt(s)")
                     break
                 
-                # Build failed - check if we can retry with ACPX
-                if build_attempt < MAX_ACPX_RETRIES:
+                # Build failed - check if we can retry with Claude
+                if build_attempt < MAX_CLAUDE_RETRIES:
                     logger.warning(f"⚠️ Build failed (attempt {build_attempt}): {build_result.stderr[:300]}")
-                    # logger.info(f"🔧 Calling ACPX to auto-fix build error (attempt {build_attempt}/{MAX_ACPX_RETRIES})")  # Commented for cleaner logs
+                    # logger.info(f"🔧 Calling Claude to auto-fix build error (attempt {build_attempt}/{MAX_CLAUDE_RETRIES})")  # Commented for cleaner logs
                     print(f"🔴 BUILD-FAILED: Attempt {build_attempt} failed, calling AI to fix...")
                     
-                    # Call ACPX to fix the build error
-                    fix_success = self._acpx_fix_build_error(build_result.stderr, build_attempt, MAX_ACPX_RETRIES)
+                    # Call Claude Code Agent to fix the build error
+                    fix_success = asyncio.run(self._claude_fix_build_error(build_result.stderr, build_attempt, MAX_CLAUDE_RETRIES))
                     
                     if fix_success:
-                        # logger.info(f"✓ ACPX auto-fix applied successfully, retrying build...")  # Commented for cleaner logs
+                        # logger.info(f"✓ Claude auto-fix applied successfully, retrying build...")  # Commented for cleaner logs
                         print(f"🔴 AUTONOMOUS-FIX-LOOP: AI fix applied, retrying build...")
                         # Loop will retry build
                     else:
-                        logger.error(f"❌ ACPX auto-fix failed, cannot continue")
+                        logger.error(f"❌ Claude auto-fix failed, cannot continue")
                         print(f"🔴 AUTONOMOUS-FIX-ERROR: AI fix attempt {build_attempt} failed")
-                        logger.info("PHASE_5_BUILD_FAILED: ACPX auto-fix failed")
+                        logger.info("PHASE_5_BUILD_FAILED: Claude auto-fix failed")
                         return False
                 else:
                     # Final attempt failed
-                    logger.error(f"❌ Build failed after {MAX_ACPX_RETRIES} ACPX auto-fix attempts")
+                    logger.error(f"❌ Build failed after {MAX_CLAUDE_RETRIES} Claude auto-fix attempts")
                     logger.error(f"Build error: {build_result.stderr[:500]}")
-                    print(f"🔴 AUTONOMOUS-FIX-FAILED: Build failed after {MAX_ACPX_RETRIES} AI fix attempts")
+                    print(f"🔴 AUTONOMOUS-FIX-FAILED: Build failed after {MAX_CLAUDE_RETRIES} AI fix attempts")
                     print("=" * 80)
                     logger.info("PHASE_5_BUILD_FAILED: max retries exceeded")
                     return False
