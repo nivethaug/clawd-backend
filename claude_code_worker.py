@@ -194,7 +194,7 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
                 
                 # Wait for process with timeout
                 try:
-                    returncode = process.wait(timeout=900)  # 15 minutes max
+                    returncode = process.wait(timeout=1300)  # 21 minutes max (matches CLAUDE_TIMEOUT)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()

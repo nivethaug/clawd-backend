@@ -74,7 +74,7 @@ MAX_NEW_FILES = 15  # Maximum new files per execution
 BUILD_TIMEOUT = 1800  # 30 minutes
 
 # Claude Code Agent settings
-CLAUDE_TIMEOUT = int(os.getenv("CLAUDE_TIMEOUT", "900"))  # 15 minutes default
+CLAUDE_TIMEOUT = int(os.getenv("CLAUDE_TIMEOUT", "1300"))  # 21 minutes default
 
 # =============================================================================
 # PATH VALIDATION
