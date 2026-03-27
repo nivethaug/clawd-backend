@@ -7,6 +7,7 @@
   "autorestart": true,
   "watch": false,
   "env": {
-    "DB_PATH": "/root/clawd-backend/clawdbot_adapter.db"
+    "DB_PATH": "/root/clawd-backend/clawdbot_adapter.db",
+    "PYTHONUNBUFFERED": "1"
   }
 }

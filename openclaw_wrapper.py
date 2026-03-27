@@ -19,6 +19,7 @@ import sys
 print("OPENCLAW_WRAPPER_BOOT", flush=True)
 sys.stdout.flush()
 
+import signal
 import json
 import logging
 import os
@@ -26,6 +27,24 @@ import subprocess
 import requests
 from datetime import datetime
 from pathlib import Path
+
+# Signal handler for debugging SIGTERM
+def _signal_handler(signum, frame):
+    """Log when process receives termination signal."""
+    signal_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
+    print(f"\n🔴 SIGNAL RECEIVED: {signal_name} ({signum}) - Process being killed!", flush=True)
+    print(f"🔴 Stack trace:", flush=True)
+    import traceback
+    traceback.print_stack(frame)
+    sys.stdout.flush()
+    # Re-raise to allow default handler
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+# Install signal handlers
+signal.signal(signal.SIGTERM, _signal_handler)
+signal.signal(signal.SIGINT, _signal_handler)
+print("🔧 Signal handlers installed for SIGTERM/SIGINT", flush=True)
 
 # Pipeline status tracking
 from pipeline_status import PipelineStatusTracker, PipelinePhase, PhaseStatus, ErrorCode, format_status_report
