@@ -728,7 +728,7 @@ class ToolExecutor:
             text_parts.append(f"with status: {status}")
         
         # Add frontend URL if available
-        frontend_url = f"https://{domain}.yourdomain.com"  # Adjust based on your domain
+        frontend_url = f"https://{domain}.dreambigwithai.com"  # Adjust based on your domain
         text_parts.append(f"Access it at {frontend_url}")
         
         # Add description if available
