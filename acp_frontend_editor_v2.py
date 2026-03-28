@@ -1399,7 +1399,7 @@ Project Description: {goal_description}
 3. Integrate Navbar into `Layout.tsx`
 4. Create each required page (fully implemented, 800+ chars)
 5. Run `npm run build` — fix all errors until it succeeds
-6. Serve dist: `npx serve dist -l 3000`
+6. Serve dist: `npx serve dist -l 3004`
 7. Verify with Chrome DevTools MCP — snapshot, console, routes, screenshot
 8. Update AI index files (symbols, files, dependencies, summaries)
 
@@ -1717,10 +1717,10 @@ Verify before serving:
 Then serve. Multiple Claude Code sessions may be running in parallel — always check if the port is in use before serving:
 
 ```bash
-# Check if 3000 is in use; if so, find a free port in the 4000–5000 range
-lsof -i :3000 && echo "Port 3000 in use" || npx serve dist -l 3000
+# Check if 3004 is in use; if so, find a free port in the 4000–5000 range
+lsof -i :3004 && echo "Port 3004 in use" || npx serve dist -l 3004
 
-# If 3000 is taken, run this instead:
+# If 3004 is taken, run this instead:
 for port in 4000 4001 4002 4003 4004 4005; do
   lsof -i :$port > /dev/null 2>&1 || {{ echo "Using port $port"; npx serve dist -l $port; break; }}
 done
@@ -1764,12 +1764,15 @@ Use DevTools MCP `network` to verify:
 - No failed API calls blocking render
 
 **6. Take final screenshot**
-Use DevTools MCP `screenshot` to capture the final confirmed state. This is the proof of completion.
+Use DevTools MCP `screenshot` with webp format to capture the final confirmed state. This is the proof of completion.
 
 **If any check fails:** fix the issue, rebuild (`npm run build`), re-serve, and re-verify.
 
 **7. Stop the server**
 Once verification is complete, stop the serve process to free the port:
+
+**7. Close the brwser **
+Don't leave any browser pages open → CLOSE THEM NOW
 
 ```bash
 kill $(lsof -t -i:PORT)
