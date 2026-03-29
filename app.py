@@ -1436,7 +1436,9 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
             from services.telegram.pm2_manager import delete_bot_pm2
             logger.info(f"🗑 Stopping Telegram bot PM2 process for project {project_id}")
             if project_id:
-                success, message = delete_bot_pm2(project_id)
+                # Use domain-based PM2 naming (consistent with creation)
+                bot_domain = frontend_domain or project_name
+                success, message = delete_bot_pm2(project_id, domain=bot_domain)
                 cleanup_results["steps"]["telegram_pm2"] = {
                     "success": success,
                     "message": message
