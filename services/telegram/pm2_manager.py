@@ -3,6 +3,7 @@ Telegram Bot PM2 Manager
 Manages PM2 processes for telegram bots.
 """
 import subprocess
+import sys
 import json
 from typing import Tuple, Dict, Optional
 from utils.logger import logger
@@ -61,11 +62,11 @@ def start_bot_pm2(project_id: int, project_path: str, port: int, domain: Optiona
         logs_dir = os.path.join(telegram_dir, "logs")
         os.makedirs(logs_dir, exist_ok=True)
         
-        # Start PM2 process
+        # Start PM2 process using current Python interpreter (where dependencies are installed)
         result = subprocess.run(
             ["pm2", "start", "main.py", 
              "--name", process_name,
-             "--interpreter", "python3",
+             "--interpreter", sys.executable,  # Use current Python (has dependencies)
              "--", "--port", str(port)],
             cwd=telegram_dir,
             capture_output=True,
