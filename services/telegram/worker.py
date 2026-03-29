@@ -3,6 +3,7 @@ Telegram Bot Worker
 Main orchestration pipeline for telegram bot deployment.
 """
 import os
+from pathlib import Path
 from typing import Tuple, Dict
 from utils.logger import logger
 
@@ -379,9 +380,9 @@ def run_telegram_bot_pipeline(
         
         logger.info(f"🎉 Telegram bot pipeline completed!")
         logger.info(f"Bot running at: https://{full_domain}")
-        logger.info(f"Webhook URL: https://{full_domain}/bot/{project_id}/webhook")
+        logger.info(f"Webhook URL: https://{full_domain}/webhook")
         
-        result_info["webhook_url"] = f"https://{full_domain}/bot/{project_id}/webhook"
+        result_info["webhook_url"] = f"https://{full_domain}/webhook"
         result_info["bot_url"] = f"https://{full_domain}"
         
         return True, result_info
