@@ -13,7 +13,15 @@ from utils.logger import logger
 SHARED_VENV_PATH = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")
 
 
-def start_bot_pm2(project_id: int, project_path: str, port: int, domain: Optional[str] = None) -> Tuple[bool, str]:
+def start_bot_pm2(
+    project_id: int, 
+    project_path: str, 
+    port: int, 
+    domain: Optional[str] = None,
+    bot_token: Optional[str] = None,
+    webhook_url: Optional[str] = None,
+    database_url: Optional[str] = None
+) -> Tuple[bool, str]:
     """
     Start telegram bot via PM2.
     
@@ -22,12 +30,12 @@ def start_bot_pm2(project_id: int, project_path: str, port: int, domain: Optiona
         project_path: Path to telegram/ directory
         port: Port for webhook server
         domain: Domain name (preferred for PM2 naming)
+        bot_token: Telegram bot token (required)
+        webhook_url: Webhook URL for the bot
+        database_url: Database connection URL (optional)
     
     Returns:
         Tuple of (success, message)
-    
-    Command:
-        pm2 start main.py --name {domain}-bot --interpreter python3
     
     Requirements:
         - Unique process name
@@ -45,30 +53,29 @@ def start_bot_pm2(project_id: int, project_path: str, port: int, domain: Optiona
         logs_dir = os.path.join(telegram_dir, "logs")
         os.makedirs(logs_dir, exist_ok=True)
         
-        # Load environment variables from .env file in telegram directory
-        env_file_path = os.path.join(telegram_dir, ".env")
-        env_vars = {}  # Start fresh for PM2 env
+        # Build environment variables directly from parameters
+        env_vars = {
+            "PORT": str(port),
+            "PROJECT_ID": str(project_id)
+        }
         
-        # Load .env file if it exists
-        if os.path.exists(env_file_path):
-            logger.info(f"📦 Loading environment from: {env_file_path}")
-            with open(env_file_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        key, value = line.split('=', 1)
-                        env_vars[key.strip()] = value.strip()
-                        # Log important vars (mask sensitive values)
-                        if key.strip() == 'BOT_TOKEN':
-                            logger.info(f"  BOT_TOKEN: ***{value.strip()[-6:]}")
-                        elif key.strip() in ['WEBHOOK_URL', 'PORT']:
-                            logger.info(f"  {key.strip()}: {value.strip()}")
+        # Add bot_token if provided
+        if bot_token:
+            env_vars["BOT_TOKEN"] = bot_token
+            logger.info(f"  BOT_TOKEN: ***{bot_token[-6:]}")
         else:
-            logger.warning(f"⚠️ No .env file found at: {env_file_path}")
+            logger.error("❌ BOT_TOKEN is required!")
+            return False, "BOT_TOKEN is required"
         
-        # Add runtime variables (these override .env if needed)
-        env_vars["PORT"] = str(port)
-        env_vars["PROJECT_ID"] = str(project_id)
+        # Add webhook_url if provided
+        if webhook_url:
+            env_vars["WEBHOOK_URL"] = webhook_url
+            logger.info(f"  WEBHOOK_URL: {webhook_url}")
+        
+        # Add database_url if provided
+        if database_url:
+            env_vars["DATABASE_URL"] = database_url
+            logger.info(f"  DATABASE_URL: ***{database_url[-20:]}")
         
         # Use shared venv Python (same as installer.py)
         venv_python = os.path.join(SHARED_VENV_PATH, "bin", "python")
