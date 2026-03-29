@@ -217,6 +217,8 @@ class SessionResponse(BaseModel):
     last_used_at: Optional[str] = None
 
 class CreateProjectRequest(BaseModel):
+    model_config = {"populate_by_name": True}  # Allow both type_id and typeId
+    
     name: str
     domain: Optional[str] = Field(None, min_length=3, max_length=50)
     description: Optional[str] = None
