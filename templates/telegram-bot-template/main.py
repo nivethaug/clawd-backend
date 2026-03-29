@@ -1,7 +1,7 @@
 """
 Telegram Bot Template - Main Entry Point (Webhook Mode)
 Clean, minimal, AI-friendly structure.
-Uses FastAPI for webhook handling.
+Uses FastAPI for webhook handling with python-telegram-bot v20.
 """
 
 import os
@@ -37,14 +37,14 @@ def init_bot():
 
     logger.info("🚀 Initializing Telegram bot...")
 
-    # Initialize database tables
+    # Initialize database tables (optional - won't crash if no DB)
     try:
         init_db()
         logger.info("✅ Database initialized")
     except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
+        logger.warning(f"⚠️ Database initialization skipped: {e}")
 
-    # Build bot application
+    # Build bot application (v20 API)
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # Register handlers
@@ -52,13 +52,20 @@ def init_bot():
     bot_app.add_handler(CommandHandler("help", help_command))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("✅ Bot initialized successfully")
+    logger.info("✅ Bot application built successfully")
 
 
 @app.on_event("startup")
 async def startup():
-    """Startup event - initialize bot and set webhook."""
+    """Startup event - initialize bot and set webhook (v20 lifecycle)."""
+    global bot_app
+    
+    # Build the bot application
     init_bot()
+    
+    # v20 requires explicit initialize() and start()
+    await bot_app.initialize()
+    await bot_app.start()
     
     # Set webhook on Telegram servers
     if WEBHOOK_URL:
@@ -67,14 +74,21 @@ async def startup():
             logger.info(f"✅ Webhook set: {WEBHOOK_URL}")
         except Exception as e:
             logger.error(f"❌ Failed to set webhook: {e}")
+    else:
+        logger.warning("⚠️ No WEBHOOK_URL configured")
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Shutdown event - cleanup."""
+    """Shutdown event - cleanup (v20 lifecycle)."""
     if bot_app:
-        await bot_app.bot.delete_webhook()
-        logger.info("✅ Webhook removed")
+        try:
+            await bot_app.stop()
+            await bot_app.shutdown()
+            await bot_app.bot.delete_webhook()
+            logger.info("✅ Bot stopped and webhook removed")
+        except Exception as e:
+            logger.error(f"❌ Shutdown error: {e}")
 
 
 @app.post("/webhook")
