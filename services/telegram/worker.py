@@ -329,6 +329,29 @@ def run_telegram_bot_pipeline(
                 logger.warning(f"⚠️ Final verification failed with status {response.status_code}")
                 result_info["final_verification"] = f"failed: status {response.status_code}"
                 
+                # Check PM2 logs to diagnose crash
+                logger.error(f"❌ Bot may have crashed after AI enhancement")
+                logger.info(f"🔍 Checking PM2 logs for errors...")
+                try:
+                    pm2_logs = subprocess.run(
+                        ["pm2", "logs", pm2_process_name, "--lines", "30", "--nostream"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    if pm2_logs.stdout:
+                        # Check for error patterns
+                        error_patterns = ["Error", "Exception", "Traceback", "ModuleNotFoundError", "SyntaxError"]
+                        has_errors = any(pattern in pm2_logs.stdout for pattern in error_patterns)
+                        
+                        if has_errors:
+                            logger.error(f"🔴 PM2 error logs:\n{pm2_logs.stdout[:2000]}")
+                            result_info["pm2_error_logs"] = pm2_logs.stdout[:1000]
+                        else:
+                            logger.info(f"ℹ️ PM2 logs (no errors detected):\n{pm2_logs.stdout[:500]}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not fetch PM2 logs: {e}")
+                
                 # SKIP: Claude agent verification for now (too complex, often fails)
                 # TODO: Re-enable after improving verifier reliability
                 logger.info("⏭️ Skipping Claude agent verification (disabled for now)")
