@@ -88,35 +88,37 @@ def start_bot_pm2(
             interpreter = sys.executable
             logger.warning(f"⚠️ Shared venv not found, using current Python: {sys.executable}")
         
-        # Create ecosystem.config.json for PM2 (proper way to pass env vars)
-        ecosystem_config = {
-            "name": process_name,
-            "script": "main.py",
-            "cwd": telegram_dir,
-            "interpreter": interpreter,
-            "instances": 1,
-            "autorestart": True,
-            "watch": False,
-            "max_memory_restart": "200M",
-            "env": env_vars,  # All environment variables including BOT_TOKEN
-            "error_file": f"{telegram_dir}/logs/error.log",
-            "out_file": f"{telegram_dir}/logs/out.log",
-            "log_date_format": "YYYY-MM-DD HH:mm:ss Z"
-        }
+        # Create a temporary .env file for the bot (PM2 will load this)
+        env_file_path = os.path.join(telegram_dir, ".env")
+        with open(env_file_path, 'w') as f:
+            for key, value in env_vars.items():
+                f.write(f"{key}={value}\n")
+        logger.info(f"📝 Created .env file: {env_file_path}")
         
-        # Write ecosystem config file
-        ecosystem_path = os.path.join(telegram_dir, "ecosystem.config.json")
-        with open(ecosystem_path, 'w') as f:
-            json.dump({"apps": [ecosystem_config]}, f, indent=2)
-        logger.info(f"📝 Created ecosystem config: {ecosystem_path}")
+        # Build PM2 start command with explicit parameters (no ecosystem file)
+        # This avoids conflicts with other PM2 processes
+        pm2_cmd = [
+            "pm2", "start", "main.py",
+            "--name", process_name,
+            "--interpreter", interpreter,
+            "--cwd", telegram_dir,
+            "--log", f"{telegram_dir}/logs/out.log",
+            "--error", f"{telegram_dir}/logs/error.log",
+            "--time",
+            "--env", "production"
+        ]
         
-        # Start PM2 using ecosystem config (this properly passes env vars)
+        # Start PM2 with environment variables in the subprocess environment
+        process_env = os.environ.copy()
+        process_env.update(env_vars)
+        
         result = subprocess.run(
-            ["pm2", "start", ecosystem_path],
+            pm2_cmd,
             cwd=telegram_dir,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=process_env  # Pass env vars directly to the subprocess
         )
         
         if result.returncode == 0:
