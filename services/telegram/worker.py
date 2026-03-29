@@ -128,7 +128,7 @@ def run_telegram_bot_pipeline(
         
         # Step 5: Start PM2 (base template works!)
         logger.info("📋 Step 5/11: Starting bot via PM2 (base template)...")
-        success, pm2_result = start_bot_pm2(project_id, telegram_path, port)
+        success, pm2_result = start_bot_pm2(project_id, telegram_path, port, domain)
         
         if not success:
             error_msg = f"PM2 start failed: {pm2_result}"
@@ -136,8 +136,10 @@ def run_telegram_bot_pipeline(
             result_info["errors"].append(error_msg)
             return False, result_info
         
-        logger.info(f"✅ Bot started: {pm2_result}")
-        result_info["pm2_process"] = f"tg-bot-{project_id}"
+        # Track PM2 process name (domain-based or fallback to project_id)
+        pm2_process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
+        logger.info(f"✅ Bot started: {pm2_result} (PM2 name: {pm2_process_name})")
+        result_info["pm2_process"] = pm2_process_name
         result_info["steps_completed"].append("pm2_start")
         
         # Wait for bot to initialize (prevent 502 errors)

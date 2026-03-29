@@ -106,8 +106,8 @@ def restart_pm2():
         print("✗ PROJECT_ID not found in .env")
         return False
     
-    # PM2 process name format: tg-bot-{project_id}
-    pm2_process_name = f"tg-bot-{project_id}"
+    # PM2 process name format: {domain}-bot or tg-bot-{project_id}
+    pm2_process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
     
     print(f"📦 Restarting PM2 app: {pm2_process_name}")
     if not run(f"pm2 restart {pm2_process_name}"):
