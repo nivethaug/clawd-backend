@@ -41,30 +41,34 @@ def start_bot_pm2(project_id: int, project_path: str, port: int, domain: Optiona
         
         logger.info(f"Starting PM2 process: {process_name}")
         
-        # PM2 ecosystem config
-        ecosystem_config = {
-            "name": process_name,
-            "script": "main.py",
-            "cwd": telegram_dir,
-            "interpreter": "python3",
-            "env": {
-                "PORT": str(port),
-                "PROJECT_ID": str(project_id)
-            },
-            "instances": 1,
-            "autorestart": True,
-            "watch": False,
-            "max_memory_restart": "200M",
-            "error_file": f"{telegram_dir}/logs/error.log",
-            "out_file": f"{telegram_dir}/logs/out.log",
-            "log_file": f"{telegram_dir}/logs/combined.log",
-            "time": True
-        }
-        
         # Create logs directory
-        import os
         logs_dir = os.path.join(telegram_dir, "logs")
         os.makedirs(logs_dir, exist_ok=True)
+        
+        # Load environment variables from .env file in telegram directory
+        env_file_path = os.path.join(telegram_dir, ".env")
+        env_vars = {}  # Start fresh for PM2 env
+        
+        # Load .env file if it exists
+        if os.path.exists(env_file_path):
+            logger.info(f"📦 Loading environment from: {env_file_path}")
+            with open(env_file_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        env_vars[key.strip()] = value.strip()
+                        # Log important vars (mask sensitive values)
+                        if key.strip() == 'BOT_TOKEN':
+                            logger.info(f"  BOT_TOKEN: ***{value.strip()[-6:]}")
+                        elif key.strip() in ['WEBHOOK_URL', 'PORT']:
+                            logger.info(f"  {key.strip()}: {value.strip()}")
+        else:
+            logger.warning(f"⚠️ No .env file found at: {env_file_path}")
+        
+        # Add runtime variables (these override .env if needed)
+        env_vars["PORT"] = str(port)
+        env_vars["PROJECT_ID"] = str(project_id)
         
         # Use shared venv Python (same as installer.py)
         venv_python = os.path.join(SHARED_VENV_PATH, "bin", "python")
@@ -77,12 +81,31 @@ def start_bot_pm2(project_id: int, project_path: str, port: int, domain: Optiona
             interpreter = sys.executable
             logger.warning(f"⚠️ Shared venv not found, using current Python: {sys.executable}")
         
-        # Start PM2 process using shared venv Python (has dependencies installed)
+        # Create ecosystem.config.json for PM2 (proper way to pass env vars)
+        ecosystem_config = {
+            "name": process_name,
+            "script": "main.py",
+            "cwd": telegram_dir,
+            "interpreter": interpreter,
+            "instances": 1,
+            "autorestart": True,
+            "watch": False,
+            "max_memory_restart": "200M",
+            "env": env_vars,  # All environment variables including BOT_TOKEN
+            "error_file": f"{telegram_dir}/logs/error.log",
+            "out_file": f"{telegram_dir}/logs/out.log",
+            "log_date_format": "YYYY-MM-DD HH:mm:ss Z"
+        }
+        
+        # Write ecosystem config file
+        ecosystem_path = os.path.join(telegram_dir, "ecosystem.config.json")
+        with open(ecosystem_path, 'w') as f:
+            json.dump({"apps": [ecosystem_config]}, f, indent=2)
+        logger.info(f"📝 Created ecosystem config: {ecosystem_path}")
+        
+        # Start PM2 using ecosystem config (this properly passes env vars)
         result = subprocess.run(
-            ["pm2", "start", "main.py", 
-             "--name", process_name,
-             "--interpreter", interpreter,
-             "--", "--port", str(port)],
+            ["pm2", "start", ecosystem_path],
             cwd=telegram_dir,
             capture_output=True,
             text=True,
