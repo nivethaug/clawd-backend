@@ -655,8 +655,8 @@ async def create_project(request: CreateProjectRequest):
             # Generate port for webhook server (use project_id to ensure uniqueness)
             bot_port = 8000 + (project_id % 1000)  # Range: 8000-8999
             
-            # Extract domain from project domain or use default
-            bot_domain = final_project.get("domain", f"tg-bot-{project_id}.dreambigwithai.com")
+            # Use the already-defined domain variable (set earlier in this function)
+            bot_domain = domain
             
             logger.info(f"Bot configuration: domain={bot_domain}, port={bot_port}")
             
