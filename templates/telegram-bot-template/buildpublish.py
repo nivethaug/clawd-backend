@@ -90,11 +90,17 @@ def restart_pm2():
         return False
     
     project_id = None
+    bot_token = None
+    domain = None
+    
     with open(env_path, 'r') as f:
         for line in f:
             if line.startswith("PROJECT_ID="):
                 project_id = line.split("=", 1)[1].strip()
-                break
+            elif line.startswith("BOT_TOKEN="):
+                bot_token = line.split("=", 1)[1].strip()
+            elif line.startswith("WEBHOOK_DOMAIN="):
+                domain = line.split("=", 1)[1].strip()
     
     if not project_id:
         print("✗ PROJECT_ID not found in .env")
@@ -104,7 +110,79 @@ def restart_pm2():
     pm2_process_name = f"tg-bot-{project_id}"
     
     print(f"📦 Restarting PM2 app: {pm2_process_name}")
-    return run(f"pm2 restart {pm2_process_name}")
+    if not run(f"pm2 restart {pm2_process_name}"):
+        return False
+    
+    # Re-register webhook if token and domain available
+    if bot_token and domain:
+        print("\n" + "="*50)
+        print("WEBHOOK RE-REGISTRATION")
+        print("="*50)
+        re_register_webhook(bot_token, domain, project_id)
+    
+    return True
+
+
+def re_register_webhook(bot_token: str, domain: str, project_id: str):
+    """
+    Re-register Telegram webhook after restart.
+    Called automatically when bot restarts to ensure webhook is up-to-date.
+    
+    Args:
+        bot_token: Telegram bot token
+        domain: Webhook domain
+        project_id: Project ID
+    
+    Safety:
+        - Non-blocking (won't fail restart if webhook registration fails)
+        - Timeout: 10 seconds
+        - Logs success/failure
+    """
+    import requests
+    
+    try:
+        # Build webhook URL
+        webhook_url = f"https://{domain}/bot/{project_id}/webhook"
+        
+        print(f"🔗 Re-registering webhook: {webhook_url}")
+        
+        # Delete old webhook first (cleanup)
+        delete_url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
+        try:
+            requests.get(delete_url, timeout=5)
+            print("✓ Old webhook removed")
+        except:
+            pass  # Ignore errors
+        
+        # Register new webhook
+        telegram_api_url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
+        
+        payload = {
+            "url": webhook_url,
+            "allowed_updates": ["message", "edited_message", "callback_query"]
+        }
+        
+        response = requests.post(telegram_api_url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            if result.get("ok"):
+                print(f"✅ Webhook re-registered successfully")
+                print(f"📍 URL: {webhook_url}")
+            else:
+                error_msg = result.get("description", "Unknown error")
+                print(f"⚠️ Webhook registration failed: {error_msg}")
+        else:
+            print(f"⚠️ Webhook registration failed with status {response.status_code}")
+    
+    except requests.exceptions.Timeout:
+        print("⚠️ Webhook registration timeout (non-critical)")
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Webhook registration error: {e} (non-critical)")
+    except Exception as e:
+        print(f"⚠️ Unexpected webhook error: {e} (non-critical)")
+
 
 
 def main():

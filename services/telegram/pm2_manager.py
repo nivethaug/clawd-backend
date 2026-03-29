@@ -8,7 +8,7 @@ from typing import Tuple, Dict, Optional
 from utils.logger import logger
 
 
-def start_bot_pm2(project_id: int, project_path: str, port: int) -> Tuple[bool, str]:
+def start_bot_pm2(project_id: int, project_path: str, port: int, domain: Optional[str] = None) -> Tuple[bool, str]:
     """
     Start telegram bot via PM2.
     
@@ -16,12 +16,13 @@ def start_bot_pm2(project_id: int, project_path: str, port: int) -> Tuple[bool, 
         project_id: Project ID
         project_path: Path to telegram/ directory
         port: Port for webhook server
+        domain: Domain name (preferred for PM2 naming)
     
     Returns:
         Tuple of (success, message)
     
     Command:
-        pm2 start main.py --name tg-bot-{project_id} --interpreter python3
+        pm2 start main.py --name {domain}-bot --interpreter python3
     
     Requirements:
         - Unique process name
@@ -29,7 +30,8 @@ def start_bot_pm2(project_id: int, project_path: str, port: int) -> Tuple[bool, 
         - Do NOT affect other projects
     """
     try:
-        process_name = f"tg-bot-{project_id}"
+        # Use domain if available, otherwise fall back to project_id
+        process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
         telegram_dir = str(project_path)
         
         logger.info(f"Starting PM2 process: {process_name}")
@@ -99,18 +101,20 @@ def start_bot_pm2(project_id: int, project_path: str, port: int) -> Tuple[bool, 
         return False, error_msg
 
 
-def stop_bot_pm2(project_id: int) -> Tuple[bool, str]:
+def stop_bot_pm2(project_id: int, domain: Optional[str] = None) -> Tuple[bool, str]:
     """
     Stop telegram bot PM2 process.
     
     Args:
         project_id: Project ID
+        domain: Domain name (preferred for PM2 naming)
     
     Returns:
         Tuple of (success, message)
     """
     try:
-        process_name = f"tg-bot-{project_id}"
+        # Use domain if available, otherwise fall back to project_id
+        process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
         
         logger.info(f"Stopping PM2 process: {process_name}")
         
@@ -135,18 +139,20 @@ def stop_bot_pm2(project_id: int) -> Tuple[bool, str]:
         return False, error_msg
 
 
-def restart_bot_pm2(project_id: int) -> Tuple[bool, str]:
+def restart_bot_pm2(project_id: int, domain: Optional[str] = None) -> Tuple[bool, str]:
     """
     Restart telegram bot PM2 process.
     
     Args:
         project_id: Project ID
+        domain: Domain name (preferred for PM2 naming)
     
     Returns:
         Tuple of (success, message)
     """
     try:
-        process_name = f"tg-bot-{project_id}"
+        # Use domain if available, otherwise fall back to project_id
+        process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
         
         logger.info(f"Restarting PM2 process: {process_name}")
         
@@ -171,18 +177,20 @@ def restart_bot_pm2(project_id: int) -> Tuple[bool, str]:
         return False, error_msg
 
 
-def get_bot_status_pm2(project_id: int) -> Tuple[bool, Dict]:
+def get_bot_status_pm2(project_id: int, domain: Optional[str] = None) -> Tuple[bool, Dict]:
     """
     Get PM2 status for telegram bot.
     
     Args:
         project_id: Project ID
+        domain: Domain name (preferred for PM2 naming)
     
     Returns:
         Tuple of (is_running, status_info)
     """
     try:
-        process_name = f"tg-bot-{project_id}"
+        # Use domain if available, otherwise fall back to project_id
+        process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
         
         # Get PM2 list in JSON format
         result = subprocess.run(
@@ -222,18 +230,20 @@ def get_bot_status_pm2(project_id: int) -> Tuple[bool, Dict]:
         return False, {"status": "error", "error": str(e)}
 
 
-def delete_bot_pm2(project_id: int) -> Tuple[bool, str]:
+def delete_bot_pm2(project_id: int, domain: Optional[str] = None) -> Tuple[bool, str]:
     """
     Delete telegram bot PM2 process.
     
     Args:
         project_id: Project ID
+        domain: Domain name (preferred for PM2 naming)
     
     Returns:
         Tuple of (success, message)
     """
     try:
-        process_name = f"tg-bot-{project_id}"
+        # Use domain if available, otherwise fall back to project_id
+        process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
         
         logger.info(f"Deleting PM2 process: {process_name}")
         

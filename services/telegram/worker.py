@@ -317,30 +317,10 @@ def run_telegram_bot_pipeline(
                 logger.warning(f"⚠️ Final verification failed with status {response.status_code}")
                 result_info["final_verification"] = f"failed: status {response.status_code}"
                 
-                # Critical failure - use Claude agent to diagnose
-                logger.info("🔄 Invoking Claude agent for critical failure diagnosis...")
-                try:
-                    from services.telegram.verifier import verify_telegram_bot_webhook
-                    import asyncio
-                    
-                    # Use Claude agent with retry (only for critical failures)
-                    # Pass project_path so Claude can fix code in the right directory
-                    success, verification_info = asyncio.run(
-                        verify_telegram_bot_webhook(full_domain, project_path=project_path, timeout=120, max_retries=1)
-                    )
-                    
-                    if success:
-                        logger.info(f"✅ Claude agent fixed the issue!")
-                        result_info["claude_fix"] = "success"
-                        result_info["verification"] = verification_info
-                    else:
-                        logger.warning(f"⚠️ Claude agent could not fix: {verification_info.get('error')}")
-                        result_info["claude_fix"] = f"failed: {verification_info.get('error')}"
-                        result_info["verification"] = verification_info
-                
-                except Exception as e:
-                    logger.warning(f"⚠️ Claude agent verification error: {e}")
-                    result_info["errors"].append(f"claude_verification_error: {e}")
+                # SKIP: Claude agent verification for now (too complex, often fails)
+                # TODO: Re-enable after improving verifier reliability
+                logger.info("⏭️ Skipping Claude agent verification (disabled for now)")
+                result_info["claude_fix"] = "skipped"
         
         except requests.exceptions.SSLError:
             logger.error(f"❌ SSL certificate error in final verification")
@@ -350,12 +330,47 @@ def run_telegram_bot_pipeline(
             logger.warning(f"⚠️ Final verification error: {e}")
             result_info["final_verification"] = f"error: {e}"
         
+        # ========================================================================
+        # STEP: Register Telegram Webhook (NEW - Safe & Optional)
+        # ========================================================================
+        
+        try:
+            from services.telegram.webhook import register_telegram_webhook
+            
+            logger.info("🔗 Registering Telegram webhook...")
+            
+            # Register webhook with Telegram API
+            webhook_success, webhook_msg = register_telegram_webhook(
+                bot_token=bot_token,
+                domain=full_domain,
+                project_id=project_id
+            )
+            
+            if webhook_success:
+                result_info["webhook_registration"] = "success"
+                result_info["steps_completed"].append("webhook_registration")
+                logger.info(f"✅ Webhook registered: {webhook_msg}")
+            else:
+                # Non-blocking - don't fail deployment
+                result_info["webhook_registration"] = f"failed: {webhook_msg}"
+                logger.warning(f"⚠️ Webhook registration failed: {webhook_msg}")
+                logger.info("ℹ️ Bot will still work - webhook can be registered manually")
+        
+        except Exception as e:
+            # Non-blocking - don't fail deployment
+            logger.warning(f"⚠️ Webhook registration error: {e}")
+            result_info["webhook_registration"] = f"error: {e}"
+            result_info["errors"].append(f"webhook_registration_error: {e}")
+        
+        # ========================================================================
         # Final success
+        # ========================================================================
+        
         logger.info(f"🎉 Telegram bot pipeline completed!")
         logger.info(f"Bot running at: https://{full_domain}")
-        logger.info(f"Webhook URL: https://{full_domain}/webhook")
+        logger.info(f"Webhook URL: https://{full_domain}/bot/{project_id}/webhook")
         
-        result_info["webhook_url"] = f"https://{full_domain}/webhook"
+        result_info["webhook_url"] = f"https://{full_domain}/bot/{project_id}/webhook"
         result_info["bot_url"] = f"https://{full_domain}"
         
         return True, result_info

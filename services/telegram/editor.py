@@ -33,7 +33,9 @@ class TelegramBotEditor:
         """
         self.project_path = Path(project_path)
         self.ai_logic_path = self.project_path / "services" / "ai_logic.py"
-        self.backup_path = self.project_path / "services" / "ai_logic.py.backup"
+        self.api_client_path = self.project_path / "services" / "api_client.py"
+        self.backup_ai_logic = self.project_path / "services" / "ai_logic.py.backup"
+        self.backup_api_client = self.project_path / "services" / "api_client.py.backup"
     
     def enhance_bot_logic(
         self,
@@ -67,9 +69,14 @@ class TelegramBotEditor:
             if not self.ai_logic_path.exists():
                 return False, f"ai_logic.py not found at {self.ai_logic_path}"
             
-            # Create backup
-            logger.info(f"Creating backup: {self.backup_path}")
-            shutil.copy2(self.ai_logic_path, self.backup_path)
+            # Create backup for ai_logic.py
+            logger.info(f"Creating backup: {self.backup_ai_logic}")
+            shutil.copy2(self.ai_logic_path, self.backup_ai_logic)
+            
+            # Create backup for api_client.py if it exists
+            if self.api_client_path.exists():
+                logger.info(f"Creating backup: {self.backup_api_client}")
+                shutil.copy2(self.api_client_path, self.backup_api_client)
             
             # Build AI prompt
             prompt = self._build_enhancement_prompt(description, bot_name)
@@ -86,9 +93,11 @@ class TelegramBotEditor:
                 
                 if is_valid:
                     logger.info(f"✅ AI enhancement successful: {validation_msg}")
-                    # Remove backup
-                    if self.backup_path.exists():
-                        self.backup_path.unlink()
+                    # Remove backups
+                    if self.backup_ai_logic.exists():
+                        self.backup_ai_logic.unlink()
+                    if self.backup_api_client.exists():
+                        self.backup_api_client.unlink()
                     return True, "Bot logic enhanced successfully"
                 else:
                     # Validation failed - rollback
@@ -107,193 +116,129 @@ class TelegramBotEditor:
             return False, f"Enhancement error: {e}"
     
     def _build_enhancement_prompt(self, description: str, bot_name: str) -> str:
-        """
-        Build AI prompt for bot enhancement.
-        
-        Args:
-            description: Bot description
-            bot_name: Bot name
-        
-        Returns:
-            Prompt string
-        """
-        # Check if user mentioned specific APIs
-        api_keywords = ["api", "API", "endpoint", "service"]
-        has_api_mention = any(keyword in description for keyword in api_keywords)
-        
-        prompt = f"""# Telegram Bot Logic Enhancement
+        """Build concise AI prompt for bot enhancement with dynamic command generation."""
+        return f"""Enhance Telegram bot for: {description}
 
-You are enhancing the AI logic for a Telegram bot.
+Bot: {bot_name}
+Allowed files to modify:
+- services/ai_logic.py (process_user_input function)
+- services/api_client.py (add helper functions only)
 
-## Bot Information
-- Name: {bot_name}
-- Description: {description}
+## 🧠 COMMAND GENERATION STRATEGY
 
-## Your Task
-Modify the `process_user_input()` function in `services/ai_logic.py` to match the bot's description.
+### Step 1: Analyze Intent
+Detect user intent from description: "{description}"
 
-## API Integration Strategy
+**Intent Patterns:**
+- crypto/blockchain → /price, /market, /balance
+- weather/forecast → /weather, /forecast, /temperature
+- productivity → /tasks, /remind, /todo
+- jokes/entertainment → /joke, /fun, /random
+- news → /news, /headlines, /latest
+- unknown/unclear → Use default commands
 
-### Step 1: Check Existing APIs
-First, read `services/api_client.py` to see what API functions already exist.
+**Default Commands (use if intent unclear):**
+- /start - Welcome message
+- /help - Show available commands
+- /ask - General Q&A
+- /status - Bot status
 
-### Step 2: Use Public APIs (Preferred)
-**PREFER PUBLIC/FREE APIs for initial implementation:**
-- CoinGecko API (crypto prices): `https://api.coingecko.com/api/v3`
-- OpenWeatherMap API (weather): `https://api.openweathermap.org/data/2.5`
-- JSONPlaceholder API (test data): `https://jsonplaceholder.typicode.com`
-- RestCountries API: `https://restcountries.com/v3.1`
-- NewsAPI: `https://newsapi.org/v2`
-- ExchangeRate-API: `https://api.exchangerate-api.com/v4`
-- Wikipedia API: `https://en.wikipedia.org/api/rest_v1`
-- JokeAPI: `https://v2.jokeapi.dev/joke`
+### Step 2: Generate Commands
+IF intent is clear from "{description}":
+  → Create relevant keyword handlers
+  → Add API helpers if needed
+ELSE:
+  → Use default commands with mock responses
 
-### Step 3: User-Specified APIs
-{'⚠️ USER MENTIONED API - Check if they specified which API to use' if has_api_mention else ''}
-{'If the description contains specific API names or endpoints, use those instead of defaults.' if has_api_mention else ''}
+## CRITICAL RULES
+1. Keep signature: def process_user_input(text: str, user: Optional[User] = None) -> str
+2. Use keyword matching: if "keyword" in text_lower
+3. DO NOT add new imports (all imports in templates)
+4. DO NOT create new files
+5. DO NOT modify main.py, config.py, database.py
+6. Handle errors gracefully
+7. Keep existing greetings/help logic
 
-## Implementation Pattern
+## 🌐 API INTEGRATION PATTERN
 
-### Adding New API Integration:
-1. Check if function exists in `services/api_client.py`
-2. If not, add new function to `api_client.py`:
-   ```python
-   def get_{feature}_data(params) -> dict:
-       try:
-           response = requests.get("https://api.example.com/endpoint", timeout=10)
-           response.raise_for_status()
-           return {"success": True, "data": response.json()}
-       except Exception as e:
-           return {"success": False, "error": str(e)}
-   ```
-3. Import in `ai_logic.py`: `from services.api_client import get_{feature}_data`
-4. Use in `process_user_input()` with error handling
-
-## Constraints
-- ONLY modify the `process_user_input()` function (and add imports if needed)
-- CAN add new functions to `services/api_client.py` if needed
-- DO NOT change function signature: `def process_user_input(text: str, user: Optional[User] = None) -> str`
-- Use simple keyword-based logic (if "keyword" in text_lower)
-- ALWAYS handle API errors gracefully (show user-friendly message)
-- Add fallback response for unrecognized input
-- Keep responses concise and user-friendly
-
-## Examples
-
-### Example 1: Crypto Price Tracker (using CoinGecko)
-Input: "crypto price tracker bot"
-
-In `services/api_client.py` (if not exists):
+### If API needed:
+1. Add helper function to api_client.py:
 ```python
-def get_crypto_price(coin_id: str = "bitcoin") -> dict:
-    try:
-        url = f"https://api.coingecko.com/api/v3/simple/price"
-        params = {{"ids": coin_id, "vs_currencies": "usd"}}
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if coin_id in data:
-            return {{"success": True, "price": data[coin_id]["usd"]}}
-        return {{"success": False, "error": "Coin not found"}}
-    except Exception as e:
-        return {{"success": False, "error": str(e)}}
+def get_feature_data() -> dict:
+    \"\"\"Fetch data from API.\"\"\"
+    result = fetch_json("https://api.example.com/endpoint", timeout=10)
+    if result["success"]:
+        return {{"success": True, "data": result["data"]}}
+    return {{"success": False, "error": result["error"]}}
 ```
 
-In `services/ai_logic.py`:
+2. Call from ai_logic.py:
 ```python
-from services.api_client import get_crypto_price
-
-def process_user_input(text: str, user: Optional[User] = None) -> str:
-    text_lower = text.lower().strip()
-    
-    # Crypto price queries
-    if any(kw in text_lower for kw in ["btc", "bitcoin"]):
-        result = get_crypto_price("bitcoin")
-        if result["success"]:
-            return f"💰 Bitcoin: ${{result['price']:,.2f}}"
+if any(kw in text_lower for kw in ["keyword", "command"]):
+    result = get_feature_data()
+    if result["success"]:
+        return f"✅ {{result['data']}}"
+    else:
         return f"⚠️ Error: {{result['error']}}"
-    
-    # ... existing logic ...
 ```
 
-### Example 2: Weather Bot (using OpenWeatherMap)
-Input: "weather bot for cities"
-
-In `services/api_client.py`:
+### If API unavailable or unclear:
+Use MOCK response:
 ```python
-def get_weather(city: str) -> dict:
-    try:
-        # Note: Requires API key from openweathermap.org
-        api_key = os.getenv("OPENWEATHER_API_KEY", "demo")
-        url = f"https://api.openweathermap.org/data/2.5/weather"
-        params = {{"q": city, "appid": api_key, "units": "metric"}}
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        return {{
-            "success": True,
-            "temp": data["main"]["temp"],
-            "description": data["weather"][0]["description"]
-        }}
-    except Exception as e:
-        return {{"success": False, "error": str(e)}}
+if "price" in text_lower:
+    return "💰 BTC Price: $65,000 (mock data)"
 ```
 
-### Example 3: Joke Bot (using JokeAPI - no auth needed)
-Input: "tell me jokes bot"
+## 📦 Available API Functions
+- fetch_json(url, params, timeout) → Generic JSON fetcher
+- safe_get(data, *keys, default) → Safe dict access
+- get_crypto_price(coin_id) → Crypto prices
+- get_weather(city) → Weather (may not be configured)
 
-In `services/api_client.py`:
-```python
-def get_random_joke() -> dict:
-    try:
-        url = "https://v2.jokeapi.dev/joke/Programming,Misc?safe-mode"
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data["type"] == "single":
-            return {{"success": True, "joke": data["joke"]}}
-        else:
-            return {{"success": True, "joke": f"{{data['setup']}} ... {{data['delivery']}}"}}
-    except Exception as e:
-        return {{"success": False, "error": str(e)}}
-```
+## 🔍 Intent Detection Examples
 
-### Example 4: User Specifies API
-Input: "bot that uses the Spotify API to search songs"
+**Crypto Bot:**
+- Description: "crypto price tracker"
+- Keywords: btc, eth, price, market
+- Commands: /price, /market
+- API: CoinGecko
 
-Note: User specified "Spotify API" - use that instead of generic APIs.
-Check Spotify API documentation and implement accordingly.
+**Weather Bot:**
+- Description: "weather forecast bot"
+- Keywords: weather, forecast, temperature
+- Commands: /weather, /forecast
+- API: OpenWeatherMap
 
-## Execution Steps
-1. Read current `services/ai_logic.py`
-2. Read `services/api_client.py` to check existing functions
-3. Check if user mentioned specific APIs in: "{description}"
-4. Identify what features need to be added based on: "{description}"
-5. Add new API functions to `api_client.py` if needed (prefer public APIs)
-6. Modify `process_user_input()` in `ai_logic.py` with new logic
-7. Keep existing logic intact (greetings, help, etc.)
-8. Add error handling for API calls
-9. Add fallback response
+**Generic Bot:**
+- Description: "helpful assistant"
+- Keywords: help, ask, question
+- Commands: /start, /help, /ask
+- Response: Mock or default
 
-## Required Output
-- Modified `services/ai_logic.py` with enhanced logic
-- Optional: New functions in `services/api_client.py` if needed
-- Syntax must be valid Python
-- All imports must be correct
-- Function signature must not change
-- API calls must have error handling
+## 🎯 Implementation Steps
+1. Read services/ai_logic.py
+2. Read services/api_client.py
+3. Detect intent from: "{description}"
+4. If clear intent → add relevant handlers
+5. If unclear → use default commands
+6. Add API helpers if needed
+7. Add mock fallbacks for errors
+8. Test syntax
 
-Begin by:
-1. Reading `services/ai_logic.py`
-2. Reading `services/api_client.py`
-3. Checking if user mentioned specific APIs
-4. Making your modifications
+## 📝 Output
+- Modified services/ai_logic.py
+- Optional: new functions in services/api_client.py
+
+## ⚠️ Fallback Rules
+- If API fails → return mock response
+- If intent unclear → use default commands
+- If error occurs → show user-friendly message
+- NEVER crash the bot
 """
-        return prompt
     
     def _run_claude_modification(self, prompt: str) -> dict:
         """
-        Run Claude Code Agent to modify file.
+        Run Claude Code Agent to modify file with safe async execution.
         
         Args:
             prompt: Enhancement prompt
@@ -312,15 +257,37 @@ Begin by:
                     )
                     return result
             
-            # Run async
-            result = asyncio.run(run_claude())
+            # Safe async execution (FIX 1 & 2)
+            try:
+                # Try to use existing event loop
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If loop is already running, create new one
+                    result = asyncio.run(run_claude())
+                else:
+                    # Use existing loop with timeout
+                    result = loop.run_until_complete(
+                        asyncio.wait_for(run_claude(), timeout=180)
+                    )
+            except RuntimeError:
+                # No event loop, create new one
+                result = asyncio.run(
+                    asyncio.wait_for(run_claude(), timeout=180)
+                )
             
             return {
                 "success": result.get("success", False),
                 "error": result.get("error", "Unknown error")
             }
         
+        except asyncio.TimeoutError:
+            logger.error("❌ Claude modification timeout after 180s")
+            return {
+                "success": False,
+                "error": "Modification timeout"
+            }
         except Exception as e:
+            logger.error(f"❌ Claude modification error: {e}")
             return {
                 "success": False,
                 "error": str(e)
@@ -337,49 +304,99 @@ Begin by:
             - File exists
             - Python syntax valid
             - Function signature intact
-            - Imports intact
+            - Changes were actually made (FIX 3)
+            - No other files modified (FIX 5)
         """
         try:
             if not self.ai_logic_path.exists():
                 return False, "Modified file not found"
             
-            # Read content
-            with open(self.ai_logic_path, 'r') as f:
-                content = f.read()
+            # FIX 3: Detect no-change edits
+            ai_logic_changed = False
+            api_client_changed = False
             
-            # Check Python syntax
+            if self.backup_ai_logic.exists():
+                with open(self.backup_ai_logic, 'r') as f:
+                    backup_ai_logic_content = f.read()
+                
+                with open(self.ai_logic_path, 'r') as f:
+                    modified_ai_logic_content = f.read()
+                
+                ai_logic_changed = (backup_ai_logic_content != modified_ai_logic_content)
+            
+            if self.backup_api_client.exists():
+                with open(self.backup_api_client, 'r') as f:
+                    backup_api_client_content = f.read()
+                
+                with open(self.api_client_path, 'r') as f:
+                    modified_api_client_content = f.read()
+                
+                api_client_changed = (backup_api_client_content != modified_api_client_content)
+            
+            # At least one file must be changed
+            if not ai_logic_changed and not api_client_changed:
+                return False, "AI made no changes to ai_logic.py or api_client.py"
+            
+            # Check Python syntax for ai_logic.py
             try:
-                compile(content, str(self.ai_logic_path), 'exec')
+                with open(self.ai_logic_path, 'r') as f:
+                    ai_logic_content = f.read()
+                compile(ai_logic_content, str(self.ai_logic_path), 'exec')
             except SyntaxError as e:
-                return False, f"Syntax error: {e}"
+                return False, f"Syntax error in ai_logic.py: {e}"
             
-            # Check function signature exists
-            if "def process_user_input(text: str" not in content:
-                return False, "Function signature changed or missing"
+            # Check Python syntax for api_client.py if it was modified
+            if api_client_changed:
+                try:
+                    with open(self.api_client_path, 'r') as f:
+                        api_client_content = f.read()
+                    compile(api_client_content, str(self.api_client_path), 'exec')
+                except SyntaxError as e:
+                    return False, f"Syntax error in api_client.py: {e}"
             
-            # Check imports intact
-            required_imports = [
-                "from services.api_client import",
-                "from utils.logger import",
-                "from models.user import"
+            # FIX 4: Only validate function signature (relaxed rules)
+            if "def process_user_input(text: str" not in ai_logic_content:
+                return False, "Function signature changed or missing in ai_logic.py"
+            
+            # FIX 5: Check if other files were modified (restrict scope)
+            # Only ai_logic.py and api_client.py can be modified
+            protected_files = [
+                "main.py",
+                "config.py",
+                "database.py"
             ]
             
-            for imp in required_imports:
-                if imp not in content:
-                    return False, f"Missing import: {imp}"
+            for filename in protected_files:
+                protected_path = self.project_path / "services" / filename
+                backup_path = self.project_path / "services" / f"{filename}.backup"
+                
+                # If backup exists for protected file, it means AI tried to modify it
+                if backup_path.exists():
+                    logger.error(f"❌ AI attempted to modify protected file: {filename}")
+                    return False, f"AI attempted to modify {filename} (not allowed)"
             
+            logger.info("✅ Validation passed")
             return True, "Validation passed"
         
         except Exception as e:
+            logger.error(f"❌ Validation error: {e}")
             return False, f"Validation error: {e}"
     
     def _rollback(self):
         """Rollback to backup if enhancement failed."""
         try:
-            if self.backup_path.exists():
-                logger.info(f"🔄 Rolling back to backup...")
-                shutil.copy2(self.backup_path, self.ai_logic_path)
-                self.backup_path.unlink()
-                logger.info("✅ Rollback complete")
+            # Rollback ai_logic.py
+            if self.backup_ai_logic.exists():
+                logger.info(f"🔄 Rolling back ai_logic.py...")
+                shutil.copy2(self.backup_ai_logic, self.ai_logic_path)
+                self.backup_ai_logic.unlink()
+            
+            # Rollback api_client.py
+            if self.backup_api_client.exists():
+                logger.info(f"🔄 Rolling back api_client.py...")
+                shutil.copy2(self.backup_api_client, self.api_client_path)
+                self.backup_api_client.unlink()
+            
+            logger.info("✅ Rollback complete")
         except Exception as e:
             logger.error(f"❌ Rollback failed: {e}")

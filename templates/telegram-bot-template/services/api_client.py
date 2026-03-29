@@ -2,12 +2,72 @@
 API Client module.
 ALL external API calls go here.
 Easy to modify by AI agents.
+
+# DreamAgent: AI can add helper functions here for dynamic integrations
 """
 
 import requests
 from utils.logger import logger
 from config import API_TIMEOUT
 
+
+# ============================================================================
+# UTILITY FUNCTIONS (Do not modify)
+# ============================================================================
+
+def fetch_json(url: str, params: dict = None, timeout: int = API_TIMEOUT) -> dict:
+    """
+    Generic JSON fetcher for public APIs.
+    
+    Args:
+        url: API endpoint URL
+        params: Optional query parameters
+        timeout: Request timeout in seconds
+    
+    Returns:
+        dict with success status and data or error
+    """
+    try:
+        response = requests.get(url, params=params, timeout=timeout)
+        response.raise_for_status()
+        return {"success": True, "data": response.json()}
+    except requests.exceptions.Timeout:
+        logger.error(f"API timeout: {url}")
+        return {"success": False, "error": "Request timeout"}
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API error: {e}")
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        return {"success": False, "error": "Failed to fetch data"}
+
+
+def safe_get(data: dict, *keys, default=None):
+    """
+    Safely get nested dictionary value.
+    
+    Args:
+        data: Dictionary to search
+        *keys: Nested keys
+        default: Default value if key not found
+    
+    Returns:
+        Value at nested key or default
+    
+    Example:
+        safe_get(response, "data", "price", default=0)
+    """
+    for key in keys:
+        try:
+            data = data[key]
+        except (KeyError, TypeError):
+            return default
+    return data
+
+
+# ============================================================================
+# API HELPER FUNCTIONS (AI can add more below)
+# ============================================================================
 
 def get_crypto_price(coin_id: str = "bitcoin", currency: str = "usd") -> dict:
     """
