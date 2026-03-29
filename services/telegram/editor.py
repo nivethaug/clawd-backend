@@ -275,10 +275,18 @@ if "price" in text_lower:
                     asyncio.wait_for(run_claude(), timeout=600)
                 )
             
-            return {
-                "success": result.get("success", False),
-                "error": result.get("error", "Unknown error")
-            }
+            # Handle result - can be string (success) or dict
+            if isinstance(result, dict):
+                return {
+                    "success": result.get("success", False),
+                    "error": result.get("error", "Unknown error")
+                }
+            elif isinstance(result, str) and result:
+                # String response means success (files were modified)
+                logger.info(f"✅ Claude returned response: {result[:100]}...")
+                return {"success": True, "error": None}
+            else:
+                return {"success": False, "error": "Empty or invalid response"}
         
         except asyncio.TimeoutError:
             logger.error("❌ Claude modification timeout after 600s")
