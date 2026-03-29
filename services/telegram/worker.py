@@ -23,7 +23,8 @@ def run_telegram_bot_pipeline(
     bot_token: str,
     project_path: str,
     domain: str,
-    port: int
+    port: int,
+    database_url: str = None
 ) -> Tuple[bool, Dict]:
     """
     Run complete telegram bot deployment pipeline.
@@ -36,6 +37,7 @@ def run_telegram_bot_pipeline(
         project_path: Base project path (e.g., /root/dreampilot/projects/123/)
         domain: Webhook domain (e.g., mybot.dreambigwithai.com)
         port: Port for webhook server
+        database_url: Database connection URL (optional)
     
     Returns:
         Tuple of (success, result_info)
@@ -129,7 +131,15 @@ def run_telegram_bot_pipeline(
         
         # Step 5: Start PM2 (base template works!)
         logger.info("📋 Step 5/11: Starting bot via PM2 (base template)...")
-        success, pm2_result = start_bot_pm2(project_id, telegram_path, port, domain)
+        success, pm2_result = start_bot_pm2(
+            project_id, 
+            telegram_path, 
+            port, 
+            domain,
+            bot_token=bot_token,
+            webhook_url=f"https://{domain}/webhook",
+            database_url=database_url
+        )
         
         if not success:
             error_msg = f"PM2 start failed: {pm2_result}"
