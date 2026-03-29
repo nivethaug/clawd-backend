@@ -140,6 +140,11 @@ def run_telegram_bot_pipeline(
         result_info["pm2_process"] = f"tg-bot-{project_id}"
         result_info["steps_completed"].append("pm2_start")
         
+        # Wait for bot to initialize (prevent 502 errors)
+        logger.info("⏳ Waiting 5s for bot to initialize...")
+        import time
+        time.sleep(5)
+        
         # Step 6: Configure nginx
         logger.info("📋 Step 6/11: Configuring nginx webhook routing...")
         
@@ -276,6 +281,10 @@ def run_telegram_bot_pipeline(
                         logger.info(f"✅ buildpublish.py completed successfully")
                         logger.debug(f"Output: {result.stdout}")
                         result_info["steps_completed"].append("buildpublish")
+                        
+                        # Wait for bot to restart
+                        logger.info("⏳ Waiting 3s for bot to restart...")
+                        time.sleep(3)
                     else:
                         logger.warning(f"⚠️ buildpublish.py failed: {result.stderr}")
                         result_info["errors"].append(f"buildpublish_failed: {result.stderr}")
