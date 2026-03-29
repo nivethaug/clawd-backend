@@ -4,9 +4,13 @@ Manages PM2 processes for telegram bots.
 """
 import subprocess
 import sys
+import os
 import json
 from typing import Tuple, Dict, Optional
 from utils.logger import logger
+
+# Shared virtual environment path (same as backend)
+SHARED_VENV_PATH = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")
 
 
 def start_bot_pm2(project_id: int, project_path: str, port: int, domain: Optional[str] = None) -> Tuple[bool, str]:
@@ -62,11 +66,22 @@ def start_bot_pm2(project_id: int, project_path: str, port: int, domain: Optiona
         logs_dir = os.path.join(telegram_dir, "logs")
         os.makedirs(logs_dir, exist_ok=True)
         
-        # Start PM2 process using current Python interpreter (where dependencies are installed)
+        # Use shared venv Python (same as installer.py)
+        venv_python = os.path.join(SHARED_VENV_PATH, "bin", "python")
+        
+        if os.path.exists(venv_python):
+            interpreter = venv_python
+            logger.info(f"📦 Using shared venv: {SHARED_VENV_PATH}")
+        else:
+            # Fallback to current Python
+            interpreter = sys.executable
+            logger.warning(f"⚠️ Shared venv not found, using current Python: {sys.executable}")
+        
+        # Start PM2 process using shared venv Python (has dependencies installed)
         result = subprocess.run(
             ["pm2", "start", "main.py", 
              "--name", process_name,
-             "--interpreter", sys.executable,  # Use current Python (has dependencies)
+             "--interpreter", interpreter,
              "--", "--port", str(port)],
             cwd=telegram_dir,
             capture_output=True,

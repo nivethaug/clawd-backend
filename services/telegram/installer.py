@@ -4,9 +4,13 @@ Installs Python dependencies for telegram bot.
 """
 import subprocess
 import sys
+import os
 from pathlib import Path
 from typing import Tuple
 from utils.logger import logger
+
+# Shared virtual environment path (same as backend)
+SHARED_VENV_PATH = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")
 
 
 def install_bot_dependencies(project_path: str) -> Tuple[bool, str]:
@@ -36,9 +40,21 @@ def install_bot_dependencies(project_path: str) -> Tuple[bool, str]:
         
         logger.info(f"Installing dependencies from {requirements_file}")
         
+        # Use shared venv pip (consistent with backend)
+        venv_pip = Path(SHARED_VENV_PATH) / "bin" / "pip"
+        
+        if venv_pip.exists():
+            pip_cmd = str(venv_pip)
+            logger.info(f"📦 Using shared venv: {SHARED_VENV_PATH}")
+        else:
+            # Fallback to current Python's pip
+            pip_cmd = f"{sys.executable} -m pip"
+            logger.warning(f"⚠️ Shared venv not found, using current Python: {sys.executable}")
+        
         # Run pip install
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)],
+            f"{pip_cmd} install --prefer-binary -r {requirements_file}",
+            shell=True,
             cwd=str(telegram_dir),
             capture_output=True,
             text=True,
