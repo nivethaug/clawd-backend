@@ -253,7 +253,7 @@ if "price" in text_lower:
                 async with ClaudeCodeAgent(repo_path=str(self.project_path)) as agent:
                     result = await agent.query(
                         prompt=prompt,
-                        timeout=180  # 3 minutes
+                        timeout=600  # 10 minutes
                     )
                     return result
             
@@ -267,12 +267,12 @@ if "price" in text_lower:
                 else:
                     # Use existing loop with timeout
                     result = loop.run_until_complete(
-                        asyncio.wait_for(run_claude(), timeout=180)
+                        asyncio.wait_for(run_claude(), timeout=600)
                     )
             except RuntimeError:
                 # No event loop, create new one
                 result = asyncio.run(
-                    asyncio.wait_for(run_claude(), timeout=180)
+                    asyncio.wait_for(run_claude(), timeout=600)
                 )
             
             return {
@@ -281,7 +281,7 @@ if "price" in text_lower:
             }
         
         except asyncio.TimeoutError:
-            logger.error("❌ Claude modification timeout after 180s")
+            logger.error("❌ Claude modification timeout after 600s")
             return {
                 "success": False,
                 "error": "Modification timeout"
