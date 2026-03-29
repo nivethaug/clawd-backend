@@ -38,7 +38,7 @@ class WebhookVerificationError(Exception):
     pass
 
 
-async def verify_telegram_bot_webhook(domain: str, timeout: int = 120, max_retries: int = 2) -> Tuple[bool, Dict[str, Any]]:
+async def verify_telegram_bot_webhook(domain: str, project_path: str = None, timeout: int = 120, max_retries: int = 2) -> Tuple[bool, Dict[str, Any]]:
     """
     Verify Telegram bot webhook endpoints using Claude Code Agent with Chrome DevTools MCP.
     
@@ -46,6 +46,7 @@ async def verify_telegram_bot_webhook(domain: str, timeout: int = 120, max_retri
     
     Args:
         domain: Full domain (e.g., "mybot-api.dreambigwithai.com")
+        project_path: Path to the telegram bot project directory (for fixing code)
         timeout: Timeout in seconds for verification (default: 120)
         max_retries: Maximum number of retry attempts if verification fails (default: 2)
     
@@ -185,8 +186,11 @@ Return a JSON object with these fields:
 
 **Important**: If you cannot fix the issue, explain why in the summary field."""
 
-            # Get repository path (use backend directory as workspace)
-            repo_path = str(Path(__file__).parent.parent.parent)
+            # Get repository path (use project path if provided, otherwise backend directory)
+            if project_path:
+                repo_path = project_path
+            else:
+                repo_path = str(Path(__file__).parent.parent.parent)
             logger.info(f"📁 Repository path: {repo_path}")
             
             # Run Claude Code Agent with verification prompt

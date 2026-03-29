@@ -324,8 +324,9 @@ def run_telegram_bot_pipeline(
                     import asyncio
                     
                     # Use Claude agent with retry (only for critical failures)
+                    # Pass project_path so Claude can fix code in the right directory
                     success, verification_info = asyncio.run(
-                        verify_telegram_bot_webhook(full_domain, timeout=120, max_retries=1)
+                        verify_telegram_bot_webhook(full_domain, project_path=project_path, timeout=120, max_retries=1)
                     )
                     
                     if success:
