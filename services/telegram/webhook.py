@@ -44,8 +44,8 @@ def register_telegram_webhook(
             logger.warning("⚠️ No domain provided - skipping webhook registration")
             return True, "Skipped (no domain)"
         
-        # Build webhook URL
-        webhook_url = f"https://{domain}/bot/{project_id}/webhook"
+        # Build webhook URL (matches nginx /webhook location)
+        webhook_url = f"https://{domain}/webhook"
         
         logger.info(f"🔗 Registering Telegram webhook: {webhook_url}")
         
@@ -57,6 +57,8 @@ def register_telegram_webhook(
             "allowed_updates": ["message", "edited_message", "callback_query"]
         }
         
+        logger.info(f"📤 Sending payload to Telegram API: {payload}")
+        
         response = requests.post(
             telegram_api_url,
             json=payload,
@@ -66,6 +68,9 @@ def register_telegram_webhook(
         if response.status_code == 200:
             result = response.json()
             
+            # Log full API response
+            logger.info(f"📡 Telegram API response: {result}")
+            
             if result.get("ok"):
                 logger.info(f"✅ Telegram webhook registered successfully")
                 logger.info(f"📍 Webhook URL: {webhook_url}")
@@ -73,10 +78,20 @@ def register_telegram_webhook(
             else:
                 error_msg = result.get("description", "Unknown error")
                 logger.warning(f"⚠️ Telegram webhook registration failed: {error_msg}")
+                logger.warning(f"📡 Telegram API error response: {result}")
                 return False, f"Telegram API error: {error_msg}"
         else:
-            logger.warning(f"⚠️ Telegram webhook registration failed with status {response.status_code}")
-            return False, f"HTTP {response.status_code}"
+            # Try to parse error response
+            try:
+                error_response = response.json()
+                logger.warning(f"⚠️ Telegram webhook registration failed with status {response.status_code}")
+                logger.warning(f"📡 Telegram API error response: {error_response}")
+                error_desc = error_response.get("description", f"HTTP {response.status_code}")
+                return False, error_desc
+            except:
+                logger.warning(f"⚠️ Telegram webhook registration failed with status {response.status_code}")
+                logger.warning(f"📡 Response text: {response.text}")
+                return False, f"HTTP {response.status_code}"
     
     except requests.exceptions.Timeout:
         logger.error("❌ Telegram webhook registration timeout")

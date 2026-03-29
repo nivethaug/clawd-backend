@@ -141,8 +141,8 @@ def re_register_webhook(bot_token: str, domain: str, project_id: str):
     import requests
     
     try:
-        # Build webhook URL
-        webhook_url = f"https://{domain}/bot/{project_id}/webhook"
+        # Build webhook URL (matches nginx /webhook location)
+        webhook_url = f"https://{domain}/webhook"
         
         print(f"🔗 Re-registering webhook: {webhook_url}")
         
