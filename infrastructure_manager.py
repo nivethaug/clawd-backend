@@ -1121,6 +1121,84 @@ server {{
             logger.error(f"Failed to generate nginx config: {e}")
             raise
 
+    def generate_telegram_bot_config(self, domain: str, port: int) -> Tuple[str, str]:
+        """
+        Generate nginx configuration for Telegram bot webhook server.
+        
+        Args:
+            domain: Domain name without TLD (e.g., "mybot-api")
+            port: Port for webhook server (8000-8999 range)
+        
+        Returns:
+            Tuple of (full_domain, config)
+        """
+        try:
+            # Full domain for webhook (e.g., mybot-api.dreambigwithai.com)
+            full_domain = f"{domain}.{BASE_DOMAIN}"
+            
+            # Use wildcard SSL certificate
+            config = f"""# Telegram Bot Webhook: {full_domain}
+# HTTP -> HTTPS redirect
+server {{
+    listen 80;
+    server_name {full_domain};
+    return 301 https://$host$request_uri;
+}}
+
+# HTTPS with wildcard SSL for Telegram webhook
+server {{
+    listen 443 ssl;
+    server_name {full_domain};
+
+    # Wildcard SSL certificate for *.dreambigwithai.com
+    ssl_certificate {self.WILDCARD_SSL_CERT};
+    ssl_certificate_key {self.WILDCARD_SSL_KEY};
+
+    # SSL optimization
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # Webhook endpoint (Telegram sends updates here)
+    location /webhook {{
+        proxy_pass http://127.0.0.1:{port}/webhook;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # Increase timeout for long-polling if needed
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 60s;
+    }}
+
+    # Health check endpoint
+    location /health {{
+        proxy_pass http://127.0.0.1:{port}/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }}
+
+    # Root redirect to health
+    location = / {{
+        return 200 '{{"status":"telegram-bot-webhook","domain":"{full_domain}"}}';
+        add_header Content-Type application/json;
+    }}
+}}
+"""
+            
+            logger.info(f"✓ Telegram bot nginx config generated for {full_domain}:{port}")
+            return (full_domain, config)
+            
+        except Exception as e:
+            logger.error(f"Failed to generate telegram bot nginx config: {e}")
+            raise
+
     def install_config(self, domain: str, config: str) -> bool:
         """
         Install nginx configuration and enable it.

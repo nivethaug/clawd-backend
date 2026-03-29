@@ -223,6 +223,7 @@ class CreateProjectRequest(BaseModel):
     user_id: Optional[int] = None
     type_id: Optional[int] = Field(None, alias="typeId")
     template_id: Optional[str] = None  # Optional pre-selected template ID (bypasses Task 1)
+    bot_token: Optional[str] = None  # Telegram bot token (required for type_id=2)
 
 class CreateSessionRequest(BaseModel):
     label: str
@@ -575,9 +576,12 @@ async def create_project(request: CreateProjectRequest):
         except Exception as e:
             logger.error(f"Template selection failed: {e}, worker will use fallback")
 
-    # Step 5: Trigger background Claude Code worker for website projects only
+    # Step 5: Trigger background worker based on project type
     # Project type 'website' has type_id = 1
+    # Project type 'telegrambot' has type_id = 2
+    
     if type_id == 1:
+        # Website project - trigger Claude Code worker
         # Generate unique session name for Claude Code
         session_name = f"project-{project_id}-{request.name.replace(' ', '-')}"
 
@@ -624,6 +628,100 @@ async def create_project(request: CreateProjectRequest):
                     ("failed", project_id)
                 )
                 conn.commit()
+    
+    elif type_id == 2:
+        # Telegram bot project - trigger telegram bot worker
+        logger.info(f"🤖 Starting Telegram bot creation for project {project_id}")
+        
+        # Validate bot_token is provided
+        if not request.bot_token:
+            error_msg = "bot_token is required for telegram bot projects (type_id=2)"
+            logger.error(f"❌ {error_msg}")
+            # Update project status to failed
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Import telegram worker
+        try:
+            from services.telegram.worker import run_telegram_bot_pipeline
+            from services.telegram.pm2_manager import get_bot_status_pm2
+            import threading
+            
+            # Generate port for webhook server (use project_id to ensure uniqueness)
+            bot_port = 8000 + (project_id % 1000)  # Range: 8000-8999
+            
+            # Extract domain from project domain or use default
+            bot_domain = final_project.get("domain", f"tg-bot-{project_id}.dreambigwithai.com")
+            
+            logger.info(f"Bot configuration: domain={bot_domain}, port={bot_port}")
+            
+            # Run telegram bot pipeline in background thread
+            def run_telegram_worker():
+                try:
+                    success, result = run_telegram_bot_pipeline(
+                        project_id=project_id,
+                        project_name=request.name,
+                        description=request.description or "",
+                        bot_token=request.bot_token,
+                        project_path=project_folder_path,
+                        domain=bot_domain,
+                        port=bot_port
+                    )
+                    
+                    if success:
+                        logger.info(f"✅ Telegram bot pipeline completed for project {project_id}")
+                        # Update project status to ready
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE projects SET status = ? WHERE id = ?",
+                                ("ready", project_id)
+                            )
+                            conn.commit()
+                    else:
+                        logger.error(f"❌ Telegram bot pipeline failed for project {project_id}")
+                        logger.error(f"Errors: {result.get('errors', [])}")
+                        # Update project status to failed
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE projects SET status = ? WHERE id = ?",
+                                ("failed", project_id)
+                            )
+                            conn.commit()
+                
+                except Exception as e:
+                    logger.error(f"❌ Telegram worker error: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    # Update project status to failed
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE projects SET status = ? WHERE id = ?",
+                            ("failed", project_id)
+                        )
+                        conn.commit()
+            
+            # Start worker in background thread
+            worker_thread = threading.Thread(target=run_telegram_worker, daemon=True)
+            worker_thread.start()
+            
+            logger.info(f"✅ Telegram bot worker started for project {project_id}")
+            
+        except ImportError as e:
+            error_msg = f"Failed to import telegram services: {e}"
+            logger.error(f"❌ {error_msg}")
+            # Update project status to failed
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
+            raise HTTPException(status_code=500, detail=error_msg)
 
     # Note: GitHub push happens at end of infrastructure_manager.provision_all()
     # This ensures all template files, builds, and infrastructure are included
@@ -1289,17 +1387,37 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     cleanup_results = {
         "project_name": project_name,
         "project_path": project_path,
+        "project_type": "telegram_bot" if project.get("type_id") == 2 else "website",
         "steps": {}
     }
 
     # STEP 1: Stop and remove PM2 services
-    # Use domain for PM2 service names (matches provisioning logic)
-    pm2_service_name = frontend_domain or project_name
-    try:
-        cleanup_results["steps"]["pm2"] = cleanup_pm2_services(pm2_service_name)
-    except Exception as e:
-        logger.error(f"Error in PM2 cleanup: {e}")
-        cleanup_results["steps"]["pm2"] = {"error": str(e)}
+    # Check if this is a telegram bot project
+    project_type_id = project.get("type_id")
+    
+    if project_type_id == 2:
+        # Telegram bot - stop PM2 process
+        try:
+            from services.telegram.pm2_manager import delete_bot_pm2
+            logger.info(f"🗑 Stopping Telegram bot PM2 process for project {project_id}")
+            success, message = delete_bot_pm2(project_id)
+            cleanup_results["steps"]["telegram_pm2"] = {
+                "success": success,
+                "message": message
+            }
+        except Exception as e:
+            logger.error(f"Error stopping telegram bot: {e}")
+            cleanup_results["steps"]["telegram_pm2"] = {"error": str(e)}
+    
+    else:
+        # Website project - use existing PM2 cleanup
+        # use domain for PM2 service names (matches provisioning logic)
+        pm2_service_name = frontend_domain or project_name
+        try:
+            cleanup_results["steps"]["pm2"] = cleanup_pm2_services(pm2_service_name)
+        except Exception as e:
+            logger.error(f"Error in PM2 cleanup: {e}")
+            cleanup_results["steps"]["pm2"] = {"error": str(e)}
 
     # STEP 2: Remove Nginx configuration
     # Use domain for nginx config name (matches provisioning logic)

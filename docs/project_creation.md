@@ -24,7 +24,7 @@
 
 **File:** `app.py:283-510`
 
-**Request:**
+### Website Project Request (type_id=1):
 ```json
 {
   "name": "my-project",
@@ -33,6 +33,17 @@
   "user_id": 1,
   "type_id": 1,
   "template_id": "blank-template"
+}
+```
+
+### Telegram Bot Project Request (type_id=2):
+```json
+{
+  "name": "my-telegram-bot",
+  "description": "AI assistant for customer support",
+  "user_id": 1,
+  "type_id": 2,
+  "bot_token": "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
 }
 ```
 
@@ -49,11 +60,23 @@
 }
 ```
 
+### Request Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Project name (unique) |
+| `domain` | string | No | Subdomain prefix (auto-generated if omitted) |
+| `description` | string | No | Project description |
+| `user_id` | integer | Yes | User ID owning the project |
+| `type_id` | integer | Yes | Project type: 1=Website, 2=Telegram Bot |
+| `template_id` | string | Conditional | Template ID (required for type_id=1) |
+| `bot_token` | string | Conditional | Telegram bot token (required for type_id=2) |
+
 ---
 
 ## Project Creation Pipeline
 
-### Entry Point Flow
+### Entry Point Flow (Website Projects - type_id=1)
 
 | Step | File | Lines | Description |
 |------|------|-------|-------------|
@@ -62,6 +85,182 @@
 | 3. Template Selection | `app.py` | 96-105 | Call `TemplateSelector.select_template()` |
 | 4. Worker Trigger | `claude_code_worker.py` | 50-80 | Start background worker |
 | 5. Fast Scaffolding | `fast_wrapper.py` | 50-240 | Create project structure |
+
+### Entry Point Flow (Telegram Bot Projects - type_id=2)
+
+| Step | File | Lines | Description |
+|------|------|-------|-------------|
+| 1. API Request | `app.py` | 632-638 | Validate bot_token provided for type_id=2 |
+| 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
+| 3. Worker Trigger | `app.py` | 640-670 | Start background telegram worker thread |
+| 4. Telegram Pipeline | `services/telegram/worker.py` | 18-150 | Execute 6-step pipeline |
+
+---
+
+## Telegram Bot Pipeline (type_id=2)
+
+### Pipeline Overview
+
+**Pattern**: Deploy base first, then enhance (ACPX-inspired)
+**Total Steps**: 11 steps
+**Duration**: ~5 minutes (2 min base + 3 min enhancement)
+
+### Phase 1: Base Deployment (Steps 1-8, ~2 min)
+
+| Step | Function | File | Lines | Description |
+|------|----------|------|-------|-------------|
+| 1 | `validate_telegram_token()` | `services/telegram/validator.py` | 15-40 | Validate token via Telegram API getMe |
+| 2 | `copy_telegram_template()` | `services/telegram/template.py` | 20-60 | Copy template from templates/telegram-bot-template/ |
+| 3 | `inject_bot_token()` | `services/telegram/env_injector.py` | 25-50 | Create .env file with BOT_TOKEN, WEBHOOK_DOMAIN, PORT, PROJECT_ID |
+| 4 | `install_bot_dependencies()` | `services/telegram/installer.py` | 20-50 | Run pip install -r requirements.txt |
+| 5 | `start_bot_pm2()` | `services/telegram/pm2_manager.py` | 50-120 | Start PM2 process: tg-bot-{project_id} ✅ Base works! |
+| 6 | Nginx webhook routing | `infrastructure_manager.py` | 822-1105 | Configure nginx webhook routing |
+| 7 | DNS provisioning | `infrastructure_manager.py` | 1210-1370 | Provision DNS (optional - uses wildcard DNS fallback) |
+| 8 | HTTP verification | `services/telegram/worker.py` | 210-240 | Fast HTTP check of /health endpoint ✅ Base confirmed! |
+
+### Phase 2: AI Enhancement (Steps 9-11, ~3 min)
+
+| Step | Function | File | Lines | Description |
+|------|----------|------|-------|-------------|
+| 9 | `enhance_bot_logic()` | `services/telegram/editor.py` | 100-250 | Claude AI modifies bot logic based on description |
+| 10 | `buildpublish.py` | `templates/telegram-bot-template/buildpublish.py` | 1-145 | Restart PM2 with enhanced code |
+| 11 | Final verification | `services/telegram/worker.py` | 260-340 | HTTP verify enhanced bot + Claude agent retry on critical failure |
+
+### Telegram Bot Configuration
+
+**Port Allocation:**
+- Formula: `bot_port = 8000 + (project_id % 1000)`
+- Range: 8000-8999
+- Unique per project
+
+**PM2 Process Name:** `tg-bot-{project_id}`
+- **Important**: PM2 process name uses `project_id`, NOT `bot_name`
+- Set by: `services/telegram/pm2_manager.py`
+- Restarted by: `templates/telegram-bot-template/buildpublish.py` (reads PROJECT_ID from .env)
+
+**Environment Variables (.env):**
+| Variable | Source | Example |
+|----------|--------|---------|
+| `BOT_TOKEN` | User input | `1234567890:ABCdef...` |
+| `PROJECT_ID` | Injected by worker.py | `123` |
+| `WEBHOOK_DOMAIN` | Auto-generated | `mybot-api.dreambigwithai.com` |
+| `PORT` | Port allocation | `8123` |
+| `BOT_NAME` | Project name | `My Telegram Bot` |
+
+**Webhook URL:** `https://{domain}.dreambigwithai.com/webhook`
+**Health Endpoint:** `https://{domain}.dreambigwithai.com/health`
+
+**Domain:** Extracted from project metadata (e.g., `{project_name}-api.dreambigwithai.com`)
+
+**Status Updates:**
+- Creating → Pipeline running
+- Ready → All 11 steps completed successfully
+- Failed → Pipeline error (token invalid, dependencies failed, etc.)
+
+**Error Handling:**
+- Each step returns success/failure tuple
+- On failure: Rollback changes, update status to 'failed'
+- Logs errors with traceback for debugging
+- Phase 2 failures don't rollback (base still works)
+
+### buildpublish.py Details
+
+**File:** `templates/telegram-bot-template/buildpublish.py`
+
+**Purpose**: Restart PM2 process after AI enhancement
+
+**How it works**:
+1. Reads `PROJECT_ID` from `.env` file (NOT `BOT_NAME`)
+2. Constructs PM2 process name: `tg-bot-{PROJECT_ID}`
+3. Runs: `pm2 restart tg-bot-{PROJECT_ID}`
+4. Uses shared venv: `/root/dreampilot/dreampilotvenv`
+
+**Usage**:
+```bash
+# Automatic (called by worker.py Step 10)
+python3 buildpublish.py
+
+# Manual (for testing)
+python3 buildpublish.py --skip-deps  # Skip pip install
+python3 buildpublish.py --no-restart # Skip PM2 restart
+```
+
+### Verification Strategy
+
+**Step 8 (Base Verification)**:
+- Fast HTTP check (< 1 second)
+- Endpoint: `https://{domain}.dreambigwithai.com/health`
+- Expected: `{"status": "healthy", "service": "telegram-bot"}`
+- On failure: Continue anyway (base may still work)
+
+**Step 11 (Final Verification)**:
+- HTTP check after AI enhancement
+- On success: ✅ Deployment complete!
+- On critical failure:
+  - Claude Code Agent invoked (uses Chrome DevTools MCP)
+  - Max retries: 1 attempt
+  - Claude diagnoses and fixes issues
+  - If Claude fails: Log warning, continue (base still works)
+
+**Critical Failure Examples**:
+- SSL certificate errors
+- PM2 process crashed
+- Port conflicts
+- Nginx misconfiguration
+
+**Non-Critical Issues** (don't trigger Claude retry):
+- Minor bot logic flaws
+- API integration issues
+- Missing features (bot still responds)
+
+### AI Enhancement Details
+
+**Step 9 - Claude Enhancement**:
+
+**File Modified**: `services/ai_logic.py` (in telegram template)
+
+**What Claude Does**:
+1. Reads current bot logic
+2. Checks `services/api_client.py` for existing API functions
+3. Detects if user mentioned specific APIs in description
+4. Adds new API functions to `api_client.py` (if needed)
+5. Enhances `process_user_input()` with new logic
+6. **Self-tests**: Runs `python -m py_compile` and import tests
+7. Fixes any syntax/import errors automatically
+
+**API Strategy**:
+- **Preferred**: Public/free APIs (CoinGecko, OpenWeatherMap, etc.)
+- **User-specified**: If user mentions "Spotify API", use that instead
+- **Error handling**: All API calls have try/except with user-friendly messages
+
+**Example Enhancement**:
+```python
+# Before (template)
+def process_user_input(text: str, user: Optional[User] = None) -> str:
+    if "hello" in text.lower():
+        return "Hello! How can I help?"
+
+# After (enhanced for "crypto price tracker")
+from services.api_client import get_crypto_price
+
+def process_user_input(text: str, user: Optional[User] = None) -> str:
+    text_lower = text.lower().strip()
+    
+    # Crypto price queries
+    if any(kw in text_lower for kw in ["btc", "bitcoin"]):
+        result = get_crypto_price("bitcoin")
+        if result["success"]:
+            return f"💰 Bitcoin: ${result['price']:,.2f}"
+        return f"⚠️ Error: {result['error']}"
+    
+    # ... existing logic ...
+```
+
+**Validation**:
+- Syntax check: `python -m py_compile services/ai_logic.py`
+- Import check: `python -c "from services.ai_logic import process_user_input"`
+- Function signature must not change
+- All imports must be valid
 
 ---
 

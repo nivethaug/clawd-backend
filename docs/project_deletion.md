@@ -49,6 +49,8 @@ Delete a project with full infrastructure cleanup (ASYNC).
 
 **Cleanup Steps (Background):**
 
+### Website Projects (type_id=1)
+
 | Step | Duration | Description |
 |------|----------|-------------|
 | 1 | Instant | Mark project as 'deleting' |
@@ -61,7 +63,26 @@ Delete a project with full infrastructure cleanup (ASYNC).
 | 8 | 5-10s | Delete project files (background) |
 | 9 | Instant | Delete database record (background) |
 
-**Total Duration**: 30-70 seconds (but API returns immediately)
+### Telegram Bot Projects (type_id=2)
+
+| Step | Duration | Description |
+|------|----------|-------------|
+| 1 | Instant | Mark project as 'deleting' |
+| 2 | Instant | Return immediate response |
+| 3 | 1-2s | Stop PM2 process: `delete_bot_pm2(project_id)` (background) |
+| 4 | 1-2s | Remove nginx config (background) |
+| 5 | 2-5s | Remove SSL certificates (background) |
+| 6 | 5-10s | Remove DNS records (background) |
+| 7 | 5-10s | Delete project files (background) |
+| 8 | Instant | Delete database record (background) |
+
+**Note:** Telegram bots do not have separate databases (use shared dreampilot DB)
+
+**Total Duration**: 
+- Website projects: 30-70 seconds
+- Telegram bot projects: 15-40 seconds
+
+**API returns immediately** (<1s) for both project types
 
 **Frontend Integration:**
 
@@ -90,6 +111,13 @@ const pollInterval = setInterval(async () => {
 - Master database deletion is blocked
 - Validates project database name pattern
 - Force flag logged as warning
+- Telegram bots skip database deletion step (no separate DB)
+
+**PM2 Cleanup by Project Type:**
+- **type_id=1 (Website):** Uses `cleanup_pm2_services()` for frontend/backend services
+- **type_id=2 (Telegram Bot):** Uses `delete_bot_pm2(project_id)` for process `tg-bot-{project_id}`
+
+**Code Reference:** `app.py:1398-1412`
 
 **Logs:**
 - Background cleanup logs with `[BG]` prefix
