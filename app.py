@@ -580,6 +580,9 @@ async def create_project(request: CreateProjectRequest):
     # Project type 'website' has type_id = 1
     # Project type 'telegrambot' has type_id = 2
     
+    logger.info(f"[PROJECT_TYPE] project_id={project_id}, type_id={type_id}, type(type_id)={type(type_id)}")
+    logger.info(f"[PROJECT_TYPE] Checking routing: type_id == 1? {type_id == 1}, type_id == 2? {type_id == 2}")
+    
     if type_id == 1:
         # Website project - trigger Claude Code worker
         # Generate unique session name for Claude Code
@@ -631,6 +634,7 @@ async def create_project(request: CreateProjectRequest):
     
     elif type_id == 2:
         # Telegram bot project - trigger telegram bot worker
+        logger.info(f"[PROJECT_TYPE] ✅ Entering TELEGRAM BOT branch (type_id=2)")
         logger.info(f"🤖 Starting Telegram bot creation for project {project_id}")
         
         # Validate bot_token is provided
@@ -648,9 +652,11 @@ async def create_project(request: CreateProjectRequest):
         
         # Import telegram worker
         try:
+            logger.info(f"[TELEGRAM] Importing telegram worker modules...")
             from services.telegram.worker import run_telegram_bot_pipeline
             from services.telegram.pm2_manager import get_bot_status_pm2
             import threading
+            logger.info(f"[TELEGRAM] Import successful!")
             
             # Generate port for webhook server (use project_id to ensure uniqueness)
             bot_port = 8000 + (project_id % 1000)  # Range: 8000-8999
@@ -658,7 +664,7 @@ async def create_project(request: CreateProjectRequest):
             # Use the already-defined domain variable (set earlier in this function)
             bot_domain = domain
             
-            logger.info(f"Bot configuration: domain={bot_domain}, port={bot_port}")
+            logger.info(f"[TELEGRAM] Bot configuration: domain={bot_domain}, port={bot_port}")
             
             # Run telegram bot pipeline in background thread
             def run_telegram_worker():
@@ -713,7 +719,9 @@ async def create_project(request: CreateProjectRequest):
             
         except ImportError as e:
             error_msg = f"Failed to import telegram services: {e}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"❌ [TELEGRAM] ImportError: {error_msg}")
+            import traceback
+            logger.error(traceback.format_exc())
             # Update project status to failed
             with get_db() as conn:
                 conn.execute(
@@ -722,6 +730,26 @@ async def create_project(request: CreateProjectRequest):
                 )
                 conn.commit()
             raise HTTPException(status_code=500, detail=error_msg)
+        
+        except Exception as e:
+            error_msg = f"Unexpected error in telegram bot creation: {e}"
+            logger.error(f"❌ [TELEGRAM] Unexpected error: {error_msg}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Update project status to failed
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
+            raise HTTPException(status_code=500, detail=error_msg)
+    
+    else:
+        # type_id is neither 1 nor 2 - this is unexpected
+        logger.warning(f"[PROJECT_TYPE] ⚠️ Unknown type_id={type_id}, no worker triggered")
+
+    logger.info(f"[PROJECT_TYPE] Finished type routing for project {project_id}")
 
     # Note: GitHub push happens at end of infrastructure_manager.provision_all()
     # This ensures all template files, builds, and infrastructure are included
