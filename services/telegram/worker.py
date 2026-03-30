@@ -16,6 +16,65 @@ from services.telegram.installer import install_bot_dependencies
 from services.telegram.pm2_manager import start_bot_pm2, get_bot_status_pm2
 
 
+def _save_project_metadata(
+    project_path: str,
+    project_id: int,
+    project_name: str,
+    bot_username: str,
+    domain: str,
+    port: int,
+    pm2_process: str,
+    telegram_path: str
+) -> bool:
+    """
+    Save project metadata to project.json for Telegram bot projects.
+    
+    This enables proper cleanup during deletion and better project tracking.
+    
+    Args:
+        project_path: Base project path (e.g., /root/dreampilot/projects/123/)
+        project_id: Project ID
+        project_name: Bot name
+        bot_username: Telegram bot username (without @)
+        domain: Webhook domain (without .dreambigwithai.com)
+        port: Webhook server port
+        pm2_process: PM2 process name
+        telegram_path: Path to telegram bot files
+    
+    Returns:
+        True if saved successfully, False otherwise
+    """
+    import json
+    from datetime import datetime
+    
+    try:
+        metadata = {
+            "project_id": project_id,
+            "project_name": project_name,
+            "type_id": 2,  # Telegram bot type
+            "bot_username": bot_username,
+            # Note: bot_token is NOT included for security
+            "domain": domain,
+            "full_domain": f"{domain}.dreambigwithai.com",
+            "port": port,
+            "pm2_process": pm2_process,
+            "telegram_path": telegram_path,
+            "webhook_url": f"https://{domain}.dreambigwithai.com/webhook",
+            "status": "ready",
+            "created_at": datetime.utcnow().isoformat()
+        }
+        
+        metadata_path = Path(project_path) / "project.json"
+        metadata_path.write_text(json.dumps(metadata, indent=2))
+        
+        logger.info(f"✅ Project metadata saved: {metadata_path}")
+        return True
+    
+    except Exception as e:
+        logger.error(f"Failed to save project metadata: {e}")
+        return False
+
+
 def run_telegram_bot_pipeline(
     project_id: int,
     project_name: str,
@@ -406,6 +465,22 @@ def run_telegram_bot_pipeline(
             logger.warning(f"⚠️ Webhook registration error: {e}")
             result_info["webhook_registration"] = f"error: {e}"
             result_info["errors"].append(f"webhook_registration_error: {e}")
+        
+        # ========================================================================
+        # STEP: Save Project Metadata (for cleanup support)
+        # ========================================================================
+        
+        logger.info("💾 Saving project metadata...")
+        _save_project_metadata(
+            project_path=project_path,
+            project_id=project_id,
+            project_name=project_name,
+            bot_username=result_info.get("bot_username", ""),
+            domain=domain,
+            port=port,
+            pm2_process=pm2_process_name,
+            telegram_path=telegram_path
+        )
         
         # ========================================================================
         # Final success

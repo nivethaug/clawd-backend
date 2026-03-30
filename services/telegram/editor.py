@@ -183,6 +183,8 @@ ELSE:
 5. DO NOT modify main.py, config.py, database.py
 6. Handle errors gracefully
 7. Keep existing greetings/help logic
+8. **PRESERVE handlers/start.py structure**: Keep all variable extractions (tg_user, username, user_id, etc.) - only modify welcome_msg content
+9. **NEVER delete variable assignments** like `username = tg_user.username` - these are required before use
 
 ## 🌐 API INTEGRATION PATTERN
 
@@ -242,8 +244,16 @@ if "price" in text_lower:
 
 ## 🔗 LINKING COMMANDS TO WELCOME MESSAGE
 
-After adding commands to ai_logic.py, UPDATE handlers/start.py:
+After adding commands to ai_logic.py, UPDATE handlers/start.py welcome message ONLY.
 
+**CRITICAL: Preserve the existing variable extraction at the top of the file:**
+```python
+# These lines MUST remain unchanged:
+tg_user = update.effective_user
+username = tg_user.username  # ← REQUIRED - do not remove this line
+```
+
+**Only modify the welcome_msg string content:**
 ```python
 welcome_msg = (
     f"👋 Welcome{{f' @{username}' if username else ''}}!\n\n"
@@ -255,7 +265,10 @@ welcome_msg = (
 )
 ```
 
-**IMPORTANT:** If you add commands to ai_logic.py, you MUST update the welcome message in handlers/start.py to mention them!
+**IMPORTANT:** 
+- If you add commands to ai_logic.py, you MUST update the welcome message in handlers/start.py
+- NEVER remove or modify the variable extraction lines (tg_user, username, etc.)
+- The `username` variable MUST be defined before use in welcome_msg
 
 ## 🎯 Implementation Steps
 1. Read services/ai_logic.py
