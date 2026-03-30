@@ -1346,6 +1346,9 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         Dict with complete cleanup status
     """
     logger.info(f"Starting infrastructure cleanup for: {project_path}")
+    
+    # Import re at function level (needed for path parsing)
+    import re
 
     # Load project metadata
     project_json_path = os.path.join(project_path, "project.json")
@@ -1364,7 +1367,6 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     project_name = project_metadata.get("project_name")
     if not project_name:
         # Extract from path (e.g., "124_test-api-project_20260220_153219" -> "test-api-project")
-        import re
         path_basename = os.path.basename(project_path)
         # Remove ID prefix and timestamp suffix (pattern: _YYYYMMDD_HHMMSS at the end)
         # Matches: 123_project-name_20260220_153219 -> extracts "project-name"
