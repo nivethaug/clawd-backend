@@ -291,7 +291,12 @@ def delete_bot_pm2(project_id: int, domain: Optional[str] = None) -> Tuple[bool,
     """
     try:
         # Use domain if available, otherwise fall back to project_id
-        process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
+        # Strip "-bot" suffix from domain if already present to avoid double suffix
+        if domain:
+            clean_domain = domain.removesuffix("-bot").removesuffix("-Bot")
+            process_name = f"{clean_domain}-bot"
+        else:
+            process_name = f"tg-bot-{project_id}"
         
         logger.info(f"Deleting PM2 process: {process_name}")
         

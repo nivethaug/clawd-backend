@@ -45,7 +45,8 @@ def process_user_input(text: str, user: Optional[User] = None) -> str:
     
     # /ask command (general Q&A)
     if text_lower.startswith("/ask") or text_lower == "ask":
-        return _handle_ask(text_lower)
+        question = text_lower.replace("/ask", "").replace("ask", "").strip()
+        return _handle_ask(question)
     
     # ========================================================================
     # EXAMPLE FEATURE: Crypto Price (AI can add more features)
@@ -139,13 +140,18 @@ def _handle_status(user: Optional[User]) -> str:
     return status
 
 
-def _handle_ask(text: str) -> str:
+def _handle_ask(question: str) -> str:
     """Handle /ask command (general Q&A)."""
-    # Remove /ask prefix
-    question = text.replace("/ask", "").replace("ask", "").strip()
+    # question is already cleaned by caller
     
-    if not question:
-        return "💡 Usage: /ask <your question>\n\nExample: /ask what is bitcoin?"
+    if not question or not question.strip():
+        return (
+            "💡 **Usage:** /ask <your question>\n\n"
+            "**Examples:**\n"
+            "• /ask what is bitcoin?\n"
+            "• /ask how does blockchain work?\n"
+            "• /ask tell me about ethereum"
+        )
     
     # Mock response for general questions
     # AI will enhance this with real logic
@@ -153,7 +159,8 @@ def _handle_ask(text: str) -> str:
         f"🤔 You asked: \"{question}\"\n\n"
         "💡 I'm still learning! Try one of these:\n"
         "• BTC price\n"
-        "• ETH price\n"
+        "• /price eth\n"
+        "• /market\n"
         "• Or type /help for more options"
     )
 

@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from handlers.start import start
 from handlers.help import help_command
+from handlers.status import status
 from handlers.message import handle_message
 from utils.logger import logger
 from core.database import init_db
@@ -48,8 +49,10 @@ def init_bot():
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # Register handlers
+    # All commands route through ai_logic.py for AI customization
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CommandHandler("help", help_command))
+    bot_app.add_handler(CommandHandler("status", status))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("✅ Bot application built successfully")

@@ -1379,13 +1379,22 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
             project_name = parts[1] if len(parts) > 1 else path_basename
         logger.warning(f"Extracted project name from path: {project_name}")
 
-    frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
-    backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(".dreambigwithai.com", "")
+    # Check if this is a telegram bot (type_id == 2)
+    is_telegram_bot = project_metadata.get("type_id") == 2
+    
+    # For telegram bots, domain is stored directly as "domain" field
+    if is_telegram_bot:
+        frontend_domain = project_metadata.get("domain", "")
+        backend_domain = ""  # Telegram bots don't have backend domains
+    else:
+        frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
+        backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(".dreambigwithai.com", "")
+    
     db_name = project_metadata.get("database", {}).get("name", "")
     db_user = project_metadata.get("database", {}).get("user", "")
 
     # Fallback: extract from full domains
-    if not frontend_domain:
+    if not frontend_domain and not is_telegram_bot:
         full_frontend = project_metadata.get("frontend_domain", "")
         if full_frontend:
             frontend_domain = full_frontend.replace(".dreambigwithai.com", "")
@@ -1402,7 +1411,8 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
             db_user = db_name.replace("_db", "_user")
 
     # Final fallback: construct from project_name if metadata is incomplete
-    if not frontend_domain and project_name:
+    # Skip this for telegram bots since domain should already be set
+    if not frontend_domain and project_name and not is_telegram_bot:
         frontend_domain = project_name
         logger.info(f"Using constructed frontend domain: {frontend_domain}")
 
@@ -1423,7 +1433,6 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         "steps": {}
     }
 
-    # STEP 1: Stop and remove PM2 services
     # Check if this is a telegram bot project
     # Priority: 1) metadata type_id, 2) path contains /telegram/
     project_type_id = project_metadata.get("type_id")
@@ -1435,33 +1444,40 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     project_id = int(project_id_match.group(1)) if project_id_match else None
     
     if is_telegram_bot:
-        # Telegram bot - stop PM2 process
+        # Telegram bot - use dedicated cleanup module
         try:
-            from services.telegram.pm2_manager import delete_bot_pm2
-            logger.info(f"🗑 Stopping Telegram bot PM2 process for project {project_id}")
-            if project_id:
-                # Use domain-based PM2 naming (consistent with creation)
-                bot_domain = frontend_domain or project_name
-                success, message = delete_bot_pm2(project_id, domain=bot_domain)
-                cleanup_results["steps"]["telegram_pm2"] = {
-                    "success": success,
-                    "message": message
-                }
-            else:
-                cleanup_results["steps"]["telegram_pm2"] = {"error": "Could not extract project_id from path"}
+            from services.telegram.cleanup_infra import cleanup_telegram_bot_infrastructure
+            logger.info(f"🤖 Using telegram bot cleanup module for project {project_id}")
+            
+            # Run full telegram bot cleanup
+            telegram_cleanup = cleanup_telegram_bot_infrastructure(
+                project_path=project_path,
+                project_id=project_id,
+                project_metadata=project_metadata
+            )
+            
+            # Copy results to main cleanup_results
+            cleanup_results["steps"] = telegram_cleanup.get("steps", {})
+            cleanup_results["domain"] = telegram_cleanup.get("domain", "")
+            
+            logger.info(f"✅ Telegram bot cleanup completed")
+            
         except Exception as e:
-            logger.error(f"Error stopping telegram bot: {e}")
-            cleanup_results["steps"]["telegram_pm2"] = {"error": str(e)}
+            logger.error(f"Error in telegram bot cleanup: {e}")
+            cleanup_results["steps"]["telegram_cleanup"] = {"error": str(e)}
+        
+        # Return early - telegram cleanup handles all infrastructure
+        return cleanup_results
     
-    else:
-        # Website project - use existing PM2 cleanup
-        # use domain for PM2 service names (matches provisioning logic)
-        pm2_service_name = frontend_domain or project_name
-        try:
-            cleanup_results["steps"]["pm2"] = cleanup_pm2_services(pm2_service_name)
-        except Exception as e:
-            logger.error(f"Error in PM2 cleanup: {e}")
-            cleanup_results["steps"]["pm2"] = {"error": str(e)}
+    # STEP 1: Stop and remove PM2 services (for non-telegram projects)
+    # Website project - use existing PM2 cleanup
+    # use domain for PM2 service names (matches provisioning logic)
+    pm2_service_name = frontend_domain or project_name
+    try:
+        cleanup_results["steps"]["pm2"] = cleanup_pm2_services(pm2_service_name)
+    except Exception as e:
+        logger.error(f"Error in PM2 cleanup: {e}")
+        cleanup_results["steps"]["pm2"] = {"error": str(e)}
 
     # STEP 2: Remove Nginx configuration
     # Use domain for nginx config name (matches provisioning logic)

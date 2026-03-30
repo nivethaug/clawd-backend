@@ -5,13 +5,15 @@ Run from bot directory: python buildpublish.py [--skip-deps] [--no-restart]
 
 IMPORTANT: Call this script AFTER making ANY changes to the bot code!
 - If you modified any files in the bot directory, run: python3 buildpublish.py
-- This will install deps and restart PM2 automatically
+- This will clear cache, install deps, and restart PM2 automatically
 - Only skip restart with --no-restart if you're just testing locally
 
 Steps:
 1. Install Python dependencies
 2. Verify main.py exists
-3. Restart PM2 process (bot will reload with new code)
+3. Clear Python cache (__pycache__, *.pyc)
+4. Restart PM2 process with hard stop/start (bot will reload with new code)
+5. Re-register Telegram webhook
 """
 
 import subprocess
@@ -73,14 +75,47 @@ def verify_main():
     return True
 
 
+def clear_python_cache():
+    """Clear Python cache files to ensure fresh code load"""
+    print("\n" + "="*50)
+    print("CLEARING PYTHON CACHE")
+    print("="*50)
+    
+    import shutil
+    
+    # Remove __pycache__ directories
+    cache_cleared = 0
+    for cache_dir in Path(".").rglob("__pycache__"):
+        try:
+            shutil.rmtree(cache_dir)
+            cache_cleared += 1
+            print(f"✓ Removed: {cache_dir}")
+        except Exception as e:
+            print(f"⚠ Failed to remove {cache_dir}: {e}")
+    
+    # Remove .pyc files
+    pyc_cleared = 0
+    for pyc_file in Path(".").rglob("*.pyc"):
+        try:
+            pyc_file.unlink()
+            pyc_cleared += 1
+        except Exception as e:
+            print(f"⚠ Failed to remove {pyc_file}: {e}")
+    
+    print(f"✅ Cleared {cache_cleared} __pycache__ dirs, {pyc_cleared} .pyc files")
+    return True
+
+
 def restart_pm2():
-    """Restart PM2 process for this bot
+    """Restart PM2 process for this bot with HARD restart
     
     PM2 app name is read from .env file (BOT_NAME variable)
     Format: tg-bot-{project_id} (set by pm2_manager.py)
+    
+    Uses stop + start instead of restart to ensure fresh code load
     """
     print("\n" + "="*50)
-    print("PM2 RESTART")
+    print("PM2 HARD RESTART")
     print("="*50)
     
     # Read bot name from .env
@@ -109,9 +144,33 @@ def restart_pm2():
     # PM2 process name format: {domain}-bot or tg-bot-{project_id}
     pm2_process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
     
-    print(f"📦 Restarting PM2 app: {pm2_process_name}")
-    if not run(f"pm2 restart {pm2_process_name}"):
-        return False
+    print(f"📦 Stopping PM2 app: {pm2_process_name}")
+    run(f"pm2 stop {pm2_process_name}")
+    
+    # Wait for process to fully stop
+    import time
+    time.sleep(2)
+    
+    print(f"📦 Starting PM2 app: {pm2_process_name}")
+    if not run(f"pm2 start {pm2_process_name}"):
+        print("⚠️ PM2 start failed, trying restart...")
+        if not run(f"pm2 restart {pm2_process_name}"):
+            return False
+    
+    # Verify process is running
+    time.sleep(2)
+    result = subprocess.run(
+        f"pm2 describe {pm2_process_name}",
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    
+    if "online" in result.stdout.lower():
+        print(f"✅ PM2 process is online: {pm2_process_name}")
+    else:
+        print(f"⚠️ PM2 process may not be running properly")
+        print(f"Status output:\n{result.stdout[:500]}")
     
     # Re-register webhook if token and domain available
     if bot_token and domain:
@@ -209,7 +268,11 @@ def main():
         if not verify_main():
             success = False
     
-    # Step 3: Restart PM2 (MANDATORY by default)
+    # Step 3: Clear Python cache (ensures fresh code load)
+    if success:
+        clear_python_cache()
+    
+    # Step 4: Restart PM2 (MANDATORY by default)
     if not args.no_restart and success:
         if not restart_pm2():
             print("⚠ PM2 restart failed, but continuing")
