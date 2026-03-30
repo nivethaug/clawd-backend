@@ -1423,14 +1423,16 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
 
     # STEP 1: Stop and remove PM2 services
     # Check if this is a telegram bot project
+    # Priority: 1) metadata type_id, 2) path contains /telegram/
     project_type_id = project_metadata.get("type_id")
+    is_telegram_bot = project_type_id == 2 or "/telegram/" in project_path.replace("\\", "/")
     
     # Extract project_id from path (e.g., "124_test-api-project_20260220_153219" -> 124)
     path_basename = os.path.basename(project_path)
     project_id_match = re.match(r'^(\d+)_', path_basename)
     project_id = int(project_id_match.group(1)) if project_id_match else None
     
-    if project_type_id == 2:
+    if is_telegram_bot:
         # Telegram bot - stop PM2 process
         try:
             from services.telegram.pm2_manager import delete_bot_pm2
