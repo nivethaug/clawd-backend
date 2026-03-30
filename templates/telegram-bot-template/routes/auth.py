@@ -78,6 +78,13 @@ async def get_current_user(
     db: Session = Depends(get_db)
 ) -> User:
     """Get current user from JWT token."""
+    # Database not configured
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not configured - authentication unavailable"
+        )
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -100,6 +107,13 @@ async def get_current_user(
 @router.post("/register", response_model=Token)
 async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     """Register new email-based user."""
+    # Database not configured
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not configured - registration unavailable"
+        )
+    
     # Check if email already exists
     db_user = db.query(User).filter(User.email == user_data.email).first()
     if db_user:
@@ -126,6 +140,13 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
 @router.post("/login", response_model=Token)
 async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     """Login email-based user."""
+    # Database not configured
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not configured - login unavailable"
+        )
+    
     user = db.query(User).filter(User.email == user_data.email).first()
     
     if not user or not user.password_hash:

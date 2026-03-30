@@ -9,23 +9,28 @@ from utils.logger import logger
 
 
 def get_or_create_telegram_user(
-    db: Session,
+    db: Optional[Session],
     telegram_user_id: int,
     telegram_chat_id: int,
     telegram_username: Optional[str] = None
-) -> User:
+) -> Optional[User]:
     """
     Get existing user or create new Telegram user.
     
     Args:
-        db: Database session
+        db: Database session (optional - returns None if not configured)
         telegram_user_id: Telegram user ID
         telegram_chat_id: Telegram chat ID
         telegram_username: Optional Telegram username
     
     Returns:
-        User object
+        User object or None if database not configured
     """
+    # Database not configured - return None
+    if db is None:
+        logger.info(f"ℹ️ No database - skipping user creation for Telegram ID: {telegram_user_id}")
+        return None
+    
     try:
         # Try to find existing user
         user = db.query(User).filter(

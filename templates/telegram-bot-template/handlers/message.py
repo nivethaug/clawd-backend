@@ -16,30 +16,33 @@ async def handle_message(update, context):
     user_id = tg_user.id
     username = tg_user.username
     
-    # Get or create user in database
-    db = SessionLocal()
+    # Get or create user in database (if available)
+    db = None
+    user = None
+    
+    if SessionLocal:
+        try:
+            db = SessionLocal()
+            user = get_or_create_telegram_user(
+                db=db,
+                telegram_user_id=user_id,
+                telegram_chat_id=chat_id,
+                telegram_username=username
+            )
+        except Exception as e:
+            # Database error - continue without user context
+            from utils.logger import logger
+            logger.error(f"Database error in message handler: {e}")
+    
+    # Process message (with or without user context)
     try:
-        user = get_or_create_telegram_user(
-            db=db,
-            telegram_user_id=user_id,
-            telegram_chat_id=chat_id,
-            telegram_username=username
-        )
-        
-        # Process message with user context
         user_input = update.message.text
         response = process_user_input(user_input, user)
-        
         await update.message.reply_text(response)
-        
     except Exception as e:
-        # Fallback: process without user context if database fails
         from utils.logger import logger
-        logger.error(f"Database error in message handler: {e}")
-        
-        user_input = update.message.text
-        response = process_user_input(user_input, user=None)
-        await update.message.reply_text(response)
-        
+        logger.error(f"Error processing message: {e}")
+        await update.message.reply_text("Sorry, I encountered an error. Please try again.")
     finally:
-        db.close()
+        if db:
+            db.close()

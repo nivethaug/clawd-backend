@@ -14,16 +14,25 @@ async def start(update, context):
     user_id = tg_user.id
     username = tg_user.username
     
-    # Get or create user in database
-    db = SessionLocal()
+    # Get or create user in database (if available)
+    db = None
+    
+    if SessionLocal:
+        try:
+            db = SessionLocal()
+            get_or_create_telegram_user(
+                db=db,
+                telegram_user_id=user_id,
+                telegram_chat_id=chat_id,
+                telegram_username=username
+            )
+        except Exception as e:
+            # Database error - continue without user context
+            from utils.logger import logger
+            logger.error(f"Database error in start handler: {e}")
+    
+    # Send welcome message
     try:
-        user = get_or_create_telegram_user(
-            db=db,
-            telegram_user_id=user_id,
-            telegram_chat_id=chat_id,
-            telegram_username=username
-        )
-        
         welcome_msg = (
             f"👋 Welcome{f' @{username}' if username else ''}!\n\n"
             f"I am your AI-powered bot.\n\n"
@@ -32,17 +41,9 @@ async def start(update, context):
         )
         
         await update.message.reply_text(welcome_msg)
-        
     except Exception as e:
-        # Fallback: show welcome without database
         from utils.logger import logger
-        logger.error(f"Database error in start handler: {e}")
-        
-        await update.message.reply_text(
-            "👋 Welcome! I am your AI-powered bot.\n\n"
-            "Send me a message to get started.\n"
-            "Type /help to see what I can do."
-        )
-        
+        logger.error(f"Error sending welcome: {e}")
     finally:
-        db.close()
+        if db:
+            db.close()

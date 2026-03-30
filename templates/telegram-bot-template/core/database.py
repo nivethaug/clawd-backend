@@ -38,9 +38,18 @@ Base = declarative_base()
 
 
 def get_db():
-    """Get database session (optional)."""
+    """
+    Get database session (optional).
+    
+    Yields:
+        Session or None: Database session if configured, None otherwise
+    
+    Note:
+        Routes and handlers should check if db is None and handle accordingly.
+        This allows the bot to run without a database for simple use cases.
+    """
     if not SessionLocal:
-        # Database not configured - return None
+        # Database not configured - yield None
         yield None
     else:
         db = SessionLocal()
