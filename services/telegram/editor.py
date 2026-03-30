@@ -256,7 +256,7 @@ username = tg_user.username  # ← REQUIRED - do not remove this line
 **Only modify the welcome_msg string content:**
 ```python
 welcome_msg = (
-    f"👋 Welcome{{f' @{username}' if username else ''}}!\n\n"
+    f"👋 Welcome{{f' @{{username}}' if {{username}} else ''}}!\n\n"
     f"I am your [BOT PURPOSE] bot.\n\n"
     f"**Available Commands:**\n"
     f"🔹 /command1 - Description\n"
