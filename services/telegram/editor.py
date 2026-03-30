@@ -449,6 +449,10 @@ welcome_msg = (
                     # Verify async def start still exists
                     if 'async def start(update, context):' not in start_content:
                         return False, "start handler function signature changed or missing"
+                    
+                    # CRITICAL: Verify username variable is still defined (prevents AI from removing it)
+                    if 'username = tg_user.username' not in start_content:
+                        return False, "CRITICAL: 'username = tg_user.username' line was removed from start.py - this will cause NameError"
                 except SyntaxError as e:
                     return False, f"Syntax error in start.py: {e}"
             
