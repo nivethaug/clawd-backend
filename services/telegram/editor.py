@@ -244,30 +244,34 @@ if "price" in text_lower:
 
 ## 🔗 LINKING COMMANDS TO WELCOME MESSAGE
 
-After adding commands to ai_logic.py, UPDATE handlers/start.py welcome message ONLY.
+After adding commands to ai_logic.py, UPDATE the `_handle_start()` function in services/ai_logic.py to list new commands.
 
-**CRITICAL: Preserve the existing variable extraction at the top of the file:**
+**Modify the `_handle_start()` function to include new commands:**
 ```python
-# These lines MUST remain unchanged:
-tg_user = update.effective_user
-username = tg_user.username  # ← REQUIRED - do not remove this line
-```
-
-**Only modify the welcome_msg string content:**
-```python
-welcome_msg = (
-    f"👋 Welcome{{f' @{{username}}' if {{username}} else ''}}!\n\n"
-    f"I am your [BOT PURPOSE] bot.\n\n"
-    f"**Available Commands:**\n"
-    f"🔹 /command1 - Description\n"
-    f"🔹 /command2 - Description\n"
-    f"🔹 /help - Show all commands\n"
-)
+def _handle_start(user: Optional[User]) -> str:
+    \"\"\"Handle /start command.\"\"\""
+    if user and user.telegram_username:
+        return (
+            f"👋 Welcome @{{user.telegram_username}}!\n\n"
+            f"I am your [BOT PURPOSE] bot.\n\n"
+            f"**Available Commands:**\n"
+            f"🔹 /command1 - Description\n"
+            f"🔹 /command2 - Description\n"
+            f"🔹 /help - Show all commands\n"
+        )
+    return (
+        "👋 Welcome!\n\n"
+        "I am your [BOT PURPOSE] bot.\n\n"
+        "**Available Commands:**\n"
+        "🔹 /command1 - Description\n"
+        "🔹 /command2 - Description\n"
+        "🔹 /help - Show all commands\n"
+    )
 ```
 
 **IMPORTANT:** 
-- If you add commands to ai_logic.py, you MUST update the welcome message in handlers/start.py
-- NEVER remove or modify the variable extraction lines (tg_user, username, etc.)
+- If you add commands to ai_logic.py, you MUST update the `_handle_start()` function to list them
+- Also update `_handle_help()` function to list new commands
 - The `username` variable MUST be defined before use in welcome_msg
 
 ## 🎯 Implementation Steps
@@ -450,9 +454,13 @@ welcome_msg = (
                     if 'async def start(update, context):' not in start_content:
                         return False, "start handler function signature changed or missing"
                     
-                    # CRITICAL: Verify username variable is still defined (prevents AI from removing it)
+                    # CRITICAL: Verify username variable is still defined (needed for database)
                     if 'username = tg_user.username' not in start_content:
-                        return False, "CRITICAL: 'username = tg_user.username' line was removed from start.py - this will cause NameError"
+                        return False, "CRITICAL: 'username = tg_user.username' line was removed from start.py"
+                    
+                    # Verify it routes through ai_logic.py
+                    if 'process_user_input' not in start_content:
+                        return False, "start.py must call process_user_input() from ai_logic.py"
                 except SyntaxError as e:
                     return False, f"Syntax error in start.py: {e}"
             
