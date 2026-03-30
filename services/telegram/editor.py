@@ -32,10 +32,20 @@ class TelegramBotEditor:
             project_path: Path to telegram/ directory
         """
         self.project_path = Path(project_path)
+        
+        # Core logic files
         self.ai_logic_path = self.project_path / "services" / "ai_logic.py"
         self.api_client_path = self.project_path / "services" / "api_client.py"
+        
+        # Handler files (AI can edit to update welcome messages)
+        self.start_handler_path = self.project_path / "handlers" / "start.py"
+        self.message_handler_path = self.project_path / "handlers" / "message.py"
+        
+        # Backup paths
         self.backup_ai_logic = self.project_path / "services" / "ai_logic.py.backup"
         self.backup_api_client = self.project_path / "services" / "api_client.py.backup"
+        self.backup_start_handler = self.project_path / "handlers" / "start.py.backup"
+        self.backup_message_handler = self.project_path / "handlers" / "message.py.backup"
     
     def enhance_bot_logic(
         self,
@@ -78,6 +88,15 @@ class TelegramBotEditor:
                 logger.info(f"Creating backup: {self.backup_api_client}")
                 shutil.copy2(self.api_client_path, self.backup_api_client)
             
+            # Create backups for handler files
+            if self.start_handler_path.exists():
+                logger.info(f"Creating backup: {self.backup_start_handler}")
+                shutil.copy2(self.start_handler_path, self.backup_start_handler)
+            
+            if self.message_handler_path.exists():
+                logger.info(f"Creating backup: {self.backup_message_handler}")
+                shutil.copy2(self.message_handler_path, self.backup_message_handler)
+            
             # Build AI prompt
             prompt = self._build_enhancement_prompt(description, bot_name)
             
@@ -98,6 +117,10 @@ class TelegramBotEditor:
                         self.backup_ai_logic.unlink()
                     if self.backup_api_client.exists():
                         self.backup_api_client.unlink()
+                    if self.backup_start_handler.exists():
+                        self.backup_start_handler.unlink()
+                    if self.backup_message_handler.exists():
+                        self.backup_message_handler.unlink()
                     return True, "Bot logic enhanced successfully"
                 else:
                     # Validation failed - rollback
@@ -121,8 +144,10 @@ class TelegramBotEditor:
 
 Bot: {bot_name}
 Allowed files to modify:
-- services/ai_logic.py (process_user_input function)
+- services/ai_logic.py (process_user_input function - ADD NEW COMMANDS HERE)
 - services/api_client.py (add helper functions only)
+- handlers/start.py (update welcome message to mention new commands)
+- handlers/message.py (update if needed, but usually not necessary)
 
 ## 🧠 COMMAND GENERATION STRATEGY
 
@@ -215,18 +240,37 @@ if "price" in text_lower:
 - Commands: /start, /help, /ask
 - Response: Mock or default
 
+## 🔗 LINKING COMMANDS TO WELCOME MESSAGE
+
+After adding commands to ai_logic.py, UPDATE handlers/start.py:
+
+```python
+welcome_msg = (
+    f"👋 Welcome{{f' @{username}' if username else ''}}!\n\n"
+    f"I am your [BOT PURPOSE] bot.\n\n"
+    f"**Available Commands:**\n"
+    f"🔹 /command1 - Description\n"
+    f"🔹 /command2 - Description\n"
+    f"🔹 /help - Show all commands\n"
+)
+```
+
+**IMPORTANT:** If you add commands to ai_logic.py, you MUST update the welcome message in handlers/start.py to mention them!
+
 ## 🎯 Implementation Steps
 1. Read services/ai_logic.py
 2. Read services/api_client.py
-3. Detect intent from: "{description}"
-4. If clear intent → add relevant handlers
-5. If unclear → use default commands
-6. Add API helpers if needed
-7. Add mock fallbacks for errors
-8. Test syntax
+3. Read handlers/start.py
+4. Detect intent from: "{description}"
+5. Add commands to ai_logic.py
+6. Update welcome message in handlers/start.py to list new commands
+7. Add API helpers if needed
+8. Add mock fallbacks for errors
+9. Test syntax
 
 ## 📝 Output
-- Modified services/ai_logic.py
+- Modified services/ai_logic.py (with new commands)
+- Modified handlers/start.py (with updated welcome message)
 - Optional: new functions in services/api_client.py
 
 ## ⚠️ Fallback Rules
@@ -322,6 +366,8 @@ if "price" in text_lower:
             # FIX 3: Detect no-change edits
             ai_logic_changed = False
             api_client_changed = False
+            start_handler_changed = False
+            message_handler_changed = False
             
             if self.backup_ai_logic.exists():
                 with open(self.backup_ai_logic, 'r') as f:
@@ -341,9 +387,27 @@ if "price" in text_lower:
                 
                 api_client_changed = (backup_api_client_content != modified_api_client_content)
             
+            if self.backup_start_handler.exists():
+                with open(self.backup_start_handler, 'r') as f:
+                    backup_start_content = f.read()
+                
+                with open(self.start_handler_path, 'r') as f:
+                    modified_start_content = f.read()
+                
+                start_handler_changed = (backup_start_content != modified_start_content)
+            
+            if self.backup_message_handler.exists():
+                with open(self.backup_message_handler, 'r') as f:
+                    backup_message_content = f.read()
+                
+                with open(self.message_handler_path, 'r') as f:
+                    modified_message_content = f.read()
+                
+                message_handler_changed = (backup_message_content != modified_message_content)
+            
             # At least one file must be changed
-            if not ai_logic_changed and not api_client_changed:
-                return False, "AI made no changes to ai_logic.py or api_client.py"
+            if not any([ai_logic_changed, api_client_changed, start_handler_changed, message_handler_changed]):
+                return False, "AI made no changes to allowed files"
             
             # Check Python syntax for ai_logic.py
             try:
@@ -362,16 +426,45 @@ if "price" in text_lower:
                 except SyntaxError as e:
                     return False, f"Syntax error in api_client.py: {e}"
             
+            # Check Python syntax for start.py if it was modified
+            if start_handler_changed:
+                try:
+                    with open(self.start_handler_path, 'r') as f:
+                        start_content = f.read()
+                    compile(start_content, str(self.start_handler_path), 'exec')
+                    
+                    # Verify async def start still exists
+                    if 'async def start(update, context):' not in start_content:
+                        return False, "start handler function signature changed or missing"
+                except SyntaxError as e:
+                    return False, f"Syntax error in start.py: {e}"
+            
+            # Check Python syntax for message.py if it was modified
+            if message_handler_changed:
+                try:
+                    with open(self.message_handler_path, 'r') as f:
+                        message_content = f.read()
+                    compile(message_content, str(self.message_handler_path), 'exec')
+                    
+                    # Verify async def handle_message still exists
+                    if 'async def handle_message(update, context):' not in message_content:
+                        return False, "message handler function signature changed or missing"
+                except SyntaxError as e:
+                    return False, f"Syntax error in message.py: {e}"
+            
             # FIX 4: Only validate function signature (relaxed rules)
             if "def process_user_input(text: str" not in ai_logic_content:
                 return False, "Function signature changed or missing in ai_logic.py"
             
             # FIX 5: Check if other files were modified (restrict scope)
-            # Only ai_logic.py and api_client.py can be modified
+            # Only these files can be modified
             protected_files = [
                 "main.py",
                 "config.py",
-                "database.py"
+                "database.py",
+                "models/user.py",
+                "utils/logger.py",
+                "utils/user_helpers.py"
             ]
             
             for filename in protected_files:
@@ -404,6 +497,18 @@ if "price" in text_lower:
                 logger.info(f"🔄 Rolling back api_client.py...")
                 shutil.copy2(self.backup_api_client, self.api_client_path)
                 self.backup_api_client.unlink()
+            
+            # Rollback start.py
+            if self.backup_start_handler.exists():
+                logger.info(f"🔄 Rolling back start.py...")
+                shutil.copy2(self.backup_start_handler, self.start_handler_path)
+                self.backup_start_handler.unlink()
+            
+            # Rollback message.py
+            if self.backup_message_handler.exists():
+                logger.info(f"🔄 Rolling back message.py...")
+                shutil.copy2(self.backup_message_handler, self.message_handler_path)
+                self.backup_message_handler.unlink()
             
             logger.info("✅ Rollback complete")
         except Exception as e:
