@@ -695,8 +695,7 @@ async def create_project(request: CreateProjectRequest):
                         port=bot_port,
                         database_url=bot_database_url
                     )
-                        database_url=bot_database_url
-                    )
+                        
                     
                     if success:
                         logger.info(f"✅ Telegram bot pipeline completed for project {project_id}")
