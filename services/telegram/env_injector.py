@@ -105,8 +105,8 @@ WEBHOOK_PATH=/webhook
                 set_keys.add('WEBHOOK_DOMAIN')
             elif line.startswith('WEBHOOK_URL='):
                 if domain:
-                    updated_lines.append(f'WEBHOOK_URL=https://{domain}/webhook')
-                    logger.info(f"   ✅ Set WEBHOOK_URL=https://{domain}/webhook")
+                    updated_lines.append(f'WEBHOOK_URL=https://{domain}.dreambigwithai.com/webhook')
+                    logger.info(f"   ✅ Set WEBHOOK_URL=https://{domain}.dreambigwithai.com/webhook")
                 else:
                     updated_lines.append(line)
                     logger.warning(f"   ⚠️ No domain provided, keeping original WEBHOOK_URL")
