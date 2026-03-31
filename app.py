@@ -666,7 +666,10 @@ async def create_project(request: CreateProjectRequest):
             # Use the already-defined domain variable (set earlier in this function)
             bot_domain = domain
             
-            logger.info(f"[TELEGRAM] Bot configuration: domain={bot_domain}, port={bot_port}")
+            logger.info(f"[TELEGRAM] Bot configuration:")
+            logger.info(f"   - bot_domain: '{bot_domain}' (type: {type(bot_domain).__name__})")
+            logger.info(f"   - bot_port: {bot_port}")
+            logger.info(f"   - bot_domain is truthy: {bool(bot_domain)}")
             
             # Run telegram bot pipeline in background thread
             def run_telegram_worker():

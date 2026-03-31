@@ -116,7 +116,11 @@ def run_telegram_bot_pipeline(
     """
     logger.info(f"🚀 Starting Telegram bot pipeline for project {project_id}")
     logger.info(f"Bot name: {project_name}")
-    logger.info(f"Domain: {domain}:{port}")
+    logger.info(f"🔧 Received parameters:")
+    logger.info(f"   - domain: '{domain}' (type: {type(domain).__name__})")
+    logger.info(f"   - port: {port} (type: {type(port).__name__})")
+    logger.info(f"   - project_id: {project_id} (type: {type(project_id).__name__})")
+    logger.info(f"   - domain is truthy: {bool(domain)}")
     
     result_info = {
         "project_id": project_id,

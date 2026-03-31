@@ -72,34 +72,73 @@ WEBHOOK_DOMAIN=your-subdomain.dreambigwithai.com
 WEBHOOK_PATH=/webhook
 """
         
+        # Log incoming parameters
+        logger.info(f"🔧 inject_bot_token called with:")
+        logger.info(f"   - project_path: {project_path}")
+        logger.info(f"   - domain: {domain}")
+        logger.info(f"   - port: {port}")
+        logger.info(f"   - project_id: {project_id}")
+        
         # Replace placeholders with actual values
         lines = env_content.split('\n')
         updated_lines = []
+        
+        # Track what we've set
+        set_keys = set()
         
         for line in lines:
             if line.startswith('BOT_TOKEN='):
                 # Replace token line (NEVER log this)
                 updated_lines.append(f'BOT_TOKEN={bot_token}')
-            elif line.startswith('WEBHOOK_DOMAIN=') and domain:
-                updated_lines.append(f'WEBHOOK_DOMAIN={domain}')
-            elif line.startswith('WEBHOOK_URL=') and domain:
-                updated_lines.append(f'WEBHOOK_URL=https://{domain}/webhook')
-            elif line.startswith('PORT=') and port:
-                updated_lines.append(f'PORT={port}')
-            elif line.startswith('PROJECT_ID=') and project_id:
-                updated_lines.append(f'PROJECT_ID={project_id}')
+                set_keys.add('BOT_TOKEN')
+                logger.info(f"   ✅ Set BOT_TOKEN")
+            elif line.startswith('WEBHOOK_DOMAIN='):
+                # Always replace if we have a domain
+                if domain:
+                    updated_lines.append(f'WEBHOOK_DOMAIN={domain}')
+                    logger.info(f"   ✅ Set WEBHOOK_DOMAIN={domain}")
+                else:
+                    updated_lines.append(line)
+                    logger.warning(f"   ⚠️ No domain provided, keeping original WEBHOOK_DOMAIN")
+                set_keys.add('WEBHOOK_DOMAIN')
+            elif line.startswith('WEBHOOK_URL='):
+                if domain:
+                    updated_lines.append(f'WEBHOOK_URL=https://{domain}/webhook')
+                    logger.info(f"   ✅ Set WEBHOOK_URL=https://{domain}/webhook")
+                else:
+                    updated_lines.append(line)
+                    logger.warning(f"   ⚠️ No domain provided, keeping original WEBHOOK_URL")
+                set_keys.add('WEBHOOK_URL')
+            elif line.startswith('PORT='):
+                if port:
+                    updated_lines.append(f'PORT={port}')
+                    logger.info(f"   ✅ Set PORT={port}")
+                else:
+                    updated_lines.append(line)
+                set_keys.add('PORT')
+            elif line.startswith('PROJECT_ID='):
+                if project_id:
+                    updated_lines.append(f'PROJECT_ID={project_id}')
+                    logger.info(f"   ✅ Set PROJECT_ID={project_id}")
+                else:
+                    updated_lines.append(line)
+                set_keys.add('PROJECT_ID')
             else:
                 updated_lines.append(line)
         
-        # Add missing webhook config if not in template
-        if domain and not any(l.startswith('WEBHOOK_DOMAIN=') for l in lines):
+        # Add missing required variables
+        if domain and 'WEBHOOK_DOMAIN' not in set_keys:
             updated_lines.append(f'WEBHOOK_DOMAIN={domain}')
-        if domain and not any(l.startswith('WEBHOOK_URL=') for l in lines):
+            logger.info(f"   ✅ Added WEBHOOK_DOMAIN={domain}")
+        if domain and 'WEBHOOK_URL' not in set_keys:
             updated_lines.append(f'WEBHOOK_URL=https://{domain}/webhook')
-        if port and not any(l.startswith('PORT=') for l in lines):
+            logger.info(f"   ✅ Added WEBHOOK_URL=https://{domain}/webhook")
+        if port and 'PORT' not in set_keys:
             updated_lines.append(f'PORT={port}')
-        if project_id and not any(l.startswith('PROJECT_ID=') for l in lines):
+            logger.info(f"   ✅ Added PORT={port}")
+        if project_id and 'PROJECT_ID' not in set_keys:
             updated_lines.append(f'PROJECT_ID={project_id}')
+            logger.info(f"   ✅ Added PROJECT_ID={project_id}")
         
         # Write .env file
         env_content_updated = '\n'.join(updated_lines)
