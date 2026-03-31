@@ -77,8 +77,10 @@ async def startup():
             logger.info(f"✅ Webhook set: {WEBHOOK_URL}")
         except Exception as e:
             logger.error(f"❌ Failed to set webhook: {e}")
+            logger.error(f"   Check that WEBHOOK_URL is reachable: {WEBHOOK_URL}")
     else:
-        logger.warning("⚠️ No WEBHOOK_URL configured")
+        logger.warning("⚠️ No WEBHOOK_URL configured - bot running in webhook mode without registration")
+        logger.info("ℹ️ Set WEBHOOK_URL or WEBHOOK_DOMAIN environment variable to enable webhook")
 
 
 @app.on_event("shutdown")

@@ -8,19 +8,17 @@ from core.database import Base
 
 class User(Base):
     """
-    Unified user model.
-    - Telegram users: telegram_user_id is set, email/password nullable
-    - Email users: email/password set, telegram_user_id nullable
+    Telegram user model.
+    Users are identified by their Telegram user ID.
     """
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
     
-    # Email-based auth (optional for Telegram users)
+    # Email (optional, for notifications)
     email = Column(String(255), unique=True, index=True, nullable=True)
-    password_hash = Column(String(255), nullable=True)
     
-    # Telegram identity (optional for email users)
+    # Telegram identity
     telegram_user_id = Column(BigInteger, unique=True, nullable=True, index=True)
     telegram_chat_id = Column(BigInteger, nullable=True)
     telegram_username = Column(String(255), nullable=True)

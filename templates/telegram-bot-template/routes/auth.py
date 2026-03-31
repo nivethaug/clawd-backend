@@ -1,12 +1,11 @@
 """
 Authentication routes for Telegram bot backend.
-Minimal JWT-ready auth structure.
+Telegram users are authenticated via their Telegram ID.
 """
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from passlib.context import CryptContext
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -17,7 +16,6 @@ from models.user import User
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Security
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
 # JWT Config (should be in .env in production)
@@ -27,16 +25,6 @@ ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 
 # Pydantic models
-class UserRegister(BaseModel):
-    email: str
-    password: str
-
-
-class UserLogin(BaseModel):
-    email: str
-    password: str
-
-
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -44,21 +32,11 @@ class Token(BaseModel):
 
 class UserInfo(BaseModel):
     id: int
-    email: str
+    email: Optional[str]
     telegram_user_id: Optional[int]
     
     class Config:
         from_attributes = True
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify password against hash."""
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def get_password_hash(password: str) -> str:
-    """Generate password hash."""
-    return pwd_context.hash(password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -92,54 +70,21 @@ async def get_current_user(
     )
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
+        telegram_user_id: str = payload.get("sub")
+        if telegram_user_id is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
     
-    user = db.query(User).filter(User.email == email).first()
+    user = db.query(User).filter(User.telegram_user_id == int(telegram_user_id)).first()
     if user is None:
         raise credentials_exception
     return user
 
 
-@router.post("/register", response_model=Token)
-async def register(user_data: UserRegister, db: Session = Depends(get_db)):
-    """Register new email-based user."""
-    # Database not configured
-    if db is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database not configured - registration unavailable"
-        )
-    
-    # Check if email already exists
-    db_user = db.query(User).filter(User.email == user_data.email).first()
-    if db_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
-    
-    # Create user
-    hashed_password = get_password_hash(user_data.password)
-    new_user = User(
-        email=user_data.email,
-        password_hash=hashed_password
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    # Create access token
-    access_token = create_access_token(data={"sub": new_user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
-
-
-@router.post("/login", response_model=Token)
-async def login(user_data: UserLogin, db: Session = Depends(get_db)):
-    """Login email-based user."""
+@router.post("/telegram", response_model=Token)
+async def telegram_login(telegram_user_id: int, db: Session = Depends(get_db)):
+    """Login via Telegram user ID."""
     # Database not configured
     if db is None:
         raise HTTPException(
@@ -147,22 +92,16 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
             detail="Database not configured - login unavailable"
         )
     
-    user = db.query(User).filter(User.email == user_data.email).first()
+    user = db.query(User).filter(User.telegram_user_id == telegram_user_id).first()
     
-    if not user or not user.password_hash:
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
-        )
-    
-    if not verify_password(user_data.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            detail="Telegram user not found"
         )
     
     # Create access token
-    access_token = create_access_token(data={"sub": user.email})
+    access_token = create_access_token(data={"sub": str(user.telegram_user_id)})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
