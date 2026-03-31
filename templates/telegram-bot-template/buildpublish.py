@@ -134,7 +134,15 @@ def restart_pm2():
                 project_id = line.split("=", 1)[1].strip()
             elif line.startswith("BOT_TOKEN="):
                 bot_token = line.split("=", 1)[1].strip()
+            elif line.startswith("WEBHOOK_URL="):
+                # Extract domain from WEBHOOK_URL (e.g., https://crypto-bot-x123/webhook -> crypto-bot-x123)
+                webhook_url = line.split("=", 1)[1].strip()
+                if "://" in webhook_url:
+                    domain = webhook_url.split("://")[1].split("/")[0]
+                else:
+                    domain = webhook_url.split("/")[0]
             elif line.startswith("WEBHOOK_DOMAIN="):
+                # Fallback for older format
                 domain = line.split("=", 1)[1].strip()
     
     if not project_id:
@@ -142,7 +150,9 @@ def restart_pm2():
         return False
     
     # PM2 process name format: {domain}-bot or tg-bot-{project_id}
+    # Domain from WEBHOOK_URL already contains the subdomain (e.g., crypto-bot-x123)
     pm2_process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
+    print(f"📦 PM2 process name: {pm2_process_name}")
     
     print(f"📦 Stopping PM2 app: {pm2_process_name}")
     run(f"pm2 stop {pm2_process_name}")

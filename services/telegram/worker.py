@@ -11,7 +11,7 @@ from utils.logger import logger
 from services.telegram.validator import validate_telegram_token
 from services.telegram.template import copy_telegram_template
 from services.telegram.editor import TelegramBotEditor
-from services.telegram.env_injector import inject_bot_token, update_env_variable
+from services.telegram.env_injector import inject_bot_token, inject_webhook_config
 from services.telegram.installer import install_bot_dependencies
 from services.telegram.pm2_manager import start_bot_pm2, get_bot_status_pm2
 
@@ -167,10 +167,10 @@ def run_telegram_bot_pipeline(
             result_info["errors"].append(error_msg)
             return False, result_info
         
-        # Update webhook config
-        update_env_variable(telegram_path, "WEBHOOK_DOMAIN", domain)
-        update_env_variable(telegram_path, "PORT", str(port))
-        update_env_variable(telegram_path, "PROJECT_ID", str(project_id))
+        # Update webhook config (sets WEBHOOK_DOMAIN, WEBHOOK_URL, PORT, PROJECT_ID)
+        success, webhook_result = inject_webhook_config(telegram_path, domain, port, project_id)
+        if not success:
+            logger.warning(f"⚠️ Webhook config injection failed: {webhook_result}")
         
         logger.info(f"✅ Environment configured")
         result_info["steps_completed"].append("env_injection")

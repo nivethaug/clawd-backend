@@ -162,3 +162,68 @@ def update_env_variable(project_path: str, key: str, value: str) -> Tuple[bool, 
         error_msg = f"Failed to update {key}: {e}"
         logger.error(error_msg)
         return False, error_msg
+
+
+def inject_webhook_config(project_path: str, domain: str, port: int, project_id: int) -> Tuple[bool, str]:
+    """
+    Inject webhook configuration into .env file.
+    
+    Args:
+        project_path: Path to telegram/ directory
+        domain: Domain name (e.g., "crypto-price-tracker-bot-yi62nm")
+        port: Port number for the bot
+        project_id: Project ID
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        env_file = Path(project_path) / ".env"
+        
+        # Create .env if it doesn't exist
+        if not env_file.exists():
+            env_file.touch()
+            os.chmod(env_file, stat.S_IRUSR | stat.S_IWUSR)
+        
+        # Build webhook URL
+        webhook_url = f"https://{domain}/webhook"
+        
+        # Read existing content
+        with open(env_file, 'r') as f:
+            lines = f.readlines()
+        
+        # Variables to set
+        config_vars = {
+            'WEBHOOK_DOMAIN': domain,
+            'WEBHOOK_URL': webhook_url,
+            'WEBHOOK_PATH': '/webhook',
+            'PORT': str(port),
+            'PROJECT_ID': str(project_id)
+        }
+        
+        # Update or add each variable
+        for key, value in config_vars.items():
+            updated = False
+            for i, line in enumerate(lines):
+                if line.startswith(f'{key}='):
+                    lines[i] = f'{key}={value}\n'
+                    updated = True
+                    break
+            
+            if not updated:
+                # Add to end if not found
+                if lines and not lines[-1].endswith('\n'):
+                    lines.append('\n')
+                lines.append(f'{key}={value}\n')
+        
+        # Write back
+        with open(env_file, 'w') as f:
+            f.writelines(lines)
+        
+        logger.info(f"✅ Webhook config injected: domain={domain}, port={port}")
+        return True, f"Webhook config set for {domain}"
+    
+    except Exception as e:
+        error_msg = f"Failed to inject webhook config: {e}"
+        logger.error(error_msg)
+        return False, error_msg
