@@ -202,7 +202,7 @@ def run_telegram_bot_pipeline(
             port, 
             domain,
             bot_token=bot_token,
-            webhook_url=f"https://{domain}/webhook",
+            webhook_url=f"https://{domain}.dreambigwithai.com/webhook",
             database_url=database_url
         )
         
