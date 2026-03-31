@@ -88,12 +88,27 @@ def start_bot_pm2(
             interpreter = sys.executable
             logger.warning(f"⚠️ Shared venv not found, using current Python: {sys.executable}")
         
-        # Create a temporary .env file for the bot (PM2 will load this)
+        # Read existing .env file (created by inject_bot_token) and merge with passed values
         env_file_path = os.path.join(telegram_dir, ".env")
+        if os.path.exists(env_file_path):
+            # Read existing .env and parse into env_vars
+            with open(env_file_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        if key not in env_vars:  # Don't override passed values
+                            env_vars[key] = value
+            logger.info(f"📝 Loaded existing .env: {env_file_path}")
+        else:
+            # Create .env if it doesn't exist (shouldn't happen normally)
+            logger.warning(f"⚠️ .env file not found, creating new one")
+        
+        # Write back the merged env vars
         with open(env_file_path, 'w') as f:
             for key, value in env_vars.items():
                 f.write(f"{key}={value}\n")
-        logger.info(f"📝 Created .env file: {env_file_path}")
+        logger.info(f"📝 Updated .env file with {len(env_vars)} variables")
         
         # Build PM2 start command with explicit parameters (no ecosystem file)
         # This avoids conflicts with other PM2 processes
