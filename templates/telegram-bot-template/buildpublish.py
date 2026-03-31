@@ -211,7 +211,7 @@ def re_register_webhook(bot_token: str, domain: str, project_id: str):
     
     try:
         # Build webhook URL (matches nginx /webhook location)
-        webhook_url = f"https://{domain}/webhook"
+        webhook_url = f"https://{domain}.dreambigwithai.com/webhook"
         
         print(f"🔗 Re-registering webhook: {webhook_url}")
         
