@@ -140,8 +140,8 @@ WEBHOOK_PATH=/webhook
             updated_lines.append(f'WEBHOOK_DOMAIN={domain}')
             logger.info(f"   ✅ Added WEBHOOK_DOMAIN={domain}")
         if domain and 'WEBHOOK_URL' not in set_keys:
-            updated_lines.append(f'WEBHOOK_URL=https://{domain}/webhook')
-            logger.info(f"   ✅ Added WEBHOOK_URL=https://{domain}/webhook")
+            updated_lines.append(f'WEBHOOK_URL=https://{domain}.dreambigwithai.com/webhook')
+            logger.info(f"   ✅ Added WEBHOOK_URL=https://{domain}.dreambigwithai.com/webhook")
         if port and 'PORT' not in set_keys:
             updated_lines.append(f'PORT={port}')
             logger.info(f"   ✅ Added PORT={port}")
