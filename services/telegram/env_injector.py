@@ -9,13 +9,22 @@ from typing import Tuple
 from utils.logger import logger
 
 
-def inject_bot_token(project_path: str, bot_token: str) -> Tuple[bool, str]:
+def inject_bot_token(
+    project_path: str, 
+    bot_token: str,
+    domain: str = None,
+    port: int = None,
+    project_id: int = None
+) -> Tuple[bool, str]:
     """
-    Inject BOT_TOKEN into .env file with secure permissions.
+    Inject BOT_TOKEN and webhook config into .env file with secure permissions.
     
     Args:
         project_path: Path to telegram/ directory
         bot_token: Telegram bot token (NEVER logged)
+        domain: Webhook domain (e.g., "crypto-price-tracker-bot-yi62nm")
+        port: Port number for the bot
+        project_id: Project ID
     
     Returns:
         Tuple of (success, message)
@@ -63,7 +72,7 @@ WEBHOOK_DOMAIN=your-subdomain.dreambigwithai.com
 WEBHOOK_PATH=/webhook
 """
         
-        # Replace BOT_TOKEN placeholder
+        # Replace placeholders with actual values
         lines = env_content.split('\n')
         updated_lines = []
         
@@ -71,11 +80,26 @@ WEBHOOK_PATH=/webhook
             if line.startswith('BOT_TOKEN='):
                 # Replace token line (NEVER log this)
                 updated_lines.append(f'BOT_TOKEN={bot_token}')
-            elif line.startswith('WEBHOOK_DOMAIN='):
-                # Will be updated later with actual domain
-                updated_lines.append(line)
+            elif line.startswith('WEBHOOK_DOMAIN=') and domain:
+                updated_lines.append(f'WEBHOOK_DOMAIN={domain}')
+            elif line.startswith('WEBHOOK_URL=') and domain:
+                updated_lines.append(f'WEBHOOK_URL=https://{domain}/webhook')
+            elif line.startswith('PORT=') and port:
+                updated_lines.append(f'PORT={port}')
+            elif line.startswith('PROJECT_ID=') and project_id:
+                updated_lines.append(f'PROJECT_ID={project_id}')
             else:
                 updated_lines.append(line)
+        
+        # Add missing webhook config if not in template
+        if domain and not any(l.startswith('WEBHOOK_DOMAIN=') for l in lines):
+            updated_lines.append(f'WEBHOOK_DOMAIN={domain}')
+        if domain and not any(l.startswith('WEBHOOK_URL=') for l in lines):
+            updated_lines.append(f'WEBHOOK_URL=https://{domain}/webhook')
+        if port and not any(l.startswith('PORT=') for l in lines):
+            updated_lines.append(f'PORT={port}')
+        if project_id and not any(l.startswith('PROJECT_ID=') for l in lines):
+            updated_lines.append(f'PROJECT_ID={project_id}')
         
         # Write .env file
         env_content_updated = '\n'.join(updated_lines)
@@ -99,6 +123,8 @@ WEBHOOK_PATH=/webhook
         
         logger.info(f"✅ .env file created with secure permissions at {env_file}")
         logger.info("✅ BOT_TOKEN injected (token not logged for security)")
+        if domain:
+            logger.info(f"✅ Webhook config injected: domain={domain}, port={port}")
         
         return True, f"Environment configured at {env_file}"
     
