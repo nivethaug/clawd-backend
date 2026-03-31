@@ -89,6 +89,8 @@ def _run_migrations():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         # Make email nullable for Telegram-only users
         "ALTER TABLE users ALTER COLUMN email DROP NOT NULL",
+        # Remove unique constraint from email (allows multiple NULL values)
+        "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key",
     ]
     
     with engine.connect() as conn:

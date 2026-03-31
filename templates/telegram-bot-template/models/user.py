@@ -16,7 +16,8 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     # Email (optional, for notifications)
-    email = Column(String(255), unique=True, index=True, nullable=True)
+    # Note: unique constraint removed to allow multiple NULL emails for Telegram-only users
+    email = Column(String(255), index=True, nullable=True)
     
     # Telegram identity
     telegram_user_id = Column(BigInteger, unique=True, nullable=True, index=True)
