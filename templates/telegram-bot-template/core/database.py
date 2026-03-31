@@ -60,13 +60,55 @@ def get_db():
 
 
 def init_db():
-    """Initialize database tables (optional)."""
+    """Initialize database tables and run migrations (optional)."""
     if not engine:
         logger.info("ℹ️ Database initialization skipped (no DATABASE_URL)")
         return
     
     try:
+        # First, run migrations to add missing columns
+        _run_migrations()
+        
+        # Then create any missing tables
         Base.metadata.create_all(bind=engine)
         logger.info("✅ Database tables initialized")
     except Exception as e:
         logger.warning(f"⚠️ Database table creation failed: {e}")
+
+
+def _run_migrations():
+    """Run database migrations to add missing columns."""
+    from sqlalchemy import text
+    
+    migrations = [
+        # Add telegram columns to users table if they don't exist
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_user_id BIGINT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(255)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    ]
+    
+    with engine.connect() as conn:
+        for migration in migrations:
+            try:
+                conn.execute(text(migration))
+                conn.commit()
+            except Exception as e:
+                # Column might already exist, that's okay
+                if "already exists" not in str(e).lower() and "duplicate" not in str(e).lower():
+                    logger.warning(f"Migration warning: {e}")
+        
+        # Create indexes for telegram columns
+        index_migrations = [
+            "CREATE INDEX IF NOT EXISTS idx_users_telegram_user_id ON users(telegram_user_id)",
+        ]
+        
+        for migration in index_migrations:
+            try:
+                conn.execute(text(migration))
+                conn.commit()
+            except Exception as e:
+                logger.warning(f"Index creation warning: {e}")
+    
+    logger.info("✅ Database migrations completed")
