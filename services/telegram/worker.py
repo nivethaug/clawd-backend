@@ -168,7 +168,8 @@ def run_telegram_bot_pipeline(
             bot_token=bot_token,
             domain=domain,
             port=port,
-            project_id=project_id
+            project_id=project_id,
+            database_url=database_url
         )
         
         if not success:

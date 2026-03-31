@@ -671,6 +671,17 @@ async def create_project(request: CreateProjectRequest):
             logger.info(f"   - bot_port: {bot_port}")
             logger.info(f"   - bot_domain is truthy: {bool(bot_domain)}")
             
+            # Get database URL for the bot (use backend's database)
+            bot_database_url = None
+            if os.getenv("USE_POSTGRES", "true").lower() == "true":
+                db_host = os.getenv("DB_HOST", "localhost")
+                db_port = os.getenv("DB_PORT", "5432")
+                db_name = os.getenv("DB_NAME", "dreampilot")
+                db_user = os.getenv("DB_USER", "admin")
+                db_password = os.getenv("DB_PASSWORD", "StrongAdminPass123")
+                bot_database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+                logger.info(f"   - bot_database_url: postgresql://{db_user}:***@{db_host}:{db_port}/{db_name}")
+            
             # Run telegram bot pipeline in background thread
             def run_telegram_worker():
                 try:
@@ -681,7 +692,10 @@ async def create_project(request: CreateProjectRequest):
                         bot_token=request.bot_token,
                         project_path=project_folder_path,
                         domain=bot_domain,
-                        port=bot_port
+                        port=bot_port,
+                        database_url=bot_database_url
+                    )
+                        database_url=bot_database_url
                     )
                     
                     if success:

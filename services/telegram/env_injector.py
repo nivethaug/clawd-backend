@@ -14,7 +14,8 @@ def inject_bot_token(
     bot_token: str,
     domain: str = None,
     port: int = None,
-    project_id: int = None
+    project_id: int = None,
+    database_url: str = None
 ) -> Tuple[bool, str]:
     """
     Inject BOT_TOKEN and webhook config into .env file with secure permissions.
@@ -25,6 +26,7 @@ def inject_bot_token(
         domain: Webhook domain (e.g., "crypto-price-tracker-bot-yi62nm")
         port: Port number for the bot
         project_id: Project ID
+        database_url: Database connection URL
     
     Returns:
         Tuple of (success, message)
@@ -123,6 +125,13 @@ WEBHOOK_PATH=/webhook
                 else:
                     updated_lines.append(line)
                 set_keys.add('PROJECT_ID')
+            elif line.startswith('DATABASE_URL='):
+                if database_url:
+                    updated_lines.append(f'DATABASE_URL={database_url}')
+                    logger.info(f"   ✅ Set DATABASE_URL=***")
+                else:
+                    updated_lines.append(line)
+                set_keys.add('DATABASE_URL')
             else:
                 updated_lines.append(line)
         
@@ -139,6 +148,9 @@ WEBHOOK_PATH=/webhook
         if project_id and 'PROJECT_ID' not in set_keys:
             updated_lines.append(f'PROJECT_ID={project_id}')
             logger.info(f"   ✅ Added PROJECT_ID={project_id}")
+        if database_url and 'DATABASE_URL' not in set_keys:
+            updated_lines.append(f'DATABASE_URL={database_url}')
+            logger.info(f"   ✅ Added DATABASE_URL=***")
         
         # Write .env file
         env_content_updated = '\n'.join(updated_lines)
