@@ -140,161 +140,191 @@ class TelegramBotEditor:
     
     def _build_enhancement_prompt(self, description: str, bot_name: str) -> str:
         """Build concise AI prompt for bot enhancement with dynamic command generation."""
-        return f"""Enhance Telegram bot for: {description}
+        return f"""
+Enhance Telegram bot for: {description}
 
 Bot: {bot_name}
-Allowed files to modify:
-- services/ai_logic.py (process_user_input function - ADD NEW COMMANDS HERE)
-- services/api_client.py (add helper functions only)
-- handlers/start.py (update welcome message to mention new commands)
-- handlers/message.py (update if needed, but usually not necessary)
 
-## 🧠 COMMAND GENERATION STRATEGY
+Allowed files to modify ONLY:
+- services/ai_logic.py
+- services/api_client.py (helper functions only)
+- handlers/start.py (ONLY update welcome message text)
+- handlers/message.py (ONLY if absolutely required)
 
-### Step 1: Analyze Intent
-Detect user intent from description: "{description}"
+DO NOT modify any other files.
 
-**Intent Patterns:**
-- crypto/blockchain → /price, /market, /balance
-- weather/forecast → /weather, /forecast, /temperature
-- productivity → /tasks, /remind, /todo
-- jokes/entertainment → /joke, /fun, /random
-- news → /news, /headlines, /latest
-- unknown/unclear → Use default commands
+==================================================
+🧠 INTENT DETECTION
+==================================================
 
-**Default Commands (use if intent unclear):**
-- /start - Welcome message
-- /help - Show available commands
-- /ask - General Q&A
-- /status - Bot status
+Analyze intent from description: "{description}"
 
-### Step 2: Generate Commands
-IF intent is clear from "{description}":
-  → Create relevant keyword handlers
-  → Add API helpers if needed
-ELSE:
-  → Use default commands with mock responses
+Examples:
+- crypto → /price, /market, /top, /convert
+- weather → /weather, /forecast
+- productivity → /tasks, /remind
+- unknown → keep default commands
 
-## CRITICAL RULES
-1. Keep signature: def process_user_input(text: str, user: Optional[User] = None) -> str
-2. Use keyword matching: if "keyword" in text_lower
-3. DO NOT add new imports (all imports in templates)
-4. DO NOT create new files
-5. DO NOT modify main.py, config.py, database.py
-6. Handle errors gracefully
-7. Keep existing greetings/help logic
-8. **PRESERVE handlers/start.py structure**: Keep all variable extractions (tg_user, username, user_id, etc.) - only modify welcome_msg content
-9. **NEVER delete variable assignments** like `username = tg_user.username` - these are required before use
+==================================================
+🔒 CRITICAL RULES (MANDATORY)
+==================================================
 
-## 🌐 API INTEGRATION PATTERN
+1. KEEP function signature EXACT:
+   def process_user_input(text: str, user: Optional[User] = None) -> str
 
-### If API needed:
-1. Add helper function to api_client.py:
-```python
-def get_feature_data() -> dict:
-    \"\"\"Fetch data from API.\"\"\"
-    result = fetch_json("https://api.example.com/endpoint", timeout=10)
-    if result["success"]:
-        return {{"success": True, "data": result["data"]}}
-    return {{"success": False, "error": result["error"]}}
-```
+2. DO NOT remove existing commands
 
-2. Call from ai_logic.py:
-```python
-if any(kw in text_lower for kw in ["keyword", "command"]):
-    result = get_feature_data()
-    if result["success"]:
-        return f"✅ {{result['data']}}"
-    else:
-        return f"⚠️ Error: {{result['error']}}"
-```
+3. DO NOT break existing handlers
 
-### If API unavailable or unclear:
-Use MOCK response:
-```python
-if "price" in text_lower:
-    return "💰 BTC Price: $65,000 (mock data)"
-```
+4. DO NOT add new imports
 
-## 📦 Available API Functions
-- fetch_json(url, params, timeout) → Generic JSON fetcher
-- safe_get(data, *keys, default) → Safe dict access
-- get_crypto_price(coin_id) → Crypto prices
-- get_weather(city) → Weather (may not be configured)
+5. DO NOT create new files
 
-## 🔍 Intent Detection Examples
+6. ALWAYS return a string (NEVER return None)
 
-**Crypto Bot:**
-- Description: "crypto price tracker"
-- Keywords: btc, eth, price, market
-- Commands: /price, /market
-- API: CoinGecko
+7. NEVER crash — always fallback safely
 
-**Weather Bot:**
-- Description: "weather forecast bot"
-- Keywords: weather, forecast, temperature
-- Commands: /weather, /forecast
-- API: OpenWeatherMap
+==================================================
+🚨 COMMAND PARSING RULES (STRICT)
+==================================================
 
-**Generic Bot:**
-- Description: "helpful assistant"
-- Keywords: help, ask, question
-- Commands: /start, /help, /ask
-- Response: Mock or default
+❌ NEVER use:
+- .replace()
+- partial string manipulation
 
-## 🔗 LINKING COMMANDS TO WELCOME MESSAGE
+✅ ALWAYS use:
 
-After adding commands to ai_logic.py, UPDATE the `_handle_start()` function in services/ai_logic.py to list new commands.
+parts = text_lower.split()
 
-**Modify the `_handle_start()` function to include new commands:**
-```python
-def _handle_start(user: Optional[User]) -> str:
-    \"\"\"Handle /start command.\"\"\""
-    if user and user.telegram_username:
-        return (
-            f"👋 Welcome @{{user.telegram_username}}!\n\n"
-            f"I am your [BOT PURPOSE] bot.\n\n"
-            f"**Available Commands:**\n"
-            f"🔹 /command1 - Description\n"
-            f"🔹 /command2 - Description\n"
-            f"🔹 /help - Show all commands\n"
-        )
-    return (
-        "👋 Welcome!\n\n"
-        "I am your [BOT PURPOSE] bot.\n\n"
-        "**Available Commands:**\n"
-        "🔹 /command1 - Description\n"
-        "🔹 /command2 - Description\n"
-        "🔹 /help - Show all commands\n"
-    )
-```
+RULES:
 
-**IMPORTANT:** 
-- If you add commands to ai_logic.py, you MUST update the `_handle_start()` function to list them
-- Also update `_handle_help()` function to list new commands
-- The `username` variable MUST be defined before use in welcome_msg
+1. ALL commands MUST use split()
 
-## 🎯 Implementation Steps
-1. Read services/ai_logic.py
-2. Read services/api_client.py
-3. Read handlers/start.py
-4. Detect intent from: "{description}"
-5. Add commands to ai_logic.py
-6. Update welcome message in handlers/start.py to list new commands
-7. Add API helpers if needed
-8. Add mock fallbacks for errors
-9. Test syntax
+2. ALWAYS validate argument length
 
-## 📝 Output
-- Modified services/ai_logic.py (with new commands)
-- Modified handlers/start.py (with updated welcome message)
-- Optional: new functions in services/api_client.py
+3. NEVER access parts[i] without checking length
 
-## ⚠️ Fallback Rules
-- If API fails → return mock response
-- If intent unclear → use default commands
-- If error occurs → show user-friendly message
-- NEVER crash the bot
+4. DO NOT mix parsing styles
+
+5. DO NOT invent new parsing logic
+
+--------------------------------------------------
+
+✅ STANDARD COMMAND FORMAT:
+
+/price <coin>
+/top [n]
+/market [n]
+/convert <amount> <from> <to>
+
+--------------------------------------------------
+
+✅ EXAMPLES (FOLLOW EXACTLY):
+
+# /price
+if text_lower.startswith("/price"):
+    parts = text_lower.split()
+
+    if len(parts) < 2:
+        return "💡 Usage: /price <coin>"
+
+    coin = parts[1]
+    return _handle_crypto_query(coin)
+
+
+# /top
+if text_lower.startswith("/top"):
+    parts = text_lower.split()
+
+    limit = 10
+    if len(parts) >= 2 and parts[1].isdigit():
+        limit = min(int(parts[1]), 50)
+
+    return _handle_top_coins(limit)
+
+
+# /convert
+if text_lower.startswith("/convert"):
+    parts = text_lower.split()
+
+    if len(parts) < 4:
+        return "💡 Usage: /convert <amount> <from> <to>"
+
+    return _handle_conversion(parts[1], parts[2], parts[3])
+
+
+==================================================
+🤖 /ask COMMAND RULE (STRICT)
+==================================================
+
+MUST follow EXACTLY:
+
+if text_lower.startswith("/ask"):
+    parts = text.split(maxsplit=1)
+
+    if len(parts) < 2:
+        return "💡 Usage: /ask <question>"
+
+    question = parts[1]
+
+    # OPTIONAL: detect crypto intent
+    if "btc" in question.lower():
+        return _handle_crypto_query("bitcoin")
+
+    return f"🤔 {{question}}\\n\\nUse /price btc for crypto queries"
+
+==================================================
+🌐 API USAGE
+==================================================
+
+Use existing functions only:
+- get_crypto_price
+- get_market_data
+- get_top_coins
+
+If API fails:
+→ return mock or friendly fallback
+
+==================================================
+📦 FEATURE RULES
+==================================================
+
+- Add new commands ONLY if clearly required
+- DO NOT remove existing commands
+- DO NOT rename commands
+
+==================================================
+🧾 START + HELP UPDATE RULE
+==================================================
+
+If new commands are added:
+
+1. UPDATE _handle_start()
+2. UPDATE _handle_help()
+
+DO NOT break formatting
+
+==================================================
+🛡️ SAFETY RULES
+==================================================
+
+- NEVER return empty string
+- NEVER return None
+- ALWAYS return user-friendly message
+- ALWAYS handle invalid input
+
+==================================================
+🎯 OUTPUT REQUIREMENT
+==================================================
+
+Return FULL updated code for:
+- services/ai_logic.py
+
+OPTIONAL:
+- services/api_client.py (if needed)
+- handlers/start.py (only text changes)
+
+==================================================
 """
     
     def _run_claude_modification(self, prompt: str) -> dict:
