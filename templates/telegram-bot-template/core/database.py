@@ -87,6 +87,8 @@ def _run_migrations():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(255)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        # Make email nullable for Telegram-only users
+        "ALTER TABLE users ALTER COLUMN email DROP NOT NULL",
     ]
     
     with engine.connect() as conn:
