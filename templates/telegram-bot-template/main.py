@@ -50,10 +50,8 @@ def init_bot():
 
     # Register handlers
     # All commands route through ai_logic.py for AI customization
-    bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(CommandHandler("help", help_command))
-    bot_app.add_handler(CommandHandler("status", status))
-    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    bot_app.add_handler(MessageHandler(filters.ALL, handle_message))
+
 
     logger.info("✅ Bot application built successfully")
 

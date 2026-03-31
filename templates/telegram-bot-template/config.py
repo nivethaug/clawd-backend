@@ -33,4 +33,4 @@ WEBHOOK_URL = None
 if os.getenv("WEBHOOK_URL"):
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 elif WEBHOOK_DOMAIN and WEBHOOK_DOMAIN != "example.com":
-    WEBHOOK_URL = f"https://{WEBHOOK_DOMAIN}{WEBHOOK_PATH}"
+    WEBHOOK_URL = f"https://{WEBHOOK_DOMAIN}.dreambigwithai.com{WEBHOOK_PATH}"
