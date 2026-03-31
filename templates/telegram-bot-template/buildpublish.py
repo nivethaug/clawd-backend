@@ -134,16 +134,16 @@ def restart_pm2():
                 project_id = line.split("=", 1)[1].strip()
             elif line.startswith("BOT_TOKEN="):
                 bot_token = line.split("=", 1)[1].strip()
-            elif line.startswith("WEBHOOK_URL="):
-                # Extract domain from WEBHOOK_URL (e.g., https://crypto-bot-x123/webhook -> crypto-bot-x123)
+            elif line.startswith("WEBHOOK_DOMAIN="):
+                # Primary: use WEBHOOK_DOMAIN directly from .env
+                domain = line.split("=", 1)[1].strip()
+            elif line.startswith("WEBHOOK_URL=") and not domain:
+                # Fallback: extract domain from WEBHOOK_URL if WEBHOOK_DOMAIN not set
                 webhook_url = line.split("=", 1)[1].strip()
                 if "://" in webhook_url:
                     domain = webhook_url.split("://")[1].split("/")[0]
                 else:
                     domain = webhook_url.split("/")[0]
-            elif line.startswith("WEBHOOK_DOMAIN="):
-                # Fallback for older format
-                domain = line.split("=", 1)[1].strip()
     
     if not project_id:
         print("✗ PROJECT_ID not found in .env")
