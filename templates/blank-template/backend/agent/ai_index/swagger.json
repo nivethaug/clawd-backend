@@ -1,0 +1,9 @@
+{
+  "swagger": {
+    "docs": "/docs",
+    "swagger": "/swagger",
+    "redoc": "/redoc",
+    "openapi": "/openapi.json",
+    "description": "FastAPI Swagger/OpenAPI documentation endpoints for blank-template backend"
+  }
+}
