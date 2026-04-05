@@ -5,6 +5,7 @@ A simple FastAPI backend with authentication.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from contextlib import asynccontextmanager
 
 from core.config import settings
@@ -34,10 +35,13 @@ async def lifespan(app: FastAPI):
     yield
 
 
-# Create FastAPI app
+# Create FastAPI app (Swagger/OpenAPI enabled)
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
 
 # CORS middleware
@@ -54,13 +58,21 @@ app.include_router(health_router)
 app.include_router(auth_router)
 
 
+@app.get("/swagger", include_in_schema=False)
+async def swagger_redirect():
+    """Redirect /swagger to FastAPI Swagger UI."""
+    return RedirectResponse(url="/docs")
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
     return {
         "message": "DreamPilot API",
         "project": settings.PROJECT_NAME,
-        "docs": "/docs"
+        "swagger": "/swagger",
+        "docs": "/docs",
+        "redoc": "/redoc"
     }
 
 

@@ -64,6 +64,28 @@ pm2 save                            # Persist across reboot
 
 ---
 
+## 🧾 Swagger / OpenAPI docs
+
+The backend ships with FastAPI OpenAPI UI enabled in the blank template.
+
+- Swagger UI: `GET /docs` (and `GET /swagger` redirects here)
+- ReDoc: `GET /redoc`
+- OpenAPI JSON: `GET /openapi.json`
+
+This is configured in `main.py` with FastAPI args:
+
+```python
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+)
+```
+
+---
+
 ## �🗄️ Database Connection Details (CRITICAL)
 
 ### How Backend Connects to Database
