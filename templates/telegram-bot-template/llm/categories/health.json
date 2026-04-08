@@ -1,0 +1,36 @@
+{
+  "category": "health",
+  "name": "System Health",
+  "description": "System status and health checks",
+  "prefix": "/",
+  "apis": [
+    {
+      "id": "health",
+      "name": "Health Check",
+      "base_url": "http://127.0.0.1:8000",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/",
+          "method": "GET",
+          "summary": "System health check",
+          "direct_url": "http://127.0.0.1:8000/",
+          "sample_request": "http://127.0.0.1:8000/",
+          "sample_response": {
+            "status": "healthy",
+            "version": "1.0.0",
+            "total_endpoints": 100,
+            "categories": 13,
+            "uptime_seconds": 345678,
+            "timestamp": "2025-03-31T14:30:00Z"
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Check service availability",
+    "Monitor system status",
+    "Verify API connectivity"
+  ]
+}

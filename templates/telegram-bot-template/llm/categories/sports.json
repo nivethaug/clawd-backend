@@ -1,0 +1,199 @@
+{
+  "category": "sports",
+  "name": "Sports",
+  "description": "Sports data, scores, teams, and player information",
+  "prefix": "/sports",
+  "apis": [
+    {
+      "id": "citybikes",
+      "name": "CityBikes",
+      "base_url": "https://api.citybik.es/v2",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/sports/bike-sharing/networks",
+          "method": "GET",
+          "summary": "Get bike sharing networks",
+          "direct_url": "https://api.citybik.es/v2/networks",
+          "sample_request": "https://api.citybik.es/v2/networks",
+          "sample_response": {
+            "networks": [
+              {
+                "company": ["Nextbike GmbH"],
+                "href": "/v2/networks/nextbike-berlin",
+                "id": "nextbike-berlin",
+                "location": {
+                  "city": "Berlin",
+                  "country": "DE",
+                  "latitude": 52.5087,
+                  "longitude": 13.3563
+                },
+                "name": "Nextbike Berlin"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "nhlapi",
+      "name": "NHL API",
+      "base_url": "https://api-web.nhle.com",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/sports/nhl/standings",
+          "method": "GET",
+          "summary": "Get NHL season standings",
+          "direct_url": "https://api-web.nhle.com/v1/standings-season",
+          "sample_request": "https://api-web.nhle.com/v1/standings-season",
+          "sample_response": {
+            "standings": [
+              {
+                "conferenceAbbrev": "E",
+                "conferenceHomeSequence": 1,
+                "conferenceL10Sequence": 5,
+                "conferenceName": "Eastern",
+                "conferenceRoadSequence": 1,
+                "conferenceSequence": 1,
+                "date": "2023-04-14",
+                "divisionAbbrev": "A",
+                "divisionHomeSequence": 1,
+                "divisionL10Sequence": 2,
+                "divisionName": "Atlantic",
+                "divisionRoadSequence": 1,
+                "divisionSequence": 1,
+                "gamesPlayed": 82,
+                "goalDifferential": 54,
+                "goalDifferentialPctg": 0.658537,
+                "goalAgainst": 201,
+                "goalFor": 255,
+                "goalsForPctg": 3.109756,
+                "homeGamesPlayed": 41,
+                "homeGoalDifferential": 29,
+                "homeGoalsAgainst": 94,
+                "homeGoalsFor": 123,
+                "homeLosses": 10,
+                "homeOtLosses": 2,
+                "homePoints": 60,
+                "homeRegulationPlusOtWins": 29,
+                "homeRegulationWins": 27,
+                "homeTies": 0,
+                "homeWins": 29,
+                "l10GamesPlayed": 10,
+                "l10GoalDifferential": 4,
+                "l10GoalsAgainst": 25,
+                "l10GoalsFor": 29,
+                "l10Losses": 4,
+                "l10OtLosses": 1,
+                "l10Points": 11,
+                "l10RegulationPlusOtWins": 5,
+                "l10RegulationWins": 4,
+                "l10Ties": 0,
+                "l10Wins": 5,
+                "leagueHomeSequence": 1,
+                "leagueL10Sequence": 5,
+                "leagueRoadSequence": 1,
+                "leagueSequence": 1,
+                "losses": 20,
+                "otLosses": 4,
+                "placeName": {
+                  "default": "1st",
+                  "fr": "1er",
+                  "sk": "1."
+                },
+                "pointPctg": 0.731707,
+                "points": 120,
+                "regulationPlusOtWinPctg": 0.597561,
+                "regulationPlusOtWins": 49,
+                "regulationWinPctg": 0.573171,
+                "regulationWins": 47,
+                "roadGamesPlayed": 41,
+                "roadGoalDifferential": 25,
+                "roadGoalsAgainst": 107,
+                "roadGoalsFor": 132,
+                "roadLosses": 10,
+                "roadOtLosses": 2,
+                "roadPoints": 60,
+                "roadRegulationPlusOtWins": 20,
+                "roadRegulationWins": 18,
+                "roadTies": 0,
+                "roadWins": 20,
+                "seasonId": 20222023,
+                "streakCode": "W1",
+                "streakCount": 1,
+                "teamAbbrev": {
+                  "default": "BOS"
+                },
+                "teamCommonName": {
+                  "default": "Bruins"
+                },
+                "teamLogo": "https://assets.nhle.com/logos/nhl/svg/BOS_light.svg",
+                "teamName": {
+                  "default": "Boston Bruins",
+                  "fr": "Bruins de Boston",
+                  "sk": "Boston Bruins"
+                },
+                "ties": 0,
+                "wildcardSequence": 1,
+                "wins": 58
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "football-data",
+      "name": "Football-Data.org",
+      "base_url": "http://api.football-data.org",
+      "auth_required": false,
+      "rate_limited": true,
+      "endpoints": [
+        {
+          "path": "/sports/football/competitions",
+          "method": "GET",
+          "summary": "Get football competitions",
+          "direct_url": "http://api.football-data.org/v4/competitions/",
+          "sample_request": "http://api.football-data.org/v4/competitions/",
+          "sample_response": {
+            "count": 167,
+            "filters": {},
+            "competitions": [
+              {
+                "id": 2006,
+                "area": {
+                  "id": 2001,
+                  "name": "Africa",
+                  "code": "AFR",
+                  "flag": null
+                },
+                "name": "WC Qualification AFR",
+                "code": "QCAF",
+                "emblemUrl": null,
+                "plan": "TIER_FOUR",
+                "currentSeason": {
+                  "id": 555,
+                  "startDate": "2019-09-04",
+                  "endDate": "2021-10-12",
+                  "currentMatchday": 6,
+                  "winner": null
+                },
+                "numberOfAvailableSeasons": 1,
+                "lastUpdated": "2020-09-15T17:30:02Z"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Get sports scores and standings",
+    "Track team and player information",
+    "Monitor sports events",
+    "Get racing championships data"
+  ]
+}

@@ -1,0 +1,182 @@
+{
+  "category": "ai",
+  "name": "AI & NLP",
+  "description": "Translation, sentiment analysis, QR codes, and AI-related utilities",
+  "prefix": "/ai",
+  "apis": [
+    {
+      "id": "twinword",
+      "name": "Twinword Sentiment Analysis",
+      "base_url": "https://twinword-sentiment-analysis.p.rapidapi.com",
+      "auth_required": false,
+      "rate_limited": true,
+      "endpoints": [
+        {
+          "path": "/ai/text/sentiment",
+          "method": "GET",
+          "summary": "Analyze text sentiment",
+          "direct_url": "https://twinword-sentiment-analysis.p.rapidapi.com/analyze/",
+          "parameters": [
+            {"name": "text", "type": "query", "required": true, "description": "Text to analyze"}
+          ],
+          "sample_request": "https://twinword-sentiment-analysis.p.rapidapi.com/analyze/?text=I love this product!",
+          "sample_response": {
+            "type": "positive",
+            "score": 0.85,
+            "ratio": 0.9,
+            "keywords": [
+              {
+                "word": "love",
+                "score": 0.9
+              },
+              {
+                "word": "product",
+                "score": 0.1
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "mymemory",
+      "name": "MyMemory Translation",
+      "base_url": "https://api.mymemory.translated.net",
+      "auth_required": false,
+      "rate_limited": true,
+      "endpoints": [
+        {
+          "path": "/ai/translate",
+          "method": "GET",
+          "summary": "Translate text",
+          "direct_url": "https://api.mymemory.translated.net/get",
+          "parameters": [
+            {"name": "text", "type": "query", "required": true, "description": "Text to translate"},
+            {"name": "target_lang", "type": "query", "default": "es", "description": "Target language code"}
+          ],
+          "sample_request": "https://api.mymemory.translated.net/get?q=Hello World!&langpair=en|es",
+          "sample_response": {
+            "responseStatus": 200,
+            "responseData": {
+              "translatedText": "¡Hola Mundo!",
+              "match": 1
+            },
+            "matches": [
+              {
+                "id": "123456789",
+                "segment": "Hello World!",
+                "translation": "¡Hola Mundo!",
+                "source": "en",
+                "target": "es",
+                "quality": 74,
+                "reference": "Machine Translation",
+                "usage-count": 123,
+                "created-by": "MT!"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "qrserver",
+      "name": "QR Server",
+      "base_url": "https://api.qrserver.com/v1",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/ai/qrcode",
+          "method": "GET",
+          "summary": "Generate QR code",
+          "direct_url": "https://api.qrserver.com/v1/create-qr-code/",
+          "parameters": [
+            {"name": "text", "type": "query", "required": true, "description": "Text to encode in QR code"}
+          ],
+          "sample_request": "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://example.com",
+          "sample_response": {
+            "message": "QR code generation",
+            "real_url": "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://example.com",
+            "how_to_use": "Open the URL in browser or download image"
+          }
+        }
+      ]
+    },
+    {
+      "id": "randomuser",
+      "name": "Random User Generator",
+      "base_url": "https://randomuser.me",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/ai/random/user",
+          "method": "GET",
+          "summary": "Generate random user data",
+          "direct_url": "https://randomuser.me/api/",
+          "sample_request": "https://randomuser.me/api/",
+          "sample_response": {
+            "results": [
+              {
+                "gender": "female",
+                "name": {
+                  "title": "Ms",
+                  "first": "Emma",
+                  "last": "Johnson"
+                },
+                "location": {
+                  "street": {
+                    "number": 1234,
+                    "name": "Main Street"
+                  },
+                  "city": "New York",
+                  "state": "New York",
+                  "country": "United States",
+                  "postcode": 10001,
+                  "coordinates": {
+                    "latitude": "40.7128",
+                    "longitude": "-74.0060"
+                  }
+                },
+                "email": "emma.johnson@example.com",
+                "login": {
+                  "uuid": "155e771b-7b2f-4c9f-8c3f-4b8f9c123456",
+                  "username": "emma_j_2025",
+                  "password": "SecurePass123!",
+                  "salt": "aB3dE5gH",
+                  "md5": "5d41402abc4b2a76b9719d911017c592",
+                  "sha1": "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d"
+                },
+                "dob": {
+                  "date": "1990-05-15T08:30:45.123Z",
+                  "age": 34
+                },
+                "phone": "(555) 123-4567",
+                "cell": "(555) 987-6543",
+                "picture": {
+                  "large": "https://randomuser.me/api/portraits/women/44.jpg",
+                  "medium": "https://randomuser.me/api/portraits/med/women/44.jpg",
+                  "thumbnail": "https://randomuser.me/api/portraits/thumb/women/44.jpg"
+                },
+                "nat": "US"
+              }
+            ],
+            "info": {
+              "seed": "abc123",
+              "results": 1,
+              "page": 1,
+              "version": "1.4"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Analyze text sentiment",
+    "Translate text between languages",
+    "Generate QR codes",
+    "Generate test data",
+    "Natural language processing"
+  ]
+}

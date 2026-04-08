@@ -1,0 +1,1367 @@
+{
+  "timestamp": "2026-04-09T00:27:31.619162",
+  "total_apis": 60,
+  "total_endpoints": 76,
+  "passed": 68,
+  "failed": 0,
+  "skipped": 8,
+  "categories": {
+    "ai": {
+      "name": "AI & NLP",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "ai",
+            "api_id": "twinword",
+            "api_name": "Twinword Sentiment Analysis",
+            "path": "/ai/text/sentiment",
+            "method": "GET",
+            "url": "https://twinword-sentiment-analysis.p.rapidapi.com/analyze/?text=I love this product!",
+            "auth_required": false,
+            "sample_url": "https://twinword-sentiment-analysis.p.rapidapi.com/analyze/?text=I love this product!"
+          },
+          "status": "skipped",
+          "status_code": 401,
+          "reason": "Authentication required"
+        },
+        {
+          "endpoint": {
+            "category": "ai",
+            "api_id": "mymemory",
+            "api_name": "MyMemory Translation",
+            "path": "/ai/translate",
+            "method": "GET",
+            "url": "https://api.mymemory.translated.net/get?q=Hello World!&langpair=en|es",
+            "auth_required": false,
+            "sample_url": "https://api.mymemory.translated.net/get?q=Hello World!&langpair=en|es"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 1230,
+          "response_preview": "{'responseData': {'translatedText': 'welcome to the world Mondo!', 'match': 1}, 'quotaFinished': False, 'mtLangSupported': None, 'responseDetails': '', 'responseStatus': 200, 'responderId': None, 'exc"
+        },
+        {
+          "endpoint": {
+            "category": "ai",
+            "api_id": "qrserver",
+            "api_name": "QR Server",
+            "path": "/ai/qrcode",
+            "method": "GET",
+            "url": "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://example.com",
+            "auth_required": false,
+            "sample_url": "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://example.com"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "content_type": "image/png",
+          "note": "Non-JSON response"
+        },
+        {
+          "endpoint": {
+            "category": "ai",
+            "api_id": "randomuser",
+            "api_name": "Random User Generator",
+            "path": "/ai/random/user",
+            "method": "GET",
+            "url": "https://randomuser.me/api/",
+            "auth_required": false,
+            "sample_url": "https://randomuser.me/api/"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 1150,
+          "response_preview": "{'results': [{'gender': 'female', 'name': {'title': 'Miss', 'first': 'Melike', 'last': '\u00d6n\u00fcr'}, 'location': {'street': {'number': 4175, 'name': 'Atat\u00fcrk Sk'}, 'city': 'Mersin', 'state': 'Kayseri', 'co"
+        }
+      ],
+      "passed": 3,
+      "failed": 0,
+      "skipped": 1
+    },
+    "crypto_finance": {
+      "name": "Cryptocurrency & Finance",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "crypto_finance",
+            "api_id": "coingecko",
+            "api_name": "CoinGecko",
+            "path": "/finance/crypto/coingecko/coins",
+            "method": "GET",
+            "url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=2&page=1",
+            "auth_required": false,
+            "sample_url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=2&page=1"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 1606,
+          "response_preview": "[{'id': 'bitcoin', 'symbol': 'btc', 'name': 'Bitcoin', 'image': 'https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png?1696501400', 'current_price': 71124, 'market_cap': 1425529216138, 'm"
+        },
+        {
+          "endpoint": {
+            "category": "crypto_finance",
+            "api_id": "coingecko",
+            "api_name": "CoinGecko",
+            "path": "/finance/crypto/coingecko/coin/{coin_id}",
+            "method": "GET",
+            "url": "https://api.coingecko.com/api/v3/coins/bitcoin",
+            "auth_required": false,
+            "sample_url": "https://api.coingecko.com/api/v3/coins/bitcoin"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 102177,
+          "response_preview": "{'id': 'bitcoin', 'symbol': 'btc', 'name': 'Bitcoin', 'web_slug': 'bitcoin', 'asset_platform_id': None, 'platforms': {'': ''}, 'detail_platforms': {'': {'decimal_place': None, 'contract_address': ''}}"
+        },
+        {
+          "endpoint": {
+            "category": "crypto_finance",
+            "api_id": "coinstats",
+            "api_name": "CoinStats",
+            "path": "/finance/crypto/coinstats/coins",
+            "method": "GET",
+            "url": "https://api.coinstats.app/public/v1/coins?limit=2&currency=USD",
+            "auth_required": false,
+            "sample_url": "https://api.coinstats.app/public/v1/coins?limit=2&currency=USD"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 117,
+          "response_preview": "{'message': 'This API is deprecated and disabled, to use the new version please go to https://coinstats.app/api-docs'}"
+        },
+        {
+          "endpoint": {
+            "category": "crypto_finance",
+            "api_id": "binance",
+            "api_name": "Binance",
+            "path": "/finance/crypto/binance/ticker/24hr",
+            "method": "GET",
+            "url": "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT",
+            "auth_required": false,
+            "sample_url": "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 557,
+          "response_preview": "{'symbol': 'BTCUSDT', 'priceChange': '2706.74000000', 'priceChangePercent': '3.954', 'weightedAvgPrice': '71279.52591533', 'prevClosePrice': '68448.58000000', 'lastPrice': '71155.33000000', 'lastQty':"
+        },
+        {
+          "endpoint": {
+            "category": "crypto_finance",
+            "api_id": "coinbase",
+            "api_name": "Coinbase",
+            "path": "/finance/crypto/coinbase/prices",
+            "method": "GET",
+            "url": "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+            "auth_required": false,
+            "sample_url": "https://api.coinbase.com/v2/prices/BTC-USD/spot"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 61,
+          "response_preview": "{'data': {'amount': '71131.725', 'base': 'BTC', 'currency': 'USD'}}"
+        },
+        {
+          "endpoint": {
+            "category": "crypto_finance",
+            "api_id": "exchangerate_api",
+            "api_name": "ExchangeRate-API",
+            "path": "/finance/exchange-rate/{base}",
+            "method": "GET",
+            "url": "https://api.exchangerate-api.com/v4/latest/USD",
+            "auth_required": false,
+            "sample_url": "https://api.exchangerate-api.com/v4/latest/USD"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 2226,
+          "response_preview": "{'provider': 'https://www.exchangerate-api.com', 'WARNING_UPGRADE_TO_V6': 'https://www.exchangerate-api.com/docs/free', 'terms': 'https://www.exchangerate-api.com/terms', 'base': 'USD', 'date': '2026-"
+        }
+      ],
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "currency": {
+      "name": "Currency Exchange",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "currency",
+            "api_id": "frankfurter",
+            "api_name": "Frankfurter",
+            "path": "/currency/frankfurter/latest",
+            "method": "GET",
+            "url": "https://api.frankfurter.app/latest?from=USD",
+            "auth_required": false,
+            "sample_url": "https://api.frankfurter.app/latest?from=USD"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 435,
+          "response_preview": "{'amount': 1.0, 'base': 'USD', 'date': '2026-04-08', 'rates': {'AUD': 1.4171, 'BRL': 5.0818, 'CAD': 1.386, 'CHF': 0.78789, 'CNY': 6.8297, 'CZK': 20.827, 'DKK': 6.3837, 'EUR': 0.85426, 'GBP': 0.74229, "
+        },
+        {
+          "endpoint": {
+            "category": "currency",
+            "api_id": "frankfurter",
+            "api_name": "Frankfurter",
+            "path": "/currency/convert",
+            "method": "GET",
+            "url": "https://api.frankfurter.app/latest?amount=100&from=USD&to=EUR",
+            "auth_required": false,
+            "sample_url": "https://api.frankfurter.app/latest?amount=100&from=USD&to=EUR"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 71,
+          "response_preview": "{'amount': 100.0, 'base': 'USD', 'date': '2026-04-08', 'rates': {'EUR': 85.43}}"
+        }
+      ],
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "ecommerce": {
+      "name": "E-commerce & Products",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "ecommerce",
+            "api_id": "fakestore",
+            "api_name": "Fake Store API",
+            "path": "/ecommerce/products",
+            "method": "GET",
+            "url": "https://fakestoreapi.com/products",
+            "auth_required": false,
+            "sample_url": "https://fakestoreapi.com/products"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 10634,
+          "response_preview": "[{'id': 1, 'title': 'Fjallraven - Foldsack No. 1 Backpack, Fits 15 Laptops', 'price': 109.95, 'description': 'Your perfect pack for everyday use and walks in the forest. Stash your laptop (up to 15 in"
+        },
+        {
+          "endpoint": {
+            "category": "ecommerce",
+            "api_id": "fakestore",
+            "api_name": "Fake Store API",
+            "path": "/ecommerce/products/{product_id}",
+            "method": "GET",
+            "url": "https://fakestoreapi.com/products/1",
+            "auth_required": false,
+            "sample_url": "https://fakestoreapi.com/products/1"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 365,
+          "response_preview": "{'id': 1, 'title': 'Fjallraven - Foldsack No. 1 Backpack, Fits 15 Laptops', 'price': 109.95, 'description': 'Your perfect pack for everyday use and walks in the forest. Stash your laptop (up to 15 inc"
+        },
+        {
+          "endpoint": {
+            "category": "ecommerce",
+            "api_id": "fakestore",
+            "api_name": "Fake Store API",
+            "path": "/ecommerce/categories",
+            "method": "GET",
+            "url": "https://fakestoreapi.com/products/categories",
+            "auth_required": false,
+            "sample_url": "https://fakestoreapi.com/products/categories"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 62,
+          "response_preview": "['electronics', 'jewelery', \"men's clothing\", \"women's clothing\"]"
+        },
+        {
+          "endpoint": {
+            "category": "ecommerce",
+            "api_id": "dummyjson",
+            "api_name": "DummyJSON",
+            "path": "/ecommerce/dummy/products",
+            "method": "GET",
+            "url": "https://dummyjson.com/products?limit=10&skip=0",
+            "auth_required": false,
+            "sample_url": "https://dummyjson.com/products?limit=10&skip=0"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 15505,
+          "response_preview": "{'products': [{'id': 1, 'title': 'Essence Mascara Lash Princess', 'description': 'The Essence Mascara Lash Princess is a popular mascara known for its volumizing and lengthening effects. Achieve drama"
+        },
+        {
+          "endpoint": {
+            "category": "ecommerce",
+            "api_id": "jsonplaceholder",
+            "api_name": "JSONPlaceholder",
+            "path": "/ecommerce/posts",
+            "method": "GET",
+            "url": "https://jsonplaceholder.typicode.com/posts?_limit=10",
+            "auth_required": false,
+            "sample_url": "https://jsonplaceholder.typicode.com/posts?_limit=10"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 2726,
+          "response_preview": "[{'userId': 1, 'id': 1, 'title': 'sunt aut facere repellat provident occaecati excepturi optio reprehenderit', 'body': 'quia et suscipit\\nsuscipit recusandae consequuntur expedita et cum\\nreprehenderi"
+        },
+        {
+          "endpoint": {
+            "category": "ecommerce",
+            "api_id": "jsonplaceholder",
+            "api_name": "JSONPlaceholder",
+            "path": "/ecommerce/users",
+            "method": "GET",
+            "url": "https://jsonplaceholder.typicode.com/users?_limit=10",
+            "auth_required": false,
+            "sample_url": "https://jsonplaceholder.typicode.com/users?_limit=10"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 5645,
+          "response_preview": "[{'id': 1, 'name': 'Leanne Graham', 'username': 'Bret', 'email': 'Sincere@april.biz', 'address': {'street': 'Kulas Light', 'suite': 'Apt. 556', 'city': 'Gwenborough', 'zipcode': '92998-3874', 'geo': {"
+        },
+        {
+          "endpoint": {
+            "category": "ecommerce",
+            "api_id": "platzi",
+            "api_name": "Platzi Fake Store API",
+            "path": "/ecommerce/platzi/products",
+            "method": "GET",
+            "url": "https://api.escuelajs.co/api/v1/products?limit=10&offset=0",
+            "auth_required": false,
+            "sample_url": "https://api.escuelajs.co/api/v1/products?limit=10&offset=0"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 8496,
+          "response_preview": "[{'id': 22, 'title': 'Mouse', 'slug': 'mouse', 'price': 10, 'description': 'Experience smooth and precise navigation with this modern wireless mouse, featuring a glossy finish and a comfortable ergono"
+        },
+        {
+          "endpoint": {
+            "category": "ecommerce",
+            "api_id": "platzi",
+            "api_name": "Platzi Fake Store API",
+            "path": "/ecommerce/platzi/categories",
+            "method": "GET",
+            "url": "https://api.escuelajs.co/api/v1/categories",
+            "auth_required": false,
+            "sample_url": "https://api.escuelajs.co/api/v1/categories"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 3687,
+          "response_preview": "[{'id': 1, 'name': 'AB_CAT_9012938793', 'slug': 'ab-cat-9012938793', 'image': 'https://placeimg.com/64022/480/any', 'creationAt': '2026-04-07T19:15:21.000Z', 'updatedAt': '2026-04-08T16:48:24.000Z'}, "
+        }
+      ],
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    "entertainment": {
+      "name": "Entertainment",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "entertainment",
+            "api_id": "jokeapi",
+            "api_name": "JokeAPI",
+            "path": "/entertainment/jokes/random",
+            "method": "GET",
+            "url": "https://v2.jokeapi.dev/joke/Any",
+            "auth_required": false,
+            "sample_url": "https://v2.jokeapi.dev/joke/Any"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 391,
+          "response_preview": "{'error': False, 'category': 'Pun', 'type': 'single', 'joke': 'To whoever stole my copy of Microsoft Office, I will find you. You have my Word!', 'flags': {'nsfw': False, 'religious': False, 'politica"
+        },
+        {
+          "endpoint": {
+            "category": "entertainment",
+            "api_id": "chucknorris",
+            "api_name": "Chuck Norris IO",
+            "path": "/entertainment/jokes/chuck-norris",
+            "method": "GET",
+            "url": "https://api.chucknorris.io/jokes/random",
+            "auth_required": false,
+            "sample_url": "https://api.chucknorris.io/jokes/random"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 327,
+          "response_preview": "{'categories': [], 'created_at': '2020-01-05 13:42:28.664997', 'icon_url': 'https://api.chucknorris.io/img/avatar/chuck-norris.png', 'id': 'rn-CCefIQX-dw5Ur6uQcEw', 'updated_at': '2020-01-05 13:42:28."
+        },
+        {
+          "endpoint": {
+            "category": "entertainment",
+            "api_id": "forismatic",
+            "api_name": "Forismatic Quotes",
+            "path": "/entertainment/quotes/random",
+            "method": "GET",
+            "url": "https://api.forismatic.com/api/1.0/?method=getQuote&format=json&lang=en",
+            "auth_required": false,
+            "sample_url": "https://api.forismatic.com/api/1.0/?method=getQuote&format=json&lang=en"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 274,
+          "response_preview": "{'quoteText': 'If you want to study yourself \u2014 look into the hearts of other people. If you want to study other people \u2014 look into your own heart. ', 'quoteAuthor': 'Friedrich von Schiller', 'senderNa"
+        },
+        {
+          "endpoint": {
+            "category": "entertainment",
+            "api_id": "uselessfacts",
+            "api_name": "Useless Facts",
+            "path": "/entertainment/facts/random",
+            "method": "GET",
+            "url": "https://uselessfacts.jsph.pl/random.json?language=en",
+            "auth_required": false,
+            "sample_url": "https://uselessfacts.jsph.pl/random.json?language=en"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 277,
+          "response_preview": "{'id': '8306ce1e4b664e4e679b27fe43147e30', 'text': '98% of Japanese are cremated.', 'source': 'djtech.net', 'source_url': 'https://www.djtech.net/humor/shorty_useless_facts.htm', 'language': 'en', 'pe"
+        }
+      ],
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "food": {
+      "name": "Food & Beverage",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "food",
+            "api_id": "themealdb",
+            "api_name": "TheMealDB",
+            "path": "/food/meals/search",
+            "method": "GET",
+            "url": "https://www.themealdb.com/api/json/v1/1/filter.php?i=chicken",
+            "auth_required": false,
+            "sample_url": "https://www.themealdb.com/api/json/v1/1/filter.php?i=chicken"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 2712,
+          "response_preview": "{'meals': [{'strMeal': 'Brown Stew Chicken', 'strMealThumb': 'https://www.themealdb.com/images/media/meals/sypxpx1515365095.jpg', 'idMeal': '52940'}, {'strMeal': 'Chicken & chorizo rice pot', 'strMeal"
+        },
+        {
+          "endpoint": {
+            "category": "food",
+            "api_id": "themealdb",
+            "api_name": "TheMealDB",
+            "path": "/food/meals/random",
+            "method": "GET",
+            "url": "https://www.themealdb.com/api/json/v1/1/random.php",
+            "auth_required": false,
+            "sample_url": "https://www.themealdb.com/api/json/v1/1/random.php"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 2084,
+          "response_preview": "{'meals': [{'idMeal': '53115', 'strMeal': 'Red onion pickle', 'strMealAlternate': None, 'strCategory': 'Vegan', 'strArea': 'Norwegian', 'strInstructions': 'Peel the onions, cut them in half from top t"
+        },
+        {
+          "endpoint": {
+            "category": "food",
+            "api_id": "thecocktaildb",
+            "api_name": "TheCocktailDB",
+            "path": "/food/cocktails/search",
+            "method": "GET",
+            "url": "https://www.thecocktaildb.com/api/json/v1/1/filter.php?i=Vodka",
+            "auth_required": false,
+            "sample_url": "https://www.thecocktaildb.com/api/json/v1/1/filter.php?i=Vodka"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 13367,
+          "response_preview": "{'drinks': [{'strDrink': '155 Belmont', 'strDrinkThumb': 'https://www.thecocktaildb.com/images/media/drink/yqvvqs1475667388.jpg', 'idDrink': '15346'}, {'strDrink': '501 Blue', 'strDrinkThumb': 'https:"
+        },
+        {
+          "endpoint": {
+            "category": "food",
+            "api_id": "openbrewerydb",
+            "api_name": "Open Brewery DB",
+            "path": "/food/breweries/list",
+            "method": "GET",
+            "url": "https://api.openbrewerydb.org/v1/breweries?by_city=portland&per_page=3",
+            "auth_required": false,
+            "sample_url": "https://api.openbrewerydb.org/v1/breweries?by_city=portland&per_page=3"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 1252,
+          "response_preview": "[{'id': 'e432899b-7f58-455f-9c7b-9a6e2130a1e0', 'name': '10 Barrel Brewing Co', 'brewery_type': 'large', 'address_1': '1411 NW Flanders St', 'address_2': None, 'address_3': None, 'city': 'Portland', '"
+        },
+        {
+          "endpoint": {
+            "category": "food",
+            "api_id": "openbrewerydb",
+            "api_name": "Open Brewery DB",
+            "path": "/food/breweries/random",
+            "method": "GET",
+            "url": "https://api.openbrewerydb.org/v1/breweries/random",
+            "auth_required": false,
+            "sample_url": "https://api.openbrewerydb.org/v1/breweries/random"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 448,
+          "response_preview": "[{'id': '37181ee1-680d-41f3-811a-34b4abab22d4', 'name': 'Storm Peak Brewing Company', 'brewery_type': 'micro', 'address_1': '1885 Elk River Plz Unit 4', 'address_2': None, 'address_3': None, 'city': '"
+        }
+      ],
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    "health": {
+      "name": "System Health",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "health",
+            "api_id": "health",
+            "api_name": "Health Check",
+            "path": "/",
+            "method": "GET",
+            "url": "http://127.0.0.1:8000/",
+            "auth_required": false,
+            "sample_url": "http://127.0.0.1:8000/"
+          },
+          "status": "skipped",
+          "reason": "HTTP URL (HTTPS only supported)"
+        }
+      ],
+      "passed": 0,
+      "failed": 0,
+      "skipped": 1
+    },
+    "images": {
+      "name": "Images & Media",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "images",
+            "api_id": "dogceo",
+            "api_name": "Dog CEO",
+            "path": "/images/dogceo/random",
+            "method": "GET",
+            "url": "https://dog.ceo/api/breeds/image/random",
+            "auth_required": false,
+            "sample_url": "https://dog.ceo/api/breeds/image/random"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 105,
+          "response_preview": "{'message': 'https://images.dog.ceo/breeds/terrier-australian/n02096294_2175.jpg', 'status': 'success'}"
+        },
+        {
+          "endpoint": {
+            "category": "images",
+            "api_id": "cataas",
+            "api_name": "Cat as a Service (CATAAS)",
+            "path": "/images/cataas/random",
+            "method": "GET",
+            "url": "https://cataas.com/cat?json=true",
+            "auth_required": false,
+            "sample_url": "https://cataas.com/cat?json=true"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 163,
+          "response_preview": "{'id': '2MLfyVlPy09vZK5c', 'tags': [], 'created_at': '2020-04-17T09:10:47.171Z', 'url': 'https://cataas.com/cat/2MLfyVlPy09vZK5c?position=center', 'mimetype': 'image/jpeg'}"
+        },
+        {
+          "endpoint": {
+            "category": "images",
+            "api_id": "picsum",
+            "api_name": "Picsum (Lorem Picsum)",
+            "path": "/images/picsum",
+            "method": "GET",
+            "url": "https://picsum.photos/800/600",
+            "auth_required": false,
+            "sample_url": "https://picsum.photos/800/600"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "content_type": "image/jpeg",
+          "note": "Non-JSON response"
+        },
+        {
+          "endpoint": {
+            "category": "images",
+            "api_id": "unsplash",
+            "api_name": "Unsplash API",
+            "path": "/images/unsplash/random",
+            "method": "GET",
+            "url": "https://api.unsplash.com/photos/random?client_id=YOUR_ACCESS_KEY",
+            "auth_required": true,
+            "sample_url": "https://api.unsplash.com/photos/random?client_id=YOUR_ACCESS_KEY"
+          },
+          "status": "skipped",
+          "status_code": 401,
+          "reason": "Authentication required"
+        }
+      ],
+      "passed": 3,
+      "failed": 0,
+      "skipped": 1
+    },
+    "jobs": {
+      "name": "Jobs & Career",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "jobs",
+            "api_id": "jobicy",
+            "api_name": "Jobicy",
+            "path": "/jobs/remote",
+            "method": "GET",
+            "url": "https://jobicy.com/api/v2/remote-jobs?count=20&geo=usa",
+            "auth_required": false,
+            "sample_url": "https://jobicy.com/api/v2/remote-jobs?count=20&geo=usa"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 175481,
+          "response_preview": "{'apiVersion': '2.2.13', 'documentationUrl': 'https://jobi.cy/apidocs', 'friendlyNotice': 'Thanks for using the Jobicy API in your projects! Please make sure Jobicy is clearly credited as the source a"
+        },
+        {
+          "endpoint": {
+            "category": "jobs",
+            "api_id": "arbeitnow",
+            "api_name": "Arbeitnow",
+            "path": "/jobs/remote",
+            "method": "GET",
+            "url": "https://www.arbeitnow.com/api/job-board-api?search=developer",
+            "auth_required": false,
+            "sample_url": "https://www.arbeitnow.com/api/job-board-api?search=developer"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 453970,
+          "response_preview": "{'data': [{'slug': 'remote-sales-executive-dach-hamburg-185802', 'company_name': 'GeoEdge', 'title': 'Sales Executive - DACH', 'description': '<p>GeoEdge is the leading provider of ad security and qua"
+        },
+        {
+          "endpoint": {
+            "category": "jobs",
+            "api_id": "usajobs",
+            "api_name": "USAJOBS API",
+            "path": "/jobs/search",
+            "method": "GET",
+            "url": "https://data.usajobs.gov/api/Search?Keyword=developer",
+            "auth_required": false,
+            "sample_url": "https://data.usajobs.gov/api/Search?Keyword=developer"
+          },
+          "status": "skipped",
+          "status_code": 401,
+          "reason": "Authentication required"
+        }
+      ],
+      "passed": 2,
+      "failed": 0,
+      "skipped": 1
+    },
+    "knowledge": {
+      "name": "Knowledge & Education",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "knowledge",
+            "api_id": "dictionaryapi",
+            "api_name": "Free Dictionary API",
+            "path": "/knowledge/dictionary/{word}",
+            "method": "GET",
+            "url": "https://api.dictionaryapi.dev/api/v2/entries/en/hello",
+            "auth_required": false,
+            "sample_url": "https://api.dictionaryapi.dev/api/v2/entries/en/hello"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 1996,
+          "response_preview": "[{'word': 'hello', 'phonetics': [{'audio': 'https://api.dictionaryapi.dev/media/pronunciations/en/hello-au.mp3', 'sourceUrl': 'https://commons.wikimedia.org/w/index.php?curid=75797336', 'license': {'n"
+        },
+        {
+          "endpoint": {
+            "category": "knowledge",
+            "api_id": "openlibrary",
+            "api_name": "Open Library",
+            "path": "/knowledge/books/search",
+            "method": "GET",
+            "url": "https://openlibrary.org/search.json?q=python&limit=10",
+            "auth_required": false,
+            "sample_url": "https://openlibrary.org/search.json?q=python&limit=10"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 8785,
+          "response_preview": "{'numFound': 6352, 'start': 0, 'numFoundExact': True, 'num_found': 6352, 'documentation_url': 'https://openlibrary.org/dev/docs/api/search', 'q': 'python', 'offset': None, 'docs': [{'author_key': ['OL"
+        },
+        {
+          "endpoint": {
+            "category": "knowledge",
+            "api_id": "openlibrary",
+            "api_name": "Open Library",
+            "path": "/knowledge/books/{work_key}",
+            "method": "GET",
+            "url": "https://openlibrary.org/works/OL12345678W.json",
+            "auth_required": false,
+            "sample_url": "https://openlibrary.org/works/OL12345678W.json"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 453,
+          "response_preview": "{'lc_classifications': ['PG3476 K383 S8'], 'key': '/works/OL12345678W', 'created': {'type': '/type/datetime', 'value': '2009-12-11T06:41:27.684297'}, 'title': 'Stupeni', 'first_publish_date': '1971', "
+        },
+        {
+          "endpoint": {
+            "category": "knowledge",
+            "api_id": "wikipedia",
+            "api_name": "Wikipedia",
+            "path": "/knowledge/wikipedia/search",
+            "method": "GET",
+            "url": "https://en.wikipedia.org/w/api.php?action=opensearch&search=python+programming&limit=10&format=json",
+            "auth_required": false,
+            "sample_url": "https://en.wikipedia.org/w/api.php?action=opensearch&search=python+programming&limit=10&format=json"
+          },
+          "status": "skipped",
+          "status_code": 403,
+          "reason": "Authentication required"
+        },
+        {
+          "endpoint": {
+            "category": "knowledge",
+            "api_id": "wikipedia",
+            "api_name": "Wikipedia",
+            "path": "/knowledge/wikipedia/article/{title}",
+            "method": "GET",
+            "url": "https://en.wikipedia.org/api/rest_v1/page/summary/Python_(programming_language)",
+            "auth_required": false,
+            "sample_url": "https://en.wikipedia.org/api/rest_v1/page/summary/Python_(programming_language)"
+          },
+          "status": "skipped",
+          "status_code": 403,
+          "reason": "Authentication required"
+        }
+      ],
+      "passed": 3,
+      "failed": 0,
+      "skipped": 2
+    },
+    "location": {
+      "name": "Maps & Location",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "location",
+            "api_id": "rest_countries",
+            "api_name": "REST Countries",
+            "path": "/location/countries",
+            "method": "GET",
+            "url": "https://restcountries.com/v3.1/name/united",
+            "auth_required": false,
+            "sample_url": "https://restcountries.com/v3.1/name/united"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 28336,
+          "response_preview": "[{'tld': ['.us'], 'cca2': 'US', 'ccn3': '840', 'cca3': 'USA', 'cioc': 'USA', 'independent': True, 'status': 'officially-assigned', 'unMember': True, 'idd': {'root': '+1', 'suffixes': ['201', '202', '2"
+        },
+        {
+          "endpoint": {
+            "category": "location",
+            "api_id": "rest_countries",
+            "api_name": "REST Countries",
+            "path": "/location/countries/{code}",
+            "method": "GET",
+            "url": "https://restcountries.com/v3.1/alpha/US",
+            "auth_required": false,
+            "sample_url": "https://restcountries.com/v3.1/alpha/US"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 5612,
+          "response_preview": "[{'tld': ['.us'], 'cca2': 'US', 'ccn3': '840', 'cca3': 'USA', 'cioc': 'USA', 'independent': True, 'status': 'officially-assigned', 'unMember': True, 'idd': {'root': '+1', 'suffixes': ['201', '202', '2"
+        },
+        {
+          "endpoint": {
+            "category": "location",
+            "api_id": "ipapi_co",
+            "api_name": "IPAPI.co",
+            "path": "/location/ip",
+            "method": "GET",
+            "url": "https://ipapi.co/json/?ip=8.8.8.8",
+            "auth_required": false,
+            "sample_url": "https://ipapi.co/json/?ip=8.8.8.8"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 844,
+          "response_preview": "{'ip': '60.243.80.90', 'network': '60.243.80.0/20', 'version': 'IPv4', 'city': 'Chennai', 'region': 'Tamil Nadu', 'region_code': 'TN', 'country': 'IN', 'country_name': 'India', 'country_code': 'IN', '"
+        },
+        {
+          "endpoint": {
+            "category": "location",
+            "api_id": "ipinfo_io",
+            "api_name": "IPinfo.io",
+            "path": "/location/ip/geo",
+            "method": "GET",
+            "url": "https://ipinfo.io/8.8.8.8/json",
+            "auth_required": false,
+            "sample_url": "https://ipinfo.io/8.8.8.8/json"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 304,
+          "response_preview": "{'ip': '8.8.8.8', 'hostname': 'dns.google', 'city': 'Mountain View', 'region': 'California', 'country': 'US', 'loc': '37.4056,-122.0775', 'org': 'AS15169 Google LLC', 'postal': '94043', 'timezone': 'A"
+        }
+      ],
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "news": {
+      "name": "News",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "news",
+            "api_id": "hackernews",
+            "api_name": "HackerNews",
+            "path": "/news/hackernews/top",
+            "method": "GET",
+            "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+            "auth_required": false,
+            "sample_url": "https://hacker-news.firebaseio.com/v0/topstories.json"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 4501,
+          "response_preview": "[47691730, 47694093, 47687273, 47693153, 47692043, 47688678, 47686549, 47689174, 47694036, 47687248, 47690977, 47689237, 47692102, 47656730, 47654062, 47692661, 47675446, 47676561, 47685739, 47685945,"
+        },
+        {
+          "endpoint": {
+            "category": "news",
+            "api_id": "hackernews",
+            "api_name": "HackerNews",
+            "path": "/news/hackernews/item/{item_id}",
+            "method": "GET",
+            "url": "https://hacker-news.firebaseio.com/v0/item/12345678.json",
+            "auth_required": false,
+            "sample_url": "https://hacker-news.firebaseio.com/v0/item/12345678.json"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 304,
+          "response_preview": "{'by': 'mef', 'descendants': 2, 'id': 12345678, 'kids': [12348171], 'score': 10, 'time': 1471974140, 'title': 'Hidden message in Sega arcades goes unnoticed', 'type': 'story', 'url': 'http://en.rocket"
+        }
+      ],
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "science": {
+      "name": "Science & Space",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "science",
+            "api_id": "spaceflightnews",
+            "api_name": "Spaceflight News API",
+            "path": "/science/articles",
+            "method": "GET",
+            "url": "https://api.spaceflightnewsapi.net/v4/articles?limit=10&summary=1",
+            "auth_required": false,
+            "sample_url": "https://api.spaceflightnewsapi.net/v4/articles?limit=10&summary=1"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 8131,
+          "response_preview": "{'count': 33602, 'next': 'https://api.spaceflightnewsapi.net/v4/articles/?limit=10&offset=10&summary=1', 'previous': None, 'results': [{'id': 37354, 'title': 'Twin NASA Control Rooms Support Artemis S"
+        },
+        {
+          "endpoint": {
+            "category": "science",
+            "api_id": "spacex",
+            "api_name": "SpaceX API",
+            "path": "/science/spacex/launches",
+            "method": "GET",
+            "url": "https://api.spacexdata.com/v4/launches",
+            "auth_required": false,
+            "sample_url": "https://api.spacexdata.com/v4/launches"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 435847,
+          "response_preview": "[{'fairings': {'reused': False, 'recovery_attempt': False, 'recovered': False, 'ships': []}, 'links': {'patch': {'small': 'https://images2.imgbox.com/94/f2/NN6Ph45r_o.png', 'large': 'https://images2.i"
+        },
+        {
+          "endpoint": {
+            "category": "science",
+            "api_id": "spacex",
+            "api_name": "SpaceX API",
+            "path": "/science/spacex/rockets",
+            "method": "GET",
+            "url": "https://api.spacexdata.com/v4/rockets",
+            "auth_required": false,
+            "sample_url": "https://api.spacexdata.com/v4/rockets"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 7580,
+          "response_preview": "[{'height': {'meters': 22.25, 'feet': 73}, 'diameter': {'meters': 1.68, 'feet': 5.5}, 'mass': {'kg': 30146, 'lb': 66460}, 'first_stage': {'thrust_sea_level': {'kN': 420, 'lbf': 94000}, 'thrust_vacuum'"
+        },
+        {
+          "endpoint": {
+            "category": "science",
+            "api_id": "spaceflight",
+            "api_name": "Spaceflight News API",
+            "path": "/science/spaceflight/news",
+            "method": "GET",
+            "url": "https://api.spaceflightnewsapi.net/v4/articles?limit=3",
+            "auth_required": false,
+            "sample_url": "https://api.spaceflightnewsapi.net/v4/articles?limit=3"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 2512,
+          "response_preview": "{'count': 33602, 'next': 'https://api.spaceflightnewsapi.net/v4/articles/?limit=3&offset=3', 'previous': None, 'results': [{'id': 37354, 'title': 'Twin NASA Control Rooms Support Artemis Safety, Succe"
+        }
+      ],
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "security": {
+      "name": "Security & Threat Intelligence",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "security",
+            "api_id": "ukpolice",
+            "api_name": "UK Police Data",
+            "path": "/security/police/forces",
+            "method": "GET",
+            "url": "https://data.police.uk/api/forces",
+            "auth_required": false,
+            "sample_url": "https://data.police.uk/api/forces"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 2258,
+          "response_preview": "[{'id': 'avon-and-somerset', 'name': 'Avon and Somerset Constabulary'}, {'id': 'bedfordshire', 'name': 'Bedfordshire Police'}, {'id': 'cambridgeshire', 'name': 'Cambridgeshire Constabulary'}, {'id': '"
+        },
+        {
+          "endpoint": {
+            "category": "security",
+            "api_id": "ukpolice",
+            "api_name": "UK Police Data",
+            "path": "/security/police/force/{force_id}",
+            "method": "GET",
+            "url": "https://data.police.uk/api/forces/metropolitan",
+            "auth_required": false,
+            "sample_url": "https://data.police.uk/api/forces/metropolitan"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 443,
+          "response_preview": "{'id': 'metropolitan', 'name': 'Metropolitan Police Service', 'description': None, 'url': 'https://www.met.police.uk/', 'telephone': '101', 'engagement_methods': [{'type': 'facebook', 'title': 'facebo"
+        },
+        {
+          "endpoint": {
+            "category": "security",
+            "api_id": "shodan",
+            "api_name": "Shodan Internet Intelligence",
+            "path": "/security/shodan/host",
+            "method": "GET",
+            "url": "https://api.shodan.io/shodan/host/8.8.8.8?key=YOUR_API_KEY",
+            "auth_required": true,
+            "sample_url": "https://api.shodan.io/shodan/host/8.8.8.8?key=YOUR_API_KEY"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 17801,
+          "response_preview": "{'city': 'Mountain View', 'region_code': 'CA', 'os': None, 'tags': [], 'ip': 134744072, 'isp': 'Google LLC', 'area_code': None, 'longitude': -122.11746, 'last_update': '2026-04-08T14:44:26.119292', 'p"
+        },
+        {
+          "endpoint": {
+            "category": "security",
+            "api_id": "nvd",
+            "api_name": "National Vulnerability Database (NVD)",
+            "path": "/security/nvd/cves",
+            "method": "GET",
+            "url": "https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=log4j&resultsPerPage=10",
+            "auth_required": false,
+            "sample_url": "https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=log4j&resultsPerPage=10"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 323480,
+          "response_preview": "{'resultsPerPage': 10, 'startIndex': 0, 'totalResults': 26, 'format': 'NVD_CVE', 'version': '2.0', 'timestamp': '2026-04-08T18:58:15.504', 'vulnerabilities': [{'cve': {'id': 'CVE-2008-7261', 'sourceId"
+        },
+        {
+          "endpoint": {
+            "category": "security",
+            "api_id": "nvd",
+            "api_name": "National Vulnerability Database (NVD)",
+            "path": "/security/nvd/cves/{cve_id}",
+            "method": "GET",
+            "url": "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2021-44228",
+            "auth_required": false,
+            "sample_url": "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2021-44228"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 86992,
+          "response_preview": "{'resultsPerPage': 1, 'startIndex': 0, 'totalResults': 1, 'format': 'NVD_CVE', 'version': '2.0', 'timestamp': '2026-04-08T18:58:16.185', 'vulnerabilities': [{'cve': {'id': 'CVE-2021-44228', 'sourceIde"
+        },
+        {
+          "endpoint": {
+            "category": "security",
+            "api_id": "httpbin",
+            "api_name": "HTTPBin",
+            "path": "/security/http/get",
+            "method": "GET",
+            "url": "https://httpbin.org/get",
+            "auth_required": false,
+            "sample_url": "https://httpbin.org/get"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 300,
+          "response_preview": "{'args': {}, 'headers': {'Accept': '*/*', 'Accept-Encoding': 'gzip, deflate', 'Host': 'httpbin.org', 'User-Agent': 'API-Verifier/1.0', 'X-Amzn-Trace-Id': 'Root=1-69d6a549-26858b086abf4707187db012'}, '"
+        },
+        {
+          "endpoint": {
+            "category": "security",
+            "api_id": "httpbin",
+            "api_name": "HTTPBin",
+            "path": "/security/http/ip",
+            "method": "GET",
+            "url": "https://httpbin.org/ip",
+            "auth_required": false,
+            "sample_url": "https://httpbin.org/ip"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 31,
+          "response_preview": "{'origin': '60.243.80.90'}"
+        },
+        {
+          "endpoint": {
+            "category": "security",
+            "api_id": "httpbin",
+            "api_name": "HTTPBin",
+            "path": "/security/http/user-agent",
+            "method": "GET",
+            "url": "https://httpbin.org/user-agent",
+            "auth_required": false,
+            "sample_url": "https://httpbin.org/user-agent"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 39,
+          "response_preview": "{'user-agent': 'API-Verifier/1.0'}"
+        }
+      ],
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    "sports": {
+      "name": "Sports",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "sports",
+            "api_id": "citybikes",
+            "api_name": "CityBikes",
+            "path": "/sports/bike-sharing/networks",
+            "method": "GET",
+            "url": "https://api.citybik.es/v2/networks",
+            "auth_required": false,
+            "sample_url": "https://api.citybik.es/v2/networks"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 224000,
+          "response_preview": "{'networks': [{'id': 'abu-dhabi-careem-bike', 'name': 'Abu Dhabi Careem BIKE', 'location': {'latitude': 24.4866, 'longitude': 54.3728, 'city': 'Abu Dhabi', 'country': 'AE'}, 'href': '/v2/networks/abu-"
+        },
+        {
+          "endpoint": {
+            "category": "sports",
+            "api_id": "nhlapi",
+            "api_name": "NHL API",
+            "path": "/sports/nhl/standings",
+            "method": "GET",
+            "url": "https://api-web.nhle.com/v1/standings-season",
+            "auth_required": false,
+            "sample_url": "https://api-web.nhle.com/v1/standings-season"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 25153,
+          "response_preview": "{'currentDate': '2026-04-08', 'seasons': [{'id': 19171918, 'conferencesInUse': False, 'divisionsInUse': False, 'pointForOTlossInUse': False, 'regulationWinsInUse': False, 'rowInUse': False, 'standings"
+        },
+        {
+          "endpoint": {
+            "category": "sports",
+            "api_id": "football-data",
+            "api_name": "Football-Data.org",
+            "path": "/sports/football/competitions",
+            "method": "GET",
+            "url": "http://api.football-data.org/v4/competitions/",
+            "auth_required": false,
+            "sample_url": "http://api.football-data.org/v4/competitions/"
+          },
+          "status": "skipped",
+          "reason": "HTTP URL (HTTPS only supported)"
+        }
+      ],
+      "passed": 2,
+      "failed": 0,
+      "skipped": 1
+    },
+    "stocks": {
+      "name": "Stocks & Market Data",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "stocks",
+            "api_id": "coingecko_stocks",
+            "api_name": "CoinGecko (Stocks)",
+            "path": "/stocks/crypto/list",
+            "method": "GET",
+            "url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=2",
+            "auth_required": false,
+            "sample_url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=2"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 1606,
+          "response_preview": "[{'id': 'bitcoin', 'symbol': 'btc', 'name': 'Bitcoin', 'image': 'https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png?1696501400', 'current_price': 71123, 'market_cap': 1425529216138, 'm"
+        },
+        {
+          "endpoint": {
+            "category": "stocks",
+            "api_id": "coingecko_stocks",
+            "api_name": "CoinGecko (Stocks)",
+            "path": "/stocks/trending",
+            "method": "GET",
+            "url": "https://api.coingecko.com/api/v3/search/trending",
+            "auth_required": false,
+            "sample_url": ""
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 54687,
+          "response_preview": "{'coins': [{'item': {'id': 'monad', 'coin_id': 38927, 'name': 'Monad', 'symbol': 'MON', 'market_cap_rank': 123, 'thumb': 'https://coin-images.coingecko.com/coins/images/38927/standard/mon.png?17660290"
+        }
+      ],
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "travel": {
+      "name": "Travel",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "travel",
+            "api_id": "rest_countries_travel",
+            "api_name": "REST Countries (Travel)",
+            "path": "/travel/capital/{country}",
+            "method": "GET",
+            "url": "https://restcountries.com/v3.1/name/france",
+            "auth_required": false,
+            "sample_url": "https://restcountries.com/v3.1/name/france"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 3123,
+          "response_preview": "[{'tld': ['.fr'], 'cca2': 'FR', 'ccn3': '250', 'cca3': 'FRA', 'cioc': 'FRA', 'independent': True, 'status': 'officially-assigned', 'unMember': True, 'idd': {'root': '+3', 'suffixes': ['3']}, 'capital'"
+        },
+        {
+          "endpoint": {
+            "category": "travel",
+            "api_id": "nominatim",
+            "api_name": "Nominatim (OpenStreetMap)",
+            "path": "/travel/geocode/search",
+            "method": "GET",
+            "url": "https://nominatim.openstreetmap.org/search.php?city=paris&format=jsonv2",
+            "auth_required": false,
+            "sample_url": "https://nominatim.openstreetmap.org/search.php?city=paris&format=jsonv2"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 1781,
+          "response_preview": "[{'place_id': 89081766, 'licence': 'Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright', 'osm_type': 'relation', 'osm_id': 7444, 'lat': '48.8588897', 'lon': '2.3200410', 'category':"
+        },
+        {
+          "endpoint": {
+            "category": "travel",
+            "api_id": "geonames",
+            "api_name": "GeoNames",
+            "path": "/travel/geonames/search",
+            "method": "GET",
+            "url": "http://api.geonames.org/searchJSON?q=paris&maxRows=10",
+            "auth_required": false,
+            "sample_url": "http://api.geonames.org/searchJSON?q=paris&maxRows=10"
+          },
+          "status": "skipped",
+          "reason": "HTTP URL (HTTPS only supported)"
+        },
+        {
+          "endpoint": {
+            "category": "travel",
+            "api_id": "zippopotamus",
+            "api_name": "Zippopotam.us",
+            "path": "/travel/zipcode/{country}/{zip}",
+            "method": "GET",
+            "url": "https://api.zippopotam.us/us/90210",
+            "auth_required": false,
+            "sample_url": "https://api.zippopotam.us/us/90210"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 225,
+          "response_preview": "{'country': 'United States', 'country abbreviation': 'US', 'post code': '90210', 'places': [{'place name': 'Beverly Hills', 'longitude': '-118.4065', 'latitude': '34.0901', 'state': 'California', 'sta"
+        }
+      ],
+      "passed": 3,
+      "failed": 0,
+      "skipped": 1
+    },
+    "utilities": {
+      "name": "Utilities & Tools",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "utilities",
+            "api_id": "qrserver",
+            "api_name": "QR Server",
+            "path": "/utilities/qr/generate",
+            "method": "GET",
+            "url": "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=HelloWorld",
+            "auth_required": false,
+            "sample_url": "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=HelloWorld"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "content_type": "image/png",
+          "note": "Non-JSON response"
+        },
+        {
+          "endpoint": {
+            "category": "utilities",
+            "api_id": "thecolorapi",
+            "api_name": "TheColorAPI",
+            "path": "/utilities/color/info",
+            "method": "GET",
+            "url": "https://www.thecolorapi.com/id?hex=24B1E0",
+            "auth_required": false,
+            "sample_url": "https://www.thecolorapi.com/id?hex=24B1E0"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 1082,
+          "response_preview": "{'hex': {'value': '#24B1E0', 'clean': '24B1E0'}, 'rgb': {'fraction': {'r': 0.1411764705882353, 'g': 0.6941176470588235, 'b': 0.8784313725490196}, 'r': 36, 'g': 177, 'b': 224, 'value': 'rgb(36, 177, 22"
+        },
+        {
+          "endpoint": {
+            "category": "utilities",
+            "api_id": "uuidtools",
+            "api_name": "UUID Tools",
+            "path": "/utilities/uuid/generate",
+            "method": "GET",
+            "url": "https://www.uuidtools.com/api/generate/v1/count/3",
+            "auth_required": false,
+            "sample_url": "https://www.uuidtools.com/api/generate/v1/count/3"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 118,
+          "response_preview": "['ecb146c8-337c-11f1-ad49-325096b39f47', 'ecb1493e-337c-11f1-ba68-325096b39f47', 'ecb149d4-337c-11f1-8f1d-325096b39f47']"
+        },
+        {
+          "endpoint": {
+            "category": "utilities",
+            "api_id": "ipify",
+            "api_name": "IPify",
+            "path": "/utilities/ip",
+            "method": "GET",
+            "url": "https://api.ipify.org?format=json",
+            "auth_required": false,
+            "sample_url": "https://api.ipify.org?format=json"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 21,
+          "response_preview": "{'ip': '60.243.80.90'}"
+        },
+        {
+          "endpoint": {
+            "category": "utilities",
+            "api_id": "sunrisesunset",
+            "api_name": "Sunrise and Sunset API",
+            "path": "/utilities/times",
+            "method": "GET",
+            "url": "https://api.sunrisesunset.io/json?lat=36.7201600&lng=-4.4203400&date=today",
+            "auth_required": false,
+            "sample_url": "https://api.sunrisesunset.io/json?lat=36.7201600&lng=-4.4203400&date=today"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 684,
+          "response_preview": "{'results': {'date': '2026-04-08', 'sunrise': '7:54:25 AM', 'sunset': '8:46:57 PM', 'first_light': '6:24:45 AM', 'last_light': '10:16:36 PM', 'dawn': '7:28:05 AM', 'dusk': '9:13:17 PM', 'solar_noon': "
+        }
+      ],
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    "weather": {
+      "name": "Weather",
+      "endpoints": [
+        {
+          "endpoint": {
+            "category": "weather",
+            "api_id": "open_meteo",
+            "api_name": "Open-Meteo",
+            "path": "/weather/open-meteo",
+            "method": "GET",
+            "url": "https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.01&current_weather=true",
+            "auth_required": false,
+            "sample_url": "https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.01&current_weather=true"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "response_size": 472,
+          "response_preview": "{'latitude': 40.710335, 'longitude': -73.99308, 'generationtime_ms': 0.11754035949707031, 'utc_offset_seconds': 0, 'timezone': 'GMT', 'timezone_abbreviation': 'GMT', 'elevation': 27.0, 'current_weathe"
+        },
+        {
+          "endpoint": {
+            "category": "weather",
+            "api_id": "nws",
+            "api_name": "US National Weather Service",
+            "path": "/weather/nws/alerts",
+            "method": "GET",
+            "url": "https://api.weather.gov/alerts?area=CA",
+            "auth_required": false,
+            "sample_url": "https://api.weather.gov/alerts?area=CA"
+          },
+          "status": "passed",
+          "status_code": 200,
+          "content_type": "application/geo+json",
+          "note": "Non-JSON response"
+        }
+      ],
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  }
+}
