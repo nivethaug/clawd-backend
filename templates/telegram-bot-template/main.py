@@ -45,7 +45,6 @@ app = FastAPI(
     title="Telegram Bot API",
     description="Telegram Bot Webhook and API Endpoints. Handles incoming Telegram updates and provides health/status endpoints.",
     version="1.0.0",
-    docs_url="/docs",
     redoc_url="/redoc",
     openapi_tags=[
         {
@@ -172,6 +171,38 @@ async def webhook_handler(request: Request):
     except Exception as e:
         logger.error(f"❌ Webhook error: {e}")
         return Response(status_code=500)
+
+
+@app.get("/")
+async def root() -> BotInfoResponse:
+    """Root endpoint with Pydantic model for Swagger."""
+    return BotInfoResponse(
+        message="Telegram Bot API",
+        docs="/docs",
+        version="1.0.0"
+    )
+
+
+@app.get("/docs")
+async def get_openapi_docs():
+    """
+    Redirect to Swagger UI (default /docs).
+    FastAPI automatically provides this route.
+    """
+    return {
+        "message": "Interactive API documentation",
+        "swagger_ui": "/docs",
+        "redoc": "/redoc",
+        "openapi_json": "/openapi.json"
+    }
+
+
+@app.get("/openapi.json")
+async def get_openapi_json():
+    """
+    Return OpenAPI specification as JSON.
+    """
+    return app.openapi()
 
 
 @app.get("/health")
