@@ -277,6 +277,39 @@ if text_lower.startswith("/ask"):
 🌐 API USAGE
 ==================================================
 
+STEP 1: Check if user explicitly wants public APIs
+
+Read the description carefully:
+- If "api" or "API" is mentioned → Use existing internal functions
+- If NOT mentioned → Use public APIs from /llm/categories/index.json
+
+--------------------------------------------------
+📋 PUBLIC API USAGE (When NO explicit API mention)
+--------------------------------------------------
+
+1. Load category index: templates/telegram-bot-template/llm/categories/index.json
+
+2. Match keywords from description to category keywords:
+   - Example: "weather" → weather category
+   - Example: "crypto" → crypto_finance category
+   - Example: "news" → news category
+
+3. Load the matched category JSON file:
+   - Use json_file field to find the file
+   - Example: weather.json, crypto_finance.json, news.json
+
+4. Use the category's APIs:
+   - Call direct_url from the matched endpoint
+   - Handle errors with friendly messages
+
+5. If multiple categories match:
+   - Ask user which one they prefer
+   - Or use the closest match
+
+--------------------------------------------------
+🔧 INTERNAL API USAGE (When explicit API mention)
+--------------------------------------------------
+
 Use existing functions only:
 - get_crypto_price
 - get_market_data
@@ -284,6 +317,16 @@ Use existing functions only:
 
 If API fails:
 → return mock or friendly fallback
+
+--------------------------------------------------
+🎯 RULE SUMMARY
+--------------------------------------------------
+
+1. ALWAYS check description for "api" or "API" keyword
+2. NO "api" keyword → Use /llm/categories/index.json
+3. YES "api" keyword → Use existing internal functions
+4. Public APIs: Call direct_url directly
+5. Fallback: Always return friendly message on failure
 
 ==================================================
 📦 FEATURE RULES
