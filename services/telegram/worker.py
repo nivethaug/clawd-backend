@@ -343,57 +343,52 @@ def run_telegram_bot_pipeline(
             result_info["base_verification"] = f"error: {e}"
         
         # ========================================================================
-        # STEP 10: Register Telegram Webhook (Safe & Optional)
+        # STEP 9: Register Telegram Webhook (Async with Retries)
         # ========================================================================
-        # Register webhook NOW with base template (DNS/nginx ready, bot verified)
-        # This ensures webhook is registered before AI enhancement modifies code
+        # Register webhook asynchronously with DNS propagation retries.
+        # This doesn't block deployment - webhook will be registered in background.
+        # Telegram's servers may take 5-60 minutes to see DNS, so we retry with
+        # exponential backoff (10s, 20s, 40s, 80s, 160s, 320s).
         # ========================================================================
         
         try:
-            from services.telegram.webhook import register_telegram_webhook
+            from services.telegram.webhook import register_webhook_async
             
-            logger.info("🔗 Registering Telegram webhook (base template)...")
-            logger.info("📋 Step 9/12: Telegram webhook registration")
+            logger.info("🔗 Starting async Telegram webhook registration...")
+            logger.info("📋 Step 9/12: Telegram webhook registration (async)")
             
-            # Wait a moment for DNS to fully propagate
-            logger.info("⏳ Waiting 3s for DNS propagation...")
-            time.sleep(3)
-            
-            # Verify DNS resolves before attempting webhook registration
+            # Verify DNS resolves locally first
             dns_resolves = _verify_dns_resolves(full_domain)
             if not dns_resolves:
-                logger.warning(f"⚠️ DNS not resolving for {full_domain} - skipping webhook registration")
-                logger.info("ℹ️ Webhook can be registered manually after DNS propagates")
-                result_info["webhook_registration"] = "skipped: DNS not resolving"
-                result_info["dns_verification"] = "failed"
-                # Continue without blocking
+                logger.warning(f"⚠️ DNS not resolving locally for {full_domain}")
+                logger.info("ℹ️ Starting async registration anyway (Telegram's DNS may differ)")
+                result_info["dns_verification"] = "local_failed"
             else:
+                logger.info(f"✅ Local DNS verification passed for {full_domain}")
                 result_info["dns_verification"] = "success"
-                
-                # Register webhook with Telegram API
-                webhook_success, webhook_msg = register_telegram_webhook(
-                    bot_token=bot_token,
-                    domain=full_domain,
-                    project_id=project_id
-                )
-                
-                if webhook_success:
-                    result_info["webhook_registration"] = "success"
-                    result_info["steps_completed"].append("webhook_registration")
-                    logger.info(f"✅ Webhook registered: {webhook_msg}")
-                else:
-                    # Non-blocking - don't fail deployment
-                    result_info["webhook_registration"] = f"failed: {webhook_msg}"
-                    logger.warning(f"⚠️ Webhook registration failed: {webhook_msg}")
-                    logger.info("ℹ️ Bot will still work - webhook can be registered manually")
+            
+            # Start async webhook registration with retries
+            register_webhook_async(
+                bot_token=bot_token,
+                domain=full_domain,
+                project_id=project_id,
+                max_retries=6,
+                initial_delay=10
+            )
+            
+            result_info["webhook_registration"] = "async_started"
+            result_info["steps_completed"].append("webhook_registration")
+            logger.info(f"✅ Webhook registration started in background (will retry up to 6 times)")
+            logger.info(f"ℹ️ Bot deployment continuing - webhook will activate when DNS propagates")
         
         except Exception as e:
             # Non-blocking - don't fail deployment
             logger.warning(f"⚠️ Webhook registration error: {e}")
             result_info["webhook_registration"] = f"error: {e}"
             result_info["errors"].append(f"webhook_registration_error: {e}")
+            logger.info("ℹ️ Bot will still work - webhook can be registered manually")
         
-        # Step 11: AI enhance logic (now that base is deployed and working)
+        # Step 10: AI enhance logic (now that base is deployed and working)
         logger.info("📋 Step 10/12: AI enhancement of bot logic...")
         try:
             editor = TelegramBotEditor(telegram_path)

@@ -4,6 +4,8 @@ Registers Telegram bot webhook after successful deployment.
 Safe, Optional. Non-blocking.
 """
 import os
+import time
+import threading
 import requests
 from typing import Tuple
 from utils.logger import logger
@@ -179,3 +181,118 @@ def delete_webhook(bot_token: str) -> Tuple[bool, str]:
     except Exception as e:
         logger.error(f"❌ Webhook deletion error: {e}")
         return False, f"Error: {e}"
+
+
+def register_telegram_webhook_with_retry(
+    bot_token: str,
+    domain: str,
+    project_id: int,
+    max_retries: int = 6,
+    initial_delay: int = 10
+) -> Tuple[bool, str]:
+    """
+    Register Telegram webhook with automatic retries and exponential backoff.
+    
+    This function handles DNS propagation delays by retrying webhook registration
+    with increasing intervals. Telegram's servers may not have propagated DNS yet,
+    so we retry until it succeeds or max retries reached.
+    
+    Args:
+        bot_token: Telegram bot token
+        domain: Webhook domain (e.g., mybot.dreambigwithai.com)
+        project_id: Project ID for webhook path
+        max_retries: Maximum number of retry attempts (default: 6)
+        initial_delay: Initial delay before first retry in seconds (default: 10)
+    
+    Returns:
+        Tuple of (success, message)
+    
+    Retry Schedule (exponential backoff):
+        - Retry 1: 10s delay
+        - Retry 2: 20s delay
+        - Retry 3: 40s delay
+        - Retry 4: 80s delay
+        - Retry 5: 160s delay
+        - Retry 6: 320s delay
+        Total max wait time: ~630 seconds (10.5 minutes)
+    """
+    for attempt in range(max_retries):
+        # Try registering webhook
+        success, message = register_telegram_webhook(bot_token, domain, project_id)
+        
+        if success:
+            logger.info(f"✅ Webhook registration succeeded on attempt {attempt + 1}/{max_retries}")
+            return True, message
+        
+        # Check if error is DNS-related (retryable)
+        if "Failed to resolve host" in message or "Name or service not known" in message:
+            if attempt < max_retries - 1:
+                # Calculate exponential backoff delay
+                delay = initial_delay * (2 ** attempt)
+                logger.warning(f"⚠️ DNS not propagated yet (attempt {attempt + 1}/{max_retries})")
+                logger.info(f"⏳ Waiting {delay}s before retry...")
+                time.sleep(delay)
+            else:
+                logger.error(f"❌ Webhook registration failed after {max_retries} attempts")
+                logger.error(f"   DNS propagation took too long - webhook will need manual registration")
+                return False, f"DNS propagation timeout after {max_retries} attempts"
+        else:
+            # Non-DNS error - don't retry
+            logger.error(f"❌ Webhook registration failed with non-retryable error: {message}")
+            return False, message
+    
+    return False, "Max retries exceeded"
+
+
+def register_webhook_async(
+    bot_token: str,
+    domain: str,
+    project_id: int,
+    max_retries: int = 6,
+    initial_delay: int = 10
+) -> None:
+    """
+    Register Telegram webhook asynchronously in a background thread.
+    
+    This function starts webhook registration in a separate thread so the deployment
+    pipeline can continue without waiting for DNS propagation. Webhook will be
+    registered in the background with retries.
+    
+    Args:
+        bot_token: Telegram bot token
+        domain: Webhook domain (e.g., mybot.dreambigwithai.com)
+        project_id: Project ID
+        max_retries: Maximum retry attempts (default: 6)
+        initial_delay: Initial delay in seconds (default: 10)
+    
+    Note:
+        - Runs in background thread (non-blocking)
+        - Logs progress independently
+        - Errors are logged but don't affect deployment status
+    """
+    def _background_registration():
+        logger.info(f"🔄 Starting async webhook registration for {domain}")
+        
+        try:
+            success, message = register_telegram_webhook_with_retry(
+                bot_token=bot_token,
+                domain=domain,
+                project_id=project_id,
+                max_retries=max_retries,
+                initial_delay=initial_delay
+            )
+            
+            if success:
+                logger.info(f"✅ Async webhook registration completed: {message}")
+            else:
+                logger.warning(f"⚠️ Async webhook registration failed: {message}")
+                logger.info(f"ℹ️ To register manually: curl -X POST 'https://api.telegram.org/bot{bot_token}/setWebhook?url=https://{domain}/webhook'")
+        
+        except Exception as e:
+            logger.error(f"❌ Async webhook registration error: {e}")
+    
+    # Start background thread
+    thread = threading.Thread(target=_background_registration, daemon=True)
+    thread.start()
+    logger.info(f"🚀 Webhook registration running in background (will retry up to {max_retries} times)")
+
