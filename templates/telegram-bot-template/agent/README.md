@@ -792,6 +792,84 @@ telegram_bot_template/
 
 ---
 
+## 🧪 Unit Testing (AUTOMATED)
+
+### Test Location
+```
+unit/
+├── README.md           # This section
+├── test_commands.py    # Command handler tests
+└── test_handlers.py    # Message handler tests
+```
+
+### Running Tests
+```bash
+# Run all tests
+python -m pytest unit/ -v
+
+# Run specific test file
+python -m pytest unit/test_commands.py -v
+python -m pytest unit/test_handlers.py -v
+
+# Run with coverage
+python -m pytest unit/ --cov=. --cov-report=html
+```
+
+### Test Philosophy - REAL APIs
+
+**Unit tests use ACTUAL API endpoints from `/llm/categories/`**
+
+When to Use Real APIs (PRIMARY):
+- Normal command execution
+- Testing command responses
+- Verifying API integration
+- Testing data flow end-to-end
+
+When to Mock (LIMITED):
+- API timeout/failure testing
+- Network error simulation
+- Invalid input edge cases
+- Error handling verification
+
+**Mock Rules:**
+- ✅ Mock ONLY for failure scenarios (timeouts, 500 errors)
+- ❌ NEVER mock successful API responses
+- ❌ NEVER mock data that should come from real APIs
+- ✅ Always verify with real APIs when possible
+
+### What Tests Verify
+- ✅ Commands parse correctly
+- ✅ **API calls work with real endpoints** from `/llm/categories/`
+- ✅ Error handling works (API failures, timeouts, invalid inputs)
+- ✅ New commands don't break existing ones
+- ✅ Integration between ai_logic.py and api_client.py works
+- ✅ Real data is returned from public APIs
+
+### Common Test Pattern
+
+```python
+# Testing REAL API integration (preferred)
+async def test_price_command_real_api():
+    """Test /price with real CoinGecko API."""
+    from handlers.commands import price_command
+    
+    update = Update(update_id=1)
+    update.message = AsyncMock()
+    update.message.text = AsyncMock(return_value="/price bitcoin")
+    update.message.reply_text = AsyncMock()
+    context = AsyncMock(spec=ContextTypes.DEFAULT_TYPE)
+    
+    # Execute command (makes REAL API call)
+    await price_command(update, context)
+    
+    # Verify response (not mocked)
+    update.message.reply_text.assert_called_once()
+    response = update.message.reply_text.call_args[0][0]
+    assert "$" in response or "BTC" in response  # Real price data
+```
+
+---
+
 ## 🚀 Deployment Flow
 
 ```
