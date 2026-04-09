@@ -75,6 +75,31 @@ def _save_project_metadata(
         return False
 
 
+def _verify_dns_resolves(domain: str, timeout: int = 5) -> bool:
+    """
+    Check if a domain resolves (DNS lookup).
+    
+    Args:
+        domain: Domain to check (e.g., mybot.dreambigwithai.com)
+        timeout: DNS lookup timeout in seconds
+    
+    Returns:
+        True if domain resolves, False otherwise
+    """
+    try:
+        import socket
+        # Simple DNS resolution check
+        socket.gethostbyname(domain)
+        logger.info(f"✅ DNS verification: {domain} resolves successfully")
+        return True
+    except socket.gaierror:
+        logger.warning(f"⚠️ DNS verification failed: {domain} does not resolve")
+        return False
+    except Exception as e:
+        logger.warning(f"⚠️ DNS verification error for {domain}: {e}")
+        return False
+
+
 def run_telegram_bot_pipeline(
     project_id: int,
     project_name: str,
@@ -110,9 +135,10 @@ def run_telegram_bot_pipeline(
         6. Configure nginx (webhook routing)
         7. Provision DNS (optional - uses wildcard DNS fallback)
         8. HTTP verify (base works)
-        9. AI enhance logic (Claude edits)
-        10. Call buildpublish.py (restarts PM2)
-        11. HTTP verify (enhanced works)
+        9. Register Telegram webhook (with base template - DNS/nginx ready)
+        10. AI enhance logic (Claude edits)
+        11. Call buildpublish.py (restarts PM2 with enhanced code)
+        12. HTTP verify (enhanced works)
     """
     logger.info(f"🚀 Starting Telegram bot pipeline for project {project_id}")
     logger.info(f"Bot name: {project_name}")
@@ -133,7 +159,7 @@ def run_telegram_bot_pipeline(
     
     try:
         # Step 1: Validate token
-        logger.info("📋 Step 1/6: Validating bot token...")
+        logger.info("📋 Step 1/12: Validating bot token...")
         is_valid, token_info = validate_telegram_token(bot_token)
         
         if not is_valid:
@@ -147,7 +173,7 @@ def run_telegram_bot_pipeline(
         result_info["steps_completed"].append("token_validation")
         
         # Step 2: Copy template
-        logger.info("📋 Step 2/6: Copying telegram template...")
+        logger.info("📋 Step 2/12: Copying telegram template...")
         success, template_result = copy_telegram_template(project_path)
         
         if not success:
@@ -162,7 +188,7 @@ def run_telegram_bot_pipeline(
         result_info["steps_completed"].append("template_copy")
         
         # Step 3: Inject environment (BOT_TOKEN + webhook config in one call)
-        logger.info("📋 Step 3/6: Injecting environment variables...")
+        logger.info("📋 Step 3/12: Injecting environment variables...")
         success, env_result = inject_bot_token(
             project_path=telegram_path,
             bot_token=bot_token,
@@ -182,7 +208,7 @@ def run_telegram_bot_pipeline(
         result_info["steps_completed"].append("env_injection")
         
         # Step 4: Install dependencies
-        logger.info("📋 Step 4/11: Installing dependencies...")
+        logger.info("📋 Step 4/12: Installing dependencies...")
         success, install_result = install_bot_dependencies(telegram_path)
         
         if not success:
@@ -195,7 +221,7 @@ def run_telegram_bot_pipeline(
         result_info["steps_completed"].append("dependency_installation")
         
         # Step 5: Start PM2 (base template works!)
-        logger.info("📋 Step 5/11: Starting bot via PM2 (base template)...")
+        logger.info("📋 Step 5/12: Starting bot via PM2 (base template)...")
         success, pm2_result = start_bot_pm2(
             project_id, 
             telegram_path, 
@@ -224,15 +250,13 @@ def run_telegram_bot_pipeline(
         time.sleep(5)
         
         # Step 6: Configure nginx
-        logger.info("📋 Step 6/11: Configuring nginx webhook routing...")
-        
         # Verify bot is running
         is_running, status_info = get_bot_status_pm2(project_id)
         result_info["bot_status"] = "running" if is_running else "error"
         result_info["pm2_status"] = status_info
         
-        # Step 7: Configure nginx (webhook routing)
-        logger.info("📋 Step 7/8: Configuring nginx for webhook...")
+        # Step 6: Configure nginx (webhook routing)
+        logger.info("📋 Step 6/12: Configuring nginx for webhook...")
         try:
             from infrastructure_manager import NginxConfigurator
             
@@ -261,7 +285,7 @@ def run_telegram_bot_pipeline(
             result_info["errors"].append(f"nginx_error: {e}")
         
         # Step 8: Provision DNS (optional - uses wildcard DNS)
-        logger.info("📋 Step 8/8: Provisioning DNS (optional)...")
+        logger.info("📋 Step 7/12: Provisioning DNS (optional)...")
         try:
             from infrastructure_manager import DNSProvisioner
             
@@ -287,7 +311,7 @@ def run_telegram_bot_pipeline(
             result_info["errors"].append(f"dns_error: {e}")
         
         # Step 8: HTTP verify (base template works)
-        logger.info("📋 Step 8/11: HTTP verification (base template)...")
+        logger.info("📋 Step 8/12: HTTP verification (base template)...")
         try:
             import requests
             
@@ -318,8 +342,59 @@ def run_telegram_bot_pipeline(
             logger.warning(f"⚠️ HTTP verification error: {e} - continuing")
             result_info["base_verification"] = f"error: {e}"
         
-        # Step 9: AI enhance logic (now that base is deployed and working)
-        logger.info("📋 Step 9/11: AI enhancement of bot logic...")
+        # ========================================================================
+        # STEP 10: Register Telegram Webhook (Safe & Optional)
+        # ========================================================================
+        # Register webhook NOW with base template (DNS/nginx ready, bot verified)
+        # This ensures webhook is registered before AI enhancement modifies code
+        # ========================================================================
+        
+        try:
+            from services.telegram.webhook import register_telegram_webhook
+            
+            logger.info("🔗 Registering Telegram webhook (base template)...")
+            logger.info("📋 Step 9/12: Telegram webhook registration")
+            
+            # Wait a moment for DNS to fully propagate
+            logger.info("⏳ Waiting 3s for DNS propagation...")
+            time.sleep(3)
+            
+            # Verify DNS resolves before attempting webhook registration
+            dns_resolves = _verify_dns_resolves(full_domain)
+            if not dns_resolves:
+                logger.warning(f"⚠️ DNS not resolving for {full_domain} - skipping webhook registration")
+                logger.info("ℹ️ Webhook can be registered manually after DNS propagates")
+                result_info["webhook_registration"] = "skipped: DNS not resolving"
+                result_info["dns_verification"] = "failed"
+                # Continue without blocking
+            else:
+                result_info["dns_verification"] = "success"
+                
+                # Register webhook with Telegram API
+                webhook_success, webhook_msg = register_telegram_webhook(
+                    bot_token=bot_token,
+                    domain=full_domain,
+                    project_id=project_id
+                )
+                
+                if webhook_success:
+                    result_info["webhook_registration"] = "success"
+                    result_info["steps_completed"].append("webhook_registration")
+                    logger.info(f"✅ Webhook registered: {webhook_msg}")
+                else:
+                    # Non-blocking - don't fail deployment
+                    result_info["webhook_registration"] = f"failed: {webhook_msg}"
+                    logger.warning(f"⚠️ Webhook registration failed: {webhook_msg}")
+                    logger.info("ℹ️ Bot will still work - webhook can be registered manually")
+        
+        except Exception as e:
+            # Non-blocking - don't fail deployment
+            logger.warning(f"⚠️ Webhook registration error: {e}")
+            result_info["webhook_registration"] = f"error: {e}"
+            result_info["errors"].append(f"webhook_registration_error: {e}")
+        
+        # Step 11: AI enhance logic (now that base is deployed and working)
+        logger.info("📋 Step 10/12: AI enhancement of bot logic...")
         try:
             editor = TelegramBotEditor(telegram_path)
             success, edit_result = editor.enhance_bot_logic(description, project_name)
@@ -337,9 +412,9 @@ def run_telegram_bot_pipeline(
             logger.warning(f"⚠️ AI enhancement error: {e} - continuing with base template")
             result_info["ai_enhancement"] = f"error: {e}"
         
-        # Step 10: Call buildpublish.py (restarts PM2 with enhanced code)
+        # Step 12: Call buildpublish.py (restarts PM2 with enhanced code)
         if result_info.get("ai_enhancement") and "failed" not in result_info.get("ai_enhancement", ""):
-            logger.info("📋 Step 10/11: Running buildpublish.py (restart PM2)...")
+            logger.info("📋 Step 11/12: Running buildpublish.py (restart PM2)...")
             try:
                 import subprocess
                 
@@ -376,8 +451,8 @@ def run_telegram_bot_pipeline(
                 logger.warning(f"⚠️ buildpublish.py error: {e} - continuing")
                 result_info["errors"].append(f"buildpublish_error: {e}")
         
-        # Step 11: HTTP verify (enhanced version works)
-        logger.info("📋 Step 11/11: Final HTTP verification (enhanced bot)...")
+        # Step 13: HTTP verify (enhanced version works)
+        logger.info("📋 Step 12/12: Final HTTP verification (enhanced bot)...")
         try:
             import requests
             import time
@@ -439,38 +514,6 @@ def run_telegram_bot_pipeline(
         except Exception as e:
             logger.warning(f"⚠️ Final verification error: {e}")
             result_info["final_verification"] = f"error: {e}"
-        
-        # ========================================================================
-        # STEP: Register Telegram Webhook (NEW - Safe & Optional)
-        # ========================================================================
-        
-        try:
-            from services.telegram.webhook import register_telegram_webhook
-            
-            logger.info("🔗 Registering Telegram webhook...")
-            
-            # Register webhook with Telegram API
-            webhook_success, webhook_msg = register_telegram_webhook(
-                bot_token=bot_token,
-                domain=full_domain,
-                project_id=project_id
-            )
-            
-            if webhook_success:
-                result_info["webhook_registration"] = "success"
-                result_info["steps_completed"].append("webhook_registration")
-                logger.info(f"✅ Webhook registered: {webhook_msg}")
-            else:
-                # Non-blocking - don't fail deployment
-                result_info["webhook_registration"] = f"failed: {webhook_msg}"
-                logger.warning(f"⚠️ Webhook registration failed: {webhook_msg}")
-                logger.info("ℹ️ Bot will still work - webhook can be registered manually")
-        
-        except Exception as e:
-            # Non-blocking - don't fail deployment
-            logger.warning(f"⚠️ Webhook registration error: {e}")
-            result_info["webhook_registration"] = f"error: {e}"
-            result_info["errors"].append(f"webhook_registration_error: {e}")
         
         # ========================================================================
         # STEP: Save Project Metadata (for cleanup support)
