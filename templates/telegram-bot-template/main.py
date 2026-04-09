@@ -7,6 +7,7 @@ Uses FastAPI for webhook handling with python-telegram-bot v20.
 import os
 import uvicorn
 from fastapi import FastAPI, Request, Response
+from pydantic import BaseModel
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 from dotenv import load_dotenv
@@ -19,11 +20,51 @@ from utils.logger import logger
 from core.database import init_db
 from config import BOT_TOKEN, WEBHOOK_URL, WEBHOOK_PORT
 
+# ============================================================================
+# Pydantic Models for API Documentation
+# ============================================================================
+
+class HealthResponse(BaseModel):
+    """Health check response model."""
+    status: str
+    service: str
+
+
+class BotInfoResponse(BaseModel):
+    """Bot information response model."""
+    message: str
+    docs: str
+    version: str
+
+
 # Load environment variables
 load_dotenv()
 
-# Initialize FastAPI app
-app = FastAPI(title="Telegram Bot API")
+# Initialize FastAPI app with Swagger/OpenAPI support
+app = FastAPI(
+    title="Telegram Bot API",
+    description="Telegram Bot Webhook and API Endpoints. Handles incoming Telegram updates and provides health/status endpoints.",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {
+            "name": "webhook",
+            "description": "Telegram webhook endpoints for receiving updates"
+        },
+        {
+            "name": "health",
+            "description": "Health check and status endpoints"
+        }
+    ],
+    contact={
+        "name": "Clawd Bot Platform",
+        "email": "support@clawd.app"
+    },
+    license_info={
+        "name": "MIT"
+    }
+)
 
 # Initialize Telegram bot application
 bot_app = None
@@ -81,6 +122,28 @@ async def startup():
         logger.info("ℹ️ Set WEBHOOK_URL or WEBHOOK_DOMAIN environment variable to enable webhook")
 
 
+@app.get("/docs")
+async def get_openapi_docs():
+    """
+    Redirect to Swagger UI (default /docs).
+    FastAPI automatically provides this route.
+    """
+    return {
+        "message": "Interactive API documentation",
+        "swagger_ui": "/docs",
+        "redoc": "/redoc",
+        "openapi_json": "/openapi.json"
+    }
+
+
+@app.get("/openapi.json")
+async def get_openapi_json():
+    """
+    Return OpenAPI specification as JSON.
+    """
+    return app.openapi()
+
+
 @app.on_event("shutdown")
 async def shutdown():
     """Shutdown event - cleanup (v20 lifecycle)."""
@@ -112,15 +175,22 @@ async def webhook_handler(request: Request):
 
 
 @app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "telegram-bot"}
+async def health() -> HealthResponse:
+    """Health check endpoint with Pydantic model for Swagger."""
+    return HealthResponse(
+        status="healthy",
+        service="telegram-bot"
+    )
 
 
 @app.get("/")
-async def root():
-    """Root endpoint."""
-    return {"message": "Telegram Bot API", "docs": "/docs"}
+async def root() -> BotInfoResponse:
+    """Root endpoint with Pydantic model for Swagger."""
+    return BotInfoResponse(
+        message="Telegram Bot API",
+        docs="/docs",
+        version="1.0.0"
+    )
 
 
 if __name__ == "__main__":
