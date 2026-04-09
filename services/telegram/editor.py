@@ -154,18 +154,34 @@ Allowed files to modify ONLY:
 DO NOT modify any other files.
 
 ==================================================
-🧠 INTENT DETECTION
+🧠 INTENT DETECTION & API SELECTION
 ==================================================
 
-Analyze intent from description: "{description}"
+ANALYZE user description: "{description}"
 
-Examples:
-- crypto → /price, /market, /top, /convert
-- weather → /weather, /forecast
-- productivity → /tasks, /remind
-- unknown → keep default commands
+During initial bot creation, LLM has FULL AUTONOMY to:
+1. Match description to BEST category from /llm/categories/index.json
+2. Select appropriate APIs from that category
+3. Generate commands to use those APIs
+4. NO USER INTERACTION NEEDED - decide everything autonomously
 
-==================================================
+KEYWORD MATCHING PROCESS:
+- Use category keywords array to find best match
+- Use sample_questions to understand category purpose
+- AI decides based on description complexity and intent
+
+EXAMPLES:
+- "weather tracker bot" → weather category, use Open-Meteo API
+- "crypto prices" → crypto_finance category, use CoinGecko API
+- "news aggregator" → news category, use Hacker News API
+- "joke bot" → entertainment category, use JokeAPI
+- "crypto price tracker" → crypto_finance category, add /price, /market, /top commands
+
+NOTE: User provides title + description - AI MUST decide APIs autonomously
+- NO back-and-forth with user
+- AI selects and implements best APIs for the use case
+
+--------------------------------------------------
 🔒 CRITICAL RULES (MANDATORY)
 ==================================================
 
@@ -302,9 +318,6 @@ Read the description carefully:
    - Call direct_url from the matched endpoint
    - Handle errors with friendly messages
 
-5. If multiple categories match:
-   - Ask user which one they prefer
-   - Or use the closest match
 
 --------------------------------------------------
 🔧 INTERNAL API USAGE (When explicit API mention)
@@ -360,12 +373,23 @@ DO NOT break formatting
 🎯 OUTPUT REQUIREMENT
 ==================================================
 
+When using public APIs from /llm/categories/index.json:
+
+1. Generate commands in ai_logic.py that call the public API
+2. If new API function is needed in api_client.py:
+   - Add the function following the same pattern as existing helpers
+   - Example: get_weather, get_news, get_crypto_price, etc.
+   - Always handle errors with friendly messages
+   - Return dict with success/data or error
+
 Return FULL updated code for:
 - services/ai_logic.py
 
+REQUIRED (when adding new APIs):
+- services/api_client.py (add new helper functions for any APIs you use)
+
 OPTIONAL:
-- services/api_client.py (if needed)
-- handlers/start.py (only text changes)
+- handlers/start.py (only text changes for welcome message)
 
 ==================================================
 """
