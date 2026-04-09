@@ -1,0 +1,98 @@
+{
+  "start_command": {
+    "type": "command",
+    "file": "handlers/start.py",
+    "start_line": 1,
+    "end_line": 20,
+    "module": "handlers",
+    "description": "/start command - Initialize bot and welcome user"
+  },
+  "help_command": {
+    "type": "command",
+    "file": "handlers/help.py",
+    "start_line": 1,
+    "end_line": 25,
+    "module": "handlers",
+    "description": "/help command - Display available commands and usage"
+  },
+  "message_handler": {
+    "type": "handler",
+    "file": "handlers/message.py",
+    "start_line": 1,
+    "end_line": 40,
+    "module": "handlers",
+    "description": "message_handler() - Main entry point for all text messages, routes to ai_logic"
+  },
+  "process_user_input": {
+    "type": "function",
+    "file": "services/ai_logic.py",
+    "start_line": 15,
+    "end_line": 80,
+    "module": "services",
+    "description": "process_user_input() - Core bot intelligence, parses user intent and returns responses"
+  },
+  "get_bitcoin_price": {
+    "type": "api",
+    "file": "services/api_client.py",
+    "start_line": 10,
+    "end_line": 25,
+    "module": "services",
+    "description": "get_bitcoin_price() - Fetches current BTC price from CoinGecko API"
+  },
+  "get_or_create_user": {
+    "type": "database",
+    "file": "services/database.py",
+    "start_line": 25,
+    "end_line": 50,
+    "module": "services",
+    "description": "get_or_create_user() - Fetches existing user from DB or creates new one"
+  },
+  "User_model": {
+    "type": "model",
+    "file": "models/user.py",
+    "start_line": 1,
+    "end_line": 30,
+    "module": "models",
+    "description": "User class - SQLAlchemy model for users table (telegram + email users)"
+  },
+  "init_db": {
+    "type": "database",
+    "file": "core/database.py",
+    "start_line": 40,
+    "end_line": 55,
+    "module": "core",
+    "description": "init_db() - Creates all database tables on startup"
+  },
+  "get_session": {
+    "type": "database",
+    "file": "core/database.py",
+    "start_line": 15,
+    "end_line": 25,
+    "module": "core",
+    "description": "get_session() - Returns SQLAlchemy session for database operations"
+  },
+  "create_app": {
+    "type": "function",
+    "file": "main.py",
+    "start_line": 20,
+    "end_line": 50,
+    "module": "",
+    "description": "create_app() - Creates Telegram bot application and configures handlers"
+  },
+  "health_check": {
+    "type": "api",
+    "file": "routes/health.py",
+    "start_line": 1,
+    "end_line": 15,
+    "module": "routes",
+    "description": "GET /health - Returns bot health status for monitoring"
+  },
+  "webhook_endpoint": {
+    "type": "api",
+    "file": "routes/webhook.py",
+    "start_line": 1,
+    "end_line": 20,
+    "module": "routes",
+    "description": "POST /webhook - Receives updates from Telegram and forwards to bot app"
+  }
+}

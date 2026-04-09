@@ -1,0 +1,127 @@
+{
+  "main.py": {
+    "path": "main.py",
+    "lines": 65,
+    "type": "entry_point",
+    "purpose": "Bot application entry point",
+    "endpoints": [
+      "/health (GET)",
+      "/webhook (POST)"
+    ],
+    "commands": [
+      "/start",
+      "/help"
+    ]
+  },
+  "handlers/start.py": {
+    "path": "handlers/start.py",
+    "lines": 20,
+    "type": "command_handler",
+    "purpose": "Handle /start command",
+    "commands": [
+      "/start"
+    ]
+  },
+  "handlers/help.py": {
+    "path": "handlers/help.py",
+    "lines": 25,
+    "type": "command_handler",
+    "purpose": "Handle /help command",
+    "commands": [
+      "/help"
+    ]
+  },
+  "handlers/message.py": {
+    "path": "handlers/message.py",
+    "lines": 40,
+    "type": "message_handler",
+    "purpose": "Handle all text messages",
+    "commands": []
+  },
+  "services/ai_logic.py": {
+    "path": "services/ai_logic.py",
+    "lines": 80,
+    "type": "business_logic",
+    "purpose": "Core bot intelligence",
+    "commands": [],
+    "functions": [
+      "process_user_input()"
+    ]
+  },
+  "services/api_client.py": {
+    "path": "services/api_client.py",
+    "lines": 60,
+    "type": "api_client",
+    "purpose": "External API integration",
+    "commands": [],
+    "functions": [
+      "get_bitcoin_price()",
+      "get_crypto_price()"
+    ]
+  },
+  "services/database.py": {
+    "path": "services/database.py",
+    "lines": 75,
+    "type": "database_service",
+    "purpose": "High-level database operations",
+    "commands": [],
+    "functions": [
+      "get_or_create_user()",
+      "get_user()",
+      "update_user()"
+    ]
+  },
+  "core/database.py": {
+    "path": "core/database.py",
+    "lines": 55,
+    "type": "database_core",
+    "purpose": "Database connection management",
+    "commands": [],
+    "functions": [
+      "get_session()",
+      "init_db()"
+    ]
+  },
+  "models/user.py": {
+    "path": "models/user.py",
+    "lines": 30,
+    "type": "model",
+    "purpose": "User database table",
+    "commands": [],
+    "functions": []
+  },
+  "config.py": {
+    "path": "config.py",
+    "lines": 35,
+    "type": "configuration",
+    "purpose": "Application settings",
+    "commands": [],
+    "functions": []
+  },
+  "utils/logger.py": {
+    "path": "utils/logger.py",
+    "lines": 25,
+    "type": "utility",
+    "purpose": "Logging configuration",
+    "commands": [],
+    "functions": [
+      "get_logger()"
+    ]
+  },
+  "buildpublish.py": {
+    "path": "buildpublish.py",
+    "lines": 200,
+    "type": "deployment_script",
+    "purpose": "Build and publish bot",
+    "commands": [
+      "buildpublish.py",
+      "buildpublish.py --skip-deps",
+      "buildpublish.py --no-restart"
+    ],
+    "functions": [
+      "install_dependencies()",
+      "restart_pm2()",
+      "re_register_webhook()"
+    ]
+  }
+}

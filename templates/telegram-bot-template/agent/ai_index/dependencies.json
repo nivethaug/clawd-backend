@@ -1,0 +1,99 @@
+{
+  "main.py": {
+    "imports": [
+      "handlers.start",
+      "handlers.help",
+      "handlers.message",
+      "services.database",
+      "core.database",
+      "config"
+    ],
+    "used_by": []
+  },
+  "handlers/start.py": {
+    "imports": [
+      "telegram",
+      "services.database",
+      "utils.logger"
+    ],
+    "used_by": ["main.py"]
+  },
+  "handlers/help.py": {
+    "imports": [
+      "telegram"
+    ],
+    "used_by": ["main.py"]
+  },
+  "handlers/message.py": {
+    "imports": [
+      "services.ai_logic",
+      "services.database",
+      "telegram"
+    ],
+    "used_by": ["main.py"]
+  },
+  "services/ai_logic.py": {
+    "imports": [
+      "services.api_client",
+      "services.database"
+    ],
+    "used_by": ["handlers/message.py"]
+  },
+  "services/api_client.py": {
+    "imports": [
+      "requests"
+    ],
+    "used_by": ["services/ai_logic.py"]
+  },
+  "services/database.py": {
+    "imports": [
+      "core.database",
+      "models.user"
+      "sqlalchemy.orm"
+    ],
+    "used_by": [
+      "handlers/start.py",
+      "handlers/message.py"
+    ]
+  },
+  "core/database.py": {
+    "imports": [
+      "sqlalchemy",
+      "sqlalchemy.orm",
+      "python-dotenv"
+    ],
+    "used_by": [
+      "main.py",
+      "services/database.py",
+      "handlers/start.py",
+      "handlers/message.py"
+    ]
+  },
+  "models/user.py": {
+    "imports": [
+      "sqlalchemy",
+      "core.database"
+    ],
+    "used_by": ["services/database.py"]
+  },
+  "config.py": {
+    "imports": [
+      "python-dotenv",
+      "pydantic"
+    ],
+    "used_by": ["main.py"]
+  },
+  "routes/health.py": {
+    "imports": [
+      "fastapi"
+    ],
+    "used_by": ["main.py"]
+  },
+  "routes/webhook.py": {
+    "imports": [
+      "fastapi",
+      "telegram"
+    ],
+    "used_by": ["main.py"]
+  }
+}

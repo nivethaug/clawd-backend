@@ -27,22 +27,33 @@ telegram_bot_template/
 ├── config.py            # Configuration
 ├── requirements.txt     # Dependencies
 ├── .env.example         # Environment template
+├── buildpublish.py      # Build & publish script
 ├── handlers/            # Message/command handlers
 │   ├── start.py         # /start command
 │   ├── help.py          # /help command
 │   └── message.py       # Text message handler
 ├── services/            # Business logic
 │   ├── api_client.py    # External API calls
-│   └── ai_logic.py      # Core business logic
+│   ├── ai_logic.py      # Core business logic
+│   └── database.py      # Database operations
 ├── core/                # Core infrastructure
 │   └── database.py      # PostgreSQL connection
 ├── models/              # Database models
 │   └── user.py          # User model
 ├── routes/              # API routes
-│   └── auth.py          # Authentication endpoints
-└── utils/               # Utilities
-    ├── logger.py        # Logging setup
-    └── user_helpers.py  # User helper functions
+│   ├── auth.py          # Authentication endpoints
+│   ├── health.py        # Health check endpoint
+│   └── webhook.py       # Telegram webhook endpoint
+├── utils/               # Utilities
+│   └── logger.py        # Logging setup
+├── agent/               # AI assistant guide
+│   └── README.md        # Code navigation instructions
+└── ai_index/            # AI codebase index
+    ├── symbols.json      # Functions, commands, APIs with locations
+    ├── modules.json      # Logical module groupings
+    ├── dependencies.json # Import relationships
+    ├── summaries.json    # File semantic descriptions
+    └── files.json       # File metadata
 ```
 
 ## 🎯 Design Principles
@@ -181,6 +192,48 @@ Template → Copy → Inject .env → Modify ai_logic → Run PM2
 - ✅ Predictable
 - ✅ Easy to modify programmatically
 - ✅ Database-ready
+- ✅ AI-friendly (with agent guide)
+
+## 🤖 AI Agent Support
+
+The `agent/` folder contains comprehensive documentation for AI assistants:
+
+**agent/README.md** - Complete guide for:
+- PM2 process management
+- Database modifications
+- Command/handler structure
+- AI logic modification
+- API integration
+- Webhook configuration
+- Error troubleshooting
+
+**ai_index/** - Structured codebase index:
+- `symbols.json` - All functions, commands, APIs with line numbers
+- `modules.json` - Logical module groupings and responsibilities
+- `dependencies.json` - Import relationships between files
+- `summaries.json` - Semantic descriptions of each file
+- `files.json` - File metadata (lines, types, endpoints)
+
+**How AI Agents Use This:**
+1. Read `agent/README.md` to understand architecture
+2. Query `ai_index/symbols.json` to find exact code locations
+3. Check `ai_index/dependencies.json` to understand relationships
+4. Use `ai_index/summaries.json` for context about files
+5. Make targeted modifications based on line numbers
+6. Update `ai_index/` files after code changes
+
+**Example AI Workflow:**
+```
+User: "Add Ethereum price tracking"
+
+AI Agent:
+1. Check agent/README.md → Find "How to Add External API"
+2. Check ai_index/symbols.json → Find get_bitcoin_price()
+3. Check ai_index/dependencies.json → See ai_logic.py calls api_client
+4. Modify services/api_client.py → Add get_ethereum_price()
+5. Modify services/ai_logic.py → Add ETH detection logic
+6. Update ai_index/symbols.json → Add new function with line numbers
+```
 
 ## 📝 Example Usage
 

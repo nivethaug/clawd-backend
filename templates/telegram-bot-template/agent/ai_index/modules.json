@@ -1,0 +1,72 @@
+{
+  "handlers": {
+    "description": "Command and message handlers for Telegram bot",
+    "files": [
+      "handlers/start.py",
+      "handlers/help.py",
+      "handlers/message.py"
+    ],
+    "responsibilities": [
+      "Register bot commands (/start, /help, etc.)",
+      "Handle incoming text messages",
+      "Route messages to appropriate handlers"
+    ]
+  },
+  "services": {
+    "description": "Business logic and external API integration",
+    "files": [
+      "services/api_client.py",
+      "services/ai_logic.py",
+      "services/database.py"
+    ],
+    "responsibilities": [
+      "External API calls (crypto prices, weather, etc.)",
+      "Core bot intelligence and user interaction logic",
+      "Database operations (CRUD users, alerts, etc.)"
+    ]
+  },
+  "core": {
+    "description": "Core infrastructure and configuration",
+    "files": [
+      "core/database.py",
+      "config.py"
+    ],
+    "responsibilities": [
+      "Database connection and session management",
+      "Application configuration and environment variables"
+    ]
+  },
+  "models": {
+    "description": "SQLAlchemy database models",
+    "files": [
+      "models/user.py"
+    ],
+    "responsibilities": [
+      "Database table definitions",
+      "ORM relationships and constraints"
+    ]
+  },
+  "routes": {
+    "description": "FastAPI routes (optional webhook server)",
+    "files": [
+      "routes/health.py",
+      "routes/webhook.py",
+      "routes/auth.py"
+    ],
+    "responsibilities": [
+      "Health check endpoint",
+      "Telegram webhook endpoint",
+      "Authentication endpoints (optional)"
+    ]
+  },
+  "utils": {
+    "description": "Utility functions and helpers",
+    "files": [
+      "utils/logger.py"
+    ],
+    "responsibilities": [
+      "Logging configuration",
+      "Helper functions"
+    ]
+  }
+}

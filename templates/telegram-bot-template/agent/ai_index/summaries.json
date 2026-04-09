@@ -1,0 +1,108 @@
+{
+  "main.py": {
+    "summary": "Entry point for Telegram bot application. Creates bot instance, registers command and message handlers, and starts FastAPI server (if configured). Contains application lifecycle management.",
+    "key_components": [
+      "Bot application creation",
+      "Handler registration (CommandHandler, MessageHandler)",
+      "FastAPI app initialization",
+      "Health and webhook route mounting"
+    ]
+  },
+  "handlers/start.py": {
+    "summary": "Handles /start command. Retrieves or creates user in database, sends welcome message, and displays available commands. Critical for user onboarding.",
+    "key_components": [
+      "User lookup/creation",
+      "Welcome message generation",
+      "Command list display"
+    ]
+  },
+  "handlers/help.py": {
+    "summary": "Handles /help command. Provides formatted list of available commands with descriptions. Helps users discover bot capabilities.",
+    "key_components": [
+      "Command registry",
+      "Usage descriptions",
+      "Formatted response generation"
+    ]
+  },
+  "handlers/message.py": {
+    "summary": "Main message handler for all non-command text messages. Delegates user input to AI logic service. Core routing layer between Telegram and business logic.",
+    "key_components": [
+      "Text message extraction",
+      "User context retrieval",
+      "Response forwarding to AI logic"
+    ]
+  },
+  "services/ai_logic.py": {
+    "summary": "Core intelligence module that processes user input and generates responses. Contains all bot features, command parsing, and external API orchestration. This is the brain of the bot.",
+    "key_components": [
+      "Command detection and routing",
+      "Feature implementation (crypto prices, weather, etc.)",
+      "API integration (calls api_client)",
+      "Response generation"
+    ]
+  },
+  "services/api_client.py": {
+    "summary": "External API client module. Encapsulates all HTTP requests to third-party services (CoinGecko, weather, etc.). Centralizes API calls for easy modification.",
+    "key_components": [
+      "API endpoint definitions",
+      "Request/response handling",
+      "Error handling and retries",
+      "Rate limiting awareness"
+    ]
+  },
+  "services/database.py": {
+    "summary": "Database service layer. Provides high-level database operations for user management, alerts, and other persistent data. Abstracts SQLAlchemy complexity.",
+    "key_components": [
+      "User CRUD operations",
+      "Session management",
+      "Query optimization",
+      "Transaction handling"
+    ]
+  },
+  "core/database.py": {
+    "summary": "Database connection and session factory. Manages SQLAlchemy engine, connection pooling, and provides session objects. Contains init_db() for table creation.",
+    "key_components": [
+      "Engine configuration",
+      "Session factory",
+      "Connection pooling",
+      "Environment-based connection string"
+    ]
+  },
+  "models/user.py": {
+    "summary": "SQLAlchemy model for users table. Supports both Telegram users (auto-created) and email-based users (manual registration). Unifies user management.",
+    "key_components": [
+      "Table definition (__tablename__)",
+      "Column specifications",
+      "Indexes and constraints",
+      "Relationships (if any)"
+    ]
+  },
+  "config.py": {
+    "summary": "Application configuration module. Loads and validates environment variables using Pydantic settings. Provides type-safe config access.",
+    "key_components": [
+      "Environment variable loading",
+      "Validation rules",
+      "Default values",
+      "Type coercion"
+    ]
+  },
+  "utils/logger.py": {
+    "summary": "Logging configuration for the bot. Sets up structured logging with timestamps, levels, and formatting. Provides logger instance used throughout codebase.",
+    "key_components": [
+      "Log level configuration",
+      "File/console output",
+      "Timestamp formatting",
+      "Colored console output"
+    ]
+  },
+  "buildpublish.py": {
+    "summary": "Build and publish script for deploying bot changes. Installs dependencies, clears cache, restarts PM2, and re-registers webhook. Critical for development workflow.",
+    "key_components": [
+      "Dependency installation",
+      "Python cache clearing",
+      "PM2 process management",
+      "Webhook re-registration",
+      "Error handling"
+    ]
+  }
+}
