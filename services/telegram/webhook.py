@@ -187,7 +187,7 @@ def register_telegram_webhook_with_retry(
     bot_token: str,
     domain: str,
     project_id: int,
-    max_retries: int = 6,
+    max_retries: int = 9,
     initial_delay: int = 10
 ) -> Tuple[bool, str]:
     """
@@ -201,7 +201,7 @@ def register_telegram_webhook_with_retry(
         bot_token: Telegram bot token
         domain: Webhook domain (e.g., mybot.dreambigwithai.com)
         project_id: Project ID for webhook path
-        max_retries: Maximum number of retry attempts (default: 6)
+        max_retries: Maximum number of retry attempts (default: 9)
         initial_delay: Initial delay before first retry in seconds (default: 10)
     
     Returns:
@@ -214,7 +214,10 @@ def register_telegram_webhook_with_retry(
         - Retry 4: 80s delay
         - Retry 5: 160s delay
         - Retry 6: 320s delay
-        Total max wait time: ~630 seconds (10.5 minutes)
+        - Retry 7: 640s delay
+        - Retry 8: 1280s delay (~21 min)
+        - Retry 9: 2560s delay (~43 min)
+        Total max wait time: ~5110 seconds (85 minutes)
     """
     for attempt in range(max_retries):
         # Try registering webhook
@@ -248,7 +251,7 @@ def register_webhook_async(
     bot_token: str,
     domain: str,
     project_id: int,
-    max_retries: int = 6,
+    max_retries: int = 9,
     initial_delay: int = 10
 ) -> None:
     """

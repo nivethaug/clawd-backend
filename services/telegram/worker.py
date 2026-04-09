@@ -372,13 +372,13 @@ def run_telegram_bot_pipeline(
                 bot_token=bot_token,
                 domain=full_domain,
                 project_id=project_id,
-                max_retries=6,
+                max_retries=9,
                 initial_delay=10
             )
             
             result_info["webhook_registration"] = "async_started"
             result_info["steps_completed"].append("webhook_registration")
-            logger.info(f"✅ Webhook registration started in background (will retry up to 6 times)")
+            logger.info(f"✅ Webhook registration started in background (will retry up to 9 times)")
             logger.info(f"ℹ️ Bot deployment continuing - webhook will activate when DNS propagates")
         
         except Exception as e:
