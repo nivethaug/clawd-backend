@@ -140,6 +140,14 @@ def run_discord_bot_pipeline(
         result_info["bot_username"] = token_info.get("username")
         result_info["steps_completed"].append("token_validation")
 
+        # Warn about privileged intents
+        logger.warning("=" * 60)
+        logger.warning("DISCORD: 'Message Content Intent' must be enabled!")
+        logger.warning("Go to: https://discord.com/developers/applications/")
+        logger.warning("Bot -> Settings -> Privileged Gateway Intents")
+        logger.warning("Enable 'Message Content Intent' and restart the bot")
+        logger.warning("=" * 60)
+
         # Step 2: Copy template
         logger.info("Step 2/12: Copying discord template...")
         success, template_result = copy_discord_template(project_path)

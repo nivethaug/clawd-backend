@@ -21,7 +21,7 @@ from core.database import init_db
 
 # Bot setup with intents
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # Requires "Message Content Intent" in Developer Portal
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
