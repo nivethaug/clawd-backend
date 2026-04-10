@@ -764,10 +764,129 @@ async def create_project(request: CreateProjectRequest):
                 )
                 conn.commit()
             raise HTTPException(status_code=500, detail=error_msg)
-    
+
+    elif type_id == 3:
+        # Discord bot project - trigger discord bot worker
+        logger.info(f"[PROJECT_TYPE] Entering DISCORD BOT branch (type_id=3)")
+        logger.info(f"Starting Discord bot creation for project {project_id}")
+
+        # Validate bot_token is provided
+        if not request.bot_token:
+            error_msg = "bot_token is required for discord bot projects (type_id=3)"
+            logger.error(f"Error: {error_msg}")
+            # Update project status to failed
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        # Import discord worker
+        try:
+            logger.info(f"[DISCORD] Importing discord worker modules...")
+            from services.discord.worker import run_discord_bot_pipeline
+            from services.discord.pm2_manager import get_bot_status_pm2
+            import threading
+            logger.info(f"[DISCORD] Import successful!")
+
+            # Generate port for health server
+            bot_port = 8000 + (project_id % 1000)  # Range: 8000-8999
+            bot_domain = domain
+
+            logger.info(f"[DISCORD] Bot configuration:")
+            logger.info(f"   - bot_domain: '{bot_domain}' (type: {type(bot_domain).__name__})")
+            logger.info(f"   - bot_port: {bot_port}")
+
+            # Get database URL for the bot
+            bot_database_url = None
+            if os.getenv("USE_POSTGRES", "true").lower() == "true":
+                db_host = os.getenv("DB_HOST", "localhost")
+                db_port = os.getenv("DB_PORT", "5432")
+                db_name = os.getenv("DB_NAME", "dreampilot")
+                db_user = os.getenv("DB_USER", "admin")
+                db_password = os.getenv("DB_PASSWORD", "StrongAdminPass123")
+                bot_database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+            # Run discord bot pipeline in background thread
+            def run_discord_worker():
+                try:
+                    success, result = run_discord_bot_pipeline(
+                        project_id=project_id,
+                        project_name=request.name,
+                        description=request.description or "",
+                        bot_token=request.bot_token,
+                        project_path=project_folder_path,
+                        domain=bot_domain,
+                        port=bot_port,
+                        database_url=bot_database_url
+                    )
+
+                    if success:
+                        logger.info(f"Discord bot pipeline completed for project {project_id}")
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE projects SET status = ? WHERE id = ?",
+                                ("ready", project_id)
+                            )
+                            conn.commit()
+                    else:
+                        logger.error(f"Discord bot pipeline failed for project {project_id}")
+                        logger.error(f"Errors: {result.get('errors', [])}")
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE projects SET status = ? WHERE id = ?",
+                                ("failed", project_id)
+                            )
+                            conn.commit()
+
+                except Exception as e:
+                    logger.error(f"Discord worker error: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE projects SET status = ? WHERE id = ?",
+                            ("failed", project_id)
+                        )
+                        conn.commit()
+
+            # Start worker in background thread
+            worker_thread = threading.Thread(target=run_discord_worker, daemon=True)
+            worker_thread.start()
+
+            logger.info(f"Discord bot worker started for project {project_id}")
+
+        except ImportError as e:
+            error_msg = f"Failed to import discord services: {e}"
+            logger.error(f"[DISCORD] ImportError: {error_msg}")
+            import traceback
+            logger.error(traceback.format_exc())
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        except Exception as e:
+            error_msg = f"Unexpected error in discord bot creation: {e}"
+            logger.error(f"[DISCORD] Unexpected error: {error_msg}")
+            import traceback
+            logger.error(traceback.format_exc())
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
+            raise HTTPException(status_code=500, detail=error_msg)
+
     else:
-        # type_id is neither 1 nor 2 - this is unexpected
-        logger.warning(f"[PROJECT_TYPE] ⚠️ Unknown type_id={type_id}, no worker triggered")
+        # type_id is neither 1, 2, nor 3 - this is unexpected
+        logger.warning(f"[PROJECT_TYPE] Unknown type_id={type_id}, no worker triggered")
 
     logger.info(f"[PROJECT_TYPE] Finished type routing for project {project_id}")
 
@@ -1397,13 +1516,15 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
             project_name = parts[1] if len(parts) > 1 else path_basename
         logger.warning(f"Extracted project name from path: {project_name}")
 
-    # Check if this is a telegram bot (type_id == 2)
+    # Check if this is a bot project (telegram=2, discord=3)
     is_telegram_bot = project_metadata.get("type_id") == 2
-    
-    # For telegram bots, domain is stored directly as "domain" field
-    if is_telegram_bot:
+    is_discord_bot = project_metadata.get("type_id") == 3
+    is_bot_project = is_telegram_bot or is_discord_bot
+
+    # For bot projects, domain is stored directly as "domain" field
+    if is_bot_project:
         frontend_domain = project_metadata.get("domain", "")
-        backend_domain = ""  # Telegram bots don't have backend domains
+        backend_domain = ""  # Bot projects don't have backend domains
     else:
         frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
         backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(".dreambigwithai.com", "")
@@ -1412,7 +1533,7 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     db_user = project_metadata.get("database", {}).get("user", "")
 
     # Fallback: extract from full domains
-    if not frontend_domain and not is_telegram_bot:
+    if not frontend_domain and not is_bot_project:
         full_frontend = project_metadata.get("frontend_domain", "")
         if full_frontend:
             frontend_domain = full_frontend.replace(".dreambigwithai.com", "")
@@ -1447,14 +1568,16 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     cleanup_results = {
         "project_name": project_name,
         "project_path": project_path,
-        "project_type": "telegram_bot" if project_metadata.get("type_id") == 2 else "website",
+        "project_type": "telegram_bot" if project_metadata.get("type_id") == 2 else "discord_bot" if project_metadata.get("type_id") == 3 else "website",
         "steps": {}
     }
 
-    # Check if this is a telegram bot project
-    # Priority: 1) metadata type_id, 2) path contains /telegram/
+    # Check if this is a bot project
+    # Priority: 1) metadata type_id, 2) path contains /telegram/ or /discord/
     project_type_id = project_metadata.get("type_id")
     is_telegram_bot = project_type_id == 2 or "/telegram/" in project_path.replace("\\", "/")
+    is_discord_bot = project_type_id == 3 or "/discord/" in project_path.replace("\\", "/")
+    is_bot_project = is_telegram_bot or is_discord_bot
     
     # Extract project_id from path (e.g., "124_test-api-project_20260220_153219" -> 124)
     path_basename = os.path.basename(project_path)
@@ -1465,26 +1588,48 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         # Telegram bot - use dedicated cleanup module
         try:
             from services.telegram.cleanup_infra import cleanup_telegram_bot_infrastructure
-            logger.info(f"🤖 Using telegram bot cleanup module for project {project_id}")
-            
-            # Run full telegram bot cleanup
+            logger.info(f"Using telegram bot cleanup module for project {project_id}")
+
             telegram_cleanup = cleanup_telegram_bot_infrastructure(
                 project_path=project_path,
                 project_id=project_id,
                 project_metadata=project_metadata
             )
-            
-            # Copy results to main cleanup_results
+
             cleanup_results["steps"] = telegram_cleanup.get("steps", {})
             cleanup_results["domain"] = telegram_cleanup.get("domain", "")
-            
-            logger.info(f"✅ Telegram bot cleanup completed")
-            
+
+            logger.info(f"Telegram bot cleanup completed")
+
         except Exception as e:
             logger.error(f"Error in telegram bot cleanup: {e}")
             cleanup_results["steps"]["telegram_cleanup"] = {"error": str(e)}
-        
+
         # Return early - telegram cleanup handles all infrastructure
+        return cleanup_results
+
+    elif is_discord_bot:
+        # Discord bot - use dedicated cleanup module
+        try:
+            from services.discord.cleanup_infra import cleanup_discord_bot_infrastructure
+            logger.info(f"Using discord bot cleanup module for project {project_id}")
+
+            discord_cleanup = cleanup_discord_bot_infrastructure(
+                project_path=project_path,
+                project_id=project_id,
+                project_metadata=project_metadata
+            )
+
+            cleanup_results["steps"] = discord_cleanup.get("steps", {})
+            cleanup_results["domain"] = discord_cleanup.get("domain", "")
+
+            logger.info(f"Discord bot cleanup completed")
+
+        except Exception as e:
+            logger.error(f"Error in discord bot cleanup: {e}")
+            cleanup_results["steps"]["discord_cleanup"] = {"error": str(e)}
+
+        # Return early - discord cleanup handles all infrastructure
         return cleanup_results
     
     # STEP 1: Stop and remove PM2 services (for non-telegram projects)

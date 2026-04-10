@@ -6,9 +6,12 @@ NO business logic here. Only command registration and bot startup.
 
 import os
 import sys
+import json
+import threading
 import asyncio
 import discord
 from discord.ext import commands
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -21,6 +24,42 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+
+# Health server for infrastructure verification
+class HealthHandler(BaseHTTPRequestHandler):
+    """Lightweight HTTP health endpoint for pipeline verification."""
+
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": "healthy",
+                "service": "discord-bot"
+            }).encode())
+        else:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": "ok",
+                "service": "discord-bot",
+                "path": self.path
+            }).encode())
+
+    def log_message(self, format, *args):
+        pass  # Suppress access logs
+
+
+def start_health_server(port):
+    """Start health check HTTP server in background thread."""
+    try:
+        server = HTTPServer(('0.0.0.0', port), HealthHandler)
+        server.serve_forever()
+    except Exception:
+        pass
 
 
 @bot.event
@@ -67,6 +106,12 @@ def main():
     # Initialize database tables
     init_db()
     print("Database initialized.")
+
+    # Start health server
+    port = int(os.getenv("PORT", "8010"))
+    health_thread = threading.Thread(target=start_health_server, args=(port,), daemon=True)
+    health_thread.start()
+    print(f"Health server started on port {port}")
 
     # Register commands
     setup_commands()

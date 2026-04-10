@@ -64,15 +64,17 @@ class ACPChatHandler:
         self.progress_mapper = ClaudeProgressMapper()
         
         # Determine project type from database (not detection)
-        # type_id 1 = website, type_id 2 = telegrambot
+        # type_id 1 = website, type_id 2 = telegrambot, type_id 3 = discordbot
         self.is_telegram_bot = (project_type_id == 2)
-        
+        self.is_discord_bot = (project_type_id == 3)
+        self.is_bot_project = self.is_telegram_bot or self.is_discord_bot
+
         # Load project metadata from database
         self._load_project_metadata()
-        
+
         # Validate paths based on project type
-        if self.is_telegram_bot:
-            # Telegram bots don't need frontend/src
+        if self.is_bot_project:
+            # Bot projects don't need frontend/src
             if not self.project_path.exists():
                 raise ValueError(f"Project path does not exist: {self.project_path}")
         else:
@@ -1163,7 +1165,251 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
 
 ---
 """
-    
+
+    def _build_chat_prompt_discord(self, user_message: str, session_context: str = "") -> str:
+        """
+        Build a chat prompt for ACPX focused on Discord bot modifications.
+
+        Args:
+            user_message: User's chat message
+            session_context: Previous conversation context
+
+        Returns:
+            Prompt string for ACPX for Discord bot modifications
+        """
+        context_section = ""
+        if session_context:
+            context_section = f"""
+## CONVERSATION HISTORY
+
+{session_context}
+
+---
+"""
+
+        return f"""You are a friendly AI assistant helping a user modify their **{self.project_name}** Discord bot.
+
+---
+
+## PROJECT CONTEXT
+
+Project Name: **{self.project_name}**
+Project Type: Discord Bot
+Bot Directory: `{self.project_path}`
+
+---
+
+## WORKFLOW ORDER (MANDATORY - NO EXCEPTIONS)
+
+**Follow this exact order every time:**
+
+1. READ agent README
+2. CREATE branch from main
+3. MAKE code changes
+4. UPDATE agent folder
+5. RESTART PM2 to apply changes
+6. TEST bot via Discord
+7. ASK user for approval
+8. AFTER approval: merge and done
+
+---
+
+## MANDATORY STARTING POINT - AI INDEX FIRST
+
+**CRITICAL: Before making ANY modifications, you MUST read the AI Index files:**
+
+**Location:** `{self.project_path}/agent/ai_index/`
+
+**Files to read (IN ORDER):**
+1. `summaries.json` - Understand what each file does
+2. `symbols.json` - Find functions, commands with line numbers
+3. `modules.json` - Understand the logical structure
+4. `dependencies.json` - See import relationships
+5. `files.json` - File metadata and endpoints
+
+**USE THESE before diving into raw source code!**
+**NEVER skip the AI index and go straight to files!**
+
+---
+
+## DISCORD BOT STRUCTURE
+
+```
+{self.project_path}/
+├── main.py              # Entry point - NO business logic
+├── config.py            # Environment config (DISCORD_TOKEN, DB creds)
+├── .env                 # Secrets (NEVER modify)
+├── requirements.txt     # Dependencies
+├── commands/            # Discord command handlers
+│   ├── start.py         # !start - user registration
+│   ├── help.py          # !help - show commands
+│   ├── ask.py           # !ask <query> - AI queries
+│   └── status.py        # !status - bot info
+├── services/            # Business logic layer
+│   ├── ai_logic.py      # CORE: AI decision engine (main file to modify)
+│   ├── api_client.py    # External API calls
+│   └── mock_data.py     # Fallback responses
+├── models/              # Database models
+│   └── user.py          # User CRUD operations
+├── core/                # Infrastructure
+│   └── database.py      # PostgreSQL connection
+├── utils/               # Utilities
+│   └── logger.py        # Logging setup
+└── agent/               # AI assistant guide
+    ├── README.md        # Bot structure guide
+    └── ai_index/        # Codebase index (JSON files)
+```
+
+---
+
+## MODIFICATION WORKFLOW
+
+**You are MODIFYING an existing bot, NOT creating a new one.**
+
+1. READ agent/README.md for Discord bot structure
+2. READ ai_index/*.json files for context
+3. UNDERSTAND the existing code structure
+4. MAKE your modifications
+5. UPDATE agent/ai_index/*.json files (MANDATORY)
+6. RESTART PM2 to apply changes
+7. RUN UNIT TESTS to verify changes
+8. ASK user for approval
+
+---
+
+## BRANCHING & SAFE WORKFLOW (MANDATORY)
+
+### 1. Task Workspace Rule
+Each new chat/session = NEW task
+MUST create a new branch from main
+NEVER work directly on main
+
+### 2. Branch Naming Convention
+```
+feature/add-weather-command
+feature/improve-ai-responses
+fix/start-command-error
+```
+
+### 3. Safe Modification Process
+```
+git checkout main
+git pull origin main
+git checkout -b feature/your-task-name
+# ... make changes ...
+# ... test changes ...
+# ... update ai_index ...
+# ... ask user for approval ...
+```
+
+---
+
+## CODE STYLE FOR DISCORD BOT
+
+**Library:** discord.py (NOT discord.py rewrite or nextcord)
+**Command prefix:** `!` (e.g., `!start`, `!help`, `!ask`)
+**Handlers:** Use `@bot.command()` decorators
+**All handlers must be async**
+
+### Command Handler Pattern:
+```python
+@bot.command()
+async def commandname(ctx, *, args: str = ""):
+    \"\"\"Description of command.\"\"\"
+    result = process_user_input(f"!commandname {{args}}")
+    await ctx.send(result)
+```
+
+### Main Logic Pattern (services/ai_logic.py):
+```python
+def process_user_input(text: str) -> str:
+    text_lower = text.lower().strip()
+
+    if text_lower.startswith("!command"):
+        parts = text_lower.split()
+        # ... handle command ...
+
+    # Default fallback
+    return "I didn't understand that. Type !help for commands."
+```
+
+---
+
+## CRITICAL FILES (DO NOT MODIFY)
+
+- `main.py` - Entry point, only command registration
+- `config.py` - Environment config
+- `core/database.py` - DB connection
+- `utils/logger.py` - Logging setup
+
+---
+
+## SAFE FILES (CAN MODIFY)
+
+- `services/ai_logic.py` - Main AI logic (primary modification target)
+- `services/api_client.py` - API helper functions
+- `commands/start.py` - Welcome message text only
+- `commands/ask.py` - Query routing
+
+---
+
+## PM2 MANAGEMENT
+
+**Process name:** `dc-bot-{self.project_id}`
+
+```bash
+# Restart bot after changes
+pm2 restart dc-bot-{self.project_id}
+
+# Check if running
+pm2 status | grep dc-bot-{self.project_id}
+
+# View logs
+pm2 logs dc-bot-{self.project_id} --lines 50
+
+# Test changes
+pm2 restart dc-bot-{self.project_id} && sleep 3 && pm2 logs dc-bot-{self.project_id} --lines 20
+```
+
+---
+
+## COMMON ISSUES
+
+### Bot Not Responding
+- Check PM2 status: `pm2 status`
+- Check logs: `pm2 logs dc-bot-{self.project_id}`
+- Restart PM2: `pm2 restart dc-bot-{self.project_id}`
+- Check bot token in `.env`
+
+### Database Issues
+- Check PostgreSQL is running
+- Verify connection string in `.env`
+
+---
+
+## RESPONSE STYLE
+
+**You are helping a NON-TECHNICAL person modify their bot.**
+
+- Explain in simple, plain English
+- Focus on the OUTCOME not implementation details
+- Keep responses conversational and friendly
+
+**Example:**
+Good: "I've added a new !weather command that responds with weather information."
+Bad: "Created weather_command() handler in commands/weather.py..."
+
+---
+
+{context_section}
+
+## USER'S REQUEST
+
+{user_message}
+
+---
+"""
+
     def _is_inline_noise(self, line: str) -> bool:
         """Check if a line is inline telemetry/noise - aggressively filter tool output"""
         if not line or not line.strip():
@@ -1342,6 +1588,9 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
             if self.is_telegram_bot:
                 full_prompt = self._build_chat_prompt_telegram(user_message, session_context)
                 logger.info(f"[CLAUDE-AGENT] Using TELEGRAM prompt for bot project")
+            elif self.is_discord_bot:
+                full_prompt = self._build_chat_prompt_discord(user_message, session_context)
+                logger.info(f"[CLAUDE-AGENT] Using DISCORD prompt for bot project")
             else:
                 full_prompt = self._build_chat_prompt(user_message, session_context)
                 logger.info(f"[CLAUDE-AGENT] Using WEBSITE prompt for web project")
@@ -1413,6 +1662,9 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
         if self.is_telegram_bot:
             prompt = self._build_chat_prompt_telegram(user_message, session_context)
             logger.info(f"[ACP-CHAT] Using TELEGRAM prompt for bot project")
+        elif self.is_discord_bot:
+            prompt = self._build_chat_prompt_discord(user_message, session_context)
+            logger.info(f"[ACP-CHAT] Using DISCORD prompt for bot project")
         else:
             prompt = self._build_chat_prompt(user_message, session_context)
             logger.info(f"[ACP-CHAT] Using WEBSITE prompt for web project")
@@ -1680,6 +1932,8 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
             # Build prompt based on project type
             if self.is_telegram_bot:
                 prompt = self._build_chat_prompt_telegram(enhanced, session_context)
+            elif self.is_discord_bot:
+                prompt = self._build_chat_prompt_discord(enhanced, session_context)
             else:
                 prompt = self._build_chat_prompt(enhanced, session_context)
             self._enhanced_prompt = None  # Reset
@@ -1687,6 +1941,8 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
             # Build prompt based on project type
             if self.is_telegram_bot:
                 prompt = self._build_chat_prompt_telegram(user_message, session_context)
+            elif self.is_discord_bot:
+                prompt = self._build_chat_prompt_discord(user_message, session_context)
             else:
                 prompt = self._build_chat_prompt(user_message, session_context)
         
@@ -1878,6 +2134,8 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
             # Build prompt based on project type
             if self.is_telegram_bot:
                 prompt = self._build_chat_prompt_telegram(enhanced, session_context)
+            elif self.is_discord_bot:
+                prompt = self._build_chat_prompt_discord(enhanced, session_context)
             else:
                 prompt = self._build_chat_prompt(enhanced, session_context)
             self._enhanced_prompt = None  # Reset
@@ -1885,6 +2143,8 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
             # Build prompt based on project type
             if self.is_telegram_bot:
                 prompt = self._build_chat_prompt_telegram(user_message, session_context)
+            elif self.is_discord_bot:
+                prompt = self._build_chat_prompt_discord(user_message, session_context)
             else:
                 prompt = self._build_chat_prompt(user_message, session_context)
         
@@ -2067,18 +2327,18 @@ def get_acp_chat_handler(session_key: str, project_path: str = None, project_typ
         return None
     
     # Validate project path based on type
-    # type_id 2 = telegram bot (no frontend/src needed)
+    # type_id 2 = telegram bot, type_id 3 = discord bot (no frontend/src needed)
     # type_id 1 = website (needs frontend/src)
-    if project_type_id != 2:
+    if project_type_id in (2, 3):
+        # Bot project - just validate project path exists
+        if not Path(project_path).exists():
+            logger.warning(f"[ACP-CHAT] Project path not found: {project_path}")
+            return None
+    else:
         # Website project - validate frontend/src exists
         frontend_src = Path(project_path) / "frontend" / "src"
         if not frontend_src.exists():
             logger.warning(f"[ACP-CHAT] Frontend src not found: {frontend_src}")
-            return None
-    else:
-        # Telegram bot - just validate project path exists
-        if not Path(project_path).exists():
-            logger.warning(f"[ACP-CHAT] Project path not found: {project_path}")
             return None
     
     return ACPChatHandler(project_path, project_name, project_type_id=project_type_id, project_id=db_project_id)

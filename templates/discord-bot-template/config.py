@@ -27,3 +27,7 @@ DATABASE_URL = os.getenv(
 
 # Bot settings
 COMMAND_PREFIX = os.getenv("COMMAND_PREFIX", "!")
+
+# Server settings
+PORT = int(os.getenv("PORT", "8010"))
+PROJECT_ID = os.getenv("PROJECT_ID", "1")
