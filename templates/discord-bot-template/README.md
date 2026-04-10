@@ -1,8 +1,20 @@
 # Discord Bot Template
 
-A clean, minimal, AI-friendly Discord bot template with PostgreSQL support for DreamAgent integration.
+A clean, minimal, AI-friendly Discord bot template with PostgreSQL support for DreamPilot integration.
 
 ## Quick Start
+
+### Prerequisites
+
+1. **Create a Discord Application** at https://discord.com/developers/applications/
+2. **Bot Settings** -> Reset Token -> Copy the bot token
+3. **Privileged Gateway Intents** -> Enable **Message Content Intent**
+4. **Invite the bot** using this URL format:
+   ```
+   https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot&permissions=277025770560
+   ```
+
+### Install & Run
 
 ```bash
 # Install dependencies
@@ -13,6 +25,7 @@ cp .env.example .env
 # Edit .env and add:
 # - DISCORD_TOKEN (from Discord Developer Portal)
 # - DATABASE_URL (PostgreSQL connection string)
+# - PORT (for health endpoint, default 8010)
 
 # Run the bot
 python main.py
@@ -22,74 +35,114 @@ python main.py
 
 ```
 discord_bot_template/
-├── main.py              # Entry point (no logic)
-├── config.py            # Configuration
+├── main.py              # Entry point (no logic) + health server
+├── config.py            # Configuration (DISCORD_TOKEN, DB, PORT)
 ├── requirements.txt     # Dependencies
 ├── .env.example         # Environment template
-├── buildpublish.py      # Build & publish script
+├── buildpublish.py      # Build & publish script (PM2)
 ├── commands/            # Discord command handlers
-│   ├── start.py         # !start command
+│   ├── start.py         # !start command (user registration)
 │   ├── help.py          # !help command
 │   ├── ask.py           # !ask <query>
-│   └── status.py        # !status command
+│   └── status.py        # !status command (bot info)
 ├── services/            # Business logic
-│   ├── ai_logic.py      # Core AI decision engine
+│   ├── ai_logic.py      # Core AI decision engine (primary modification target)
 │   ├── api_client.py    # External API calls
 │   └── mock_data.py     # Fallback responses
 ├── core/                # Core infrastructure
-│   └── database.py      # PostgreSQL connection
+│   └── database.py      # PostgreSQL connection + auto-migration
 ├── models/              # Database models
-│   └── user.py          # User model
+│   └── user.py          # User model (shared with main backend)
 ├── utils/               # Utilities
 │   └── logger.py        # Logging setup
 ├── unit/                # Unit tests
-│   ├── test_commands.py  # Command handler tests
-│   ├── test_handlers.py  # API client tests
-│   └── README.md         # Test documentation
+│   ├── test_commands.py # Command handler tests
+│   └── test_handlers.py # API client tests
 ├── agent/               # AI assistant guide
-│   └── README.md        # Code navigation instructions
-└── ai_index/            # AI codebase index
-    ├── symbols.json      # Functions, commands with locations
-    ├── modules.json      # Logical module groupings
-    ├── dependencies.json # Import relationships
-    ├── summaries.json    # File semantic descriptions
-    └── files.json        # File metadata
+│   ├── README.md        # Code navigation instructions
+│   └── ai_index/        # Codebase index (JSON)
+└── logs/                # PM2 log output directory
 ```
+
+## Architecture
+
+### Message Flow
+
+```
+Discord User                    Your Bot (PM2 process)
+─────────────                   ──────────────────────
+User types:                     discord.py connects via
+  "!ask bitcoin"       ──→      WebSocket gateway
+                                       │
+                                       ▼
+                                 on_message (logs all messages)
+                                       │
+                                       ▼
+                                 commands/ask.py: ask()
+                                       │
+                                       ▼
+                                 services/ai_logic.py:
+                                   process_user_input("bitcoin")
+                                       │
+                                       ▼
+                                 services/api_client.py:
+                                   CoinGecko API call
+                                       │
+                                       ▼
+                           ◀──    ctx.send("$94,231.00")
+                           
+User sees bot reply
+in Discord channel
+```
+
+### Health Endpoint
+
+The bot starts a lightweight HTTP server on `PORT` for infrastructure verification:
+
+- `GET /health` → `{"status": "healthy", "service": "discord-bot"}`
+- Used by deployment pipeline to verify the bot is running
+- Runs in a background thread alongside the Discord gateway
+
+### Logging
+
+All bot components use structured logging visible via PM2:
+
+```
+pm2 logs dc-bot-{project_id} --lines 50
+```
+
+Log events include:
+- `[MSG]` - Every message the bot sees (guild, channel, author, content)
+- `[CMD]` - Command execution with arguments
+- `[CMD-DONE]` - Command completion
+- `[CMD-ERR]` - Command errors with full traceback
+- `[services.ai_logic]` - Intent detection (greeting, bitcoin, etc.)
+- `[services.api_client]` - External API requests and responses
+
+### Database
+
+The bot connects to the shared PostgreSQL database. On startup, `init_db()`:
+1. Creates the `users` table if it doesn't exist
+2. Auto-adds `discord_user_id` column if the table exists without it (shared DB scenario)
+
+This allows the bot to coexist with the main DreamPilot backend which uses the same `users` table.
 
 ## Design Principles
 
-1. **NO business logic in `main.py`** - Only handler registration
+1. **NO business logic in `main.py`** - Only command registration
 2. **ALL behavior in `ai_logic.py`** - Easy to modify
 3. **ALL APIs in `api_client.py`** - Centralized API calls
 4. **Commands only route** - Minimal, predictable code
-5. **Database-ready** - PostgreSQL support with user persistence
-
-## Database Features
-
-### User Model
-- **Unified user system**: Supports both Discord users and email-based users
-- **Discord users**: Auto-created on first message
-- **Email users**: Optional, for API authentication
-- **Single table**: Simple, extensible schema
-
-### Auto-Creation
-Discord users are automatically created in the database:
-```python
-# In commands/start.py
-user = get_or_create_discord_user(
-    db=db,
-    discord_user_id=str(ctx.author.id),
-    discord_username=str(ctx.author)
-)
-```
+5. **Database-ready** - PostgreSQL support with shared schema
+6. **Structured logging** - Full message and command visibility
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `!start` | Register your account |
+| `!start` | Register your Discord account in the database |
 | `!help` | Show available commands |
-| `!ask <query>` | Ask a question or send a message |
+| `!ask <query>` | Ask a question (routes through AI logic) |
 | `!status` | Check bot status and latency |
 
 ## AI-Friendly Features
@@ -100,8 +153,8 @@ user = get_or_create_discord_user(
 - Safe environment handling
 - Minimal dependencies
 - Easy to extend
-- Database integration
-- User context in all handlers
+- Full structured logging
+- Shared database schema
 
 ## Extending the Bot
 
@@ -128,7 +181,7 @@ user = get_or_create_discord_user(
 
 1. Create model functions in `models/`
 2. Import in `models/__init__.py`
-3. Add table creation in `core/database.py` → `init_db()`
+3. Add migration in `core/database.py` → `init_db()` (use ALTER TABLE for existing DBs)
 
 ## Dependencies
 
@@ -138,31 +191,83 @@ user = get_or_create_discord_user(
 - `python-dotenv==1.0.0` - Environment management
 
 ### Database
+- `sqlalchemy==2.0.25` - SQL toolkit
 - `psycopg2-binary==2.9.9` - PostgreSQL adapter
 
 ## Security
 
-- Token stored in `.env` (never committed)
+- Token stored in `.env` with chmod 600 permissions
 - `.gitignore` excludes sensitive files
 - No hardcoded credentials
 - Environment-based configuration
-- Database connection pooling
+- Health endpoint runs on internal port only
 
-## DreamAgent Integration
+## DreamPilot Integration
 
 This template is designed for automated deployment:
 
 ```
-Template -> Copy -> Inject .env -> Modify ai_logic -> Run PM2
+API creates project → Copy template → Inject .env → Install deps → 
+Start PM2 → Configure nginx/DNS → Verify health → AI enhance → 
+Run buildpublish → Final verify
 ```
 
-**Template is:**
-- Generic
-- Clean
-- Predictable
-- Easy to modify programmatically
-- Database-ready
-- AI-friendly (with agent guide)
+### PM2 Management
+
+```bash
+# Start bot
+pm2 start main.py --name dc-bot-{project_id} --interpreter python3 --cwd /path/to/discord/
+
+# View structured logs
+pm2 logs dc-bot-{project_id} --lines 50
+
+# Restart after code changes
+pm2 restart dc-bot-{project_id}
+
+# Check status
+pm2 status dc-bot-{project_id}
+```
+
+### Testing with dreamtest CLI
+
+```bash
+# Create and test a Discord bot project
+dreamtest discord --name "My Bot" --token "YOUR_DISCORD_TOKEN" --desc "A test bot"
+
+# Skip infrastructure verification
+dreamtest discord --name "My Bot" --token "YOUR_DISCORD_TOKEN" --skip-verify
+
+# JSON output for automation
+dreamtest discord --name "My Bot" --token "YOUR_DISCORD_TOKEN" --agent
+```
+
+## Troubleshooting
+
+### `PrivilegedIntentsRequired` error
+Enable **Message Content Intent** in the Discord Developer Portal:
+- https://discord.com/developers/applications/ -> Bot -> Privileged Gateway Intents
+
+### `CommandRegistrationError: The command help is already an existing command`
+This is handled in `commands/help.py` — the built-in help command is removed before registering the custom one.
+
+### `column "discord_user_id" does not exist`
+`init_db()` auto-adds the column via ALTER TABLE. Restart the bot to trigger the migration.
+
+### Bot shows `Guilds: 0`
+The bot hasn't been invited to any server. Use the invite URL with `&scope=bot`:
+```
+https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot&permissions=277025770560
+```
+
+## Unit Tests
+
+```bash
+# Run all tests
+python -m pytest unit/ -v
+
+# Or with unittest
+python -m unittest discover unit/ -v
+```
 
 ## AI Agent Support
 
@@ -190,63 +295,6 @@ The `agent/` folder contains comprehensive documentation for AI assistants:
 4. Use `ai_index/summaries.json` for context about files
 5. Make targeted modifications based on line numbers
 6. Update `ai_index/` files after code changes
-
-**Example AI Workflow:**
-```
-User: "Add Ethereum price tracking"
-
-AI Agent:
-1. Check agent/README.md -> Find "How to Add External API"
-2. Check ai_index/symbols.json -> Find fetch_bitcoin_price()
-3. Check ai_index/dependencies.json -> See ai_logic.py calls api_client
-4. Modify services/api_client.py -> Add fetch_ethereum_price()
-5. Modify services/ai_logic.py -> Add ETH detection logic
-6. Update ai_index/symbols.json -> Add new function with line numbers
-```
-
-## Example Usage
-
-### User sends first message:
-1. Bot receives message
-2. User auto-created in database
-3. User context passed to AI logic
-4. Response sent back
-
-### User asks "whoami":
-```
-You can use `!start` to see your Discord user info!
-```
-
-### User asks "BTC price":
-```
-Bitcoin Price: $45,123.45
-```
-
-## PM2 Deployment
-
-```bash
-# Start bot
-pm2 start main.py --name dc-bot-{project_id} --interpreter python3
-
-# View logs
-pm2 logs dc-bot-{project_id}
-
-# Restart
-pm2 restart dc-bot-{project_id}
-
-# Stop
-pm2 stop dc-bot-{project_id}
-```
-
-## Unit Tests
-
-```bash
-# Run all tests
-python -m pytest unit/ -v
-
-# Or with unittest
-python -m unittest discover unit/ -v
-```
 
 ## License
 
