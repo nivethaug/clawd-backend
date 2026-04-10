@@ -2,12 +2,14 @@
 """
 !start command - Register user in database and send welcome message.
 """
-
+import logging
 import discord
 from discord.ext import commands
 
 from core.database import get_db
 from models.user import get_or_create_discord_user
+
+logger = logging.getLogger('commands.start')
 
 
 async def start(ctx):
@@ -15,6 +17,8 @@ async def start(ctx):
     user_id = str(ctx.author.id)
     username = str(ctx.author)
     channel_id = str(ctx.channel.id)
+
+    logger.info(f"User starting: {username} (ID: {user_id}) in channel {channel_id}")
 
     # Get or create user in database
     try:
@@ -28,13 +32,14 @@ async def start(ctx):
             conn.commit()
             cur.close()
 
+        logger.info(f"User registered: {username}")
         await ctx.send(
             f"Welcome, {ctx.author.mention}!\n"
             f"Your account has been set up.\n"
             f"Type `!help` to see available commands."
         )
     except Exception as e:
-        print(f"Start command error: {e}")
+        logger.error(f"Start command error: {e}", exc_info=True)
         await ctx.send("Welcome! There was an issue setting up your account, but you can still use the bot.")
 
 

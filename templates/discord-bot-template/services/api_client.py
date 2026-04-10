@@ -5,10 +5,11 @@ API Client - External API calls.
 AI agents can modify this file to add new API integrations.
 All external HTTP requests go through this module.
 """
-
+import logging
 import requests
 from typing import Optional, Dict, Any
 
+logger = logging.getLogger('services.api_client')
 
 # API endpoints
 API_URLS = {
@@ -37,9 +38,12 @@ def fetch_data(api_name: str) -> Any:
     if not url:
         raise ValueError(f"Unknown API: {api_name}")
 
+    logger.info(f"API request: {api_name} -> {url[:80]}...")
     response = requests.get(url, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    logger.info(f"API response: {api_name} -> {str(data)[:100]}")
+    return data
 
 
 def fetch_bitcoin_price() -> float:
