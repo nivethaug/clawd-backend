@@ -48,7 +48,7 @@
   "services/database.py": {
     "imports": [
       "core.database",
-      "models.user"
+      "models.user",
       "sqlalchemy.orm"
     ],
     "used_by": [

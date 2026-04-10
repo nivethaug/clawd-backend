@@ -60,7 +60,7 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
     # Get project info from session
     with get_db() as conn:
         session = conn.execute(
-            """SELECT s.project_id, p.project_path, p.name 
+            """SELECT s.project_id, p.project_path, p.name, p.type_id 
                FROM sessions s 
                JOIN projects p ON s.project_id = p.id 
                WHERE s.id = ?""",
@@ -72,15 +72,16 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
         
         project_path = session['project_path']
         project_name = session['name']
+        project_type_id = session['type_id']
     
     if not project_path:
         return "Error: No project path found for this session."
     
     # Get ACP chat handler
     try:
-        handler = get_acp_chat_handler(request.session_key, project_path)
+        handler = get_acp_chat_handler(request.session_key, project_path, project_type_id=project_type_id)
         if not handler:
-            return f"Error: ACP mode not available for project '{project_name}'. Make sure the frontend directory exists."
+            return f"Error: ACP mode not available for project '{project_name}'. Make sure the project directory exists."
     except Exception as e:
         logger.error(f"[ACP-CHAT] Failed to create handler: {e}")
         return f"Error: Failed to initialize ACP mode: {str(e)}"

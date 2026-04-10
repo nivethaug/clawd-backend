@@ -46,6 +46,10 @@ telegram_bot_template/
 │   └── webhook.py       # Telegram webhook endpoint
 ├── utils/               # Utilities
 │   └── logger.py        # Logging setup
+├── unit/                # Unit tests
+│   ├── test_commands.py  # Command handler tests
+│   ├── test_handlers.py   # Message handler tests
+│   └── README.md         # Test documentation
 ├── agent/               # AI assistant guide
 │   └── README.md        # Code navigation instructions
 └── ai_index/            # AI codebase index
