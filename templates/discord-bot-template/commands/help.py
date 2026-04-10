@@ -22,10 +22,9 @@ async def help_command(ctx):
 
 def setup(bot):
     """Register the help command with the bot."""
-    # Use a different internal name to avoid conflict with built-in help
+    # Remove default help command FIRST to avoid CommandRegistrationError
+    bot.remove_command("help")
+
     @bot.command(name="help")
     async def _help(ctx):
         await help_command(ctx)
-
-    # Remove default help command
-    bot.remove_command("help")
