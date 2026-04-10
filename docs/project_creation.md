@@ -1,6 +1,6 @@
 # Project Creation - Complete Reference
 
-> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
+> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-04-10
 
 ---
 
@@ -47,6 +47,17 @@
 }
 ```
 
+### Discord Bot Project Request (type_id=3):
+```json
+{
+  "name": "my-discord-bot",
+  "description": "Crypto price tracker for Discord server",
+  "user_id": 1,
+  "type_id": 3,
+  "bot_token": "YOUR_DISCORD_BOT_TOKEN"
+}
+```
+
 **Response:**
 ```json
 {
@@ -68,9 +79,9 @@
 | `domain` | string | No | Subdomain prefix (auto-generated if omitted) |
 | `description` | string | No | Project description |
 | `user_id` | integer | Yes | User ID owning the project |
-| `type_id` | integer | Yes | Project type: 1=Website, 2=Telegram Bot |
+| `type_id` | integer | Yes | Project type: 1=Website, 2=Telegram Bot, 3=Discord Bot |
 | `template_id` | string | Conditional | Template ID (required for type_id=1) |
-| `bot_token` | string | Conditional | Telegram bot token (required for type_id=2) |
+| `bot_token` | string | Conditional | Bot token (required for type_id=2 Telegram, type_id=3 Discord) |
 
 ---
 
@@ -92,8 +103,17 @@
 |------|------|-------|-------------|
 | 1. API Request | `app.py` | 632-638 | Validate bot_token provided for type_id=2 |
 | 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
-| 3. Worker Trigger | `app.py` | 640-670 | Start background telegram worker thread |
-| 4. Telegram Pipeline | `services/telegram/worker.py` | 18-150 | Execute 6-step pipeline |
+| 3. Worker Trigger | `app.py` | 639-766 | Start background telegram worker thread |
+| 4. Telegram Pipeline | `services/telegram/worker.py` | 18-150 | Execute 11-step pipeline |
+
+### Entry Point Flow (Discord Bot Projects - type_id=3)
+
+| Step | File | Lines | Description |
+|------|------|-------|-------------|
+| 1. API Request | `app.py` | 768-784 | Validate bot_token provided for type_id=3 |
+| 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
+| 3. Worker Trigger | `app.py` | 786-859 | Start background discord worker thread |
+| 4. Discord Pipeline | `services/discord/worker.py` | 90-430 | Execute 12-step pipeline |
 
 ---
 
@@ -264,6 +284,165 @@ def process_user_input(text: str, user: Optional[User] = None) -> str:
 
 ---
 
+## Discord Bot Pipeline (type_id=3)
+
+### Pipeline Overview
+
+**Pattern**: Deploy base first, then enhance (same as Telegram)
+**Total Steps**: 12 steps
+**Duration**: ~5 minutes (2 min base + 3 min enhancement)
+**Key Difference**: Discord uses WebSocket gateway (not HTTP webhooks)
+
+### Phase 1: Base Deployment (Steps 1-8, ~2 min)
+
+| Step | Function | File | Lines | Description |
+|------|----------|------|-------|-------------|
+| 1 | `validate_discord_token()` | `services/discord/validator.py` | 18-86 | Validate token via Discord API `/users/@me` |
+| 2 | `copy_discord_template()` | `services/discord/template.py` | 15-102 | Copy template from `templates/discord-bot-template/` to `{project_path}/discord/` |
+| 3 | `inject_bot_token()` | `services/discord/env_injector.py` | 12-181 | Create .env with `DISCORD_TOKEN`, PORT, PROJECT_ID, DATABASE_URL |
+| 4 | `install_bot_dependencies()` | `services/discord/installer.py` | 16-90 | Run pip install (discord.py, requests, etc.) in shared venv |
+| 5 | `start_bot_pm2()` | `services/discord/pm2_manager.py` | 21-153 | Start PM2 process: `dc-bot-{project_id}` |
+| 6 | Nginx routing | `services/discord/worker.py` | 231-256 | Configure nginx for health endpoint |
+| 7 | DNS provisioning | `services/discord/worker.py` | 258-279 | Provision DNS (optional - wildcard fallback) |
+| 8 | HTTP verification | `services/discord/worker.py` | 281-310 | Fast HTTP check of `/health` endpoint |
+
+### Phase 2: AI Enhancement (Steps 9-12, ~3 min)
+
+| Step | Function | File | Lines | Description |
+|------|----------|------|-------|-------------|
+| 9 | Webhook registration | `services/discord/webhook.py` | 14-31 | **No-op** (Discord uses WebSocket gateway) |
+| 10 | `enhance_bot_logic()` | `services/discord/editor.py` | 50-126 | Claude AI modifies bot logic based on description |
+| 11 | `buildpublish.py` | `templates/discord-bot-template/buildpublish.py` | 1-145 | Restart PM2 with enhanced code |
+| 12 | Final verification | `services/discord/worker.py` | 373-404 | HTTP verify enhanced bot |
+
+### Discord Bot Configuration
+
+**Port Allocation:**
+- Formula: `bot_port = 8000 + (project_id % 1000)`
+- Range: 8000-8999
+- Same formula as Telegram (ports shared across bot types)
+
+**PM2 Process Name:** `dc-bot-{project_id}`
+- **Important**: PM2 process name uses `project_id`, NOT `bot_name`
+- Set by: `services/discord/pm2_manager.py`
+- Restarted by: `templates/discord-bot-template/buildpublish.py` (reads PROJECT_ID from .env)
+
+**Environment Variables (.env):**
+| Variable | Source | Example |
+|----------|--------|---------|
+| `DISCORD_TOKEN` | User input | `MTIzNDU2...XXXXXX` |
+| `PROJECT_ID` | Injected by worker.py | `123` |
+| `PORT` | Port allocation | `8123` |
+| `DATABASE_URL` | Shared PostgreSQL | `postgresql://admin:xxx@localhost:5432/dreampilot` |
+| `WEBHOOK_DOMAIN` | Auto-generated | `mybot-api.dreambigwithai.com` |
+
+**Health Endpoint:** `https://{domain}.dreambigwithai.com/health`
+- Runs lightweight HTTP server in background thread
+- Returns: `{"status": "healthy", "service": "discord-bot"}`
+
+**Domain:** `{project_name}-api.dreambigwithai.com`
+
+**Token Validation:**
+- Endpoint: `GET https://discord.com/api/v10/users/@me`
+- Header: `Authorization: Bot {token}`
+- Returns bot info: id, username, global_name
+- Generates invite URL with permissions `277025770560`
+
+**Prerequisites (manual):**
+1. Create Discord Application at https://discord.com/developers/applications/
+2. Enable **Message Content Intent** under Bot > Privileged Gateway Intents
+3. Invite bot using generated URL with `&scope=bot&permissions=277025770560`
+
+**Status Updates:**
+- Creating → Pipeline running
+- Ready → All 12 steps completed successfully
+- Failed → Pipeline error (token invalid, dependencies failed, etc.)
+
+**Error Handling:**
+- Each step returns success/failure tuple
+- On failure: Rollback changes, update status to 'failed'
+- Logs errors with traceback for debugging
+- Phase 2 failures don't rollback (base still works)
+
+### Discord Bot Template Structure
+
+```
+discord/
+├── main.py              # Entry point + health server + structured logging
+├── config.py            # Configuration (DISCORD_TOKEN, DB, PORT, PROJECT_ID)
+├── requirements.txt     # Dependencies
+├── .env.example         # Environment template
+├── buildpublish.py      # Build & publish script (PM2 restart)
+├── commands/            # Discord command handlers (! prefix)
+│   ├── start.py         # !start command (user registration)
+│   ├── help.py          # !help command
+│   ├── ask.py           # !ask <query>
+│   └── status.py        # !status command
+├── services/            # Business logic
+│   ├── ai_logic.py      # Core AI decision engine (primary AI modification target)
+│   ├── api_client.py    # External API calls
+│   └── mock_data.py     # Fallback responses
+├── core/
+│   └── database.py      # PostgreSQL connection + auto-migration
+├── models/
+│   └── user.py          # User model (shared with main backend)
+├── utils/
+│   └── logger.py        # Logging setup
+└── logs/                # PM2 log output
+```
+
+### AI Enhancement Details
+
+**Step 10 - Claude Enhancement**:
+
+**Allowed Files** (AI can modify):
+- `services/ai_logic.py` - Core decision engine
+- `services/api_client.py` - External API calls
+- `commands/start.py` - Welcome message only
+- `commands/ask.py` - Query handling
+
+**Protected Files** (AI cannot modify):
+- `main.py`, `config.py`, `core/database.py`, `models/user.py`, `utils/logger.py`
+
+**Validation:**
+- Syntax check: `python -m py_compile services/ai_logic.py`
+- Import check: `python -c "from services.ai_logic import process_user_input"`
+- Function signature must not change: `process_user_input(text: str) -> str`
+- Backup files created before modification (*.backup)
+- Rollback on validation failure
+
+### Discord vs Telegram Comparison
+
+| Aspect | Telegram (type_id=2) | Discord (type_id=3) |
+|--------|---------------------|---------------------|
+| **Token Validation** | `api.telegram.org/bot{token}/getMe` | `discord.com/api/v10/users/@me` + `Authorization: Bot {token}` |
+| **Env Key** | `BOT_TOKEN` | `DISCORD_TOKEN` |
+| **Subdirectory** | `telegram/` | `discord/` |
+| **Handler Directory** | `handlers/` | `commands/` |
+| **PM2 Naming** | `tg-bot-{project_id}` | `dc-bot-{project_id}` |
+| **Webhook** | Real (Telegram API webhook) | No-op (WebSocket gateway) |
+| **Command Prefix** | `/` (slash commands) | `!` (prefix commands) |
+| **Health Endpoint** | Via webhook server | Background HTTP thread |
+| **User Param** | `process_user_input(text, user)` | `process_user_input(text)` |
+| **Intent System** | N/A | Privileged Gateway Intents required |
+| **Database** | Shared `users` table with `telegram_user_id` | Shared `users` table with `discord_user_id` column (auto-migrated) |
+| **Pipeline Steps** | 11 steps | 12 steps (extra no-op webhook step) |
+
+### Testing with dreamtest CLI
+
+```bash
+# Create and test a Discord bot project
+python scripts/dreamtest.py discord --name "My Bot" --token "YOUR_DISCORD_TOKEN" --desc "A test bot"
+
+# Skip infrastructure verification
+python scripts/dreamtest.py discord --name "My Bot" --token "YOUR_DISCORD_TOKEN" --skip-verify
+
+# JSON output for automation
+python scripts/dreamtest.py discord --name "My Bot" --token "YOUR_DISCORD_TOKEN" --agent
+```
+
+---
+
 ## Pipeline Phases
 
 | Phase | Function | File | Lines | Description |
@@ -370,6 +549,46 @@ def process_user_input(text: str, user: Optional[User] = None) -> str:
 
 ---
 
+## ACP Chat Handler (`acp_chat_handler.py`)
+
+### Project Type Support
+
+The ACP chat handler supports all three project types via prompt dispatching:
+
+| Project Type | type_id | Flag | Prompt Method |
+|-------------|---------|------|---------------|
+| Website | 1 | `is_website` | `_build_chat_prompt_website()` |
+| Telegram Bot | 2 | `is_telegram_bot` | `_build_chat_prompt_telegram()` |
+| Discord Bot | 3 | `is_discord_bot` | `_build_chat_prompt_discord()` |
+
+**Initialization** (`acp_chat_handler.py:__init__`):
+- `self.project_id` - Project ID (required for bot PM2 commands)
+- `self.domain` - Project domain (from DB, fallback to project_name)
+- `self.is_telegram_bot` - True for type_id=2
+- `self.is_discord_bot` - True for type_id=3
+- `self.is_bot_project` - True for type_id=2 or 3
+
+**Path Validation:**
+- Website projects: `{project_path}/frontend/src/`
+- Bot projects (type_id=2,3): `{project_path}/telegram/` or `{project_path}/discord/`
+
+### Discord Chat Prompt
+
+**Method:** `_build_chat_prompt_discord()` (line 1169)
+
+**Key differences from Telegram prompt:**
+- Command prefix: `!` (not `/`)
+- Handler directory: `commands/` (not `handlers/`)
+- PM2 process: `dc-bot-{project_id}` (not `tg-bot-{project_id}`)
+- No `user` parameter in `process_user_input(text)`
+- References `agent/ai_index/` for code navigation
+- Protected files: main.py, config.py, core/database.py
+
+**Prompt Dispatching:**
+All 6 prompt-dispatching locations in the handler include `elif self.is_discord_bot:` branches between telegram and website conditions.
+
+---
+
 ## Fast Wrapper (`fast_wrapper.py`)
 
 ### FastWrapper Methods
@@ -431,6 +650,15 @@ def process_user_input(text: str, user: Optional[User] = None) -> str:
 | DNS Manager | `dns_manager.py` | 1-150 | Hostinger DNS API | `create_a_record()`, `check_subdomain_exists()` |
 | ContextInjector | `context_injector.py` | 1-100 | Inject context | `inject_context()`, `load_project_info()` |
 | FrontendOptimizer | `frontend_optimizer.py` | 1-300 | Rule-based branding | `run()`, `update_package_json()`, `update_index_html()` |
+| Discord Validator | `services/discord/validator.py` | 18-86 | Validate Discord token | `validate_discord_token()` |
+| Discord Template | `services/discord/template.py` | 15-146 | Copy Discord template | `copy_discord_template()`, `verify_template_structure()` |
+| Discord Env Injector | `services/discord/env_injector.py` | 12-227 | Inject DISCORD_TOKEN + env | `inject_bot_token()`, `update_env_variable()` |
+| Discord Installer | `services/discord/installer.py` | 16-125 | Install discord.py deps | `install_bot_dependencies()`, `verify_dependencies()` |
+| Discord PM2 Manager | `services/discord/pm2_manager.py` | 21-264 | PM2 process lifecycle | `start_bot_pm2()`, `stop_bot_pm2()`, `delete_bot_pm2()` |
+| Discord Webhook | `services/discord/webhook.py` | 14-51 | No-op (WebSocket) | `register_discord_interactions_endpoint()` |
+| Discord Editor | `services/discord/editor.py` | 21-447 | AI bot enhancement | `DiscordBotEditor.enhance_bot_logic()` |
+| Discord Worker | `services/discord/worker.py` | 90-477 | 12-step pipeline | `run_discord_bot_pipeline()` |
+| Discord Cleanup | `services/discord/cleanup_infra.py` | 16-184 | Full infra cleanup | `cleanup_discord_bot_infrastructure()` |
 
 ### FrontendOptimizer Changes (Phase 9 Step 0)
 
@@ -516,7 +744,7 @@ def process_user_input(text: str, user: Optional[User] = None) -> str:
 | `domain` | VARCHAR(255) | Subdomain (e.g., "myproject") |
 | `description` | TEXT | Project description |
 | `project_path` | VARCHAR(500) | Filesystem path to project |
-| `status` | VARCHAR(50) | Current status: creating, scaffolding, ready, error |
+| `status` | VARCHAR(50) | Current status: creating, scaffolding, ready, error, failed |
 | `template_id` | VARCHAR(100) | Template identifier (e.g., "blank-template") |
 | `frontend_port` | INTEGER | Frontend port (3010-4000) |
 | `backend_port` | INTEGER | Backend port (8010-9000) |
@@ -531,6 +759,7 @@ def process_user_input(text: str, user: Optional[User] = None) -> str:
 - `ai_provisioning` - Phase 8/9 AI refinement
 - `ready` - All phases complete
 - `error` - Pipeline failed
+- `failed` - Bot pipeline error (token invalid, dependencies failed, etc.)
 
 ### Connection Pooling (`database_postgres.py`)
 
@@ -679,22 +908,34 @@ Look for:
 
 ## Common Modifications
 
+### Bot Project Cleanup
+
+**File:** `app.py` → `cleanup_infrastructure()` (line 1475)
+
+Bot projects (type_id=2,3) use dedicated cleanup modules that handle all infrastructure removal:
+
+| Bot Type | Cleanup Module | PM2 Process |
+|----------|---------------|-------------|
+| Telegram (type_id=2) | `services/telegram/cleanup_infra.py` | `tg-bot-{project_id}` |
+| Discord (type_id=3) | `services/discord/cleanup_infra.py` | `dc-bot-{project_id}` |
+
+**Discord Bot Cleanup Steps** (`services/discord/cleanup_infra.py`):
+
+| Step | Description | Details |
+|------|-------------|---------|
+| 1 | Delete PM2 process | `pm2 delete dc-bot-{project_id}` |
+| 2 | Remove Nginx config | Delete `{domain}.conf` from sites-available/enabled |
+| 3 | Remove SSL certificates | Delete certbot certificates for domain |
+| 4 | Remove DNS records | Delete A record via Hostinger API |
+| 5 | Drop PostgreSQL database | DROP DATABASE and DROP USER (if applicable) |
+| 6 | Remove project directory | `shutil.rmtree(project_path)` |
+
+**Detection Logic:**
+- Primary: `project.json` → `type_id` field
+- Fallback: Path contains `/telegram/` or `/discord/`
+- Bot projects return early from cleanup (dedicated modules handle everything)
+
 ### Add New Page Type
-
-| Step | File | Lines | Action |
-|------|------|-------|--------|
-| 1 | `acp_frontend_editor_v2.py` | 1460-1490 | Add keyword mapping for page detection |
-| 2 | `page_specs.py` | - | Define page spec with components, layout |
-| 3 | `templates/` | - | Create template file if needed |
-
-**Example:**
-```python
-# acp_frontend_editor_v2.py:1470
-"analytics": ["dashboard", "metrics", "charts", "reports"],
-"settings": ["config", "preferences", "account"],
-```
-
-### Modify Build Process
 
 | Step | File | Lines | Action |
 |------|------|-------|--------|
