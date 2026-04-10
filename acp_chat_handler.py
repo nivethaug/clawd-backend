@@ -84,9 +84,10 @@ class ACPChatHandler:
     def _load_project_metadata(self):
         """Load project domain from database to populate prompt placeholders."""
         # Set defaults first (will be overwritten if DB lookup succeeds)
+        self.domain = self.project_name
         self.frontend_domain = f"{self.project_name}.dreambigwithai.com"
         self.backend_domain = f"{self.project_name}-api.dreambigwithai.com"
-        
+
         try:
             from database_adapter import get_db
             with get_db() as conn:
@@ -97,10 +98,11 @@ class ACPChatHandler:
                     WHERE name = %s
                 """, (self.project_name,))
                 row = conn.fetchone()
-            
+
             if row and row['domain']:
                 domain = row['domain']
                 # Domain column contains subdomain only (e.g., "thinkai-likrt6")
+                self.domain = domain
                 # Build full domain if not already a full domain
                 if '.' not in domain:
                     self.frontend_domain = f"{domain}.dreambigwithai.com"
@@ -113,7 +115,7 @@ class ACPChatHandler:
                         self.backend_domain = f"{parts[0]}-api.{parts[1]}"
                     else:
                         self.backend_domain = f"{domain}-api"
-                
+
                 logger.info(f"[ACP-CHAT] Loaded project domain: {domain} -> {self.frontend_domain}")
             else:
                 logger.warning(f"[ACP-CHAT] Project '{self.project_name}' not found, using defaults")
