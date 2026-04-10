@@ -57,12 +57,13 @@ def get_db_cursor(dict_cursor=False):
 def init_db():
     """
     Initialize database tables. Called on bot startup.
+    Handles both fresh databases and existing ones (adds Discord columns).
     """
     conn = get_db()
     try:
         cur = conn.cursor()
 
-        # Create users table
+        # Create users table (skipped if exists)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -72,6 +73,15 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+
+        # Add discord_user_id column if table exists without it (shared DB scenario)
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'discord_user_id'
+        """)
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE users ADD COLUMN discord_user_id TEXT UNIQUE")
+            print("Added discord_user_id column to existing users table.")
 
         conn.commit()
         print("Database tables verified.")
