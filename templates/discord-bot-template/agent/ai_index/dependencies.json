@@ -1,0 +1,108 @@
+{
+  "dependencies": {
+    "main.py": {
+      "imports": [
+        "config",
+        "core.database",
+        "commands.start",
+        "commands.help",
+        "commands.ask",
+        "commands.status"
+      ],
+      "used_by": []
+    },
+    "commands/start.py": {
+      "imports": [
+        "discord",
+        "discord.ext.commands",
+        "core.database",
+        "models.user"
+      ],
+      "used_by": [
+        "main.py"
+      ]
+    },
+    "commands/help.py": {
+      "imports": [
+        "discord",
+        "discord.ext.commands"
+      ],
+      "used_by": [
+        "main.py"
+      ]
+    },
+    "commands/ask.py": {
+      "imports": [
+        "discord",
+        "discord.ext.commands",
+        "services.ai_logic"
+      ],
+      "used_by": [
+        "main.py"
+      ]
+    },
+    "commands/status.py": {
+      "imports": [
+        "discord",
+        "discord.ext.commands"
+      ],
+      "used_by": [
+        "main.py"
+      ]
+    },
+    "services/ai_logic.py": {
+      "imports": [
+        "services.api_client",
+        "services.mock_data"
+      ],
+      "used_by": [
+        "commands/ask.py"
+      ]
+    },
+    "services/api_client.py": {
+      "imports": [
+        "requests"
+      ],
+      "used_by": [
+        "services/ai_logic.py"
+      ]
+    },
+    "services/mock_data.py": {
+      "imports": [],
+      "used_by": [
+        "services/ai_logic.py"
+      ]
+    },
+    "models/user.py": {
+      "imports": [],
+      "used_by": [
+        "commands/start.py"
+      ]
+    },
+    "core/database.py": {
+      "imports": [
+        "psycopg2",
+        "config"
+      ],
+      "used_by": [
+        "main.py",
+        "commands/start.py"
+      ]
+    },
+    "config.py": {
+      "imports": [
+        "dotenv"
+      ],
+      "used_by": [
+        "main.py",
+        "core/database.py"
+      ]
+    },
+    "utils/logger.py": {
+      "imports": [
+        "logging"
+      ],
+      "used_by": []
+    }
+  }
+}

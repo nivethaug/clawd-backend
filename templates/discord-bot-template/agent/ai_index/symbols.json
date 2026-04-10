@@ -1,0 +1,124 @@
+{
+  "symbols": [
+    {
+      "name": "start",
+      "type": "command",
+      "file": "commands/start.py",
+      "start_line": 12,
+      "end_line": 35,
+      "description": "!start command - Register Discord user in database"
+    },
+    {
+      "name": "help_command",
+      "type": "command",
+      "file": "commands/help.py",
+      "start_line": 10,
+      "end_line": 22,
+      "description": "!help command - Show available commands"
+    },
+    {
+      "name": "ask",
+      "type": "command",
+      "file": "commands/ask.py",
+      "start_line": 10,
+      "end_line": 26,
+      "description": "!ask <query> command - Process user query via AI logic"
+    },
+    {
+      "name": "status",
+      "type": "command",
+      "file": "commands/status.py",
+      "start_line": 10,
+      "end_line": 19,
+      "description": "!status command - Show bot status and latency"
+    },
+    {
+      "name": "process_user_input",
+      "type": "function",
+      "file": "services/ai_logic.py",
+      "start_line": 13,
+      "end_line": 52,
+      "description": "Core AI decision engine - detects intent and returns response"
+    },
+    {
+      "name": "fetch_data",
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 19,
+      "end_line": 38,
+      "description": "Fetch data from external API by name"
+    },
+    {
+      "name": "fetch_bitcoin_price",
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 41,
+      "end_line": 50,
+      "description": "Get current Bitcoin price in USD"
+    },
+    {
+      "name": "get_mock_response",
+      "type": "function",
+      "file": "services/mock_data.py",
+      "start_line": 17,
+      "end_line": 35,
+      "description": "Get fallback mock response by category"
+    },
+    {
+      "name": "get_or_create_discord_user",
+      "type": "function",
+      "file": "models/user.py",
+      "start_line": 10,
+      "end_line": 52,
+      "description": "Get existing user or create new Discord user in database"
+    },
+    {
+      "name": "get_user_by_discord_id",
+      "type": "function",
+      "file": "models/user.py",
+      "start_line": 55,
+      "end_line": 77,
+      "description": "Get user by Discord user ID"
+    },
+    {
+      "name": "get_db",
+      "type": "function",
+      "file": "core/database.py",
+      "start_line": 13,
+      "end_line": 23,
+      "description": "Get a PostgreSQL database connection"
+    },
+    {
+      "name": "init_db",
+      "type": "function",
+      "file": "core/database.py",
+      "start_line": 60,
+      "end_line": 83,
+      "description": "Initialize database tables on startup"
+    },
+    {
+      "name": "on_ready",
+      "type": "event",
+      "file": "main.py",
+      "start_line": 23,
+      "end_line": 27,
+      "description": "Discord bot ready event handler"
+    },
+    {
+      "name": "setup_commands",
+      "type": "function",
+      "file": "main.py",
+      "start_line": 40,
+      "end_line": 52,
+      "description": "Register all command modules with the bot"
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "file": "main.py",
+      "start_line": 55,
+      "end_line": 69,
+      "description": "Bot entry point - init DB, register commands, start bot"
+    }
+  ]
+}

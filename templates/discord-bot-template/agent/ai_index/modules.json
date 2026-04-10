@@ -1,0 +1,52 @@
+{
+  "modules": {
+    "commands": {
+      "description": "Discord command handlers - route user input to services",
+      "files": [
+        "commands/start.py",
+        "commands/help.py",
+        "commands/ask.py",
+        "commands/status.py"
+      ],
+      "responsibility": "Parse user input, call services, send response"
+    },
+    "services": {
+      "description": "Business logic layer - AI decisions, API calls, mock data",
+      "files": [
+        "services/ai_logic.py",
+        "services/api_client.py",
+        "services/mock_data.py"
+      ],
+      "responsibility": "Process user input, make API calls, provide fallback responses"
+    },
+    "models": {
+      "description": "Database models and CRUD operations",
+      "files": [
+        "models/user.py"
+      ],
+      "responsibility": "User creation, lookup, and database operations"
+    },
+    "core": {
+      "description": "Core infrastructure - database connection and initialization",
+      "files": [
+        "core/database.py"
+      ],
+      "responsibility": "PostgreSQL connection management, table creation"
+    },
+    "utils": {
+      "description": "Utility modules",
+      "files": [
+        "utils/logger.py"
+      ],
+      "responsibility": "Logging configuration"
+    },
+    "root": {
+      "description": "Entry point and configuration",
+      "files": [
+        "main.py",
+        "config.py"
+      ],
+      "responsibility": "Bot startup, environment configuration"
+    }
+  }
+}

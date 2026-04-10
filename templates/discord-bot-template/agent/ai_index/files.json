@@ -1,0 +1,102 @@
+{
+  "files": {
+    "main.py": {
+      "type": "python",
+      "lines": 69,
+      "purpose": "Bot entry point - command registration and startup",
+      "exports": ["bot", "main"],
+      "endpoints": []
+    },
+    "config.py": {
+      "type": "python",
+      "lines": 25,
+      "purpose": "Environment variable configuration",
+      "exports": ["DISCORD_TOKEN", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DATABASE_URL", "COMMAND_PREFIX"],
+      "endpoints": []
+    },
+    "commands/start.py": {
+      "type": "python",
+      "lines": 35,
+      "purpose": "!start command - user registration",
+      "exports": ["start", "setup"],
+      "endpoints": []
+    },
+    "commands/help.py": {
+      "type": "python",
+      "lines": 22,
+      "purpose": "!help command - show available commands",
+      "exports": ["help_command", "setup"],
+      "endpoints": []
+    },
+    "commands/ask.py": {
+      "type": "python",
+      "lines": 26,
+      "purpose": "!ask command - process AI queries",
+      "exports": ["ask", "setup"],
+      "endpoints": []
+    },
+    "commands/status.py": {
+      "type": "python",
+      "lines": 19,
+      "purpose": "!status command - bot status info",
+      "exports": ["status", "setup"],
+      "endpoints": []
+    },
+    "services/ai_logic.py": {
+      "type": "python",
+      "lines": 52,
+      "purpose": "Core AI decision engine",
+      "exports": ["process_user_input"],
+      "endpoints": []
+    },
+    "services/api_client.py": {
+      "type": "python",
+      "lines": 80,
+      "purpose": "External API client",
+      "exports": ["fetch_data", "fetch_bitcoin_price", "get_json", "post_json"],
+      "endpoints": []
+    },
+    "services/mock_data.py": {
+      "type": "python",
+      "lines": 35,
+      "purpose": "Fallback mock responses",
+      "exports": ["get_mock_response", "MOCK_RESPONSES"],
+      "endpoints": []
+    },
+    "models/user.py": {
+      "type": "python",
+      "lines": 77,
+      "purpose": "User model - database CRUD operations",
+      "exports": ["get_or_create_discord_user", "get_user_by_discord_id"],
+      "endpoints": []
+    },
+    "core/database.py": {
+      "type": "python",
+      "lines": 83,
+      "purpose": "PostgreSQL connection and table initialization",
+      "exports": ["get_db", "get_db_cursor", "init_db"],
+      "endpoints": []
+    },
+    "utils/logger.py": {
+      "type": "python",
+      "lines": 35,
+      "purpose": "Logging configuration",
+      "exports": ["setup_logger", "logger"],
+      "endpoints": []
+    },
+    "requirements.txt": {
+      "type": "text",
+      "lines": 4,
+      "purpose": "Python package dependencies",
+      "exports": [],
+      "endpoints": []
+    },
+    ".env.example": {
+      "type": "text",
+      "lines": 8,
+      "purpose": "Environment variable template",
+      "exports": [],
+      "endpoints": []
+    }
+  }
+}

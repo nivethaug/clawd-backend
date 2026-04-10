@@ -1,0 +1,18 @@
+{
+  "summaries": {
+    "main.py": "Bot entry point. Registers commands, initializes database, starts Discord bot. NO business logic here.",
+    "config.py": "Environment configuration. Loads DISCORD_TOKEN and DB credentials from .env file.",
+    "commands/start.py": "!start command handler. Registers Discord user in database on first use.",
+    "commands/help.py": "!help command handler. Displays list of all available commands.",
+    "commands/ask.py": "!ask <query> command handler. Routes queries through AI logic engine.",
+    "commands/status.py": "!status command handler. Shows bot status, guild count, and latency.",
+    "services/ai_logic.py": "Core AI decision engine. Detects intent from user text, calls APIs, returns responses. This is the primary file to modify for bot behavior.",
+    "services/api_client.py": "External API client. All HTTP requests go here. Uses requests library with timeout.",
+    "services/mock_data.py": "Fallback mock responses when API is unavailable or intent is unclear.",
+    "models/user.py": "User model with database CRUD operations. Supports Discord user auto-creation.",
+    "core/database.py": "PostgreSQL connection manager. Provides get_db() context manager and table initialization.",
+    "utils/logger.py": "Simple logging configuration with console handler.",
+    "requirements.txt": "Python dependencies: discord.py, requests, python-dotenv, psycopg2-binary.",
+    ".env.example": "Environment variable template. Copy to .env and fill in values."
+  }
+}
