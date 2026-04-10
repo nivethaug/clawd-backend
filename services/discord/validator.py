@@ -7,6 +7,14 @@ from typing import Tuple, Dict
 from utils.logger import logger
 
 
+# Minimal permissions needed for bot commands (Send Messages, Read Message History, Use Application Commands)
+# Calculated using Discord's permission calculator
+BOT_PERMISSIONS = 277025770560  # SendMessages + ReadMessageHistory + UseApplicationCommands
+
+# Privileged intents required
+REQUIRED_INTENTS = ["MESSAGE CONTENT"]
+
+
 def validate_discord_token(token: str) -> Tuple[bool, Dict]:
     """
     Validate Discord bot token via /users/@me API.
@@ -16,7 +24,7 @@ def validate_discord_token(token: str) -> Tuple[bool, Dict]:
 
     Returns:
         Tuple of (is_valid, info_dict)
-        - If valid: (True, {"bot_id": str, "username": str, "global_name": str})
+        - If valid: (True, {"bot_id": str, "username": str, "global_name": str, "invite_url": str})
         - If invalid: (False, {"error": str})
 
     Security:
@@ -36,11 +44,20 @@ def validate_discord_token(token: str) -> Tuple[bool, Dict]:
 
         if response.status_code == 200:
             data = response.json()
+            bot_id = data.get("id")
+
+            # Generate invite URL with correct permissions
+            invite_url = (
+                f"https://discord.com/api/oauth2/authorize?client_id={bot_id}"
+                f"&permissions={BOT_PERMISSIONS}&scope=bot"
+            )
+
             return True, {
-                "bot_id": data.get("id"),
+                "bot_id": bot_id,
                 "username": data.get("username"),
                 "global_name": data.get("global_name", data.get("username")),
-                "is_bot": data.get("bot", True)
+                "is_bot": data.get("bot", True),
+                "invite_url": invite_url
             }
 
         elif response.status_code == 401:
