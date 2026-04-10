@@ -78,8 +78,9 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
         return "Error: No project path found for this session."
     
     # Get ACP chat handler
+    project_id_from_db = session['project_id']
     try:
-        handler = get_acp_chat_handler(request.session_key, project_path, project_type_id=project_type_id)
+        handler = get_acp_chat_handler(request.session_key, project_path, project_type_id=project_type_id, project_id=project_id_from_db)
         if not handler:
             return f"Error: ACP mode not available for project '{project_name}'. Make sure the project directory exists."
     except Exception as e:

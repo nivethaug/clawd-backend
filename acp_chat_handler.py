@@ -43,17 +43,19 @@ USE_CLAUDE_AGENT = os.getenv("ACP_USE_CLAUDE_AGENT", "true").lower() == "true" a
 class ACPChatHandler:
     """Handles ACP chat mode for frontend editing."""
     
-    def __init__(self, project_path: str, project_name: str = "Unknown", project_type_id: int = None):
+    def __init__(self, project_path: str, project_name: str = "Unknown", project_type_id: int = None, project_id: int = None):
         """
         Initialize ACP chat handler.
-        
+
         Args:
             project_path: Path to the project root
             project_name: Name of the project
             project_type_id: Project type ID from database (1=website, 2=telegrambot)
+            project_id: Project ID from database (needed for telegram bot PM2 commands)
         """
         self.project_path = Path(project_path)
         self.project_name = project_name
+        self.project_id = project_id
         self.frontend_path = self.project_path / "frontend"
         self.frontend_src_path = self.frontend_path / "src"
         self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)
@@ -2021,7 +2023,7 @@ async def check_preprocessor(user_message: str, project_name: str, project_path:
         return None
 
 
-def get_acp_chat_handler(session_key: str, project_path: str = None, project_type_id: int = None) -> Optional[ACPChatHandler]:
+def get_acp_chat_handler(session_key: str, project_path: str = None, project_type_id: int = None, project_id: int = None) -> Optional[ACPChatHandler]:
     """
     Get or create an ACP chat handler for a session.
     
@@ -2034,21 +2036,23 @@ def get_acp_chat_handler(session_key: str, project_path: str = None, project_typ
         ACPChatHandler instance or None if not available
     """
     from database_adapter import get_db
-    
+
     # Get project path from session if not provided
+    db_project_id = project_id  # Use passed project_id if available
     if not project_path:
         with get_db() as conn:
             session = conn.execute(
-                """SELECT s.project_id, p.project_path, p.name, p.type_id 
-                   FROM sessions s 
-                   JOIN projects p ON s.project_id = p.id 
+                """SELECT s.project_id, p.project_path, p.name, p.type_id
+                   FROM sessions s
+                   JOIN projects p ON s.project_id = p.id
                    WHERE s.session_key = ?""",
                 (session_key,)
             ).fetchone()
-            
+
             if session:
                 project_path = session['project_path']
                 project_name = session['name']
+                db_project_id = session['project_id']
                 # Get type_id from database if not provided
                 if project_type_id is None:
                     project_type_id = session['type_id']
@@ -2075,4 +2079,4 @@ def get_acp_chat_handler(session_key: str, project_path: str = None, project_typ
             logger.warning(f"[ACP-CHAT] Project path not found: {project_path}")
             return None
     
-    return ACPChatHandler(project_path, project_name, project_type_id=project_type_id)
+    return ACPChatHandler(project_path, project_name, project_type_id=project_type_id, project_id=db_project_id)
