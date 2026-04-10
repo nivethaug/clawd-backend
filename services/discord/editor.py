@@ -126,7 +126,7 @@ class DiscordBotEditor:
             return False, f"Enhancement error: {e}"
 
     def _build_enhancement_prompt(self, description: str, bot_name: str) -> str:
-        """Build AI prompt for Discord bot enhancement."""
+        """Build AI prompt for Discord bot enhancement with dynamic command generation."""
         return f"""
 Enhance Discord bot for: {description}
 
@@ -152,13 +152,21 @@ During initial bot creation, LLM has FULL AUTONOMY to:
 3. Generate commands to use those APIs
 4. NO USER INTERACTION NEEDED - decide everything autonomously
 
+KEYWORD MATCHING PROCESS:
+- Use category keywords array to find best match
+- Use sample_questions to understand category purpose
+- AI decides based on description complexity and intent
+
 EXAMPLES:
 - "weather tracker bot" -> weather category, use Open-Meteo API
 - "crypto prices" -> crypto_finance category, use CoinGecko API
 - "news aggregator" -> news category, use Hacker News API
 - "joke bot" -> entertainment category, use JokeAPI
+- "crypto price tracker" -> crypto_finance category, add !price, !market, !top commands
 
 NOTE: User provides title + description - AI MUST decide APIs autonomously
+- NO back-and-forth with user
+- AI selects and implements best APIs for the use case
 
 --------------------------------------------------
 CRITICAL RULES (MANDATORY)
@@ -183,15 +191,27 @@ CRITICAL RULES (MANDATORY)
 COMMAND PARSING RULES (STRICT)
 ==================================================
 
+NEVER use:
+- .replace()
+- partial string manipulation
+
 ALWAYS use:
 
 parts = text_lower.split()
 
 RULES:
+
 1. ALL commands MUST use split()
+
 2. ALWAYS validate argument length
+
 3. NEVER access parts[i] without checking length
+
 4. DO NOT mix parsing styles
+
+5. DO NOT invent new parsing logic
+
+--------------------------------------------------
 
 STANDARD COMMAND FORMAT (Discord uses ! prefix):
 
@@ -199,6 +219,8 @@ STANDARD COMMAND FORMAT (Discord uses ! prefix):
 !top [n]
 !market [n]
 !convert <amount> <from> <to>
+
+--------------------------------------------------
 
 EXAMPLES (FOLLOW EXACTLY):
 
@@ -224,7 +246,21 @@ if text_lower.startswith("!top"):
     return _handle_top_coins(limit)
 
 
-# !ask
+# !convert
+if text_lower.startswith("!convert"):
+    parts = text_lower.split()
+
+    if len(parts) < 4:
+        return "Usage: !convert <amount> <from> <to>"
+
+    return _handle_conversion(parts[1], parts[2], parts[3])
+
+==================================================
+!ask COMMAND RULE (STRICT)
+==================================================
+
+MUST follow EXACTLY:
+
 if text_lower.startswith("!ask"):
     parts = text.split(maxsplit=1)
 
@@ -232,19 +268,83 @@ if text_lower.startswith("!ask"):
         return "Usage: !ask <question>"
 
     question = parts[1]
-    return f"{{question}}"
+
+    # OPTIONAL: detect crypto intent
+    if "btc" in question.lower():
+        return _handle_crypto_query("bitcoin")
+
+    return f"{{question}}\\n\\nUse !price btc for crypto queries"
 
 ==================================================
 API USAGE
 ==================================================
 
-Use public APIs when appropriate:
-- Call direct_url from matched category endpoint
-- Handle errors with friendly messages
-- Always fallback safely
+STEP 1: Check if user explicitly wants public APIs
+
+Read the description carefully:
+- If "api" or "API" is mentioned -> Use existing internal functions
+- If NOT mentioned -> Use public APIs from /llm/categories/index.json
+
+--------------------------------------------------
+PUBLIC API USAGE (When NO explicit API mention)
+--------------------------------------------------
+
+1. Load category index: templates/discord-bot-template/llm/categories/index.json
+
+2. Match keywords from description to category keywords:
+   - Example: "weather" -> weather category
+   - Example: "crypto" -> crypto_finance category
+   - Example: "news" -> news category
+
+3. Load the matched category JSON file:
+   - Use json_file field to find the file
+   - Example: weather.json, crypto_finance.json, news.json
+
+4. Use the category's APIs:
+   - Call direct_url from the matched endpoint
+   - Handle errors with friendly messages
+
+
+--------------------------------------------------
+INTERNAL API USAGE (When explicit API mention)
+--------------------------------------------------
+
+Use existing functions only:
+- get_crypto_price
+- get_market_data
+- get_top_coins
 
 If API fails:
 -> return mock or friendly fallback
+
+--------------------------------------------------
+RULE SUMMARY
+--------------------------------------------------
+
+1. ALWAYS check description for "api" or "API" keyword
+2. NO "api" keyword -> Use /llm/categories/index.json
+3. YES "api" keyword -> Use existing internal functions
+4. Public APIs: Call direct_url directly
+5. Fallback: Always return friendly message on failure
+
+==================================================
+FEATURE RULES
+==================================================
+
+- Add new commands ONLY if clearly required
+- DO NOT remove existing commands
+- DO NOT rename commands
+
+==================================================
+START + HELP UPDATE RULE
+==================================================
+
+If new commands are added:
+
+1. UPDATE _handle_start()
+2. UPDATE _handle_help()
+
+DO NOT break formatting
 
 ==================================================
 SAFETY RULES
@@ -258,6 +358,15 @@ SAFETY RULES
 ==================================================
 OUTPUT REQUIREMENT
 ==================================================
+
+When using public APIs from /llm/categories/index.json:
+
+1. Generate commands in ai_logic.py that call the public API
+2. If new API function is needed in api_client.py:
+   - Add the function following the same pattern as existing helpers
+   - Example: get_weather, get_news, get_crypto_price, etc.
+   - Always handle errors with friendly messages
+   - Return dict with success/data or error
 
 Return FULL updated code for:
 - services/ai_logic.py

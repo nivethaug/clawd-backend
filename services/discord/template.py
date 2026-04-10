@@ -68,7 +68,8 @@ def copy_discord_template(project_path: str) -> Tuple[bool, str]:
             ".env.example",
             "commands/start.py",
             "services/ai_logic.py",
-            "core/database.py"
+            "core/database.py",
+            "llm/categories/index.json"
         ]
 
         missing_files = []

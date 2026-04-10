@@ -1,0 +1,359 @@
+{
+  "name": "Public API Explorer - Category Index",
+  "description": "Master index for LLMs to navigate API categories and find relevant endpoints",
+  "version": "1.0.1",
+  "last_updated": "2026-04-09",
+  "total_categories": 19,
+  "total_apis": 60,
+  "total_endpoints": 76,
+  "navigation_guide": {
+    "how_to_use": "Based on the user's request, identify the category that best matches their needs, then reference the corresponding JSON file for detailed API information",
+    "category_selection": "Match keywords in user queries to the 'keywords' field in each category below"
+  },
+  "categories": [
+    {
+      "id": "ai",
+      "name": "AI & NLP",
+      "json_file": "ai.json",
+      "description": "Translation, sentiment analysis, QR codes, and AI-related utilities",
+      "apis_count": 4,
+      "endpoints_count": 4,
+      "keywords": ["translate", "translation", "sentiment", "analysis", "qr code", "qrcode", "random user", "text analysis", "nlp", "ai", "artificial intelligence"],
+      "use_when": "User needs text translation, sentiment analysis, QR code generation, or random test data",
+      "sample_questions": [
+        "Translate this text to Spanish",
+        "Analyze the sentiment of this message",
+        "Generate a QR code",
+        "Create random user data for testing"
+      ]
+    },
+    {
+      "id": "crypto_finance",
+      "name": "Cryptocurrency & Finance",
+      "json_file": "crypto_finance.json",
+      "description": "Cryptocurrency prices, market data, and financial information",
+      "apis_count": 5,
+      "endpoints_count": 6,
+      "use_when": "User needs cryptocurrency prices, market data, or blockchain information",
+      "sample_questions": [
+        "What's the current price of Bitcoin?",
+        "Show me cryptocurrency market data",
+        "Get Ethereum price trends",
+        "List top cryptocurrencies"
+      ]
+    },
+    {
+      "id": "currency",
+      "name": "Currency Exchange",
+      "json_file": "currency.json",
+      "description": "Currency exchange rates and conversion",
+      "apis_count": 1,
+      "endpoints_count": 2,
+      "keywords": ["currency", "exchange rate", "forex", "conversion", "money", "rate", "convert", "usd", "eur", "gbp"],
+      "use_when": "User needs currency exchange rates or wants to convert between currencies",
+      "sample_questions": [
+        "What's the exchange rate for USD to EUR?",
+        "Convert 100 dollars to euros",
+        "Get current currency rates",
+        "What's the forex rate for GBP?"
+      ]
+    },
+    {
+      "id": "ecommerce",
+      "name": "E-commerce & Products",
+      "json_file": "ecommerce.json",
+      "description": "Product catalogs, categories, and e-commerce data",
+      "apis_count": 4,
+      "endpoints_count": 8,
+      "keywords": ["product", "products", "ecommerce", "shopping", "store", "catalog", "price", "category", "inventory", "fake store"],
+      "use_when": "User needs product information, categories, or e-commerce data",
+      "sample_questions": [
+        "Show me available products",
+        "Get product categories",
+        "Find product details by ID",
+        "List all products in a category"
+      ]
+    },
+    {
+      "id": "entertainment",
+      "name": "Entertainment",
+      "json_file": "entertainment.json",
+      "description": "Movies, TV shows, games, jokes, and entertainment content",
+      "apis_count": 4,
+      "endpoints_count": 4,
+      "keywords": ["movie", "movies", "tv", "show", "game", "joke", "entertainment", "fun", "humor", "trivia", "chuck norris"],
+      "use_when": "User wants entertainment content, movie info, jokes, or games",
+      "sample_questions": [
+        "Tell me a joke",
+        "Get information about a movie",
+        "Random Chuck Norris fact",
+        "Play a trivia game"
+      ]
+    },
+    {
+      "id": "food",
+      "name": "Food & Recipes",
+      "json_file": "food.json",
+      "description": "Recipes, ingredients, nutrition, and food data",
+      "apis_count": 3,
+      "endpoints_count": 5,
+      "keywords": ["food", "recipe", "recipes", "cooking", "ingredient", "nutrition", "meal", "dish", "kitchen", "culinary"],
+      "use_when": "User needs recipes, food information, or nutritional data",
+      "sample_questions": [
+        "Find recipes with chicken",
+        "Get random recipe",
+        "Search for food by ingredient",
+        "What can I cook with these ingredients?"
+      ]
+    },
+    {
+      "id": "health",
+      "name": "Health & Fitness",
+      "json_file": "health.json",
+      "description": "Health data, fitness information, and medical resources",
+      "apis_count": 1,
+      "endpoints_count": 1,
+      "keywords": ["health", "fitness", "exercise", "workout", "nutrition", "calories", "bmi", "medical", "wellness", "diet"],
+      "use_when": "User needs health or fitness related information",
+      "sample_questions": [
+        "Get nutrition information",
+        "Calculate BMI",
+        "Find exercises for muscle groups",
+        "Get workout routine"
+      ]
+    },
+    {
+      "id": "images",
+      "name": "Images & Photos",
+      "json_file": "images.json",
+      "description": "Image search, photos, and visual content",
+      "apis_count": 4,
+      "endpoints_count": 4,
+      "keywords": ["image", "images", "photo", "photos", "picture", "pictures", "search", "unsplash", "pixabay", "stock photo"],
+      "use_when": "User needs to search for or retrieve images and photos",
+      "sample_questions": [
+        "Search for images of nature",
+        "Get random photos",
+        "Find stock photos",
+        "Search for pictures"
+      ]
+    },
+    {
+      "id": "jobs",
+      "name": "Jobs & Career",
+      "json_file": "jobs.json",
+      "description": "Job search, career opportunities, and employment data",
+      "apis_count": 3,
+      "endpoints_count": 3,
+      "use_when": "User is looking for jobs or career information",
+      "sample_questions": [
+        "Search for Python developer jobs",
+        "Find remote work opportunities",
+        "Get IT job listings",
+        "Search jobs by location"
+      ]
+    },
+    {
+      "id": "knowledge",
+      "name": "Knowledge & Education",
+      "json_file": "knowledge.json",
+      "description": "Dictionary, books, Wikipedia, and educational resources",
+      "apis_count": 3,
+      "endpoints_count": 5,
+      "use_when": "User needs definitions, book information, or Wikipedia articles",
+      "sample_questions": [
+        "Define a word",
+        "Search for books",
+        "Get Wikipedia article",
+        "Find book by title or author"
+      ]
+    },
+    {
+      "id": "location",
+      "name": "Location & Geocoding",
+      "json_file": "location.json",
+      "description": "Geocoding, addresses, and location-based services",
+      "apis_count": 3,
+      "endpoints_count": 4,
+      "use_when": "User needs to geocode addresses or get location information",
+      "sample_questions": [
+        "Get coordinates for an address",
+        "Find address from coordinates",
+        "Search for places",
+        "Get location details"
+      ]
+    },
+    {
+      "id": "news",
+      "name": "News & Media",
+      "json_file": "news.json",
+      "description": "News articles, headlines, and current events",
+      "apis_count": 1,
+      "endpoints_count": 2,
+      "keywords": ["news", "headlines", "articles", "current events", "breaking news", "media", "journalism", "top stories"],
+      "use_when": "User wants news articles or current events",
+      "sample_questions": [
+        "Get latest news headlines",
+        "Search for news articles",
+        "What's happening in the world?",
+        "Get top stories"
+      ]
+    },
+    {
+      "id": "security",
+      "name": "Security & Threat Intelligence",
+      "json_file": "security.json",
+      "description": "Cybersecurity data, vulnerability information, and threat intelligence",
+      "apis_count": 4,
+      "endpoints_count": 8,
+      "keywords": ["security", "vulnerability", "cve", "malware", "threat", "cybersecurity", "hack", "breach", "httpbin", "police"],
+      "use_when": "User needs security or vulnerability information",
+      "sample_questions": [
+        "Search for CVE vulnerabilities",
+        "Get HTTP request information",
+        "Get crime statistics",
+        "Find security vulnerabilities"
+      ]
+    },
+    {
+      "id": "science",
+      "name": "Science & Space",
+      "json_file": "science.json",
+      "description": "Space exploration, NASA data, ISS tracking, and scientific information",
+      "apis_count": 5,
+      "endpoints_count": 4,
+      "keywords": ["space", "science", "nasa", "iss", "spacex", "astronomy", "rocket", "launch", "satellite", "earthquake", "mars"],
+      "use_when": "User needs space data, scientific information, or satellite tracking",
+      "sample_questions": [
+        "Where is the ISS right now?",
+        "Get SpaceX launch information",
+        "Get recent earthquakes",
+        "Who is on the space station?"
+      ]
+    },
+    {
+      "id": "sports",
+      "name": "Sports & Athletics",
+      "json_file": "sports.json",
+      "description": "Sports scores, statistics, and athletic information",
+      "apis_count": 3,
+      "endpoints_count": 3,
+      "keywords": ["sports", "football", "basketball", "soccer", "score", "stats", "athletics", "game", "team", "player"],
+      "use_when": "User wants sports scores or statistics",
+      "sample_questions": [
+        "Get sports scores",
+        "Find team statistics",
+        "Get league standings",
+        "Search for player info"
+      ]
+    },
+    {
+      "id": "stocks",
+      "name": "Stocks & Markets",
+      "json_file": "stocks.json",
+      "description": "Stock market data, quotes, and financial markets",
+      "apis_count": 1,
+      "endpoints_count": 2,
+      "keywords": ["stock", "stocks", "market", "quote", "trading", "nasdaq", "nyse", "dow jones", "s&p", "investment"],
+      "use_when": "User needs stock market data or quotes",
+      "sample_questions": [
+        "Get stock quote for AAPL",
+        "Show market data",
+        "What's the current stock price?",
+        "Get market indices"
+      ]
+    },
+    {
+      "id": "travel",
+      "name": "Travel & Tourism",
+      "json_file": "travel.json",
+      "description": "Travel information, tourism, and location guides",
+      "apis_count": 4,
+      "endpoints_count": 4,
+      "keywords": ["travel", "tourism", "vacation", "hotel", "flight", "destination", "trip", "tourist", "attraction"],
+      "use_when": "User needs travel or tourism information",
+      "sample_questions": [
+        "Find tourist attractions",
+        "Get travel information",
+        "Search for destinations",
+        "Find hotels"
+      ]
+    },
+    {
+      "id": "weather",
+      "name": "Weather",
+      "json_file": "weather.json",
+      "description": "Weather forecasts, current conditions, and alerts",
+      "apis_count": 2,
+      "endpoints_count": 2,
+      "keywords": ["weather", "forecast", "temperature", "rain", "sunny", "climate", "meteorology", "storm", "humidity"],
+      "use_when": "User needs weather information or forecasts",
+      "sample_questions": [
+        "What's the weather today?",
+        "Get weather forecast",
+        "Is it going to rain?",
+        "What's the temperature?"
+      ]
+    },
+    {
+      "id": "utilities",
+      "name": "Utilities",
+      "json_file": "utilities.json",
+      "description": "Utility APIs: hashing, encoding, validation, and helper tools",
+      "apis_count": 5,
+      "endpoints_count": 5,
+      "keywords": ["utility", "utilities", "hash", "encode", "decode", "validate", "base64", "uuid", "random", "calculator"],
+      "use_when": "User needs utility functions or helper tools",
+      "sample_questions": [
+        "Generate a hash",
+        "Encode to base64",
+        "Create a UUID",
+        "Validate email address"
+      ]
+    }
+  ],
+  "quick_reference": {
+    "most_common_requests": {
+      "translate_text": "ai.json - /ai/translate endpoint",
+      "get_weather": "weather.json - /weather/open-meteo endpoint",
+      "search_news": "news.json - /news endpoints",
+      "get_crypto_prices": "crypto_finance.json - /finance/crypto endpoints",
+      "currency_exchange": "currency.json - /currency/rates endpoint",
+      "find_jobs": "jobs.json - /jobs/search endpoints",
+      "get_jokes": "entertainment.json - /entertainment/jokes endpoint",
+      "search_books": "knowledge.json - /knowledge/books/search endpoint",
+      "get_definition": "knowledge.json - /knowledge/dictionary endpoint",
+      "check_iss": "science.json - /science/iss/position endpoint",
+      "get_products": "ecommerce.json - /ecommerce/products endpoint",
+      "search_images": "images.json - /images/search endpoint"
+    },
+    "category_groups": {
+      "text_and_language": ["ai", "knowledge"],
+      "financial": ["crypto_finance", "currency", "stocks"],
+      "media_and_entertainment": ["entertainment", "images", "news"],
+      "data_and_utilities": ["utilities", "ecommerce", "location"],
+      "science_and_tech": ["science", "security"],
+      "lifestyle": ["food", "health", "travel", "weather", "sports", "jobs"]
+    }
+  },
+  "usage_instructions": {
+    "for_llms": [
+      "1. Analyze the user's request to identify keywords and intent",
+      "2. Match keywords to the 'keywords' array in each category above",
+      "3. Select the most relevant category based on keyword matching",
+      "4. Load the corresponding JSON file (e.g., 'ai.json' for AI category)",
+      "5. Find the appropriate endpoint within that category's APIs",
+      "6. Use the direct_url to call the real API directly",
+      "7. Return the results to the user"
+    ],
+    "example_workflow": {
+      "user_request": "What's the weather in New York?",
+      "step_1": "Identify keywords: 'weather', 'New York'",
+      "step_2": "Match to category: 'weather' category",
+      "step_3": "Load file: weather.json",
+      "step_4": "Find endpoint: /weather/open-meteo",
+      "step_5": "Call API: https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.01&current_weather=true",
+      "step_6": "Return weather data to user"
+    }
+  }
+}

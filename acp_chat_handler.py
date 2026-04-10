@@ -1255,6 +1255,13 @@ Bot Directory: `{self.project_path}`
 │   └── database.py      # PostgreSQL connection
 ├── utils/               # Utilities
 │   └── logger.py        # Logging setup
+├── llm/                 # Public API catalog for AI enhancement
+│   └── categories/      # JSON files with API endpoints by category
+│       ├── index.json   # Master index - 19 categories, 60+ APIs
+│       ├── weather.json # Weather APIs
+│       ├── crypto_finance.json # Crypto/finance APIs
+│       ├── news.json    # News APIs
+│       └── ...          # 16 more category files
 └── agent/               # AI assistant guide
     ├── README.md        # Bot structure guide
     └── ai_index/        # Codebase index (JSON files)
@@ -1350,6 +1357,35 @@ def process_user_input(text: str) -> str:
 - `services/api_client.py` - API helper functions
 - `commands/start.py` - Welcome message text only
 - `commands/ask.py` - Query routing
+
+---
+
+## PUBLIC API CATALOG
+
+**When adding new API integrations, use the pre-built catalog:**
+
+**Location:** `{self.project_path}/llm/categories/`
+
+**How to use:**
+1. Read `index.json` to find the right category for the user's request
+2. Match keywords from user request to category `keywords` array
+3. Load the matched category JSON file (e.g., `weather.json`, `crypto_finance.json`)
+4. Use `direct_url` from the matched endpoint to call the real API
+5. Add helper function to `services/api_client.py` if needed
+6. Add command handler in `services/ai_logic.py` using `!` prefix
+
+**Available categories (19 total, 60+ APIs):**
+- weather, crypto_finance, currency, news, entertainment
+- food, health, sports, stocks, science, images
+- knowledge, location, ecommerce, jobs, travel
+- ai, security, utilities
+
+**Example workflow:**
+1. User asks: "add weather command"
+2. Read `llm/categories/index.json` -> find "weather" category
+3. Read `llm/categories/weather.json` -> find Open-Meteo endpoint
+4. Add `get_weather()` to `services/api_client.py`
+5. Add `!weather` handler in `services/ai_logic.py`
 
 ---
 

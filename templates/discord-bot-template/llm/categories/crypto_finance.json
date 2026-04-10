@@ -1,0 +1,230 @@
+{
+  "category": "crypto_finance",
+  "name": "Cryptocurrency & Finance",
+  "description": "Cryptocurrency prices, market data, and financial information",
+  "prefix": "/finance",
+  "apis": [
+    {
+      "id": "coingecko",
+      "name": "CoinGecko",
+      "base_url": "https://api.coingecko.com/api/v3",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/finance/crypto/coingecko/coins",
+          "method": "GET",
+          "summary": "List cryptocurrencies with market data",
+          "direct_url": "https://api.coingecko.com/api/v3/coins/markets",
+          "parameters": [
+            {"name": "vs_currency", "type": "query", "default": "usd", "description": "Currency to compare against"},
+            {"name": "per_page", "type": "query", "default": 50, "description": "Results per page"},
+            {"name": "page", "type": "query", "default": 1, "description": "Page number"}
+          ],
+          "sample_request": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=2&page=1",
+          "sample_response": [
+            {
+              "id": "bitcoin",
+              "symbol": "btc",
+              "name": "Bitcoin",
+              "image": "https://assets.coingecko.com/coins/images/1/large/bitcoin.png",
+              "current_price": 67234.12,
+              "market_cap": 1324567890123,
+              "market_cap_rank": 1,
+              "total_volume": 45678901234,
+              "price_change_24h": 1234.56,
+              "price_change_percentage_24h": 1.87,
+              "circulating_supply": 19654321,
+              "total_supply": 21000000,
+              "ath": 73738.12,
+              "ath_change_percentage": -8.82
+            },
+            {
+              "id": "ethereum",
+              "symbol": "eth",
+              "name": "Ethereum",
+              "current_price": 3456.78,
+              "market_cap": 415123456789,
+              "market_cap_rank": 2,
+              "price_change_percentage_24h": 2.34
+            }
+          ]
+        },
+        {
+          "path": "/finance/crypto/coingecko/coin/{coin_id}",
+          "method": "GET",
+          "summary": "Get specific cryptocurrency details",
+          "direct_url": "https://api.coingecko.com/api/v3/coins/{coin_id}",
+          "parameters": [
+            {"name": "coin_id", "type": "path", "description": "Coin ID (e.g., bitcoin, ethereum)"}
+          ],
+          "sample_request": "https://api.coingecko.com/api/v3/coins/bitcoin",
+          "sample_response": {
+            "id": "bitcoin",
+            "symbol": "btc",
+            "name": "Bitcoin",
+            "description": {
+              "en": "Bitcoin is a cryptocurrency and worldwide payment system."
+            },
+            "market_data": {
+              "current_price": {"usd": 67234.12, "eur": 62345.67},
+              "market_cap": {"usd": 1324567890123},
+              "total_volume": {"usd": 45678901234},
+              "price_change_percentage_24h": 1.87,
+              "price_change_percentage_7d": -3.45
+            },
+            "links": {
+              "homepage": ["https://bitcoin.org/"],
+              "blockchain_site": ["https://blockchain.info/"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "coinstats",
+      "name": "CoinStats",
+      "base_url": "https://api.coinstats.app/public/v1",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/finance/crypto/coinstats/coins",
+          "method": "GET",
+          "summary": "List cryptocurrencies",
+          "direct_url": "https://api.coinstats.app/public/v1/coins",
+          "parameters": [
+            {"name": "limit", "type": "query", "default": 50, "description": "Number of results"},
+            {"name": "currency", "type": "query", "default": "USD", "description": "Currency for prices"}
+          ],
+          "sample_request": "https://api.coinstats.app/public/v1/coins?limit=2&currency=USD",
+          "sample_response": [
+            {
+              "id": "bitcoin",
+              "symbol": "BTC",
+              "name": "Bitcoin",
+              "price": 67234.12,
+              "marketCap": 1324567890123,
+              "availableSupply": 19654321,
+              "totalSupply": 21000000,
+              "priceChange1d": 1.87,
+              "priceChange1w": -3.45,
+              "websiteUrl": "https://bitcoin.org",
+              "twitterUrl": "https://twitter.com/bitcoin"
+            },
+            {
+              "id": "ethereum",
+              "symbol": "ETH",
+              "name": "Ethereum",
+              "price": 3456.78,
+              "marketCap": 415123456789,
+              "priceChange1d": 2.34
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "binance",
+      "name": "Binance",
+      "base_url": "https://api.binance.com/api/v3",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/finance/crypto/binance/ticker/24hr",
+          "method": "GET",
+          "summary": "Get 24-hour ticker statistics",
+          "direct_url": "https://api.binance.com/api/v3/ticker/24hr",
+          "parameters": [
+            {"name": "symbol", "type": "query", "description": "Trading pair (e.g., BTCUSDT)"}
+          ],
+          "sample_request": "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT",
+          "sample_response": {
+            "symbol": "BTCUSDT",
+            "priceChange": "1234.56000000",
+            "priceChangePercent": "1.870",
+            "weightedAvgPrice": "67123.45678901",
+            "prevClosePrice": "66000.00000000",
+            "lastPrice": "67234.56000000",
+            "lastQty": "0.12345678",
+            "bidPrice": "67234.55000000",
+            "askPrice": "67234.57000000",
+            "openPrice": "66000.00000000",
+            "highPrice": "68000.00000000",
+            "lowPrice": "65500.00000000",
+            "volume": "45678.90123456",
+            "quoteVolume": "3065432123.45678901",
+            "openTime": 1711756800000,
+            "closeTime": 1711843200000,
+            "count": 456789
+          }
+        }
+      ]
+    },
+    {
+      "id": "coinbase",
+      "name": "Coinbase",
+      "base_url": "https://api.coinbase.com/v2",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/finance/crypto/coinbase/prices",
+          "method": "GET",
+          "summary": "Get buy/sell prices",
+          "direct_url": "https://api.coinbase.com/v2/prices/{currency_pair}/spot",
+          "parameters": [
+            {"name": "currency_pair", "type": "query", "default": "BTC-USD", "description": "Currency pair"}
+          ],
+          "sample_request": "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+          "sample_response": {
+            "data": {
+              "base": "BTC",
+              "currency": "USD",
+              "amount": "67234.12"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "exchangerate_api",
+      "name": "ExchangeRate-API",
+      "base_url": "https://api.exchangerate-api.com/v4",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/finance/exchange-rate/{base}",
+          "method": "GET",
+          "summary": "Get exchange rates",
+          "direct_url": "https://api.exchangerate-api.com/v4/latest/{base}",
+          "parameters": [
+            {"name": "base", "type": "path", "description": "Base currency (e.g., USD, EUR)"}
+          ],
+          "sample_request": "https://api.exchangerate-api.com/v4/latest/USD",
+          "sample_response": {
+            "base": "USD",
+            "date": "2025-03-31",
+            "time_last_updated": 1711843200,
+            "rates": {
+              "USD": 1,
+              "EUR": 0.9234,
+              "GBP": 0.7891,
+              "JPY": 149.56,
+              "CAD": 1.3567,
+              "AUD": 1.5234,
+              "CHF": 0.8901,
+              "CNY": 7.2345,
+              "INR": 83.12,
+              "MXN": 16.789
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Get cryptocurrency prices",
+    "Monitor market cap and trading volume",
+    "Currency conversion",
+    "Exchange rate tracking",
+    "Crypto market analysis"
+  ]
+}
