@@ -32,8 +32,10 @@ from email.mime.text import MIMEText
 import requests
 
 from config import (
-    TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN,
-    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+    DISCORD_WEBHOOK_URL,
+    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_TO,
+    API_ENDPOINT,
 )
 from services import api_client
 
@@ -198,7 +200,7 @@ def _send_telegram(payload: dict) -> Tuple[str, str]:
     if not TELEGRAM_BOT_TOKEN:
         return ('failed', 'TELEGRAM_BOT_TOKEN not configured')
 
-    chat_id = payload.get('chat_id')
+    chat_id = payload.get('chat_id', TELEGRAM_CHAT_ID)
     text = payload.get('text', '')
 
     if not chat_id:
@@ -216,7 +218,7 @@ def _send_telegram(payload: dict) -> Tuple[str, str]:
 
 def _send_discord(payload: dict) -> Tuple[str, str]:
     """Send a message via Discord webhook."""
-    webhook_url = payload.get('webhook_url')
+    webhook_url = payload.get('webhook_url', DISCORD_WEBHOOK_URL)
     content = payload.get('content', payload.get('text', ''))
 
     if not webhook_url:
@@ -235,7 +237,7 @@ def _send_email(payload: dict) -> Tuple[str, str]:
     if not SMTP_HOST or not SMTP_USER:
         return ('failed', 'SMTP not configured')
 
-    to_addr = payload.get('to')
+    to_addr = payload.get('to', EMAIL_TO)
     subject = payload.get('subject', 'Scheduler Notification')
     body = payload.get('body', payload.get('text', ''))
 
@@ -258,7 +260,7 @@ def _send_email(payload: dict) -> Tuple[str, str]:
 
 def _call_api(payload: dict) -> Tuple[str, str]:
     """Call an external API endpoint."""
-    url = payload.get('url')
+    url = payload.get('url', API_ENDPOINT)
     if not url:
         return ('failed', 'Missing url in payload')
 

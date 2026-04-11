@@ -228,6 +228,16 @@ class CreateProjectRequest(BaseModel):
     type_id: Optional[int] = Field(None, alias="typeId")
     template_id: Optional[str] = None  # Optional pre-selected template ID (bypasses Task 1)
     bot_token: Optional[str] = None  # Telegram bot token (required for type_id=2)
+    # Scheduler sender channels (at least one required for type_id=5)
+    telegram_bot_token: Optional[str] = None  # Telegram bot token for scheduler
+    telegram_chat_id: Optional[str] = None  # Default Telegram chat_id
+    discord_webhook_url: Optional[str] = None  # Discord webhook URL
+    smtp_host: Optional[str] = None  # SMTP server host
+    smtp_port: Optional[int] = None  # SMTP server port
+    smtp_user: Optional[str] = None  # SMTP username
+    smtp_pass: Optional[str] = None  # SMTP password
+    email_to: Optional[str] = None  # Default email recipient
+    api_endpoint: Optional[str] = None  # Default API endpoint URL
 
 class CreateSessionRequest(BaseModel):
     label: str
@@ -911,6 +921,15 @@ async def create_project(request: CreateProjectRequest):
                         description=request.description or "",
                         project_path=project_folder_path,
                         backend_url=backend_url,
+                        telegram_bot_token=request.telegram_bot_token,
+                        telegram_chat_id=request.telegram_chat_id,
+                        discord_webhook_url=request.discord_webhook_url,
+                        smtp_host=request.smtp_host,
+                        smtp_port=request.smtp_port,
+                        smtp_user=request.smtp_user,
+                        smtp_pass=request.smtp_pass,
+                        email_to=request.email_to,
+                        api_endpoint=request.api_endpoint,
                     )
 
                     if success:

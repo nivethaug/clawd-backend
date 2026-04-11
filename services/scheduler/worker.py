@@ -85,11 +85,14 @@ def run_scheduler_pipeline(
             project_id=project_id,
             backend_url=backend_url,
             telegram_bot_token=kwargs.get("telegram_bot_token"),
-            discord_bot_token=kwargs.get("discord_bot_token"),
+            telegram_chat_id=kwargs.get("telegram_chat_id"),
+            discord_webhook_url=kwargs.get("discord_webhook_url"),
             smtp_host=kwargs.get("smtp_host"),
             smtp_port=kwargs.get("smtp_port"),
             smtp_user=kwargs.get("smtp_user"),
             smtp_pass=kwargs.get("smtp_pass"),
+            email_to=kwargs.get("email_to"),
+            api_endpoint=kwargs.get("api_endpoint"),
         )
 
         if not success:

@@ -2,14 +2,21 @@
 """
 Scheduler Env Injector - Creates .env file for scheduler project.
 
-Pattern: Same as services/telegram/env_injector.py.
-Injects PROJECT_ID, PROJECT_PATH, BACKEND_URL, and task tokens.
+Injects PROJECT_ID, PROJECT_PATH, BACKEND_URL, and sender channel config.
+At least one sender channel must be provided so jobs can deliver notifications.
+
+Sender channels:
+  - Telegram: bot_token + chat_id
+  - Discord:  webhook_url
+  - Email:    smtp_host/user/pass + email_to
+  - API:      api_endpoint URL
+
 No DATABASE_URL — jobs are in main DB, managed centrally.
 """
 
 import os
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple
 from dotenv import load_dotenv
 
 from utils.logger import logger
@@ -22,12 +29,19 @@ def inject_scheduler_env(
     project_path: str,
     project_id: int,
     backend_url: str = None,
+    # Telegram channel
     telegram_bot_token: str = None,
-    discord_bot_token: str = None,
+    telegram_chat_id: str = None,
+    # Discord channel
+    discord_webhook_url: str = None,
+    # Email channel
     smtp_host: str = None,
     smtp_port: int = None,
     smtp_user: str = None,
     smtp_pass: str = None,
+    email_to: str = None,
+    # API channel
+    api_endpoint: str = None,
 ) -> Tuple[bool, str]:
     """
     Create .env file for the scheduler project.
@@ -36,9 +50,15 @@ def inject_scheduler_env(
         project_path: Path to scheduler/ directory
         project_id: Project ID
         backend_url: Backend API URL for job_manager
-        telegram_bot_token: Optional telegram token
-        discord_bot_token: Optional discord token
-        smtp_*: Optional SMTP credentials
+        telegram_bot_token: Telegram bot token
+        telegram_chat_id: Default Telegram chat ID for notifications
+        discord_webhook_url: Discord webhook URL for notifications
+        smtp_host: SMTP server host
+        smtp_port: SMTP server port
+        smtp_user: SMTP username
+        smtp_pass: SMTP password
+        email_to: Default email recipient
+        api_endpoint: Default API endpoint URL
 
     Returns:
         (True, path) on success, (False, error) on failure
@@ -50,16 +70,8 @@ def inject_scheduler_env(
 
     # Default backend URL
     if not backend_url:
-        backend_port = os.getenv("PORT", "8000")
+        backend_port = os.getenv("PORT", "8002")
         backend_url = f"http://localhost:{backend_port}"
-
-    # Read .env.example as base if it exists
-    env_example_path = scheduler_path / ".env.example"
-    if env_example_path.exists():
-        with open(env_example_path, 'r') as f:
-            env_content = f.read()
-    else:
-        env_content = ""
 
     # Build env content
     lines = [
@@ -68,21 +80,34 @@ def inject_scheduler_env(
         f"BACKEND_URL={backend_url}",
     ]
 
-    # Task tokens (only if provided)
+    # --- Telegram channel ---
     if telegram_bot_token:
-        lines.append(f"\n# Task: Telegram\nTELEGRAM_BOT_TOKEN={telegram_bot_token}")
+        lines.append(f"\n# Channel: Telegram")
+        lines.append(f"TELEGRAM_BOT_TOKEN={telegram_bot_token}")
+        if telegram_chat_id:
+            lines.append(f"TELEGRAM_CHAT_ID={telegram_chat_id}")
 
-    if discord_bot_token:
-        lines.append(f"\n# Task: Discord\nDISCORD_BOT_TOKEN={discord_bot_token}")
+    # --- Discord channel ---
+    if discord_webhook_url:
+        lines.append(f"\n# Channel: Discord")
+        lines.append(f"DISCORD_WEBHOOK_URL={discord_webhook_url}")
 
+    # --- Email channel ---
     if smtp_host:
-        lines.append(f"\n# Task: Email")
+        lines.append(f"\n# Channel: Email")
         lines.append(f"SMTP_HOST={smtp_host}")
         lines.append(f"SMTP_PORT={smtp_port or 587}")
         if smtp_user:
             lines.append(f"SMTP_USER={smtp_user}")
         if smtp_pass:
             lines.append(f"SMTP_PASS={smtp_pass}")
+        if email_to:
+            lines.append(f"EMAIL_TO={email_to}")
+
+    # --- API channel ---
+    if api_endpoint:
+        lines.append(f"\n# Channel: API")
+        lines.append(f"API_ENDPOINT={api_endpoint}")
 
     # Write .env file
     env_path = scheduler_path / ".env"
