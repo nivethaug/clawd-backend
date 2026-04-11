@@ -64,10 +64,11 @@ class ACPChatHandler:
         self.progress_mapper = ClaudeProgressMapper()
         
         # Determine project type from database (not detection)
-        # type_id 1 = website, type_id 2 = telegrambot, type_id 3 = discordbot
+        # type_id 1 = website, type_id 2 = telegrambot, type_id 3 = discordbot, type_id 5 = scheduler
         self.is_telegram_bot = (project_type_id == 2)
         self.is_discord_bot = (project_type_id == 3)
-        self.is_bot_project = self.is_telegram_bot or self.is_discord_bot
+        self.is_scheduler = (project_type_id == 5)
+        self.is_bot_project = self.is_telegram_bot or self.is_discord_bot or self.is_scheduler
 
         # Load project metadata from database
         self._load_project_metadata()
@@ -193,7 +194,209 @@ class ACPChatHandler:
                 pass
             except Exception as e:
                 logger.warning(f"[ACP-CHAT] Failed to SIGKILL PID {pid}: {e}")
-    
+
+    def _build_chat_prompt_scheduler(self, user_message: str, session_context: str = "") -> str:
+        """
+        Build chat prompt for scheduler project modifications.
+        Covers: executor.py enhancement, job_manager usage, api_client helpers.
+        """
+        context_section = ""
+        if session_context:
+            context_section = f"""
+## CONVERSATION HISTORY
+
+{session_context}
+
+---
+"""
+
+        return f"""You are a friendly AI assistant helping a user with their **{self.project_name}** scheduler project.
+
+---
+
+## PROJECT CONTEXT
+
+Project Name: **{self.project_name}**
+Project Type: Scheduler
+Project Path: `{self.project_path}`
+Scheduler Directory: `{self.project_path}/scheduler/`
+
+---
+
+## WHAT YOU CAN DO
+
+1. **Modify executor.py** — Add new task handlers and routes
+2. **Modify api_client.py** — Add new API helper functions
+3. **Create jobs** — Schedule jobs using the job_manager tool
+4. **Manage jobs** — List, pause, resume, delete jobs
+
+---
+
+## FILE STRUCTURE
+
+```
+{self.project_path}/
+└── scheduler/
+    ├── executor.py          ← YOU MODIFY THIS (add task handlers)
+    ├── job_manager.py       ← YOUR TOOL (create/manage jobs)
+    └── ...
+└── services/
+    └── api_client.py        ← YOU MODIFY THIS (add API helpers)
+└── llm/categories/          ← API catalog for reference
+```
+
+---
+
+## HOW TO ADD A NEW TASK
+
+### Step 1: Add API helper to services/api_client.py
+
+```python
+def get_weather(latitude=40.71, longitude=-74.01):
+    \"\"\"Fetch weather from Open-Meteo API.\"\"\"
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {{"latitude": latitude, "longitude": longitude, "current_weather": True}}
+    response = requests.get(url, params=params, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+    weather = data.get("current_weather", {{}})
+    return {{"success": True, "temperature": weather.get("temperature")}}
+```
+
+### Step 2: Add task handler to scheduler/executor.py
+
+```python
+# Add to FETCH_DATA_REGISTRY (for dynamic {{variable}} resolution)
+FETCH_DATA_REGISTRY["weather"] = lambda: _fetch_weather()
+
+# Add helper function
+def _fetch_weather():
+    result = api_client.get_weather()
+    if result.get("success"):
+        return f"{{result['temperature']}}C"
+    return f"unavailable"
+
+# Add task handler
+def _weather_alert(payload):
+    \"\"\"Send weather update via configured channel.\"\"\"
+    weather = _fetch_weather()
+    text = f"Weather update: {{weather}}"
+    # Route to email, telegram, etc. based on payload
+    task_type = payload.get("channel", "email")
+    if task_type == "email":
+        payload["body"] = text
+        return _send_email(payload)
+    elif task_type == "telegram":
+        payload["text"] = text
+        return _send_telegram(payload)
+    return ("success", text)
+
+# Register in execute_task() routing:
+elif task_type == 'weather_alert':
+    status, message = _weather_alert(payload)
+```
+
+### Step 3: Create the job using job_manager
+
+```python
+from scheduler import job_manager
+
+job_manager.create(
+    job_type="interval",        # interval, daily, once
+    schedule_value="1h",         # 30s, 5m, 1h, 2d, daily:09:00
+    task_type="weather_alert",   # MUST match your executor route
+    payload={{
+        "channel": "email",
+        "to": "user@email.com",
+        "subject": "Weather Update",
+    }}
+)
+```
+
+---
+
+## JOB MANAGEMENT TOOL (scheduler/job_manager.py)
+
+This is your primary tool for creating and managing jobs:
+
+```python
+from scheduler import job_manager
+
+# Create a job
+job_manager.create(job_type, schedule_value, task_type, payload)
+
+# List all jobs
+job_manager.list_jobs()
+
+# Get execution logs
+job_manager.get_logs(job_id)
+job_manager.get_project_logs()
+
+# Control jobs
+job_manager.pause(job_id)
+job_manager.resume(job_id)
+job_manager.run_now(job_id)    # Trigger immediately
+job_manager.delete(job_id)
+```
+
+---
+
+## DYNAMIC CONTENT ({{variable}} system)
+
+Use fetch lists for dynamic content without adding new task types:
+
+```python
+job_manager.create(
+    job_type="interval",
+    schedule_value="10m",
+    task_type="email",
+    payload={{
+        "to": "user@email.com",
+        "subject": "BTC Price",
+        "body": "Bitcoin: {{{{btc_price}}}}",
+        "fetch": ["btc_price"]     # Resolved before sending
+    }}
+)
+```
+
+Available fetch variables: btc_price, eth_price, weather, news
+Add new ones to FETCH_DATA_REGISTRY in executor.py.
+
+---
+
+## API SELECTION
+
+Reference `llm/categories/index.json` for available public APIs.
+Match user's intent to the best category and API.
+
+Common categories:
+- crypto_finance → CoinGecko (prices, market data)
+- weather → Open-Meteo (temperature, forecasts)
+- news → Hacker News API (top stories)
+- entertainment → JokeAPI, trivia
+- stocks → Alpha Vantage (stock prices)
+- location → IP-based geolocation
+- utilities → math, random, QR codes
+
+---
+
+## RULES
+
+1. KEEP execute_task function signature: `def execute_task(job: dict) -> dict`
+2. KEEP all existing handlers (telegram, discord, email, api, trade)
+3. KEEP FETCH_DATA_REGISTRY and resolve_content logic
+4. Return `{{"status": "success"|"failed", "message": str}}` from all handlers
+5. Use services.api_client for ALL external API calls
+6. task_type in job_manager.create() MUST match the elif route in execute_task()
+7. Create the job AFTER adding the handler — task_type must exist first
+
+{context_section}
+
+## USER REQUEST
+
+{user_message}
+"""
+
     def _build_chat_prompt(self, user_message: str, session_context: str = "") -> str:
         """
         Build a chat prompt for ACPX.
@@ -1627,6 +1830,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             elif self.is_discord_bot:
                 full_prompt = self._build_chat_prompt_discord(user_message, session_context)
                 logger.info(f"[CLAUDE-AGENT] Using DISCORD prompt for bot project")
+            elif self.is_scheduler:
+                full_prompt = self._build_chat_prompt_scheduler(user_message, session_context)
+                logger.info(f"[CLAUDE-AGENT] Using SCHEDULER prompt for scheduler project")
             else:
                 full_prompt = self._build_chat_prompt(user_message, session_context)
                 logger.info(f"[CLAUDE-AGENT] Using WEBSITE prompt for web project")
@@ -1701,6 +1907,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         elif self.is_discord_bot:
             prompt = self._build_chat_prompt_discord(user_message, session_context)
             logger.info(f"[ACP-CHAT] Using DISCORD prompt for bot project")
+        elif self.is_scheduler:
+            prompt = self._build_chat_prompt_scheduler(user_message, session_context)
+            logger.info(f"[ACP-CHAT] Using SCHEDULER prompt for scheduler project")
         else:
             prompt = self._build_chat_prompt(user_message, session_context)
             logger.info(f"[ACP-CHAT] Using WEBSITE prompt for web project")
@@ -1970,6 +2179,8 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 prompt = self._build_chat_prompt_telegram(enhanced, session_context)
             elif self.is_discord_bot:
                 prompt = self._build_chat_prompt_discord(enhanced, session_context)
+            elif self.is_scheduler:
+                prompt = self._build_chat_prompt_scheduler(enhanced, session_context)
             else:
                 prompt = self._build_chat_prompt(enhanced, session_context)
             self._enhanced_prompt = None  # Reset
@@ -1979,6 +2190,8 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 prompt = self._build_chat_prompt_telegram(user_message, session_context)
             elif self.is_discord_bot:
                 prompt = self._build_chat_prompt_discord(user_message, session_context)
+            elif self.is_scheduler:
+                prompt = self._build_chat_prompt_scheduler(user_message, session_context)
             else:
                 prompt = self._build_chat_prompt(user_message, session_context)
         
@@ -2172,6 +2385,8 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 prompt = self._build_chat_prompt_telegram(enhanced, session_context)
             elif self.is_discord_bot:
                 prompt = self._build_chat_prompt_discord(enhanced, session_context)
+            elif self.is_scheduler:
+                prompt = self._build_chat_prompt_scheduler(enhanced, session_context)
             else:
                 prompt = self._build_chat_prompt(enhanced, session_context)
             self._enhanced_prompt = None  # Reset
@@ -2181,6 +2396,8 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 prompt = self._build_chat_prompt_telegram(user_message, session_context)
             elif self.is_discord_bot:
                 prompt = self._build_chat_prompt_discord(user_message, session_context)
+            elif self.is_scheduler:
+                prompt = self._build_chat_prompt_scheduler(user_message, session_context)
             else:
                 prompt = self._build_chat_prompt(user_message, session_context)
         
@@ -2365,8 +2582,8 @@ def get_acp_chat_handler(session_key: str, project_path: str = None, project_typ
     # Validate project path based on type
     # type_id 2 = telegram bot, type_id 3 = discord bot (no frontend/src needed)
     # type_id 1 = website (needs frontend/src)
-    if project_type_id in (2, 3):
-        # Bot project - just validate project path exists
+    if project_type_id in (2, 3, 5):
+        # Bot/scheduler project - just validate project path exists
         if not Path(project_path).exists():
             logger.warning(f"[ACP-CHAT] Project path not found: {project_path}")
             return None

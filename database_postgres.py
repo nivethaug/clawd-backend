@@ -395,6 +395,51 @@ def init_schema():
             
             _run_migration(migrate_ai_sessions_domain)
 
+            # Scheduler Jobs table (centralized, ALL scheduler projects)
+            cur.execute("""CREATE TABLE IF NOT EXISTS scheduler_jobs (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                job_type VARCHAR(20) CHECK (job_type IN ('interval', 'daily', 'once')),
+                schedule_value VARCHAR(100) NOT NULL,
+                task_type VARCHAR(50) NOT NULL,
+                payload JSONB DEFAULT '{}',
+                last_run TIMESTAMP,
+                next_run TIMESTAMP,
+                status VARCHAR(20) DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+
+            # Scheduler jobs indexes
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_scheduler_jobs_due
+                ON scheduler_jobs (status, next_run)
+                WHERE status = 'active'
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_scheduler_jobs_project
+                ON scheduler_jobs (project_id, status)
+            """)
+            conn.commit()
+
+            # Scheduler Logs table
+            cur.execute("""CREATE TABLE IF NOT EXISTS scheduler_logs (
+                id SERIAL PRIMARY KEY,
+                job_id INTEGER REFERENCES scheduler_jobs(id) ON DELETE CASCADE,
+                status VARCHAR(20) CHECK (status IN ('success', 'failed')),
+                message TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_scheduler_logs_job
+                ON scheduler_logs (job_id, created_at DESC)
+            """)
+            conn.commit()
+
+            logger.info("✓ Added scheduler_jobs and scheduler_logs tables")
+
             logger.info("✓ Database schema initialized")
     finally:
         pool.putconn(conn)

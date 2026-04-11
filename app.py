@@ -356,6 +356,10 @@ app.include_router(ai_chat_router, prefix="/api/ai", tags=["ai-chat"])
 app.include_router(ai_selection_router, prefix="/api/ai", tags=["ai-selection"])
 app.include_router(ai_confirm_router, prefix="/api/ai", tags=["ai-confirm"])
 
+# Register Scheduler Job API router
+from api.scheduler_router import router as scheduler_router
+app.include_router(scheduler_router, prefix="/api/scheduler", tags=["scheduler"])
+
 
 @app.get("/projects", response_model=list[ProjectResponse])
 async def get_projects():
@@ -884,8 +888,94 @@ async def create_project(request: CreateProjectRequest):
                 conn.commit()
             raise HTTPException(status_code=500, detail=error_msg)
 
+    elif type_id == 5:
+        # Scheduler project - trigger scheduler worker
+        logger.info(f"[PROJECT_TYPE] Entering SCHEDULER branch (type_id=5)")
+        logger.info(f"Starting scheduler project creation for project {project_id}")
+
+        try:
+            logger.info(f"[SCHEDULER] Importing scheduler worker modules...")
+            from services.scheduler.worker import run_scheduler_pipeline
+            import threading
+            logger.info(f"[SCHEDULER] Import successful!")
+
+            # Get backend URL for job_manager
+            backend_url = f"http://localhost:{os.getenv('PORT', '8000')}"
+
+            # Run scheduler pipeline in background thread
+            def run_scheduler_worker():
+                try:
+                    success, result_info = run_scheduler_pipeline(
+                        project_id=project_id,
+                        project_name=request.name,
+                        description=request.description or "",
+                        project_path=project_folder_path,
+                        backend_url=backend_url,
+                    )
+
+                    if success:
+                        logger.info(f"✅ Scheduler pipeline completed for project {project_id}")
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE projects SET status = ? WHERE id = ?",
+                                ("ready", project_id)
+                            )
+                            conn.commit()
+                    else:
+                        logger.error(f"❌ Scheduler pipeline failed for project {project_id}")
+                        logger.error(f"Errors: {result_info.get('errors', [])}")
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE projects SET status = ? WHERE id = ?",
+                                ("failed", project_id)
+                            )
+                            conn.commit()
+
+                except Exception as e:
+                    logger.error(f"❌ Scheduler worker error: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE projects SET status = ? WHERE id = ?",
+                            ("failed", project_id)
+                        )
+                        conn.commit()
+
+            # Start worker in background thread
+            worker_thread = threading.Thread(target=run_scheduler_worker, daemon=True)
+            worker_thread.start()
+
+            logger.info(f"✅ Scheduler worker started for project {project_id}")
+
+        except ImportError as e:
+            error_msg = f"Failed to import scheduler services: {e}"
+            logger.error(f"❌ [SCHEDULER] ImportError: {error_msg}")
+            import traceback
+            logger.error(traceback.format_exc())
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        except Exception as e:
+            error_msg = f"Unexpected error in scheduler project creation: {e}"
+            logger.error(f"❌ [SCHEDULER] Unexpected error: {error_msg}")
+            import traceback
+            logger.error(traceback.format_exc())
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
+            raise HTTPException(status_code=500, detail=error_msg)
+
     else:
-        # type_id is neither 1, 2, nor 3 - this is unexpected
+        # type_id is not recognized - no worker triggered
         logger.warning(f"[PROJECT_TYPE] Unknown type_id={type_id}, no worker triggered")
 
     logger.info(f"[PROJECT_TYPE] Finished type routing for project {project_id}")
@@ -1519,7 +1609,8 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     # Check if this is a bot project (telegram=2, discord=3)
     is_telegram_bot = project_metadata.get("type_id") == 2
     is_discord_bot = project_metadata.get("type_id") == 3
-    is_bot_project = is_telegram_bot or is_discord_bot
+    is_scheduler = project_metadata.get("type_id") == 5
+    is_bot_project = is_telegram_bot or is_discord_bot or is_scheduler
 
     # For bot projects, domain is stored directly as "domain" field
     if is_bot_project:
@@ -1568,7 +1659,7 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     cleanup_results = {
         "project_name": project_name,
         "project_path": project_path,
-        "project_type": "telegram_bot" if project_metadata.get("type_id") == 2 else "discord_bot" if project_metadata.get("type_id") == 3 else "website",
+        "project_type": "telegram_bot" if project_metadata.get("type_id") == 2 else "discord_bot" if project_metadata.get("type_id") == 3 else "scheduler" if project_metadata.get("type_id") == 5 else "website",
         "steps": {}
     }
 
@@ -1577,7 +1668,8 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     project_type_id = project_metadata.get("type_id")
     is_telegram_bot = project_type_id == 2 or "/telegram/" in project_path.replace("\\", "/")
     is_discord_bot = project_type_id == 3 or "/discord/" in project_path.replace("\\", "/")
-    is_bot_project = is_telegram_bot or is_discord_bot
+    is_scheduler = project_type_id == 5 or "/scheduler/" in project_path.replace("\\", "/")
+    is_bot_project = is_telegram_bot or is_discord_bot or is_scheduler
     
     # Extract project_id from path (e.g., "124_test-api-project_20260220_153219" -> 124)
     path_basename = os.path.basename(project_path)
@@ -1631,7 +1723,28 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
 
         # Return early - discord cleanup handles all infrastructure
         return cleanup_results
-    
+
+    elif is_scheduler:
+        # Scheduler project - clear jobs from main DB + remove directory
+        logger.info(f"Using scheduler cleanup for project {project_id}")
+        try:
+            from services.scheduler import clear_jobs
+            cleared = clear_jobs(project_id)
+            cleanup_results["steps"]["scheduler_jobs"] = {"cleared": cleared}
+            logger.info(f"Cleared {cleared} scheduler jobs for project {project_id}")
+        except Exception as e:
+            logger.error(f"Error clearing scheduler jobs: {e}")
+            cleanup_results["steps"]["scheduler_jobs"] = {"error": str(e)}
+
+        try:
+            cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path)
+        except Exception as e:
+            logger.error(f"Error removing project directory: {e}")
+            cleanup_results["steps"]["directory"] = {"error": str(e)}
+
+        logger.info(f"Scheduler cleanup completed")
+        return cleanup_results
+
     # STEP 1: Stop and remove PM2 services (for non-telegram projects)
     # Website project - use existing PM2 cleanup
     # use domain for PM2 service names (matches provisioning logic)

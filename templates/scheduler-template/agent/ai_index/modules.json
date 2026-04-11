@@ -1,0 +1,77 @@
+{
+  "scheduler": {
+    "description": "Task execution and job management - executor (AI-modifiable) + job_manager (LLM tool)",
+    "files": [
+      "scheduler/executor.py",
+      "scheduler/job_manager.py",
+      "scheduler/__init__.py"
+    ],
+    "responsibilities": [
+      "Task type routing (telegram, discord, email, api, trade + AI-added)",
+      "Dynamic content resolution via FETCH_DATA_REGISTRY",
+      "Job CRUD via backend REST API (job_manager)",
+      "{{variable}} template system"
+    ]
+  },
+  "services": {
+    "description": "External API helpers - AI adds new data source functions here",
+    "files": [
+      "services/api_client.py",
+      "services/__init__.py"
+    ],
+    "responsibilities": [
+      "Public API calls (crypto, weather, news, etc.)",
+      "Generic fetch_json() and safe_get() utilities",
+      "AI-extensible helper functions"
+    ]
+  },
+  "config": {
+    "description": "Environment configuration - project identity and task tokens",
+    "files": [
+      "config.py"
+    ],
+    "responsibilities": [
+      "PROJECT_ID, PROJECT_PATH, BACKEND_URL",
+      "Task credentials (Telegram, Discord, SMTP)"
+    ]
+  },
+  "entry_point": {
+    "description": "Thin entry point - no server, no database, no scheduler loop",
+    "files": [
+      "main.py"
+    ],
+    "responsibilities": [
+      "Logging setup only"
+    ]
+  },
+  "llm": {
+    "description": "Public API catalog for AI enhancement (17 categories)",
+    "files": [
+      "llm/categories/index.json",
+      "llm/categories/crypto_finance.json",
+      "llm/categories/weather.json",
+      "llm/categories/news.json",
+      "llm/categories/entertainment.json",
+      "llm/categories/stocks.json",
+      "llm/categories/location.json",
+      "llm/categories/utilities.json",
+      "llm/categories/currency.json",
+      "llm/categories/sports.json",
+      "llm/categories/health.json",
+      "llm/categories/ai.json",
+      "llm/categories/science.json",
+      "llm/categories/food.json",
+      "llm/categories/travel.json",
+      "llm/categories/jobs.json",
+      "llm/categories/knowledge.json",
+      "llm/categories/security.json",
+      "llm/categories/ecommerce.json",
+      "llm/categories/images.json"
+    ],
+    "responsibilities": [
+      "17 categories of public APIs with endpoints and parameters",
+      "Keyword matching for intent-to-API selection",
+      "Reference catalog for AI agent"
+    ]
+  }
+}

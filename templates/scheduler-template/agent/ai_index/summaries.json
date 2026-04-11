@@ -1,0 +1,53 @@
+{
+  "scheduler/executor.py": {
+    "summary": "Task execution router with dynamic content resolution. Supports {{variable}} templates in payloads that are resolved to live data before sending. Routes to task-specific handlers (telegram, discord, email, api, trade). AI agents add entries to FETCH_DATA_REGISTRY and new task_type handlers with elif routes in execute_task().",
+    "key_components": [
+      "FETCH_DATA_REGISTRY - maps variable names to data fetch functions",
+      "resolve_content() - replaces {{variable}} with live data",
+      "execute_task(job) - main entry point called by central scheduler",
+      "Task handlers: _send_telegram, _send_discord, _send_email, _call_api, _execute_trade",
+      "Data fetchers: _fetch_crypto, _fetch_weather, _fetch_news"
+    ]
+  },
+  "scheduler/job_manager.py": {
+    "summary": "HTTP client that wraps the backend REST API at /api/scheduler/. This is the LLM's primary tool for creating and managing jobs. All functions call BACKEND_URL/api/scheduler/ endpoints. No direct database access.",
+    "key_components": [
+      "create() - POST /projects/{PROJECT_ID}/jobs",
+      "list_jobs() - GET /projects/{PROJECT_ID}/jobs",
+      "pause/resume/run_now/delete - Job lifecycle control",
+      "get_logs/get_project_logs - Execution history"
+    ]
+  },
+  "scheduler/__init__.py": {
+    "summary": "Package init for scheduler module.",
+    "key_components": []
+  },
+  "services/api_client.py": {
+    "summary": "External API client module. Provides helper functions for public APIs (CoinGecko for crypto, Open-Meteo for weather, Hacker News for news). AI agents add new API functions here. All HTTP requests centralized in this module.",
+    "key_components": [
+      "fetch_json() - generic JSON fetcher utility",
+      "safe_get() - safe nested dict access",
+      "get_crypto_price() - CoinGecko integration",
+      "get_weather() - Open-Meteo integration",
+      "get_news() - Hacker News integration"
+    ]
+  },
+  "services/__init__.py": {
+    "summary": "Package init for services module.",
+    "key_components": []
+  },
+  "config.py": {
+    "summary": "Environment configuration loaded via python-dotenv. Contains PROJECT_ID, PROJECT_PATH, BACKEND_URL (for job_manager), and optional task credentials (TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, SMTP_*). No DATABASE_URL — jobs are in main DB.",
+    "key_components": [
+      "PROJECT_ID, PROJECT_PATH - project identity",
+      "BACKEND_URL - for job_manager API calls",
+      "Task tokens: TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, SMTP_*"
+    ]
+  },
+  "main.py": {
+    "summary": "Thin entry point. No FastAPI, no database, no scheduler loop. The centralized backend handles all scheduling, job storage, and execution. This file only sets up logging.",
+    "key_components": [
+      "Logging configuration"
+    ]
+  }
+}

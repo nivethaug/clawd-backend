@@ -1,0 +1,186 @@
+{
+  "execute_task": {
+    "type": "function",
+    "file": "scheduler/executor.py",
+    "start_line": 140,
+    "end_line": 189,
+    "module": "scheduler",
+    "description": "execute_task(job) - Main entry point called by central execution engine. Resolves dynamic content, routes to task handler by task_type. Returns {status, message}."
+  },
+  "resolve_content": {
+    "type": "function",
+    "file": "scheduler/executor.py",
+    "start_line": 81,
+    "end_line": 120,
+    "module": "scheduler",
+    "description": "resolve_content(payload) - Fetches live data via FETCH_DATA_REGISTRY and replaces {{variable}} templates in all string fields."
+  },
+  "FETCH_DATA_REGISTRY": {
+    "type": "registry",
+    "file": "scheduler/executor.py",
+    "start_line": 49,
+    "end_line": 54,
+    "module": "scheduler",
+    "description": "FETCH_DATA_REGISTRY - Maps variable names (btc_price, eth_price, weather, news) to fetch functions. AI adds new entries here."
+  },
+  "_deep_replace": {
+    "type": "function",
+    "file": "scheduler/executor.py",
+    "start_line": 123,
+    "end_line": 133,
+    "module": "scheduler",
+    "description": "_deep_replace(obj, resolved) - Recursively replaces {{key}} in all string/dict/list values."
+  },
+  "_send_telegram": {
+    "type": "handler",
+    "file": "scheduler/executor.py",
+    "start_line": 196,
+    "end_line": 214,
+    "module": "scheduler",
+    "description": "_send_telegram(payload) - Send message via Telegram Bot API sendMessage. Requires TELEGRAM_BOT_TOKEN and chat_id in payload."
+  },
+  "_send_discord": {
+    "type": "handler",
+    "file": "scheduler/executor.py",
+    "start_line": 217,
+    "end_line": 230,
+    "module": "scheduler",
+    "description": "_send_discord(payload) - Send message via Discord webhook. Requires webhook_url in payload."
+  },
+  "_send_email": {
+    "type": "handler",
+    "file": "scheduler/executor.py",
+    "start_line": 233,
+    "end_line": 256,
+    "module": "scheduler",
+    "description": "_send_email(payload) - Send email via SMTP. Requires SMTP_* in .env and 'to' in payload."
+  },
+  "_call_api": {
+    "type": "handler",
+    "file": "scheduler/executor.py",
+    "start_line": 259,
+    "end_line": 279,
+    "module": "scheduler",
+    "description": "_call_api(payload) - HTTP request to any URL. Method, headers, body from payload."
+  },
+  "_execute_trade": {
+    "type": "handler",
+    "file": "scheduler/executor.py",
+    "start_line": 282,
+    "end_line": 290,
+    "module": "scheduler",
+    "description": "_execute_trade(payload) - Paper trade placeholder (safe, no real execution)."
+  },
+  "_fetch_crypto": {
+    "type": "function",
+    "file": "scheduler/executor.py",
+    "start_line": 57,
+    "end_line": 62,
+    "module": "scheduler",
+    "description": "_fetch_crypto(coin) - Fetches crypto price via api_client.get_crypto_price(), returns formatted string."
+  },
+  "_fetch_weather": {
+    "type": "function",
+    "file": "scheduler/executor.py",
+    "start_line": 65,
+    "end_line": 70,
+    "module": "scheduler",
+    "description": "_fetch_weather() - Fetches weather via api_client.get_weather(), returns formatted string."
+  },
+  "_fetch_news": {
+    "type": "function",
+    "file": "scheduler/executor.py",
+    "start_line": 73,
+    "end_line": 78,
+    "module": "scheduler",
+    "description": "_fetch_news() - Fetches top stories via api_client.get_news(), returns pipe-separated titles."
+  },
+  "job_manager.create": {
+    "type": "function",
+    "file": "scheduler/job_manager.py",
+    "start_line": 46,
+    "end_line": 64,
+    "module": "scheduler",
+    "description": "job_manager.create(job_type, schedule_value, task_type, payload) - Create new job via POST /api/scheduler/projects/{id}/jobs"
+  },
+  "job_manager.list_jobs": {
+    "type": "function",
+    "file": "scheduler/job_manager.py",
+    "start_line": 67,
+    "end_line": 69,
+    "module": "scheduler",
+    "description": "job_manager.list_jobs() - List all jobs for this project via GET /api/scheduler/projects/{id}/jobs"
+  },
+  "job_manager.pause": {
+    "type": "function",
+    "file": "scheduler/job_manager.py",
+    "start_line": 93,
+    "end_line": 95,
+    "module": "scheduler",
+    "description": "job_manager.pause(job_id) - Pause an active job via POST /api/scheduler/jobs/{id}/pause"
+  },
+  "job_manager.resume": {
+    "type": "function",
+    "file": "scheduler/job_manager.py",
+    "start_line": 98,
+    "end_line": 100,
+    "module": "scheduler",
+    "description": "job_manager.resume(job_id) - Resume a paused job via POST /api/scheduler/jobs/{id}/resume"
+  },
+  "job_manager.run_now": {
+    "type": "function",
+    "file": "scheduler/job_manager.py",
+    "start_line": 103,
+    "end_line": 105,
+    "module": "scheduler",
+    "description": "job_manager.run_now(job_id) - Trigger job immediately via POST /api/scheduler/jobs/{id}/run"
+  },
+  "job_manager.get_logs": {
+    "type": "function",
+    "file": "scheduler/job_manager.py",
+    "start_line": 108,
+    "end_line": 110,
+    "module": "scheduler",
+    "description": "job_manager.get_logs(job_id) - Get execution logs via GET /api/scheduler/jobs/{id}/logs"
+  },
+  "fetch_json": {
+    "type": "function",
+    "file": "services/api_client.py",
+    "start_line": 20,
+    "end_line": 41,
+    "module": "services",
+    "description": "fetch_json(url, params, timeout) - Generic JSON fetcher for public APIs with error handling."
+  },
+  "safe_get": {
+    "type": "function",
+    "file": "services/api_client.py",
+    "start_line": 44,
+    "end_line": 56,
+    "module": "services",
+    "description": "safe_get(data, *keys, default) - Safely get nested dictionary value."
+  },
+  "get_crypto_price": {
+    "type": "api",
+    "file": "services/api_client.py",
+    "start_line": 63,
+    "end_line": 92,
+    "module": "services",
+    "description": "get_crypto_price(coin_id, currency) - Fetch crypto price from CoinGecko API."
+  },
+  "get_weather": {
+    "type": "api",
+    "file": "services/api_client.py",
+    "start_line": 95,
+    "end_line": 127,
+    "module": "services",
+    "description": "get_weather(latitude, longitude) - Fetch weather from Open-Meteo API."
+  },
+  "get_news": {
+    "type": "api",
+    "file": "services/api_client.py",
+    "start_line": 130,
+    "end_line": 155,
+    "module": "services",
+    "description": "get_news(query, page) - Fetch top stories from Hacker News API."
+  }
+}

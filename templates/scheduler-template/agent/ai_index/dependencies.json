@@ -1,0 +1,46 @@
+{
+  "scheduler/executor.py": {
+    "imports": [
+      "config",
+      "services.api_client",
+      "requests",
+      "smtplib"
+    ],
+    "used_by": ["central execution engine (services/scheduler/execution_engine.py)"]
+  },
+  "scheduler/job_manager.py": {
+    "imports": [
+      "os",
+      "requests"
+    ],
+    "used_by": ["executor.py (LLM calls via import)", "AI agent (direct import)"]
+  },
+  "scheduler/__init__.py": {
+    "imports": [],
+    "used_by": ["scheduler/executor.py", "scheduler/job_manager.py"]
+  },
+  "services/api_client.py": {
+    "imports": [
+      "requests",
+      "config"
+    ],
+    "used_by": ["scheduler/executor.py"]
+  },
+  "services/__init__.py": {
+    "imports": [],
+    "used_by": ["services/api_client.py"]
+  },
+  "config.py": {
+    "imports": [
+      "os",
+      "dotenv"
+    ],
+    "used_by": ["scheduler/executor.py", "services/api_client.py", "main.py"]
+  },
+  "main.py": {
+    "imports": [
+      "logging"
+    ],
+    "used_by": []
+  }
+}

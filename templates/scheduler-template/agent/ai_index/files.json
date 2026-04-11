@@ -1,0 +1,82 @@
+{
+  "scheduler/executor.py": {
+    "path": "scheduler/executor.py",
+    "lines": 291,
+    "type": "task_router",
+    "purpose": "Routes task execution by type with dynamic content resolution. AI agents add FETCH_DATA_REGISTRY entries and task handlers here.",
+    "functions": [
+      "resolve_content()",
+      "_deep_replace()",
+      "execute_task()",
+      "_send_telegram()",
+      "_send_discord()",
+      "_send_email()",
+      "_call_api()",
+      "_execute_trade()",
+      "_fetch_crypto()",
+      "_fetch_weather()",
+      "_fetch_news()"
+    ],
+    "registry": "FETCH_DATA_REGISTRY"
+  },
+  "scheduler/job_manager.py": {
+    "path": "scheduler/job_manager.py",
+    "lines": 121,
+    "type": "api_client",
+    "purpose": "HTTP client wrapping the backend REST API at /api/scheduler/. This is the LLM's tool for creating and managing jobs.",
+    "functions": [
+      "create()",
+      "list_jobs()",
+      "get()",
+      "update()",
+      "delete()",
+      "pause()",
+      "resume()",
+      "run_now()",
+      "get_logs()",
+      "get_project_logs()",
+      "clear_all()"
+    ]
+  },
+  "scheduler/__init__.py": {
+    "path": "scheduler/__init__.py",
+    "lines": 3,
+    "type": "package",
+    "purpose": "Package init for scheduler module",
+    "functions": []
+  },
+  "services/api_client.py": {
+    "path": "services/api_client.py",
+    "lines": 156,
+    "type": "api_client",
+    "purpose": "External API helper functions. AI agents add new data source functions here.",
+    "functions": [
+      "fetch_json()",
+      "safe_get()",
+      "get_crypto_price()",
+      "get_weather()",
+      "get_news()"
+    ]
+  },
+  "services/__init__.py": {
+    "path": "services/__init__.py",
+    "lines": 3,
+    "type": "package",
+    "purpose": "Package init for services module",
+    "functions": []
+  },
+  "config.py": {
+    "path": "config.py",
+    "lines": 30,
+    "type": "configuration",
+    "purpose": "Environment variable loading: PROJECT_ID, PROJECT_PATH, BACKEND_URL, task tokens",
+    "functions": []
+  },
+  "main.py": {
+    "path": "main.py",
+    "lines": 14,
+    "type": "entry_point",
+    "purpose": "Thin entry point. No server, no database, no scheduler loop. All centralized.",
+    "functions": []
+  }
+}

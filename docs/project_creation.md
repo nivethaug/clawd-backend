@@ -1,6 +1,6 @@
 # Project Creation - Complete Reference
 
-> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-04-10
+> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-04-11
 
 ---
 
@@ -17,6 +17,16 @@
 | `/projects/{id}/files` | GET | `app.py` | 2154-2185 | List project files |
 | `/projects/{id}/files/{path}` | GET | `app.py` | 2187-2225 | Get file content |
 | `/projects/{id}/files/{path}` | PUT | `app.py` | 2227-2265 | Save file content |
+| `/api/scheduler/projects/{pid}/jobs` | POST | `api/scheduler_router.py` | 77-95 | Create scheduler job |
+| `/api/scheduler/projects/{pid}/jobs` | GET | `api/scheduler_router.py` | 98-106 | List project jobs |
+| `/api/scheduler/jobs/{jid}` | GET | `api/scheduler_router.py` | 109-115 | Get job details |
+| `/api/scheduler/jobs/{jid}` | PUT | `api/scheduler_router.py` | 118-139 | Update job |
+| `/api/scheduler/jobs/{jid}` | DELETE | `api/scheduler_router.py` | 142-148 | Delete job |
+| `/api/scheduler/jobs/{jid}/pause` | POST | `api/scheduler_router.py` | 151-160 | Pause job |
+| `/api/scheduler/jobs/{jid}/resume` | POST | `api/scheduler_router.py` | 163-170 | Resume job |
+| `/api/scheduler/jobs/{jid}/run` | POST | `api/scheduler_router.py` | 173-180 | Trigger job now |
+| `/api/scheduler/jobs/{jid}/logs` | GET | `api/scheduler_router.py` | 194-211 | Get job logs |
+| `/api/scheduler/projects/{pid}/logs` | GET | `api/scheduler_router.py` | 214-233 | Get project logs |
 
 ---
 
@@ -58,6 +68,16 @@
 }
 ```
 
+### Scheduler Project Request (type_id=5):
+```json
+{
+  "name": "my-scheduler",
+  "description": "Send BTC price via email every 10 minutes",
+  "user_id": 1,
+  "type_id": 5
+}
+```
+
 **Response:**
 ```json
 {
@@ -79,7 +99,7 @@
 | `domain` | string | No | Subdomain prefix (auto-generated if omitted) |
 | `description` | string | No | Project description |
 | `user_id` | integer | Yes | User ID owning the project |
-| `type_id` | integer | Yes | Project type: 1=Website, 2=Telegram Bot, 3=Discord Bot |
+| `type_id` | integer | Yes | Project type: 1=Website, 2=Telegram Bot, 3=Discord Bot, 5=Scheduler |
 | `template_id` | string | Conditional | Template ID (required for type_id=1) |
 | `bot_token` | string | Conditional | Bot token (required for type_id=2 Telegram, type_id=3 Discord) |
 
@@ -114,6 +134,15 @@
 | 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
 | 3. Worker Trigger | `app.py` | 786-859 | Start background discord worker thread |
 | 4. Discord Pipeline | `services/discord/worker.py` | 90-430 | Execute 12-step pipeline |
+
+### Entry Point Flow (Scheduler Projects - type_id=5)
+
+| Step | File | Lines | Description |
+|------|------|-------|-------------|
+| 1. API Request | `app.py` | 891-895 | No bot_token required, enter scheduler branch |
+| 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
+| 3. Worker Trigger | `app.py` | 896-950 | Start background scheduler worker thread |
+| 4. Scheduler Pipeline | `services/scheduler/worker.py` | 33-151 | Execute 4-step pipeline |
 
 ---
 
@@ -443,6 +472,187 @@ python scripts/dreamtest.py discord --name "My Bot" --token "YOUR_DISCORD_TOKEN"
 
 ---
 
+## Scheduler Pipeline (type_id=5)
+
+### Pipeline Overview
+
+**Pattern**: Copy template → inject env → AI enhance → validate
+**Total Steps**: 4 steps
+**Duration**: ~2-3 minutes (mostly AI enhancement)
+**Key Difference**: No PM2, no nginx, no DNS, no webhook — centralized scheduler runs jobs
+
+### Pipeline Steps
+
+| Step | Function | File | Lines | Description |
+|------|----------|------|-------|-------------|
+| 1 | `copy_scheduler_template()` | `services/scheduler/template.py` | 31-78 | Copy template from `templates/scheduler-template/` to `{project_path}/scheduler/` |
+| 2 | `inject_scheduler_env()` | `services/scheduler/env_injector.py` | 21-99 | Create .env with `PROJECT_ID`, `PROJECT_PATH`, `BACKEND_URL`, task tokens |
+| 3 | `SchedulerEditor.enhance_executor()` | `services/scheduler/editor.py` | 34-84 | Claude AI modifies executor.py + api_client.py based on description |
+| 4 | `validate_scheduler_project()` + metadata save | `services/scheduler/worker.py` | 124-141 | Validate `execute_task()` exists, save `project.json` |
+
+### Scheduler Project Configuration
+
+**No PM2 Process:** Jobs run in the centralized scheduler (no per-project process)
+**No Nginx/DNS:** No webhook routing needed
+**No Port Allocation:** No HTTP server per project
+
+**Environment Variables (.env):**
+| Variable | Source | Example |
+|----------|--------|---------|
+| `PROJECT_ID` | Injected by worker.py | `123` |
+| `PROJECT_PATH` | Injected by worker.py | `/root/clawd-projects/123_my-scheduler/` |
+| `BACKEND_URL` | Auto-generated | `http://localhost:8000` |
+| `TELEGRAM_BOT_TOKEN` | Optional (user input) | `1234567890:ABCdef...` |
+| `DISCORD_BOT_TOKEN` | Optional (user input) | `MTIzNDU2...` |
+| `SMTP_HOST` | Optional (user input) | `smtp.gmail.com` |
+| `SMTP_PORT` | Optional (user input) | `587` |
+| `SMTP_USER` | Optional (user input) | `user@gmail.com` |
+| `SMTP_PASS` | Optional (user input) | `app-password` |
+
+**Job Management:** Via REST API at `/api/scheduler/` (not direct DB access)
+
+### Scheduler Template Structure
+
+```
+scheduler/
+├── executor.py          # Task execution engine (AI modification target)
+├── job_manager.py       # HTTP client for job CRUD (LLM's tool)
+├── __init__.py          # Package init
+├── config.py            # Configuration loader
+├── main.py              # Standalone runner (optional)
+├── requirements.txt     # Dependencies
+├── .env.example         # Environment template
+├── services/
+│   ├── __init__.py
+│   └── api_client.py    # External API helper functions (AI modification target)
+└── llm/categories/      # API catalog for intent detection (17 categories)
+    ├── index.json        # Category index
+    ├── crypto_finance.json
+    ├── weather.json
+    ├── news.json
+    └── ...
+```
+
+### Job Management API
+
+**Router:** `api/scheduler_router.py` (prefix: `/api/scheduler`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/projects/{project_id}/jobs` | Create a new job |
+| GET | `/projects/{project_id}/jobs` | List project jobs |
+| GET | `/jobs/{job_id}` | Get job details |
+| PUT | `/jobs/{job_id}` | Update job (schedule, payload, status) |
+| DELETE | `/jobs/{job_id}` | Delete a job |
+| POST | `/jobs/{job_id}/pause` | Pause an active job |
+| POST | `/jobs/{job_id}/resume` | Resume a paused job |
+| POST | `/jobs/{job_id}/run` | Trigger job immediately |
+| GET | `/jobs/{job_id}/logs` | Get job execution logs |
+| GET | `/projects/{project_id}/logs` | Get all project logs |
+
+### Job Manager Helper (LLM Tool)
+
+**File:** `templates/scheduler-template/scheduler/job_manager.py`
+
+The LLM uses this Python module during chat to create and manage jobs:
+
+```python
+from scheduler import job_manager
+
+# Create a job
+job_manager.create("interval", "10m", "btc_email", {"to": "user@email.com"})
+
+# List, control, and query jobs
+job_manager.list_jobs()
+job_manager.pause(job_id)
+job_manager.resume(job_id)
+job_manager.run_now(job_id)
+job_manager.delete(job_id)
+job_manager.get_logs(job_id)
+```
+
+### AI Enhancement Details
+
+**Step 3 - Claude Enhancement**:
+
+**Allowed Files** (AI can modify):
+- `scheduler/executor.py` — Add task handlers + FETCH_DATA_REGISTRY entries
+- `services/api_client.py` — Add API helper functions
+
+**Protected Files** (AI cannot modify):
+- `scheduler/job_manager.py`, `config.py`, `main.py`, `requirements.txt`
+
+**What Claude Does**:
+1. Analyzes user description for intent (e.g., "BTC price via email every 10min")
+2. Matches to API category from `llm/categories/index.json`
+3. Adds API helper to `services/api_client.py`
+4. Adds task handler + FETCH_DATA_REGISTRY entry to `executor.py`
+5. Registers route in `execute_task()` function
+6. Validates `execute_task()` and `FETCH_DATA_REGISTRY` still exist
+
+**Dynamic Content System (`{{variable}}`):**
+
+Jobs can use `{{variable}}` placeholders resolved at execution time:
+```python
+job_manager.create("interval", "10m", "btc_email", {
+    "body": "Bitcoin: {{btc_price}}",
+    "fetch": ["btc_price"]  # Resolved before sending
+})
+```
+
+### End-to-End Job Creation Flow
+
+```
+User: "send me BTC price via email every 10 minutes"
+  → acp_chat_handler._build_chat_prompt_scheduler()
+  → Claude Agent modifies:
+     1. services/api_client.py → adds get_crypto_price()
+     2. scheduler/executor.py → adds _btc_email() handler + route
+  → Claude Agent calls job_manager (HTTP → API):
+     job_manager.create("interval", "10m", "btc_email", {...})
+  → API Router → services/scheduler/jobs.create_job()
+  → INSERT INTO scheduler_jobs
+  → Centralized scheduler picks up on next poll → runs executor._btc_email()
+```
+
+### Centralized Scheduler
+
+**File:** `services/scheduler/scheduler.py`
+
+The central scheduler runs as a single process:
+- Polls `scheduler_jobs` table for due jobs
+- Uses `services/scheduler/execution_engine.py` to execute each job
+- Execution engine loads project's `executor.py` and calls `execute_task(job)`
+- Logs results to `scheduler_logs` table
+
+**Status Updates:**
+- Creating → Pipeline running
+- Ready → All 4 steps completed (template copied, env injected, AI enhanced)
+- Failed → Pipeline error (template missing, enhancement failed)
+
+**Error Handling:**
+- Step 1-2 failures: Halt pipeline, mark as failed
+- Step 3 (AI enhancement) failures: Continue with base executor (still functional)
+- Step 4 validation failures: Log warning, continue
+
+### Scheduler vs Bot Comparison
+
+| Aspect | Telegram (type_id=2) | Discord (type_id=3) | Scheduler (type_id=5) |
+|--------|---------------------|---------------------|----------------------|
+| **PM2 Process** | `tg-bot-{id}` | `dc-bot-{id}` | None (centralized) |
+| **Nginx** | Yes (webhook) | Yes (health) | None |
+| **DNS** | Yes | Yes | None |
+| **Port** | `8000 + id%1000` | `8000 + id%1000` | None |
+| **Webhook** | Telegram API | No-op (WebSocket) | None |
+| **Job Execution** | On message | On message | Centralized scheduler poll |
+| **DB Access** | Direct (own DB) | Direct (own DB) | Via API (main DB) |
+| **Template Dir** | `telegram/` | `discord/` | `scheduler/` |
+| **AI Target** | `services/ai_logic.py` | `services/ai_logic.py` | `scheduler/executor.py` + `services/api_client.py` |
+| **Pipeline Steps** | 11 | 12 | 4 |
+| **Cleanup** | PM2+nginx+DNS+DB+dir | PM2+nginx+DNS+DB+dir | Clear jobs + dir |
+
+---
+
 ## Pipeline Phases
 
 | Phase | Function | File | Lines | Description |
@@ -553,24 +763,27 @@ python scripts/dreamtest.py discord --name "My Bot" --token "YOUR_DISCORD_TOKEN"
 
 ### Project Type Support
 
-The ACP chat handler supports all three project types via prompt dispatching:
+The ACP chat handler supports all four project types via prompt dispatching:
 
 | Project Type | type_id | Flag | Prompt Method |
 |-------------|---------|------|---------------|
 | Website | 1 | `is_website` | `_build_chat_prompt_website()` |
 | Telegram Bot | 2 | `is_telegram_bot` | `_build_chat_prompt_telegram()` |
 | Discord Bot | 3 | `is_discord_bot` | `_build_chat_prompt_discord()` |
+| Scheduler | 5 | `is_scheduler` | `_build_chat_prompt_scheduler()` |
 
 **Initialization** (`acp_chat_handler.py:__init__`):
 - `self.project_id` - Project ID (required for bot PM2 commands)
 - `self.domain` - Project domain (from DB, fallback to project_name)
 - `self.is_telegram_bot` - True for type_id=2
 - `self.is_discord_bot` - True for type_id=3
-- `self.is_bot_project` - True for type_id=2 or 3
+- `self.is_scheduler` - True for type_id=5
+- `self.is_bot_project` - True for type_id=2, 3, or 5
 
 **Path Validation:**
 - Website projects: `{project_path}/frontend/src/`
 - Bot projects (type_id=2,3): `{project_path}/telegram/` or `{project_path}/discord/`
+- Scheduler projects (type_id=5): `{project_path}/scheduler/`
 
 ### Discord Chat Prompt
 
@@ -585,7 +798,25 @@ The ACP chat handler supports all three project types via prompt dispatching:
 - Protected files: main.py, config.py, core/database.py
 
 **Prompt Dispatching:**
-All 6 prompt-dispatching locations in the handler include `elif self.is_discord_bot:` branches between telegram and website conditions.
+All 6 prompt-dispatching locations in the handler include `elif self.is_scheduler:` branches between discord and website conditions.
+
+### Scheduler Chat Prompt
+
+**Method:** `_build_chat_prompt_scheduler()` (line 198)
+
+**What the prompt covers:**
+- Modify `scheduler/executor.py` — Add task handlers and FETCH_DATA_REGISTRY entries
+- Modify `services/api_client.py` — Add API helper functions
+- Create jobs using `scheduler/job_manager.py` (HTTP client wrapping the REST API)
+- Manage jobs — list, pause, resume, delete via job_manager
+- API selection from `llm/categories/index.json` (17 categories)
+
+**Key differences from Bot prompts:**
+- No PM2 commands (centralized scheduler)
+- No `process_user_input` — uses `execute_task(job)` instead
+- Primary tool is `job_manager.py` (not direct code changes)
+- Two modification targets: `executor.py` + `api_client.py`
+- Dynamic `{{variable}}` system for runtime content resolution
 
 ---
 
@@ -659,6 +890,18 @@ All 6 prompt-dispatching locations in the handler include `elif self.is_discord_
 | Discord Editor | `services/discord/editor.py` | 21-447 | AI bot enhancement | `DiscordBotEditor.enhance_bot_logic()` |
 | Discord Worker | `services/discord/worker.py` | 90-477 | 12-step pipeline | `run_discord_bot_pipeline()` |
 | Discord Cleanup | `services/discord/cleanup_infra.py` | 16-184 | Full infra cleanup | `cleanup_discord_bot_infrastructure()` |
+| Scheduler API Router | `api/scheduler_router.py` | 1-234 | Job CRUD REST endpoints | `api_create_job()`, `api_list_jobs()`, `api_get_job_logs()` |
+| Scheduler Jobs | `services/scheduler/jobs.py` | — | Job DB operations | `create_job()`, `update_job()`, `delete_job()`, `list_jobs()`, `clear_jobs()` |
+| Scheduler Core | `services/scheduler/scheduler.py` | — | Centralized poll loop | `run_scheduler()` |
+| Scheduler Execution | `services/scheduler/execution_engine.py` | — | Load & run executor.py | `execute_job()` |
+| Scheduler Parser | `services/scheduler/parser.py` | — | Parse schedule values | parse interval/daily/once |
+| Scheduler Logger | `services/scheduler/logger.py` | — | Job execution logging | `log_job()` |
+| Scheduler Template | `services/scheduler/template.py` | 1-93 | Copy scheduler template | `copy_scheduler_template()`, `verify_template_structure()` |
+| Scheduler Env Injector | `services/scheduler/env_injector.py` | 1-99 | Inject .env for scheduler | `inject_scheduler_env()` |
+| Scheduler Editor | `services/scheduler/editor.py` | 1-209 | AI enhancement of executor | `SchedulerEditor.enhance_executor()` |
+| Scheduler Validator | `services/scheduler/validator.py` | 1-44 | Validate executor.py | `validate_scheduler_project()` |
+| Scheduler Worker | `services/scheduler/worker.py` | 1-181 | 4-step pipeline | `run_scheduler_pipeline()` |
+| Job Manager (template) | `templates/scheduler-template/scheduler/job_manager.py` | 1-68 | LLM tool for job CRUD | `create()`, `list_jobs()`, `pause()`, `resume()` |
 
 ### FrontendOptimizer Changes (Phase 9 Step 0)
 
@@ -910,14 +1153,15 @@ Look for:
 
 ### Bot Project Cleanup
 
-**File:** `app.py` → `cleanup_infrastructure()` (line 1475)
+**File:** `app.py` → `cleanup_infrastructure()` (line 1565)
 
-Bot projects (type_id=2,3) use dedicated cleanup modules that handle all infrastructure removal:
+Bot and scheduler projects use dedicated cleanup logic that handles all infrastructure removal:
 
-| Bot Type | Cleanup Module | PM2 Process |
-|----------|---------------|-------------|
+| Type | Cleanup Module / Logic | PM2 Process |
+|------|----------------------|-------------|
 | Telegram (type_id=2) | `services/telegram/cleanup_infra.py` | `tg-bot-{project_id}` |
 | Discord (type_id=3) | `services/discord/cleanup_infra.py` | `dc-bot-{project_id}` |
+| Scheduler (type_id=5) | Inline in `cleanup_infrastructure()` | None |
 
 **Discord Bot Cleanup Steps** (`services/discord/cleanup_infra.py`):
 
@@ -930,10 +1174,17 @@ Bot projects (type_id=2,3) use dedicated cleanup modules that handle all infrast
 | 5 | Drop PostgreSQL database | DROP DATABASE and DROP USER (if applicable) |
 | 6 | Remove project directory | `shutil.rmtree(project_path)` |
 
+**Scheduler Cleanup Steps** (inline in `cleanup_infrastructure()`, line 1727):
+
+| Step | Description | Details |
+|------|-------------|---------|
+| 1 | Clear scheduler jobs | `DELETE FROM scheduler_jobs WHERE project_id=X` via `clear_jobs()` |
+| 2 | Remove project directory | `shutil.rmtree(project_path)` |
+
 **Detection Logic:**
 - Primary: `project.json` → `type_id` field
-- Fallback: Path contains `/telegram/` or `/discord/`
-- Bot projects return early from cleanup (dedicated modules handle everything)
+- Fallback: Path contains `/telegram/`, `/discord/`, or `/scheduler/`
+- All bot/scheduler projects return early from cleanup (dedicated logic handles everything)
 
 ### Add New Page Type
 
