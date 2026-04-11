@@ -26,7 +26,7 @@ Usage by AI agents inside executor.py or directly:
 import os
 import requests
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8002")
 PROJECT_ID = os.getenv("PROJECT_ID", "1")
 TIMEOUT = 10
 
