@@ -82,7 +82,7 @@ def create_project(name: str, description: str = "", type_id: int = 1, bot_token
     Returns project data including ID and domain.
     """
     log_info(f"Creating project: {name}")
-    type_names = {1: "Website", 2: "Telegram Bot", 3: "Discord Bot"}
+    type_names = {1: "Website", 2: "Telegram Bot", 3: "Discord Bot", 5: "Scheduler"}
     if type_id in type_names:
         log_info(f"Type: {type_names[type_id]}")
 
@@ -653,6 +653,159 @@ def run_telegram_pipeline_test(
     return result
 
 
+def verify_scheduler(project_id: int) -> Tuple[bool, bool]:
+    """
+    Verify scheduler project deployment.
+
+    Returns (jobs_api_ok, project_ready_ok)
+    """
+    log_check(f"Verifying scheduler project deployment...")
+
+    jobs_api_ok = False
+    project_ready_ok = False
+
+    # Check scheduler jobs API (list jobs for project)
+    jobs_url = f"{API_BASE_URL}/api/scheduler/projects/{project_id}/jobs"
+    log_info(f"Checking scheduler jobs API: {jobs_url}")
+
+    try:
+        response = requests.get(jobs_url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success"):
+                job_count = data.get("count", 0)
+                log_success(f"Scheduler jobs API verified ({job_count} jobs)")
+                jobs_api_ok = True
+            else:
+                log_error(f"Unexpected API response: {data}")
+        else:
+            log_error(f"Scheduler jobs API returned {response.status_code}")
+    except Exception as e:
+        log_error(f"Scheduler jobs API check failed: {e}")
+
+    # Check project logs API
+    logs_url = f"{API_BASE_URL}/api/scheduler/projects/{project_id}/logs"
+    log_info(f"Checking scheduler logs API: {logs_url}")
+
+    try:
+        response = requests.get(logs_url, timeout=10)
+        if response.status_code == 200:
+            log_success("Scheduler logs API verified")
+            project_ready_ok = True
+        else:
+            log_error(f"Scheduler logs API returned {response.status_code}")
+    except Exception as e:
+        log_error(f"Scheduler logs API check failed: {e}")
+
+    return jobs_api_ok, project_ready_ok
+
+
+def run_scheduler_pipeline_test(
+    name: str,
+    description: str = "",
+    timeout: int = DEFAULT_TIMEOUT,
+    agent_mode: bool = False,
+    skip_verify: bool = False
+) -> Dict:
+    """
+    Run Scheduler project pipeline test.
+
+    Returns result dict with status and project info.
+    """
+    # Step 1: Create scheduler project (no bot_token needed)
+    project = create_project(name, description, type_id=5)
+    if not project:
+        return {
+            "success": False,
+            "error": "Failed to create scheduler project",
+            "exit_code": 1
+        }
+
+    project_id = project["id"]
+
+    # Step 2: Monitor pipeline
+    final_status, elapsed = poll_project_status(project_id, timeout, agent_mode)
+
+    result = {
+        "project_id": project_id,
+        "status": final_status,
+        "domain": project.get("domain", ""),
+        "project_path": project.get("project_path", ""),
+        "jobs_api": f"{API_BASE_URL}/api/scheduler/projects/{project_id}/jobs",
+        "pipeline_time": f"{elapsed // 60}m {elapsed % 60}s"
+    }
+
+    if final_status != "ready":
+        result["success"] = False
+        result["error"] = f"Pipeline ended with status: {final_status}"
+        result["exit_code"] = 1 if final_status == "failed" else 2
+        return result
+
+    # Step 3: Verify scheduler deployment
+    if not skip_verify:
+        print()
+        log_info("Running scheduler verification...")
+        print()
+
+        jobs_ok, logs_ok = verify_scheduler(project_id)
+
+        result["verification"] = {
+            "jobs_api": jobs_ok,
+            "logs_api": logs_ok
+        }
+
+        if not all([jobs_ok, logs_ok]):
+            result["success"] = False
+            result["error"] = "Scheduler verification failed"
+            result["exit_code"] = 3
+            return result
+
+    result["success"] = True
+    result["exit_code"] = 0
+
+    if not agent_mode:
+        print()
+        print("=" * 60)
+        print("SCHEDULER PROJECT DEPLOYMENT INFO")
+        print("=" * 60)
+        print(f"Project ID:    {project_id}")
+        print(f"Name:          {project.get('name')}")
+        print(f"Status:        {final_status}")
+        print()
+        print("API Endpoints:")
+        print(f"  Jobs:        {API_BASE_URL}/api/scheduler/projects/{project_id}/jobs")
+        print(f"  Logs:        {API_BASE_URL}/api/scheduler/projects/{project_id}/logs")
+        print()
+        print("No PM2/nginx/DNS — centralized scheduler manages execution.")
+        print("=" * 60)
+        log_success(f"Pipeline completed in {result['pipeline_time']}")
+
+    return result
+
+
+def cmd_scheduler(args) -> int:
+    """Handle scheduler command."""
+    result = run_scheduler_pipeline_test(
+        name=args.name,
+        description=args.desc or "",
+        timeout=args.timeout,
+        agent_mode=args.agent,
+        skip_verify=args.skip_verify
+    )
+
+    if args.agent:
+        output = {
+            "project_id": result.get("project_id"),
+            "status": result.get("status"),
+            "jobs_api": result.get("jobs_api"),
+            "pipeline_time": result.get("pipeline_time"),
+            "success": result.get("success")
+        }
+        print(json.dumps(output, indent=2))
+
+    return result.get("exit_code", 1)
+
+
 def cmd_create(args) -> int:
     """Handle create command."""
     result = run_pipeline_test(
@@ -894,6 +1047,7 @@ Examples:
   dreamtest create --ci
   dreamtest telegram --name "My Bot" --token "123:abc"
   dreamtest discord --name "My Bot" --token "MTIz.abc.def"
+  dreamtest scheduler --name "BTC Tracker" --desc "Send BTC price every 10m"
   dreamtest status 123
         """
     )
@@ -941,6 +1095,17 @@ Examples:
     discord_parser.add_argument("--skip-verify", action="store_true",
                                 help="Skip bot verification")
 
+    # Scheduler command
+    scheduler_parser = subparsers.add_parser("scheduler", help="Create and test a Scheduler project")
+    scheduler_parser.add_argument("--name", "-n", required=True, help="Project name")
+    scheduler_parser.add_argument("--desc", "-d", default="", help="Project description")
+    scheduler_parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                                  help=f"Pipeline timeout in seconds (default: {DEFAULT_TIMEOUT})")
+    scheduler_parser.add_argument("--agent", "-a", action="store_true",
+                                  help="Agent mode - output JSON only")
+    scheduler_parser.add_argument("--skip-verify", action="store_true",
+                                  help="Skip API verification")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -957,6 +1122,10 @@ Examples:
 
     elif args.command == "discord":
         exit_code = cmd_discord(args)
+        sys.exit(exit_code)
+
+    elif args.command == "scheduler":
+        exit_code = cmd_scheduler(args)
         sys.exit(exit_code)
 
     elif args.command == "status":
