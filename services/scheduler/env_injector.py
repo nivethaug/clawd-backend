@@ -65,10 +65,10 @@ def inject_scheduler_env(
         backend_port = os.getenv("PORT", "8002")
         backend_url = f"http://localhost:{backend_port}"
 
-    # SMTP from backend .env (shared)
-    smtp_host = os.getenv("SMTP_HOST", "")
+    # SMTP from backend .env (shared - Hostinger)
+    smtp_host = os.getenv("SMTP_HOST", "smtp.hostinger.com")
     smtp_port = os.getenv("SMTP_PORT", "587")
-    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_user = os.getenv("SMTP_USER", "support@vnalert.tech")
     smtp_pass = os.getenv("SMTP_PASS", "")
 
     # Build env content
@@ -90,13 +90,13 @@ def inject_scheduler_env(
         lines.append(f"\n# Channel: Discord")
         lines.append(f"DISCORD_WEBHOOK_URL={discord_webhook_url}")
 
-    # --- Email channel (SMTP from backend, only recipient per-project) ---
+    # --- Email channel (SMTP auto-injected from backend, only recipient per-project) ---
     if email_to:
         lines.append(f"\n# Channel: Email")
-        if smtp_host:
-            lines.append(f"SMTP_HOST={smtp_host}")
-            lines.append(f"SMTP_PORT={smtp_port}")
-            lines.append(f"SMTP_USER={smtp_user}")
+        lines.append(f"SMTP_HOST={smtp_host}")
+        lines.append(f"SMTP_PORT={smtp_port}")
+        lines.append(f"SMTP_USER={smtp_user}")
+        if smtp_pass:
             lines.append(f"SMTP_PASS={smtp_pass}")
         lines.append(f"EMAIL_TO={email_to}")
 

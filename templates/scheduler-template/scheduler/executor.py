@@ -28,6 +28,7 @@ import logging
 import smtplib
 from typing import Tuple
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 import requests
 
@@ -233,27 +234,38 @@ def _send_discord(payload: dict) -> Tuple[str, str]:
 
 
 def _send_email(payload: dict) -> Tuple[str, str]:
-    """Send an email via SMTP."""
+    """Send an email via SMTP (supports plain text and HTML)."""
     if not SMTP_HOST or not SMTP_USER:
         return ('failed', 'SMTP not configured')
 
     to_addr = payload.get('to', EMAIL_TO)
     subject = payload.get('subject', 'Scheduler Notification')
     body = payload.get('body', payload.get('text', ''))
+    html = payload.get('html', '')
 
     if not to_addr:
         return ('failed', 'Missing "to" address in payload')
-
-    msg = MIMEText(body)
-    msg['Subject'] = subject
-    msg['From'] = SMTP_USER
-    msg['To'] = to_addr
 
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
         server.starttls()
         if SMTP_PASS:
             server.login(SMTP_USER, SMTP_PASS)
-        server.send_message(msg)
+
+        if html:
+            # HTML email
+            msg = MIMEMultipart()
+            msg['From'] = SMTP_USER
+            msg['To'] = to_addr
+            msg['Subject'] = subject
+            msg.attach(MIMEText(html, 'html'))
+        else:
+            # Plain text email
+            msg = MIMEText(body)
+            msg['Subject'] = subject
+            msg['From'] = SMTP_USER
+            msg['To'] = to_addr
+
+        server.sendmail(SMTP_USER, to_addr, msg.as_string())
 
     return ('success', f'Email sent to {to_addr}')
 
