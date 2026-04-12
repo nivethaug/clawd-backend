@@ -3119,6 +3119,10 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 logger.warning(f"[ACP-STREAM] Background save: no content after {max_wait}s")
                         except Exception as e:
                             logger.error(f"[ACP-STREAM] Background save error: {e}")
+                        finally:
+                            # Remove handler from registry after background save completes
+                            active_handlers.pop(request.session_key, None)
+                            logger.info(f"[ACP-STREAM] Background save done, handler removed from registry")
                     
                     # Create task that survives disconnection
                     asyncio.create_task(wait_and_save())
@@ -3135,9 +3139,21 @@ async def chat_stream_endpoint(request: ChatRequest):
                     yield f"data: {event_data}\n\n"
 
                 finally:
-                    # Remove handler from active registry when streaming ends
-                    active_handlers.pop(request.session_key, None)
-                    logger.info(f"[ACP-STREAM] Handler removed from active registry")
+                    # Only remove handler from registry if query is NOT still running
+                    # If client disconnected but query continues in background, keep it registered
+                    # so /chat/status can detect it on page reload
+                    if handler and not handler.is_query_running():
+                        active_handlers.pop(request.session_key, None)
+                        logger.info(f"[ACP-STREAM] Handler removed from active registry (query complete)")
+                    else:
+                        logger.info(f"[ACP-STREAM] Query still running in background, keeping handler in registry")
+
+                    # Schedule delayed cleanup for background queries (remove after 10 min max)
+                    async def delayed_cleanup():
+                        await asyncio.sleep(600)
+                        active_handlers.pop(request.session_key, None)
+                        logger.info(f"[ACP-STREAM] Delayed cleanup: handler removed from registry")
+                    asyncio.create_task(delayed_cleanup())
 
                 yield "data: [DONE]\n\n"
             
