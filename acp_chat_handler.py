@@ -154,6 +154,8 @@ class ACPChatHandler:
     def is_query_running(self) -> bool:
         """Check if a query is currently running."""
         return self._active_agent is not None and not self._query_complete.is_set()
+
+    def _get_chrome_devtools_pids(self) -> set:
         """
         Get current chrome-devtools-mcp PIDs.
         
