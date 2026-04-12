@@ -35,7 +35,7 @@ import requests
 from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
     DISCORD_WEBHOOK_URL,
-    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_TO,
+    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, EMAIL_TO,
     API_ENDPOINT,
 )
 from services import api_client
@@ -238,6 +238,7 @@ def _send_email(payload: dict) -> Tuple[str, str]:
     if not SMTP_HOST or not SMTP_USER:
         return ('failed', 'SMTP not configured')
 
+    from_addr = SMTP_FROM or SMTP_USER
     to_addr = payload.get('to', EMAIL_TO)
     subject = payload.get('subject', 'Scheduler Notification')
     body = payload.get('body', payload.get('text', ''))
@@ -253,7 +254,7 @@ def _send_email(payload: dict) -> Tuple[str, str]:
         if html:
             # HTML email
             msg = MIMEMultipart()
-            msg['From'] = SMTP_USER
+            msg['From'] = from_addr
             msg['To'] = to_addr
             msg['Subject'] = subject
             msg.attach(MIMEText(html, 'html'))
@@ -261,10 +262,10 @@ def _send_email(payload: dict) -> Tuple[str, str]:
             # Plain text email
             msg = MIMEText(body)
             msg['Subject'] = subject
-            msg['From'] = SMTP_USER
+            msg['From'] = from_addr
             msg['To'] = to_addr
 
-        server.sendmail(SMTP_USER, to_addr, msg.as_string())
+        server.sendmail(from_addr, to_addr, msg.as_string())
 
     return ('success', f'Email sent to {to_addr}')
 

@@ -68,8 +68,9 @@ def inject_scheduler_env(
     # SMTP from backend .env (shared - Hostinger)
     smtp_host = os.getenv("SMTP_HOST", "smtp.hostinger.com")
     smtp_port = os.getenv("SMTP_PORT", "465")
-    smtp_user = os.getenv("SMTP_USER", "dreamagent@dreambigwithai.com")
+    smtp_user = os.getenv("SMTP_USER", "support@dreambigwithai.com")
     smtp_pass = os.getenv("SMTP_PASS", "Nivetha@3117")
+    smtp_from = os.getenv("SMTP_FROM", "dreamagent@dreambigwithai.com")  # From alias
 
     # Build env content
     lines = [
@@ -98,6 +99,7 @@ def inject_scheduler_env(
         lines.append(f"SMTP_USER={smtp_user}")
         if smtp_pass:
             lines.append(f"SMTP_PASS={smtp_pass}")
+        lines.append(f"SMTP_FROM={smtp_from}")
         lines.append(f"EMAIL_TO={email_to}")
 
     # --- API channel ---
