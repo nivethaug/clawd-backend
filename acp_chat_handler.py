@@ -34,7 +34,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Configuration
-ACPX_TIMEOUT = 900  # 15 minutes for interactive chat
+ACPX_TIMEOUT = 1800  # 15 minutes for interactive chat
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 USE_PREPROCESSOR = os.getenv("ACP_USE_PREPROCESSOR", "false").lower() == "true"  # DISABLED for ClaudeCodeAgent migration testing
 USE_CLAUDE_AGENT = os.getenv("ACP_USE_CLAUDE_AGENT", "true").lower() == "true" and CLAUDE_AGENT_AVAILABLE  # Prefer Claude Agent
@@ -59,6 +59,7 @@ class ACPChatHandler:
         self.frontend_path = self.project_path / "frontend"
         self.frontend_src_path = self.frontend_path / "src"
         self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)
+        self._active_agent = None  # Currently running agent (for cancellation)
 
         # Progress mapper for user-friendly messages
         self.progress_mapper = ClaudeProgressMapper()
@@ -128,8 +129,31 @@ class ACPChatHandler:
                 
         except Exception as e:
             logger.warning(f"[ACP-CHAT] Could not load project metadata: {e}")
-    
-    def _get_chrome_devtools_pids(self) -> set:
+
+    async def cancel_query(self) -> bool:
+        """
+        Cancel the currently running query by killing the Claude subprocess.
+
+        Returns:
+            True if a query was cancelled, False otherwise
+        """
+        logger.info(f"[ACP-CHAT] Cancel requested for session")
+
+        if self._active_agent:
+            try:
+                result = await self._active_agent.cancel()
+                logger.info(f"[ACP-CHAT] Agent cancel result: {result}")
+            except Exception as e:
+                logger.warning(f"[ACP-CHAT] Error cancelling agent: {e}")
+
+        # Signal completion to unblock any waiting background saves
+        self._query_complete.set()
+        self._active_agent = None
+        return True
+
+    def is_query_running(self) -> bool:
+        """Check if a query is currently running."""
+        return self._active_agent is not None and not self._query_complete.is_set()
         """
         Get current chrome-devtools-mcp PIDs.
         
@@ -2280,6 +2304,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                     on_text=on_chunk,
                     on_progress=on_progress
                 ) as agent:
+                    self._active_agent = agent  # Track for cancellation
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     response = await agent.query(prompt)
                     logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars (extracted answer)")
@@ -2315,6 +2340,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 self._last_query_response = None
             finally:
                 logger.info(f"[ACP-CHAT] run_query task done, setting complete flag")
+                self._active_agent = None  # Clear active agent reference
                 query_complete.set()
                 self._query_complete.set()  # Signal app.py background save
         

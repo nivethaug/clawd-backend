@@ -100,6 +100,7 @@ class ClaudeCodeAgent:
 
         # Internal state
         self._running = False
+        self._current_process = None  # Track running subprocess for cancellation
         self._progress_dots_offset = 0  # For dot animation (1-2-3 cycling)
 
         # Load Claude Code settings
@@ -291,6 +292,25 @@ class ClaudeCodeAgent:
         self._running = False
         logger.info("Agent stopped")
 
+    async def cancel(self) -> bool:
+        """
+        Cancel the currently running query by killing the subprocess.
+
+        Returns:
+            True if a process was killed, False if no process was running
+        """
+        if self._current_process and self._current_process.returncode is None:
+            logger.info("[CLAUDE-AGENT] Cancelling query - killing subprocess")
+            try:
+                self._current_process.kill()
+                await self._current_process.wait()
+            except Exception as e:
+                logger.warning(f"[CLAUDE-AGENT] Error killing process: {e}")
+            self._current_process = None
+            return True
+        logger.info("[CLAUDE-AGENT] Cancel called but no running process found")
+        return False
+
     async def query(self, prompt: str, timeout: float = 900.0) -> Optional[str]:
         """
         Send a query to Claude Code and return the final answer.
@@ -407,6 +427,10 @@ class ClaudeCodeAgent:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.repo_path),
+                env=env,
+                limit=10 * 1024 * 1024  # 10MB limit for large JSON lines
+            )
+            self._current_process = process  # Store for cancellation
                 env=env,
                 limit=10 * 1024 * 1024  # 10MB limit for large JSON lines (screenshots)
             )
@@ -565,6 +589,7 @@ class ClaudeCodeAgent:
 
         finally:
             # Ensure process is cleaned up
+            self._current_process = None
             if process and process.returncode is None:
                 logger.debug("Cleaning up subprocess in finally block")
                 process.kill()

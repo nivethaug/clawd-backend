@@ -155,6 +155,9 @@ DB_PATH = os.getenv("DB_PATH", "/root/clawd-backend/clawdbot_adapter.db")
 DEFAULT_AGENT_ID = "main"
 DEFAULT_CHANNEL = "webchat"
 
+# Active handler registry for cancellation (session_key -> handler)
+active_handlers: Dict[str, Any] = {}
+
 IMAGE_MODEL = "zai/glm-4.6v"
 TEXT_MODEL = "agent:main"
 
@@ -2871,6 +2874,9 @@ async def chat_stream_endpoint(request: ChatRequest):
             
             logger.info(f"[ACP-STREAM] Handler initialized for project: {handler.project_name}")
             logger.info(f"[ACP-STREAM] Frontend path: {handler.frontend_src_path}")
+
+            # Register handler for cancellation support
+            active_handlers[request.session_key] = handler
             
             # Handle image for ACP mode - save to temp file and use path instead of base64
             acp_user_content = user_content
@@ -3127,7 +3133,12 @@ async def chat_stream_endpoint(request: ChatRequest):
                     error_msg = f"Error: {str(stream_err)}"
                     event_data = json.dumps({'error': error_msg})
                     yield f"data: {event_data}\n\n"
-                
+
+                finally:
+                    # Remove handler from active registry when streaming ends
+                    active_handlers.pop(request.session_key, None)
+                    logger.info(f"[ACP-STREAM] Handler removed from active registry")
+
                 yield "data: [DONE]\n\n"
             
             return StreamingResponse(
@@ -3245,6 +3256,53 @@ async def chat_stream_endpoint(request: ChatRequest):
             error_stream(),
             media_type="text/event-stream"
         )
+
+# ============================================================================
+# Chat Cancel & Status Endpoints
+# ============================================================================
+
+class CancelChatRequest(BaseModel):
+    session_key: str
+
+@app.post("/chat/cancel")
+async def cancel_chat(request: CancelChatRequest):
+    """
+    Cancel a running chat query for a session.
+
+    Kills the Claude subprocess and removes the handler from the active registry.
+    Used by the frontend Stop button.
+    """
+    logger.info(f"[CANCEL] Cancel requested for session_key: {request.session_key[:16]}...")
+
+    handler = active_handlers.get(request.session_key)
+    if handler:
+        try:
+            await handler.cancel_query()
+            active_handlers.pop(request.session_key, None)
+            logger.info(f"[CANCEL] Query cancelled successfully")
+            return {"success": True, "message": "Query cancelled"}
+        except Exception as e:
+            logger.error(f"[CANCEL] Error cancelling query: {e}")
+            active_handlers.pop(request.session_key, None)
+            return {"success": False, "message": f"Error cancelling: {str(e)}"}
+
+    logger.info(f"[CANCEL] No active handler found for session")
+    return {"success": False, "message": "No active query found"}
+
+
+@app.get("/chat/status")
+async def chat_status(session_key: str):
+    """
+    Check if a chat query is currently running for a session.
+
+    Used by frontend on page reload to detect if a background query is still active.
+    Returns the handler's running state so the UI can show Stop button.
+    """
+    handler = active_handlers.get(session_key)
+    if handler and handler.is_query_running():
+        return {"active": True, "session_key": session_key}
+    return {"active": False, "session_key": session_key}
+
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
