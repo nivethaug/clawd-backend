@@ -8,7 +8,7 @@ At least one sender channel must be provided so jobs can deliver notifications.
 Sender channels:
   - Telegram: bot_token + chat_id
   - Discord:  webhook_url
-  - Email:    smtp_host/user/pass + email_to
+  - Email:    email_to (SMTP is shared from backend .env)
   - API:      api_endpoint URL
 
 No DATABASE_URL — jobs are in main DB, managed centrally.
@@ -34,11 +34,7 @@ def inject_scheduler_env(
     telegram_chat_id: str = None,
     # Discord channel
     discord_webhook_url: str = None,
-    # Email channel
-    smtp_host: str = None,
-    smtp_port: int = None,
-    smtp_user: str = None,
-    smtp_pass: str = None,
+    # Email channel (SMTP comes from backend .env, only recipient needed)
     email_to: str = None,
     # API channel
     api_endpoint: str = None,
@@ -53,11 +49,7 @@ def inject_scheduler_env(
         telegram_bot_token: Telegram bot token
         telegram_chat_id: Default Telegram chat ID for notifications
         discord_webhook_url: Discord webhook URL for notifications
-        smtp_host: SMTP server host
-        smtp_port: SMTP server port
-        smtp_user: SMTP username
-        smtp_pass: SMTP password
-        email_to: Default email recipient
+        email_to: Default email recipient (SMTP credentials from backend .env)
         api_endpoint: Default API endpoint URL
 
     Returns:
@@ -72,6 +64,12 @@ def inject_scheduler_env(
     if not backend_url:
         backend_port = os.getenv("PORT", "8002")
         backend_url = f"http://localhost:{backend_port}"
+
+    # SMTP from backend .env (shared)
+    smtp_host = os.getenv("SMTP_HOST", "")
+    smtp_port = os.getenv("SMTP_PORT", "587")
+    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_pass = os.getenv("SMTP_PASS", "")
 
     # Build env content
     lines = [
@@ -92,17 +90,15 @@ def inject_scheduler_env(
         lines.append(f"\n# Channel: Discord")
         lines.append(f"DISCORD_WEBHOOK_URL={discord_webhook_url}")
 
-    # --- Email channel ---
-    if smtp_host:
+    # --- Email channel (SMTP from backend, only recipient per-project) ---
+    if email_to:
         lines.append(f"\n# Channel: Email")
-        lines.append(f"SMTP_HOST={smtp_host}")
-        lines.append(f"SMTP_PORT={smtp_port or 587}")
-        if smtp_user:
+        if smtp_host:
+            lines.append(f"SMTP_HOST={smtp_host}")
+            lines.append(f"SMTP_PORT={smtp_port}")
             lines.append(f"SMTP_USER={smtp_user}")
-        if smtp_pass:
             lines.append(f"SMTP_PASS={smtp_pass}")
-        if email_to:
-            lines.append(f"EMAIL_TO={email_to}")
+        lines.append(f"EMAIL_TO={email_to}")
 
     # --- API channel ---
     if api_endpoint:
