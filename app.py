@@ -3320,6 +3320,38 @@ async def chat_status(session_key: str):
     return {"active": False, "session_key": session_key}
 
 
+@app.get("/chat/chunks")
+async def chat_chunks(session_key: str, after: int = 0):
+    """
+    Get accumulated chunks for a running background query since index `after`.
+
+    Used by frontend on reload to resume displaying the response in real-time.
+    Returns chunks and the total count so the frontend knows what index to poll from next.
+    """
+    handler = active_handlers.get(session_key)
+    if not handler:
+        return {"chunks": [], "total": 0, "active": False}
+
+    all_chunks = getattr(handler, '_last_query_chunks', []) or []
+    new_chunks = all_chunks[after:] if after < len(all_chunks) else []
+
+    # Filter out PROGRESS: and TOOL: chunks, strip TEXT: prefix
+    filtered = []
+    for chunk in new_chunks:
+        if chunk.startswith('PROGRESS:') or chunk.startswith('TOOL:'):
+            continue
+        if chunk.startswith('TEXT:'):
+            filtered.append(chunk[5:])
+        elif chunk.strip() and chunk not in ['null', '{}', '[]', '---']:
+            filtered.append(chunk)
+
+    return {
+        "chunks": filtered,
+        "total": len(all_chunks),
+        "active": handler.is_query_running()
+    }
+
+
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     """Handle both streaming and non-streaming chat requests."""

@@ -2247,6 +2247,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             """Callback for streaming chunks."""
             logger.info(f"[ACP-CHAT] on_chunk called: {text[:80]}...")
             all_chunks.append(text)
+            self._last_query_chunks = all_chunks  # Keep live reference for /chat/chunks polling
             
             # Get friendly progress message from keyword mapper
             friendly = self.progress_mapper.get_friendly_message(text)
