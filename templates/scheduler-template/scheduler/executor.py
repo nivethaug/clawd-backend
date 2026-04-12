@@ -276,7 +276,7 @@ def _call_api(payload: dict) -> Tuple[str, str]:
     if not url:
         return ('failed', 'Missing url in payload')
 
-    method = payload.get('method', 'GET').upper()
+    method = payload.get('method', 'POST').upper()
     headers = payload.get('headers', {})
     body = payload.get('body')
     timeout = payload.get('timeout', 10)

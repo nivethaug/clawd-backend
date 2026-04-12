@@ -30,12 +30,12 @@ import requests
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USER = os.getenv("SMTP_USER", "support@dreambigwithai.com")
-SMTP_PASS = os.getenv("SMTP_PASS", "Nivetha@3117")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8754771378:AAFqdZNwYc8JbZanNy901IQr6lFmJs1gtm4")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "2048754634")
 
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1492717782792671384/e5LqOI4VQxfZLlxb0qpPNY9-dpq-O-Kgrr-PrpSIemNT1sW8iOhrWZKf2XSxS3lydT7A")
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8002")
 PROJECT_ID = os.getenv("PROJECT_ID", "1")
@@ -186,8 +186,8 @@ def test_execute_task() -> dict:
 
     # Try calling the actual scheduler API to create and run a test job
     try:
-        # First test the jobs API is reachable
-        resp = requests.get(f"{BACKEND_URL}/api/scheduler/projects/{PROJECT_ID}/jobs", timeout=5)
+        # First test the jobs API is reachable (POST for future extensibility)
+        resp = requests.post(f"{BACKEND_URL}/api/scheduler/projects/{PROJECT_ID}/jobs", json={}, timeout=5)
         if resp.status_code != 200:
             print(f"  Result: SKIPPED - Backend not reachable at {BACKEND_URL}")
             return {"channel": "execute_task", "status": "skipped", "error": f"Backend returned {resp.status_code}"}
