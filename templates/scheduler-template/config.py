@@ -22,7 +22,7 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
 # Channel: Email (SMTP auto-injected from backend .env, only EMAIL_TO per-project)
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USER = os.getenv("SMTP_USER", "support@vnalert.tech")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 EMAIL_TO = os.getenv("EMAIL_TO", "")

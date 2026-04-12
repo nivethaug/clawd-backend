@@ -67,9 +67,9 @@ def inject_scheduler_env(
 
     # SMTP from backend .env (shared - Hostinger)
     smtp_host = os.getenv("SMTP_HOST", "smtp.hostinger.com")
-    smtp_port = os.getenv("SMTP_PORT", "587")
-    smtp_user = os.getenv("SMTP_USER", "support@vnalert.tech")
-    smtp_pass = os.getenv("SMTP_PASS", "")
+    smtp_port = os.getenv("SMTP_PORT", "465")
+    smtp_user = os.getenv("SMTP_USER", "dreamagent@dreambigwithai.com")
+    smtp_pass = os.getenv("SMTP_PASS", "Nivetha@3117")
 
     # Build env content
     lines = [

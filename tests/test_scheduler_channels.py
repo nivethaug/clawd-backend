@@ -28,12 +28,12 @@ import requests
 # ---------------------------------------------------------------------------
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "drea,agent@dreambigwithai.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("SMTP_USER", "dreamagent@dreambigwithai.com")
 SMTP_PASS = os.getenv("SMTP_PASS", "Nivetha@3117")
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8754771378:AAFqdZNwYc8JbZanNy901IQr6lFmJs1gtm4")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "2048754634")
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
@@ -56,8 +56,7 @@ def test_email_plain(to_addr: str = None) -> dict:
     print(f"{'='*50}")
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-            server.starttls()
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15) as server:
             server.login(SMTP_USER, SMTP_PASS)
 
             msg = MIMEText("This is a test email from the scheduler system. If you received this, email sending works correctly.")
@@ -85,8 +84,7 @@ def test_email_html(to_addr: str = None) -> dict:
     print(f"{'='*50}")
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-            server.starttls()
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15) as server:
             server.login(SMTP_USER, SMTP_PASS)
 
             html = """

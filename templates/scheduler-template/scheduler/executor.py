@@ -246,8 +246,7 @@ def _send_email(payload: dict) -> Tuple[str, str]:
     if not to_addr:
         return ('failed', 'Missing "to" address in payload')
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.starttls()
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
         if SMTP_PASS:
             server.login(SMTP_USER, SMTP_PASS)
 
