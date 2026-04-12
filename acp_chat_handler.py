@@ -59,9 +59,12 @@ class ACPChatHandler:
         self.frontend_path = self.project_path / "frontend"
         self.frontend_src_path = self.frontend_path / "src"
         self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)
-        
+
         # Progress mapper for user-friendly messages
         self.progress_mapper = ClaudeProgressMapper()
+
+        # Query completion tracking for background save
+        self._query_complete = asyncio.Event()
         
         # Determine project type from database (not detection)
         # type_id 1 = website, type_id 2 = telegrambot, type_id 3 = discordbot, type_id 5 = scheduler
@@ -2204,8 +2207,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         
         # Reset progress mapper for new session
         self.progress_mapper.reset()
+        self._query_complete.clear()  # Reset completion event
         query_start_time = datetime.now()
-        
+
         # Use asyncio.Queue for real-time streaming
         chunk_queue = asyncio.Queue()
         query_complete = asyncio.Event()
@@ -2290,6 +2294,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             finally:
                 logger.info(f"[ACP-CHAT] run_query task done, setting complete flag")
                 query_complete.set()
+                self._query_complete.set()  # Signal app.py background save
         
         # Start query task (shielded from cancellation)
         logger.info(f"[ACP-CHAT] Creating query task...")

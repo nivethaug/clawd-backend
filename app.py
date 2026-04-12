@@ -3003,31 +3003,34 @@ async def chat_stream_endpoint(request: ChatRequest):
                 
                 async def background_save_when_complete():
                     """Wait for query to complete in background, then save to DB."""
-                    # Wait for the handler to signal completion
-                    max_wait = 600  # 10 minutes max
-                    waited = 0
-                    while waited < max_wait:
-                        await asyncio.sleep(1)
-                        waited += 1
-                        # Check if handler has collected all chunks
-                        if hasattr(handler, '_last_query_chunks'):
-                            chunks = handler._last_query_chunks
-                            # Filter out PROGRESS: messages, keep TEXT: and unprefixed
-                            real_chunks = [c for c in chunks if not c.startswith('PROGRESS:')]
-                            # Strip TEXT: prefix from actual content
-                            real_chunks = [c[5:] if c.startswith('TEXT:') else c for c in real_chunks]
-                            if real_chunks:
-                                content = '\n'.join(real_chunks).strip()
-                                if content:
-                                    logger.info(f"[ACP-STREAM] Background save: {len(content)} chars after {waited}s")
-                                    await save_response_to_db(content)
-                                    return
-                        # Also check for direct response
-                        if hasattr(handler, '_last_query_response') and handler._last_query_response:
-                            logger.info(f"[ACP-STREAM] Background save from response: {len(handler._last_query_response)} chars")
-                            await save_response_to_db(handler._last_query_response)
-                            return
-                    logger.warning(f"[ACP-STREAM] Background save timed out after {max_wait}s")
+                    # Wait for the handler's query_complete event
+                    query_event = getattr(handler, '_query_complete', None)
+                    if query_event:
+                        try:
+                            await asyncio.wait_for(query_event.wait(), timeout=600)
+                            logger.info(f"[ACP-STREAM] Query completed, saving full response")
+                        except asyncio.TimeoutError:
+                            logger.warning(f"[ACP-STREAM] Query completion timed out after 600s")
+
+                    # Prefer _last_query_response (full final response from Claude Agent)
+                    if hasattr(handler, '_last_query_response') and handler._last_query_response:
+                        logger.info(f"[ACP-STREAM] Background save (full response): {len(handler._last_query_response)} chars")
+                        await save_response_to_db(handler._last_query_response)
+                        return
+
+                    # Fallback to chunks
+                    if hasattr(handler, '_last_query_chunks'):
+                        chunks = handler._last_query_chunks
+                        real_chunks = [c for c in chunks if not c.startswith('PROGRESS:')]
+                        real_chunks = [c[5:] if c.startswith('TEXT:') else c for c in real_chunks]
+                        if real_chunks:
+                            content = '\n'.join(real_chunks).strip()
+                            if content:
+                                logger.info(f"[ACP-STREAM] Background save (chunks fallback): {len(content)} chars")
+                                await save_response_to_db(content)
+                                return
+
+                    logger.warning(f"[ACP-STREAM] Background save: no content found to save")
                 
                 try:
                     # Use unified streaming method
@@ -3070,35 +3073,36 @@ async def chat_stream_endpoint(request: ChatRequest):
                     
                     # Spawn background task that will poll until query completes
                     async def wait_and_save():
-                        """Poll until query completion then save."""
+                        """Wait for query completion then save full response."""
                         try:
-                            max_wait = 600  # 10 minutes max
-                            poll_interval = 5  # Check every 5 seconds
-                            waited = 0
-                            
-                            while waited < max_wait:
-                                await asyncio.sleep(poll_interval)
-                                waited += poll_interval
-                                
-                                # Check handler for collected chunks
-                                if hasattr(handler, '_last_query_chunks'):
-                                    chunks = handler._last_query_chunks
-                                    # Filter out PROGRESS: messages, keep TEXT: and unprefixed
-                                    real = [c for c in chunks if not c.startswith('PROGRESS:')]
-                                    # Strip TEXT: prefix from actual content
-                                    real = [c[5:] if c.startswith('TEXT:') else c for c in real]
-                                    if real:
-                                        content = '\n'.join(real).strip()
-                                        if content and len(content) > 50:  # Ensure we have real content
-                                            logger.info(f"[ACP-STREAM] Background saved after {waited}s: {len(content)} chars")
-                                            await save_response_to_db(content)
-                                            return
-                                
-                                # Also check for direct response
-                                if hasattr(handler, '_last_query_response') and handler._last_query_response:
-                                    content = handler._last_query_response.strip()
-                                    if content and len(content) > 20:
-                                        logger.info(f"[ACP-STREAM] Background saved (response) after {waited}s: {len(content)} chars")
+                            # Wait for the handler's query_complete event (set when Claude finishes)
+                            query_event = getattr(handler, '_query_complete', None)
+                            if query_event:
+                                try:
+                                    await asyncio.wait_for(query_event.wait(), timeout=600)
+                                    logger.info(f"[ACP-STREAM] Query completed, saving full response")
+                                except asyncio.TimeoutError:
+                                    logger.warning(f"[ACP-STREAM] Query completion timed out after 600s")
+
+                            # Prefer _last_query_response (full final response from Claude Agent)
+                            if hasattr(handler, '_last_query_response') and handler._last_query_response:
+                                content = handler._last_query_response.strip()
+                                if content:
+                                    logger.info(f"[ACP-STREAM] Background saved (full response): {len(content)} chars")
+                                    await save_response_to_db(content)
+                                    return
+
+                            # Fallback to chunks if _last_query_response not set
+                            if hasattr(handler, '_last_query_chunks'):
+                                chunks = handler._last_query_chunks
+                                real = [c for c in chunks if not c.startswith('PROGRESS:')]
+                                real = [c[5:] if c.startswith('TEXT:') else c for c in real]
+                                if real:
+                                    content = '\n'.join(real).strip()
+                                    if content and len(content) > 50:
+                                        logger.info(f"[ACP-STREAM] Background saved (chunks fallback): {len(content)} chars")
+                                        await save_response_to_db(content)
+                                        return
                                         await save_response_to_db(content)
                                         return
                             
