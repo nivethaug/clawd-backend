@@ -2282,9 +2282,31 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 ) as agent:
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     response = await agent.query(prompt)
-                    logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars")
-                    # Store response for later saving
-                    self._last_query_response = response
+                    logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars (extracted answer)")
+
+                    # Build full response from all streamed text chunks (not the extracted short answer)
+                    # Filter out TOOL: prefixes, PROGRESS:, and JSON noise to get clean content
+                    text_chunks = []
+                    for chunk in all_chunks:
+                        chunk_stripped = chunk.strip()
+                        if not chunk_stripped or chunk_stripped in ["null", "{}", "[]", "---"]:
+                            continue
+                        if chunk_stripped.startswith("TOOL:") or chunk_stripped.startswith("PROGRESS:"):
+                            continue
+                        if chunk_stripped.startswith("{") or chunk_stripped.startswith("["):
+                            continue
+                        if "z.ai built-in tool" in chunk_stripped.lower() or "analyze_image" in chunk_stripped.lower():
+                            continue
+                        text_chunks.append(chunk_stripped)
+
+                    full_response = "\n".join(text_chunks).strip()
+                    if full_response:
+                        self._last_query_response = full_response
+                        logger.info(f"[ACP-CHAT] Stored full response from chunks: {len(full_response)} chars")
+                    else:
+                        # Fallback to extracted answer if no chunks collected
+                        self._last_query_response = response
+                        logger.info(f"[ACP-CHAT] Fallback to extracted answer: {len(response or '')} chars")
             except Exception as e:
                 logger.error(f"[ACP-CHAT] Query error: {e}")
                 import traceback

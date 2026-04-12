@@ -3103,8 +3103,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                                         logger.info(f"[ACP-STREAM] Background saved (chunks fallback): {len(content)} chars")
                                         await save_response_to_db(content)
                                         return
-                                        await save_response_to_db(content)
-                                        return
                             
                             # Fall back to what we collected before disconnect
                             if real_chunks:
