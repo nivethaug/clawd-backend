@@ -169,3 +169,83 @@ async def validate_credentials(request: ValidateCredentialsRequest):
 
     # Unknown type
     return {"valid": False, "type_id": type_id, "error": f"Unknown type_id: {type_id}"}
+
+
+# ============================================================================
+# API Endpoint Test - Same payload format as scheduler executor _call_api
+# ============================================================================
+
+class TestApiCallRequest(BaseModel):
+    """Same format as scheduler executor's _call_api payload."""
+    url: str
+    method: str = "POST"
+    headers: Optional[dict] = None
+    body: Optional[dict] = None
+    timeout: int = 10
+
+
+@router.post("/api-call")
+async def test_api_call(request: TestApiCallRequest):
+    """
+    Test an API endpoint using the same payload format as scheduler executor.
+
+    This lets users verify their API endpoint works before creating
+    scheduler jobs that call it.
+
+    Payload matches scheduler executor's _call_api:
+        url:     Target URL (required)
+        method:  HTTP method (default: POST)
+        headers: Optional request headers
+        body:    Optional JSON body
+        timeout: Request timeout in seconds (default: 10)
+
+    Response:
+        valid:   True if status < 400
+        status:  HTTP status code
+        method:  HTTP method used
+        url:     Target URL
+        body:    Response body (truncated to 2000 chars)
+        error:   Error message if request failed
+    """
+    import requests as http
+
+    try:
+        response = http.request(
+            method=request.method.upper(),
+            url=request.url,
+            headers=request.headers or {},
+            json=request.body if request.body else None,
+            timeout=request.timeout,
+        )
+
+        is_valid = response.status_code < 400
+
+        # Try to parse response body
+        try:
+            resp_body = response.json()
+        except Exception:
+            resp_body = response.text[:2000] if response.text else None
+
+        result = {
+            "valid": is_valid,
+            "status": response.status_code,
+            "method": request.method.upper(),
+            "url": request.url,
+        }
+
+        if resp_body is not None:
+            # Truncate large responses
+            body_str = str(resp_body)
+            if len(body_str) > 2000:
+                body_str = body_str[:2000] + "... (truncated)"
+            result["response"] = resp_body
+
+        logger.info(f"✅ API call test: {request.method.upper()} {request.url} -> {response.status_code}")
+        return result
+
+    except http.exceptions.Timeout:
+        return {"valid": False, "error": f"Request timed out after {request.timeout}s", "url": request.url}
+    except http.exceptions.ConnectionError:
+        return {"valid": False, "error": "Connection failed", "url": request.url}
+    except Exception as e:
+        return {"valid": False, "error": str(e), "url": request.url}
