@@ -431,9 +431,6 @@ class ClaudeCodeAgent:
                 limit=10 * 1024 * 1024  # 10MB limit for large JSON lines
             )
             self._current_process = process  # Store for cancellation
-                env=env,
-                limit=10 * 1024 * 1024  # 10MB limit for large JSON lines (screenshots)
-            )
             logger.debug(f"Subprocess started with PID: {process.pid}")
 
             # Accumulate plain text lines from stdout (stderr kept separate)
