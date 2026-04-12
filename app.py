@@ -3289,9 +3289,11 @@ async def cancel_chat(request: CancelChatRequest):
     Used by the frontend Stop button.
     """
     logger.info(f"[CANCEL] Cancel requested for session_key: {request.session_key[:16]}...")
+    logger.info(f"[CANCEL] Active handlers in registry: {list(active_handlers.keys())}")
 
     handler = active_handlers.get(request.session_key)
     if handler:
+        logger.info(f"[CANCEL] Handler found. Agent active: {handler._active_agent is not None}, Query running: {handler.is_query_running()}")
         try:
             await handler.cancel_query()
             active_handlers.pop(request.session_key, None)
@@ -3302,7 +3304,7 @@ async def cancel_chat(request: CancelChatRequest):
             active_handlers.pop(request.session_key, None)
             return {"success": False, "message": f"Error cancelling: {str(e)}"}
 
-    logger.info(f"[CANCEL] No active handler found for session")
+    logger.info(f"[CANCEL] No active handler found for session_key: {request.session_key[:16]}...")
     return {"success": False, "message": "No active query found"}
 
 

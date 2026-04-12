@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import sys
 import re
 import shutil
@@ -294,18 +295,43 @@ class ClaudeCodeAgent:
 
     async def cancel(self) -> bool:
         """
-        Cancel the currently running query by killing the subprocess.
+        Cancel the currently running query by killing the entire process group.
+
+        Uses SIGKILL on the process group (not just the parent) to ensure
+        all child processes (Claude CLI, inference workers) are terminated.
 
         Returns:
             True if a process was killed, False if no process was running
         """
         if self._current_process and self._current_process.returncode is None:
-            logger.info("[CLAUDE-AGENT] Cancelling query - killing subprocess")
+            pid = self._current_process.pid
+            logger.info(f"[CLAUDE-AGENT] Cancelling query - killing process group (PID: {pid})")
             try:
-                self._current_process.kill()
-                await self._current_process.wait()
+                # Kill the entire process group (parent + all children)
+                os.killpg(pid, signal.SIGKILL)
+                logger.info(f"[CLAUDE-AGENT] Sent SIGKILL to process group {pid}")
+            except ProcessLookupError:
+                logger.info(f"[CLAUDE-AGENT] Process group {pid} already terminated")
+            except PermissionError:
+                logger.warning(f"[CLAUDE-AGENT] Permission denied killing process group {pid}, falling back to single process kill")
+                try:
+                    self._current_process.kill()
+                except Exception:
+                    pass
             except Exception as e:
-                logger.warning(f"[CLAUDE-AGENT] Error killing process: {e}")
+                logger.warning(f"[CLAUDE-AGENT] Error killing process group: {e}")
+                try:
+                    self._current_process.kill()
+                except Exception:
+                    pass
+
+            try:
+                await asyncio.wait_for(self._current_process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"[CLAUDE-AGENT] Process {pid} did not exit after 5s")
+            except Exception:
+                pass
+
             self._current_process = None
             return True
         logger.info("[CLAUDE-AGENT] Cancel called but no running process found")
@@ -428,7 +454,8 @@ class ClaudeCodeAgent:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.repo_path),
                 env=env,
-                limit=10 * 1024 * 1024  # 10MB limit for large JSON lines
+                limit=10 * 1024 * 1024,  # 10MB limit for large JSON lines
+                start_new_session=True  # New process group so we can kill entire tree
             )
             self._current_process = process  # Store for cancellation
             logger.debug(f"Subprocess started with PID: {process.pid}")
