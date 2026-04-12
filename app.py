@@ -366,6 +366,10 @@ app.include_router(ai_confirm_router, prefix="/api/ai", tags=["ai-confirm"])
 from api.scheduler_router import router as scheduler_router
 app.include_router(scheduler_router, prefix="/api/scheduler", tags=["scheduler"])
 
+# Register Validation API router
+from api.validate_router import router as validate_router
+app.include_router(validate_router, prefix="/api/validate", tags=["validation"])
+
 
 @app.get("/projects", response_model=list[ProjectResponse])
 async def get_projects():
