@@ -4,11 +4,14 @@
 
 ---
 
-## API Endpoint
+## API Endpoints
 
-| Endpoint | Method | File | Lines | Description |
-|----------|--------|------|-------|-------------|
-| `/chat/stream` | POST | `app.py` | 2213-2632 | Streaming chat (SSE) |
+| Endpoint | Method | File | Description |
+|----------|--------|------|-------------|
+| `/chat/stream` | POST | `app.py` | Streaming chat (SSE) |
+| `/chat/cancel` | POST | `app.py` | Cancel running query (kills Claude process) |
+| `/chat/status` | GET | `app.py` | Check if query is running (for reload detection) |
+| `/chat/chunks` | GET | `app.py` | Poll accumulated response chunks (for resume after reload) |
 
 ---
 
@@ -178,6 +181,174 @@ data: [DONE]
 
 ---
 
+## Cancel & Status API
+
+### Active Handler Registry
+
+When a streaming chat starts, the handler is registered in a global dict:
+
+```python
+active_handlers: Dict[str, ACPChatHandler] = {}  # session_key -> handler
+```
+
+- **Added** when streaming begins (`/chat/stream` step A5)
+- **Kept** if client disconnects but query still running (for reload detection)
+- **Removed** when query completes or is cancelled
+- **Delayed cleanup** after 10 minutes for abandoned queries
+
+### POST /chat/cancel
+
+Cancel a running query. Kills the Claude subprocess immediately.
+
+**Request:**
+
+```json
+{
+  "session_key": "abc123"
+}
+```
+
+**Response:**
+
+```json
+{"success": true, "message": "Query cancelled"}
+```
+
+**How it works:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ POST /chat/cancel                                               │
+│   1. Look up handler in active_handlers by session_key          │
+│   2. handler.cancel_query()                                     │
+│      ├─ agent.cancel() → os.killpg(pid, SIGKILL)               │
+│      │   (kills entire process group: parent + children)        │
+│      ├─ _query_complete.set() (unblock background save)        │
+│      └─ _active_agent = None                                    │
+│   3. Remove handler from active_handlers                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Process group kill:** The Claude CLI subprocess is created with `start_new_session=True`, putting it in its own process group. `cancel()` uses `os.killpg()` to kill the entire group (parent CLI + child inference workers), not just the parent process.
+
+### GET /chat/status
+
+Check if a query is running. Used by frontend on page reload.
+
+**Request:**
+
+```
+GET /chat/status?session_key=abc123
+```
+
+**Response (active):**
+
+```json
+{"active": true, "session_key": "abc123"}
+```
+
+**Response (inactive):**
+
+```json
+{"active": false, "session_key": "abc123"}
+```
+
+### GET /chat/chunks
+
+Poll for accumulated response chunks. Used by frontend to resume streaming after page reload.
+
+**Request:**
+
+```
+GET /chat/chunks?session_key=abc123&after=0
+```
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `session_key` | string | Session identifier |
+| `after` | int | Chunk index to start from (default 0) |
+
+**Response:**
+
+```json
+{
+  "chunks": ["Once upon", " a time", "..."],
+  "total": 15,
+  "active": true
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `chunks` | string[] | New chunks since `after` index (noise filtered) |
+| `total` | int | Total chunks accumulated |
+| `active` | bool | Whether query is still running |
+
+**Filtering:** Chunks prefixed with `PROGRESS:`, `TOOL:`, or containing JSON/telemetry are excluded. Only clean text content is returned.
+
+---
+
+## Reload Detection Flow
+
+When the user reloads the page during an active query:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ PAGE RELOAD                                                      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Frontend: checkBackgroundQuery()                             │
+│    • GET /chat/status?session_key=abc123                        │
+│    • If active: show loading state + Stop button                │
+│    • Add placeholder assistant message (isStreaming: true)      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ (if active)
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. Frontend: Poll for chunks every 15 seconds                   │
+│    • GET /chat/chunks?session_key=abc123&after=N                │
+│    • Append new chunks to streaming message                     │
+│    • When active=false: reload full messages from DB            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Stop Button Flow (Frontend)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ USER CLICKS STOP BUTTON                                         │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Abort SSE connection                                         │
+│    • abortControllerRef.current.abort()                         │
+│    • Breaks the EventSource/fetch stream                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. Cancel backend query                                         │
+│    • POST /chat/cancel { session_key }                          │
+│    • Kills Claude process group on server                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. Update UI state                                              │
+│    • Mark streaming messages as complete (isStreaming: false)   │
+│    • Set isLoading = false                                      │
+│    • Re-enable chat input                                       │
+│    • Stop button → Send button                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Non-ACP Mode Flow (acp_mode=false)
 
 ```
@@ -299,6 +470,9 @@ while (true) {
 | ACP handler failed | SSE stream with `{"error": "..."}` |
 | OpenClaw API error | SSE stream with `{"error": "..."}` |
 | Streaming exception | SSE stream with `{"error": "..."}` |
+| Cancel: no active query | `200 {"success": false, "message": "No active query found"}` |
+| Cancel: handler error | `200 {"success": false, "message": "Error cancelling: ..."}` |
+| Cancel: success | `200 {"success": true, "message": "Query cancelled"}` |
 
 ---
 
@@ -309,8 +483,10 @@ while (true) {
 | Response format | SSE stream | JSON object |
 | Real-time output | Yes | No |
 | Client disconnect | Background save | N/A |
+| Cancel support | POST /chat/cancel | N/A |
+| Reload detection | GET /chat/status + /chat/chunks | N/A |
 | ACP mode | Streaming chunks | Single response |
-| Timeout | 900s (ACP) / 120s (non-ACP) | 300s |
+| Timeout | 1800s (ACP) / 120s (non-ACP) | 300s |
 
 ---
 
