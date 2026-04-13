@@ -1,7 +1,7 @@
 # DreamPilot Documentation - Master Table of Contents
 
 > **Purpose:** Help AI agents quickly navigate codebase by API endpoint
-> Last updated: 2026-03-15
+> Last updated: 2026-04-13
 
 ---
 
@@ -109,6 +109,21 @@
 | `/templates` | GET | `app.py:574-600` | [project_creation.md](./project_creation.md) |
 | `/templates/select` | POST | `app.py:530-572` | [project_creation.md](./project_creation.md) |
 
+### Scheduler Jobs
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/api/scheduler/projects/{id}/jobs` | POST | `api/scheduler_router.py:96-120` | [scheduler.md](./scheduler.md) |
+| `/api/scheduler/projects/{id}/jobs` | GET | `api/scheduler_router.py:123-132` | [scheduler.md](./scheduler.md) |
+| `/api/scheduler/projects/{id}/jobs` | DELETE | `api/scheduler_router.py:181-185` | [scheduler.md](./scheduler.md) |
+| `/api/scheduler/jobs/{id}` | GET | `api/scheduler_router.py:135-140` | [scheduler.md](./scheduler.md) |
+| `/api/scheduler/jobs/{id}` | PUT | `api/scheduler_router.py:143-165` | [scheduler.md](./scheduler.md) |
+| `/api/scheduler/jobs/{id}` | DELETE | `api/scheduler_router.py:168-175` | [scheduler.md](./scheduler.md) |
+| `/api/scheduler/jobs/{id}/pause` | POST | `api/scheduler_router.py:178-187` | [scheduler.md](./scheduler.md) |
+| `/api/scheduler/jobs/{id}/resume` | POST | `api/scheduler_router.py:190-196` | [scheduler.md](./scheduler.md) |
+| `/api/scheduler/jobs/{id}/run` | POST | `api/scheduler_router.py:199-205` | [scheduler.md](./scheduler.md) |
+| `/api/scheduler/jobs/{id}/logs` | GET | `api/scheduler_router.py:215-230` | [scheduler.md](./scheduler.md) |
+
 ### System
 
 | Endpoint | Method | File:Lines | Docs |
@@ -135,6 +150,7 @@
 | [ai_completion.md](./ai_completion.md) | AI completion endpoint |
 | [publish_frontend.md](./publish_frontend.md) | Frontend build & publish |
 | [publish_backend.md](./publish_backend.md) | Backend build & publish |
+| [scheduler.md](./scheduler.md) | Centralized job scheduling daemon + REST API |
 3. **Find the exact file and line numbers** for the code you need
 4. **Make targeted changes** using the line references
 

@@ -1,0 +1,18 @@
+{
+  "name": "clawd-scheduler",
+  "script": "/root/clawd-backend/venv/bin/python",
+  "args": "-c \"from services.scheduler.scheduler import run_scheduler; run_scheduler()\"",
+  "cwd": "/root/clawd-backend",
+  "instances": 1,
+  "exec_mode": "fork",
+  "autorestart": true,
+  "watch": false,
+  "max_memory_restart": "200M",
+  "env": {
+    "PYTHONUNBUFFERED": "1",
+    "USE_POSTGRES": "true",
+    "SCHEDULER_ENABLED": "true",
+    "SCHEDULER_INTERVAL": "10",
+    "SCHEDULER_MAX_WORKERS": "10"
+  }
+}
