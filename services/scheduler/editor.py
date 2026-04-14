@@ -95,11 +95,18 @@ Enhance the scheduler executor for: {description}
 
 Project: {project_name} (ID: {self.project_id})
 
-Allowed files to modify ONLY:
-- scheduler/executor.py (add task handlers + routes)
-- services/api_client.py (add API helper functions)
+Allowed files to modify:
+- scheduler/executor.py (add task handlers + routes) — PRIMARY file to modify
+- services/api_client.py — ONLY if you need a NEW API function that doesn't exist yet
 
 DO NOT modify any other files.
+
+IMPORTANT: api_client.py already has these functions:
+- get_crypto_price(coin_id, currency) — use it, don't recreate it
+- get_weather(latitude, longitude)
+- get_news(query, page)
+- fetch_json(url, params) — generic JSON fetcher
+Only add to api_client.py if you need an API NOT listed above.
 
 ==================================================
 INTENT DETECTION & API SELECTION
@@ -225,9 +232,18 @@ CRITICAL RULES
             return {"success": False, "error": "No response from Claude"}
 
     def _validate(self) -> Tuple[bool, str]:
-        """Validate modified executor.py."""
+        """Validate modified executor.py and api_client.py."""
         if not self.executor_path.exists():
             return False, "executor.py missing"
+
+        # Syntax check both files
+        for path in [self.executor_path, self.api_client_path]:
+            if not path.exists():
+                continue
+            try:
+                compile(path.read_text(), str(path), 'exec')
+            except SyntaxError as e:
+                return False, f"Syntax error in {path.name}: {e.msg} (line {e.lineno})"
 
         content = self.executor_path.read_text()
 
