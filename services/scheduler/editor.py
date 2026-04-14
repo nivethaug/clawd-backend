@@ -207,6 +207,9 @@ CRITICAL RULES
 7. Use services.api_client for ALL external API calls
 8. Use {{variable}} with fetch list for dynamic content when possible
 9. YOU MUST create the job via curl after modifying files — this is not optional
+10. AFTER editing ANY .py file, run: python -c "import py_compile; py_compile.compile('FILE_PATH', doraise=True)"
+    This catches syntax errors BEFORE they break the scheduler.
+    If compilation fails, FIX the error immediately — do not leave broken files.
 """
 
     def _run_claude(self, prompt: str) -> dict:
