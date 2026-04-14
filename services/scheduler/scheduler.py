@@ -74,21 +74,32 @@ def run_scheduler():
     2. Submit each job to thread pool for parallel execution
     3. Each worker: loads executor (cached) → execute_task → update timestamps → log
     """
-    logger.info(f"Scheduler started (interval={SCHEDULER_INTERVAL}s, workers={MAX_WORKERS})")
+    logger.info(f"Scheduler started (interval={SCHEDULER_INTERVAL}s, workers={MAX_WORKERS}, enabled={SCHEDULER_ENABLED})")
+
+    if not SCHEDULER_ENABLED:
+        logger.error("SCHEDULER_ENABLED=false — scheduler will NOT run. Set SCHEDULER_ENABLED=true to enable.")
+        return
 
     executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+    poll_count = 0
 
     while SCHEDULER_ENABLED:
+        poll_count += 1
         try:
             # Single query for ALL due jobs
             due_jobs = get_due_jobs()
 
+            # Log every 30th poll (~5 min) even when idle, so we know it's alive
+            if poll_count % 30 == 0:
+                logger.info(f"Scheduler alive (poll #{poll_count}, {len(due_jobs)} due jobs)")
+
             if due_jobs:
-                logger.info(f"Found {len(due_jobs)} due job(s)")
+                logger.info(f"Found {len(due_jobs)} due job(s): {[{'id': j['id'], 'type': j['task_type'], 'project': j['project_id']} for j in due_jobs]}")
 
                 # Submit all jobs to thread pool (parallel execution)
                 futures = []
                 for job in due_jobs:
+                    logger.info(f"Submitting job {job['id']} (type={job['task_type']}, project_path={job.get('project_path')})")
                     future = executor.submit(_execute_single_job, job)
                     futures.append(future)
 
@@ -101,6 +112,8 @@ def run_scheduler():
 
         except Exception as e:
             logger.error(f"Scheduler loop error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
         # Wait before next poll
         time.sleep(SCHEDULER_INTERVAL)
