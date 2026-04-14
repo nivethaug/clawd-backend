@@ -175,13 +175,26 @@ Include the job_manager.create() call to register the job.
 """
 
     def _run_claude(self, prompt: str) -> dict:
-        """Run Claude Code Agent."""
+        """Run Claude Code Agent using async query method."""
         try:
-            agent = ClaudeCodeAgent(str(self.project_path))
-            result = agent.run(prompt, timeout=600)
-            return {"success": True, "result": result}
+            import asyncio
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(self._async_run_claude(prompt))
+                return result
+            finally:
+                loop.close()
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    async def _async_run_claude(self, prompt: str) -> dict:
+        """Async wrapper for ClaudeCodeAgent."""
+        async with ClaudeCodeAgent(str(self.project_path)) as agent:
+            result = await agent.query(prompt, timeout=600)
+            if result:
+                return {"success": True, "result": result}
+            return {"success": False, "error": "No response from Claude"}
 
     def _validate(self) -> Tuple[bool, str]:
         """Validate modified executor.py."""
