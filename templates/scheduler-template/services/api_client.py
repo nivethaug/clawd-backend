@@ -8,7 +8,6 @@ AI agents can add helper functions here for dynamic integrations.
 """
 
 import requests
-from config import SCHEDULER_INTERVAL
 
 REQUEST_TIMEOUT = 10
 
