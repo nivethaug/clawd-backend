@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Scheduler Template Copier - Copies scheduler-template to project directory.
+Scheduler Template Copier - Copies scheduler-template contents to project directory.
 
-Pattern: Same as services/telegram/template.py.
 Source: templates/scheduler-template/
-Target: {project_path}/scheduler/
+Target: {project_path}/ (contents copied directly, not nested)
+
+Result: executor.py ends up at {project_path}/scheduler/executor.py
 """
 
 import shutil
@@ -32,11 +33,14 @@ def copy_scheduler_template(project_path: str) -> Tuple[bool, str]:
     """
     Copy scheduler template to project directory.
 
+    Copies the contents of templates/scheduler-template/ directly into
+    {project_path}/ so that executor.py lands at {project_path}/scheduler/executor.py.
+
     Args:
-        project_path: Base project path (e.g., /root/clawd-projects/10_my-scheduler/)
+        project_path: Base project path (e.g., /root/dreampilot/projects/scheduler/10_my-scheduler/)
 
     Returns:
-        (True, scheduler_path) on success
+        (True, project_path) on success
         (False, error_message) on failure
     """
     # Validate source template exists
@@ -45,17 +49,19 @@ def copy_scheduler_template(project_path: str) -> Tuple[bool, str]:
         logger.error(f"❌ {error_msg}")
         return False, error_msg
 
-    # Target: {project_path}/scheduler/
-    target_path = Path(project_path) / "scheduler"
+    target_path = Path(project_path)
 
-    # Remove existing scheduler directory if exists
-    if target_path.exists():
-        logger.warning(f"Removing existing scheduler directory: {target_path}")
-        shutil.rmtree(target_path)
-
-    # Copy template
+    # Copy each item from template into project root (avoids double-nesting)
     try:
-        shutil.copytree(str(TEMPLATE_SOURCE), str(target_path))
+        for item in TEMPLATE_SOURCE.iterdir():
+            dest = target_path / item.name
+            if item.is_dir():
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(str(item), str(dest))
+            else:
+                shutil.copy2(str(item), str(dest))
+
         logger.info(f"✅ Scheduler template copied to {target_path}")
     except Exception as e:
         error_msg = f"Failed to copy template: {e}"
