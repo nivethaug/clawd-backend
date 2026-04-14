@@ -128,6 +128,14 @@ STEP 2: Determine target channels from description:
 - "send to all channels" → ALL configured channels
 - If description doesn't specify a channel → send to ALL configured channels
 
+STEP 3: CHANNEL FALLBACK RULES:
+- If description requests a channel that is NOT configured in .env:
+  → Use available channels instead, do NOT silently skip
+  → Include a note in the message: "(Discord not configured, sent via Telegram)"
+  → If NO requested channels are configured, fall back to ALL configured channels
+- Example: "send to discord" but only Telegram is configured
+  → Send via Telegram with note: "(Discord not configured)"
+
 STEP 3: Build your handler to send to ALL target channels.
 The executor already has these sender functions you can call:
 - _send_telegram({{"text": msg, "chat_id": "..."}})
