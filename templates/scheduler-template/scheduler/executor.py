@@ -148,10 +148,11 @@ def resolve_content(payload: dict) -> dict:
 
 
 def _deep_replace(obj, resolved: dict):
-    """Recursively replace {{key}} in all string values."""
+    """Recursively replace {{key}} and {key} in all string values."""
     if isinstance(obj, str):
         for key, value in resolved.items():
             obj = obj.replace("{{" + key + "}}", str(value))
+            obj = obj.replace("{" + key + "}", str(value))
         return obj
     elif isinstance(obj, dict):
         return {k: _deep_replace(v, resolved) for k, v in obj.items()}
