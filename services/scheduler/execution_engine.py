@@ -66,7 +66,9 @@ def _load_executor(project_id: int, project_path: str) -> Optional[Any]:
     1. {project_path}/scheduler/executor.py  (project with scheduler subfolder)
     2. {project_path}/executor.py            (flat project structure)
 
-    Uses unique module name per project to avoid import conflicts.
+    Isolates imports by temporarily inserting project_path at sys.path[0]
+    so that project-local modules (config, services.*, scheduler.*)
+    take priority over the backend's own modules.
     """
     # Return cached if available
     if project_id in _executor_cache:
@@ -90,12 +92,27 @@ def _load_executor(project_id: int, project_path: str) -> Optional[Any]:
         logger.error(f"No executor.py found for project {project_id} (searched: {project_path})")
         return None
 
-    # Add project path to sys.path so imports like 'config', 'scheduler.*', 'services.*' resolve
-    if project_path not in sys.path:
-        sys.path.insert(0, project_path)
-
-    # Load with importlib using unique module name
     module_name = f"scheduler_executors.project_{project_id}"
+
+    # Modules that conflict between the backend and project directories.
+    # The backend has its own config.py, services/, and scheduler/ packages.
+    # We must temporarily evict them from sys.modules so the project's versions load.
+    saved_modules = {}
+    evicted_keys = []
+    for key in list(sys.modules.keys()):
+        # Never evict the execution engine itself
+        if key == "services.scheduler.execution_engine":
+            continue
+        # Evict: config, services, scheduler, and all their submodules
+        if key == "config" or key == "services" or key == "scheduler" \
+                or key.startswith("services.") or key.startswith("scheduler."):
+            saved_modules[key] = sys.modules.pop(key)
+            evicted_keys.append(key)
+
+    # Insert project path at position 0 (highest priority)
+    path_was_present = project_path in sys.path
+    if not path_was_present:
+        sys.path.insert(0, project_path)
 
     try:
         spec = importlib.util.spec_from_file_location(module_name, executor_path)
@@ -120,6 +137,15 @@ def _load_executor(project_id: int, project_path: str) -> Optional[Any]:
     except Exception as e:
         logger.error(f"Failed to load executor for project {project_id}: {e}")
         return None
+
+    finally:
+        # Remove project path
+        if not path_was_present and project_path in sys.path:
+            sys.path.remove(project_path)
+        # Restore evicted backend modules
+        for key in evicted_keys:
+            if key in saved_modules:
+                sys.modules[key] = saved_modules[key]
 
 
 def clear_cache(project_id: int = None):
