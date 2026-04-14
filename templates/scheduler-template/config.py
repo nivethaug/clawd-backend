@@ -5,9 +5,13 @@ No database credentials — jobs are managed centrally in main DB.
 """
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from the directory where config.py lives (project root),
+# not from cwd (which may be the backend directory for daemon processes)
+_project_dir = Path(__file__).resolve().parent
+load_dotenv(_project_dir / ".env")
 
 # Project Identity
 PROJECT_ID = os.getenv("PROJECT_ID", "1")
