@@ -90,6 +90,10 @@ def _load_executor(project_id: int, project_path: str) -> Optional[Any]:
         logger.error(f"No executor.py found for project {project_id} (searched: {project_path})")
         return None
 
+    # Add project path to sys.path so imports like 'config', 'scheduler.*', 'services.*' resolve
+    if project_path not in sys.path:
+        sys.path.insert(0, project_path)
+
     # Load with importlib using unique module name
     module_name = f"scheduler_executors.project_{project_id}"
 
