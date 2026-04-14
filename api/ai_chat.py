@@ -145,10 +145,24 @@ If the user wants to:
 ### Action Verb Mapping:
 
 * "start" → start_project
-* "stop" → stop_project  
+* "stop" → stop_project
 * "restart" → restart_project
 * "logs" → get_logs
 * "status" → project_status
+
+---
+
+### Scheduler Action Verb Mapping (for scheduler projects):
+
+* "show jobs" / "list jobs" → scheduler_list_jobs
+* "add job" / "create job" / "schedule" → scheduler_create_job
+* "edit job" / "change schedule" / "update job" → scheduler_update_job
+* "pause job" → scheduler_pause_job
+* "resume job" → scheduler_resume_job
+* "test job" / "run now" → scheduler_run_job
+* "job logs" / "execution history" → scheduler_job_logs
+* "delete job" → scheduler_delete_job (requires confirmation)
+* "delete all jobs" → scheduler_clear_jobs (requires confirmation)
 
 ---
 
@@ -530,9 +544,10 @@ async def ai_chat(request: AIChatRequest):
         
         # 10. Resolve project if needed
         tools_needing_project = [
-            "start_project", "stop_project", "restart_project", 
+            "start_project", "stop_project", "restart_project",
             "project_status", "get_logs", "set_active_project",
-            "delete_project"
+            "delete_project",
+            "scheduler_list_jobs", "scheduler_create_job", "scheduler_clear_jobs"
         ]
         
         if tool_name in tools_needing_project:

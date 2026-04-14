@@ -227,8 +227,12 @@ class ACPChatHandler:
     def _build_chat_prompt_scheduler(self, user_message: str, session_context: str = "") -> str:
         """
         Build chat prompt for scheduler project modifications.
-        Covers: executor.py enhancement, job_manager usage, api_client helpers.
+        Covers: executor.py enhancement, REST API job management, api_client helpers.
         """
+        import os
+        backend_url = f"http://localhost:{os.getenv('PORT', '8002')}"
+        jobs_base = f"{backend_url}/api/scheduler/projects/{self.project_id}/jobs"
+
         context_section = ""
         if session_context:
             context_section = f"""
@@ -246,18 +250,23 @@ class ACPChatHandler:
 ## PROJECT CONTEXT
 
 Project Name: **{self.project_name}**
+Project ID: **{self.project_id}**
 Project Type: Scheduler
 Project Path: `{self.project_path}`
 Scheduler Directory: `{self.project_path}/scheduler/`
+Backend API: `{backend_url}/api/scheduler`
 
 ---
 
 ## WHAT YOU CAN DO
 
-1. **Modify executor.py** — Add new task handlers and routes
-2. **Modify api_client.py** — Add new API helper functions
-3. **Create jobs** — Schedule jobs using the job_manager tool
-4. **Manage jobs** — List, pause, resume, delete jobs
+1. **Add new tasks** — Modify executor.py + api_client.py, then create job via API
+2. **List existing jobs** — See all scheduled jobs for this project
+3. **Edit jobs** — Change schedule, payload, or status of any job
+4. **Pause/Resume jobs** — Temporarily stop or restart a job
+5. **Delete jobs** — Remove a job entirely
+6. **Run jobs now** — Trigger a job immediately for testing
+7. **View logs** — Check execution history and status
 
 ---
 
@@ -267,151 +276,307 @@ Scheduler Directory: `{self.project_path}/scheduler/`
 {self.project_path}/
 └── scheduler/
     ├── executor.py          ← YOU MODIFY THIS (add task handlers)
-    ├── job_manager.py       ← YOUR TOOL (create/manage jobs)
     └── ...
 └── services/
     └── api_client.py        ← YOU MODIFY THIS (add API helpers)
-└── llm/categories/          ← API catalog for reference
 ```
+
+---
+
+## CHANNEL DETECTION
+
+Read `{self.project_path}/.env` to find which channels are configured:
+- TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID → Telegram available
+- DISCORD_WEBHOOK_URL → Discord available
+- SMTP_HOST + EMAIL_TO → Email available
+- API_ENDPOINT → API available
+
+The executor already has these sender functions:
+- `_send_telegram({{"text": msg, "chat_id": "..."}})`
+- `_send_discord({{"content": msg}})`
+- `_send_email({{"to": "...", "subject": "...", "body": msg}})`
+- `_call_api({{"url": "...", "body": {{}}}})`
+
+Send to ALL configured channels unless the user specifies a particular channel.
 
 ---
 
 ## HOW TO ADD A NEW TASK
 
-### Step 1: Add API helper to services/api_client.py
+### Step 1: Read .env to detect configured channels
 
-```python
-def get_weather(latitude=40.71, longitude=-74.01):
-    \"\"\"Fetch weather from Open-Meteo API.\"\"\"
-    url = "https://api.open-meteo.com/v1/forecast"
-    params = {{"latitude": latitude, "longitude": longitude, "current_weather": True}}
-    response = requests.get(url, params=params, timeout=10)
-    response.raise_for_status()
-    data = response.json()
-    weather = data.get("current_weather", {{}})
-    return {{"success": True, "temperature": weather.get("temperature")}}
+```bash
+cat {self.project_path}/.env
 ```
 
-### Step 2: Add task handler to scheduler/executor.py
+### Step 2: Add API helper to services/api_client.py (only if needed)
+
+api_client.py already has:
+- get_crypto_price(coin_id, currency)
+- get_weather(latitude, longitude)
+- get_news(query, page)
+- fetch_json(url, params) — generic JSON fetcher
+
+Only add a NEW function if you need an API NOT listed above.
+
+### Step 3: Add task handler to scheduler/executor.py
 
 ```python
-# Add to FETCH_DATA_REGISTRY (for dynamic {{variable}} resolution)
-FETCH_DATA_REGISTRY["weather"] = lambda: _fetch_weather()
+# Add to FETCH_DATA_REGISTRY (for dynamic {{{{variable}}}} resolution)
+FETCH_DATA_REGISTRY["weather_nyc"] = lambda: _fetch_weather_nyc()
 
 # Add helper function
-def _fetch_weather():
-    result = api_client.get_weather()
+def _fetch_weather_nyc():
+    result = api_client.get_weather(40.71, -74.01)
     if result.get("success"):
         return f"{{result['temperature']}}C"
-    return f"unavailable"
+    return "unavailable"
 
-# Add task handler
-def _weather_alert(payload):
-    \"\"\"Send weather update via configured channel.\"\"\"
-    weather = _fetch_weather()
-    text = f"Weather update: {{weather}}"
-    # Route to email, telegram, etc. based on payload
-    task_type = payload.get("channel", "email")
-    if task_type == "email":
-        payload["body"] = text
-        return _send_email(payload)
-    elif task_type == "telegram":
-        payload["text"] = text
-        return _send_telegram(payload)
-    return ("success", text)
+# Add multi-channel task handler
+def _weather_alert(payload: dict):
+    weather = _fetch_weather_nyc()
+    msg = f"Weather Update\\n\\nTemp: {{weather}}\\n\\nUpdated: auto"
+    results = []
+    if TELEGRAM_BOT_TOKEN:
+        s, m = _send_telegram({{"text": msg}})
+        results.append(("telegram", s))
+    if DISCORD_WEBHOOK_URL:
+        s, m = _send_discord({{"content": msg}})
+        results.append(("discord", s))
+    if EMAIL_TO:
+        s, m = _send_email({{"subject": "Weather Update", "body": msg}})
+        results.append(("email", s))
+    failed = [r for r in results if r[1] == "failed"]
+    if failed:
+        return ("failed", f"Failed: {{failed}}")
+    return ("success", f"Sent to {{len(results)}} channels")
 
 # Register in execute_task() routing:
 elif task_type == 'weather_alert':
     status, message = _weather_alert(payload)
 ```
 
-### Step 3: Create the job using job_manager
+### Step 4: Create the job via REST API
 
-```python
-from scheduler import job_manager
+You MUST execute the curl command — do NOT just print it:
 
-job_manager.create(
-    job_type="interval",        # interval, daily, once
-    schedule_value="1h",         # 30s, 5m, 1h, 2d, daily:09:00
-    task_type="weather_alert",   # MUST match your executor route
-    payload={{
-        "channel": "email",
-        "to": "user@email.com",
-        "subject": "Weather Update",
-    }}
-)
+```bash
+curl -s -X POST {jobs_base} \\
+  -H "Content-Type: application/json" \\
+  -d '{{"
+    "job_type": "interval",
+    "schedule_value": "1h",
+    "task_type": "weather_alert",
+    "payload": {{{{
+        "fetch": ["weather_nyc"]
+    }}}}
+  }}'
+```
+
+### Step 5: Verify the file compiles
+
+```bash
+python -c "import py_compile; py_compile.compile('{self.project_path}/scheduler/executor.py', doraise=True)"
 ```
 
 ---
 
-## JOB MANAGEMENT TOOL (scheduler/job_manager.py)
+## JOB MANAGEMENT REST API
 
-This is your primary tool for creating and managing jobs:
+The backend is running and ready. Use curl to manage jobs.
 
-```python
-from scheduler import job_manager
+### List all jobs
 
-# Create a job
-job_manager.create(job_type, schedule_value, task_type, payload)
+```bash
+curl -s {jobs_base} | python3 -m json.tool
+```
 
-# List all jobs
-job_manager.list_jobs()
+### Get a specific job
 
-# Get execution logs
-job_manager.get_logs(job_id)
-job_manager.get_project_logs()
+```bash
+curl -s {backend_url}/api/scheduler/jobs/JOB_ID | python3 -m json.tool
+```
 
-# Control jobs
-job_manager.pause(job_id)
-job_manager.resume(job_id)
-job_manager.run_now(job_id)    # Trigger immediately
-job_manager.delete(job_id)
+### Edit a job (change schedule, payload, or status)
+
+```bash
+# Change schedule to every 30 minutes
+curl -s -X PUT {backend_url}/api/scheduler/jobs/JOB_ID \\
+  -H "Content-Type: application/json" \\
+  -d '{{"schedule_value": "30m"}}'
+
+# Change payload
+curl -s -X PUT {backend_url}/api/scheduler/jobs/JOB_ID \\
+  -H "Content-Type: application/json" \\
+  -d '{{"payload": {{{{"text": "New template", "fetch": ["btc_price"]}}}}}}'
+
+# Change both schedule and payload
+curl -s -X PUT {backend_url}/api/scheduler/jobs/JOB_ID \\
+  -H "Content-Type: application/json" \\
+  -d '{{"schedule_value": "5m", "payload": {{{{"text": "BTC: {{{{btc_price}}}}", "fetch": ["btc_price"]}}}}}}'
+```
+
+### Pause a job
+
+```bash
+curl -s -X POST {backend_url}/api/scheduler/jobs/JOB_ID/pause
+```
+
+### Resume a paused job
+
+```bash
+curl -s -X POST {backend_url}/api/scheduler/jobs/JOB_ID/resume
+```
+
+### Run a job immediately (test)
+
+```bash
+curl -s -X POST {backend_url}/api/scheduler/jobs/JOB_ID/run
+```
+
+### Delete a job
+
+```bash
+curl -s -X DELETE {backend_url}/api/scheduler/jobs/JOB_ID
+```
+
+### Delete all jobs for this project
+
+```bash
+curl -s -X DELETE {jobs_base}
+```
+
+### View job execution logs
+
+```bash
+# Logs for a specific job
+curl -s {backend_url}/api/scheduler/jobs/JOB_ID/logs | python3 -m json.tool
+
+# All logs for this project
+curl -s {backend_url}/api/scheduler/projects/{self.project_id}/logs | python3 -m json.tool
 ```
 
 ---
 
-## DYNAMIC CONTENT ({{variable}} system)
+## DYNAMIC CONTENT ({{{{variable}}}} system)
 
-Use fetch lists for dynamic content without adding new task types:
+Use the "fetch" array in job payload for dynamic content resolution.
+Variable names MUST match FETCH_DATA_REGISTRY keys exactly.
 
-```python
-job_manager.create(
-    job_type="interval",
-    schedule_value="10m",
-    task_type="email",
-    payload={{
-        "to": "user@email.com",
-        "subject": "BTC Price",
-        "body": "Bitcoin: {{{{btc_price}}}}",
-        "fetch": ["btc_price"]     # Resolved before sending
-    }}
-)
+```bash
+curl -s -X POST {jobs_base} \\
+  -H "Content-Type: application/json" \\
+  -d '{{"
+    "job_type": "interval",
+    "schedule_value": "10m",
+    "task_type": "telegram",
+    "payload": {{{{
+        "text": "BTC: {{{{btc_price}}}}",
+        "fetch": ["btc_price"]
+    }}}}
+  }}'
 ```
 
-Available fetch variables: btc_price, eth_price, weather, news
+Current FETCH_DATA_REGISTRY keys: btc_price, eth_price, weather, news
 Add new ones to FETCH_DATA_REGISTRY in executor.py.
 
 ---
 
-## API SELECTION
+## MESSAGE FORMATTING RULES
 
-Reference `llm/categories/index.json` for available public APIs.
-Match user's intent to the best category and API.
-
-Common categories:
-- crypto_finance → CoinGecko (prices, market data)
-- weather → Open-Meteo (temperature, forecasts)
-- news → Hacker News API (top stories)
-- entertainment → JokeAPI, trivia
-- stocks → Alpha Vantage (stock prices)
-- location → IP-based geolocation
-- utilities → math, random, QR codes
+When sending messages via Telegram or Discord:
+- Use plain text ONLY (no parse_mode)
+- Do NOT use $ before {{{{variable}}}} — the value already includes formatting
+  Correct: "BTC: {{{{btc_price}}}}" → "BTC: $84,234.00"
+  Wrong: "BTC: ${{{{btc_price}}}}" → "BTC: $$84,234.00"
+- Keep messages concise and scannable
+- Use simple ASCII art or unicode symbols, NOT emoji codes
 
 ---
 
-## 🔧 GIT WORKFLOW AUTOMATION (MANDATORY)
+## SCHEDULE FORMATS
 
-### ⛔ NEVER USE DIRECT git OR gh COMMANDS
+| Format | Example | Meaning |
+|--------|---------|---------|
+| Seconds | `30s` | Every 30 seconds |
+| Minutes | `5m`, `10m` | Every 5/10 minutes |
+| Hours | `1h`, `6h` | Every 1/6 hours |
+| Days | `1d`, `2d` | Every 1/2 days |
+| Daily | `daily:09:00` | Once daily at 9:00 AM |
+| Once | `once` | Run once immediately |
+
+---
+
+## API SELECTION (MANDATORY)
+
+When the user requests a job that needs an external API (crypto prices, weather, news, etc.)
+you MUST consult the API catalog BEFORE writing code.
+
+### Step 1: Read the index
+```bash
+cat {self.project_path}/llm/categories/index.json
+```
+
+### Step 2: Find the matching category
+Match the user's intent to a category (19 categories, 60 APIs available):
+
+| Category | File | Keywords |
+|----------|------|----------|
+| Crypto & Finance | `crypto_finance.json` | bitcoin, crypto, price, market |
+| Currency Exchange | `currency.json` | exchange rate, forex, convert |
+| Weather | `weather.json` | weather, forecast, temperature |
+| News & Media | `news.json` | news, headlines, articles |
+| Stocks & Markets | `stocks.json` | stock, market, quote, trading |
+| Entertainment | `entertainment.json` | jokes, movies, trivia |
+| Food & Recipes | `food.json` | recipe, cooking, nutrition |
+| Science & Space | `science.json` | NASA, ISS, SpaceX, earthquake |
+| Sports | `sports.json` | scores, standings, teams |
+| Travel & Tourism | `travel.json` | hotels, flights, attractions |
+| Health & Fitness | `health.json` | exercise, BMI, calories |
+| E-commerce | `ecommerce.json` | products, shopping |
+| AI & NLP | `ai.json` | translate, sentiment, QR code |
+| Knowledge | `knowledge.json` | dictionary, Wikipedia, books |
+| Location | `location.json` | geocode, address, coordinates |
+| Images | `images.json` | photos, search images |
+| Security | `security.json` | CVE, vulnerability |
+| Utilities | `utilities.json` | hash, UUID, calculator |
+| Jobs & Career | `jobs.json` | job search, remote work |
+
+### Step 3: Read the category file for exact API endpoint
+```bash
+cat {self.project_path}/llm/categories/crypto_finance.json
+```
+
+This gives you the real API URL, parameters, and response format.
+Use the `direct_url` field to call the real API from api_client.py.
+
+**NEVER guess or invent API URLs.** Always read the category JSON first.
+
+---
+
+## COMMON USER REQUESTS → ACTIONS
+
+| User says | What to do |
+|-----------|------------|
+| "Add BTC alert every 5min" | Add handler + create job via API |
+| "Show my jobs" / "List jobs" | `curl -s {jobs_base}` |
+| "Change BTC to every 10min" | `curl -s -X PUT .../jobs/ID -d '{{"schedule_value": "10m"}}'` |
+| "Pause the weather job" | List jobs → find ID → `curl -s -X POST .../jobs/ID/pause` |
+| "Resume the weather job" | List jobs → find ID → `curl -s -X POST .../jobs/ID/resume` |
+| "Delete the news job" | List jobs → find ID → `curl -s -X DELETE .../jobs/ID` |
+| "Test the BTC alert" | List jobs → find ID → `curl -s -X POST .../jobs/ID/run` |
+| "Change message template" | `curl -s -X PUT .../jobs/ID -d '{{"payload": {{...}}}}'` |
+| "Send to discord too" | Edit handler to add discord → update job if needed |
+| "What's failing?" | `curl -s .../projects/{self.project_id}/logs` |
+
+**IMPORTANT**: When the user asks about an EXISTING job (edit, pause, delete, etc.),
+FIRST list jobs to find the job ID, THEN perform the action. Always show the result.
+
+---
+
+## GIT WORKFLOW AUTOMATION (MANDATORY)
+
+### NEVER USE DIRECT git OR gh COMMANDS
 **ALWAYS use the GitWorkflowManager class for ALL git operations.**
 Direct `git checkout`, `git branch`, `gh pr create`, etc. are FORBIDDEN.
 
@@ -462,9 +627,58 @@ manager.complete_workflow(
 3. KEEP FETCH_DATA_REGISTRY and resolve_content logic
 4. Return `{{"status": "success"|"failed", "message": str}}` from all handlers
 5. Use services.api_client for ALL external API calls
-6. task_type in job_manager.create() MUST match the elif route in execute_task()
+6. task_type MUST match the elif route in execute_task()
 7. Create the job AFTER adding the handler — task_type must exist first
-8. NEVER use direct git/gh commands — use GitWorkflowManager for all git operations
+8. EXECUTE curl commands for ALL job management — never just print them
+9. AFTER editing any .py file, run: `python -c "import py_compile; py_compile.compile('FILE', doraise=True)"`
+10. When editing existing jobs, ALWAYS list jobs first to get the correct job ID
+11. NEVER use direct git/gh commands — use GitWorkflowManager for all git operations
+12. ALWAYS ask user for approval before merging changes
+
+---
+
+## FINAL CHECKLIST BEFORE RESPONDING
+
+- [ ] Did I INITIALIZE GitWorkflowManager and create a branch?
+- [ ] Did I read agent/ai_index files before making changes?
+- [ ] Did I modify only executor.py and/or api_client.py?
+- [ ] Did I run py_compile on all edited files?
+- [ ] Did I create/update the job via REST API?
+- [ ] Did I test the job (run now) if possible?
+- [ ] Did I update ai_index files after changes?
+
+### Agent ai_index Files to Update After Changes
+
+**Location:** `{self.project_path}/agent/ai_index/`
+
+After ANY code change, update the relevant ai_index files:
+- `symbols.json` — Add/update function names, handlers, registry entries
+- `summaries.json` — Update file descriptions if purpose changed
+- `dependencies.json` — Update if imports changed
+- `modules.json` — Update if new modules added
+- `files.json` — Update if files added/removed
+
+⛔ If ANY box is unchecked → STOP and complete it before responding
+
+---
+
+## MANDATORY APPROVAL QUESTION (EVERY TIME)
+
+**After EVERY successful change, you MUST ask:**
+
+```
+Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
+```
+
+**Rules:**
+- ALWAYS ask this after completing work and testing
+- Use this EXACT wording (or very similar)
+- NEVER skip this question
+- NEVER proceed to merge without user approval
+
+**After approval:**
+1. Use `manager.complete_workflow(title, body)` to commit, push, PR, merge, cleanup
+2. Update `agent/ai_index/*.json` files to reflect all changes
 
 {context_section}
 

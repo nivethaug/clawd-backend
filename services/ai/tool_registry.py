@@ -166,6 +166,185 @@ TOOLS_AUTO = [
                 "required": []
             }
         }
+    },
+
+    # ============================================================
+    # Scheduler Job Tools
+    # ============================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_list_jobs",
+            "description": "List all scheduled jobs for a scheduler project. Shows job type, schedule, status, task type, and payload. Use when user asks 'show my jobs', 'list jobs', 'what jobs do I have', 'scheduler status'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID (uses active project if not provided)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_get_job",
+            "description": "Get details of a specific scheduler job by ID. Use when user asks about a specific job's configuration or payload.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "integer",
+                        "description": "Job ID to retrieve"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_create_job",
+            "description": "Create a new scheduled job for a scheduler project. Supports interval (recurring), daily (at specific time), or once (one-time) schedules. Use when user says 'add job', 'schedule', 'create alert', 'send every X minutes'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID (uses active project if not provided)"
+                    },
+                    "job_type": {
+                        "type": "string",
+                        "enum": ["interval", "daily", "once"],
+                        "description": "Job type: interval (recurring), daily (at specific time), or once"
+                    },
+                    "schedule_value": {
+                        "type": "string",
+                        "description": "Schedule: '30s', '5m', '10m', '1h', '6h', '1d' for interval; 'daily:09:00' for daily"
+                    },
+                    "task_type": {
+                        "type": "string",
+                        "description": "Task type identifier (e.g., 'btc_alert', 'weather_update', 'email', 'telegram')"
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": "Job payload: {\"text\": \"message template\", \"fetch\": [\"btc_price\"], \"to\": \"email@example.com\", \"subject\": \"subject\"}",
+                        "properties": {},
+                        "additionalProperties": True
+                    }
+                },
+                "required": ["job_type", "schedule_value", "task_type"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_update_job",
+            "description": "Update an existing scheduler job's schedule, payload, or status. Use when user says 'change schedule', 'update job', 'edit job', 'change to every 10min'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "integer",
+                        "description": "Job ID to update"
+                    },
+                    "schedule_value": {
+                        "type": "string",
+                        "description": "New schedule value (e.g., '10m', '1h', 'daily:09:00')"
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": "New payload (partial updates supported)",
+                        "properties": {},
+                        "additionalProperties": True
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["active", "paused"],
+                        "description": "New status"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_pause_job",
+            "description": "Pause an active scheduler job. It will stop executing until resumed. Use when user says 'pause job', 'stop job temporarily'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "integer",
+                        "description": "Job ID to pause"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_resume_job",
+            "description": "Resume a paused scheduler job. Use when user says 'resume job', 'restart job', 'unpause job'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "integer",
+                        "description": "Job ID to resume"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_run_job",
+            "description": "Trigger a scheduler job to run immediately (test/force execution). Use when user says 'test job', 'run now', 'trigger job'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "integer",
+                        "description": "Job ID to trigger"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_job_logs",
+            "description": "Get execution logs for a scheduler job. Shows status and messages from recent executions. Use when user asks 'job logs', 'execution history', 'did the job run', 'check job status'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "integer",
+                        "description": "Job ID to get logs for"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max log entries to return (default: 20)",
+                        "default": 20
+                    }
+                },
+                "required": ["job_id"]
+            }
+        }
     }
 ]
 
@@ -278,6 +457,44 @@ TOOLS_CONFIRM = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+                "required": []
+            }
+        }
+    },
+
+    # ============================================================
+    # Scheduler Job Tools (require confirmation)
+    # ============================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_delete_job",
+            "description": "Delete a scheduler job permanently (destructive - requires confirmation). Use when user says 'delete job', 'remove job'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "integer",
+                        "description": "Job ID to delete"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scheduler_clear_jobs",
+            "description": "Delete ALL scheduler jobs for a project (destructive bulk operation - requires confirmation). Use when user says 'delete all jobs', 'clear scheduler', 'remove all jobs'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project domain or ID (uses active project if not provided)"
+                    }
+                },
                 "required": []
             }
         }

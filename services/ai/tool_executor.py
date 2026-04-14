@@ -107,6 +107,26 @@ class ToolExecutor:
                 return await self._execute_get_active_project(args, session_key)
             elif tool_name == "get_project_info":
                 return await self._execute_get_project_info(args, session_key)
+            elif tool_name == "scheduler_list_jobs":
+                return await self._execute_scheduler_list_jobs(args, session_key)
+            elif tool_name == "scheduler_get_job":
+                return await self._execute_scheduler_get_job(args)
+            elif tool_name == "scheduler_create_job":
+                return await self._execute_scheduler_create_job(args, session_key)
+            elif tool_name == "scheduler_update_job":
+                return await self._execute_scheduler_update_job(args)
+            elif tool_name == "scheduler_pause_job":
+                return await self._execute_scheduler_pause_job(args)
+            elif tool_name == "scheduler_resume_job":
+                return await self._execute_scheduler_resume_job(args)
+            elif tool_name == "scheduler_run_job":
+                return await self._execute_scheduler_run_job(args)
+            elif tool_name == "scheduler_job_logs":
+                return await self._execute_scheduler_job_logs(args)
+            elif tool_name == "scheduler_delete_job":
+                return await self._execute_scheduler_delete_job(args)
+            elif tool_name == "scheduler_clear_jobs":
+                return await self._execute_scheduler_clear_jobs(args, session_key)
             else:
                 return {
                     "status": "error",
@@ -764,6 +784,349 @@ class ToolExecutor:
                 }
             }
         }
+
+    # ================================================================
+    # Scheduler Job Tools
+    # ================================================================
+
+    def _resolve_project_to_id(self, project_id: str, session_key: str = None) -> Optional[int]:
+        """Resolve project domain or string ID to numeric database ID."""
+        domain = project_id.split(".")[0] if "." in project_id else project_id
+
+        with get_db() as conn:
+            # Try domain first
+            result = conn.execute(
+                "SELECT id FROM projects WHERE domain = %s",
+                (domain,)
+            ).fetchone()
+
+            if result:
+                return result["id"] if isinstance(result, dict) else result[0]
+
+            # Try numeric ID
+            if domain.isdigit():
+                result = conn.execute(
+                    "SELECT id FROM projects WHERE id = %s",
+                    (int(domain),)
+                ).fetchone()
+                if result:
+                    return result["id"] if isinstance(result, dict) else result[0]
+
+        return None
+
+    async def _execute_scheduler_list_jobs(
+        self, args: Dict[str, Any], session_key: str = None
+    ) -> Dict[str, Any]:
+        """List all scheduled jobs for a project."""
+        project_id = args.get("project_id")
+
+        # Fallback to active project
+        if not project_id and session_key:
+            session_manager = get_session_manager()
+            active_project = await session_manager.get_active_project(session_key)
+            if active_project:
+                project_id = active_project.get("domain")
+
+        if not project_id:
+            return {"status": "error", "message": "No project specified. Please specify a project or set an active project."}
+
+        numeric_id = self._resolve_project_to_id(project_id, session_key)
+        if not numeric_id:
+            return {"status": "error", "message": f"Project '{project_id}' not found"}
+
+        try:
+            from services.scheduler import list_jobs as scheduler_list_jobs
+            jobs = scheduler_list_jobs(numeric_id)
+
+            if not jobs:
+                return {
+                    "status": "success",
+                    "message": f"No scheduled jobs found for project {project_id}",
+                    "result": {"jobs": [], "count": 0}
+                }
+
+            # Summarize jobs for readability
+            job_summaries = []
+            for job in jobs:
+                job_summaries.append({
+                    "id": job.get("id"),
+                    "task_type": job.get("task_type"),
+                    "job_type": job.get("job_type"),
+                    "schedule": job.get("schedule_value"),
+                    "status": job.get("status"),
+                    "payload": job.get("payload"),
+                    "last_run": job.get("last_run_at"),
+                    "next_run": job.get("next_run_at"),
+                })
+
+            return {
+                "status": "success",
+                "message": f"Found {len(jobs)} job(s) for project {project_id}",
+                "result": {"jobs": job_summaries, "count": len(jobs)}
+            }
+        except Exception as e:
+            logger.error(f"Error listing scheduler jobs: {e}")
+            return {"status": "error", "message": f"Failed to list jobs: {str(e)}"}
+
+    async def _execute_scheduler_get_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get details of a specific scheduler job."""
+        job_id = args.get("job_id")
+        if not job_id:
+            return {"status": "error", "message": "Missing job_id"}
+
+        try:
+            from services.scheduler import get_job as scheduler_get_job
+            job = scheduler_get_job(int(job_id))
+
+            if not job:
+                return {"status": "error", "message": f"Job {job_id} not found"}
+
+            return {
+                "status": "success",
+                "message": f"Job {job_id} details",
+                "result": {"job": job}
+            }
+        except Exception as e:
+            logger.error(f"Error getting scheduler job: {e}")
+            return {"status": "error", "message": f"Failed to get job: {str(e)}"}
+
+    async def _execute_scheduler_create_job(
+        self, args: Dict[str, Any], session_key: str = None
+    ) -> Dict[str, Any]:
+        """Create a new scheduled job."""
+        project_id = args.get("project_id")
+        job_type = args.get("job_type")
+        schedule_value = args.get("schedule_value")
+        task_type = args.get("task_type")
+        payload = args.get("payload", {})
+
+        if not job_type or not schedule_value or not task_type:
+            return {"status": "error", "message": "Missing required fields: job_type, schedule_value, task_type"}
+
+        # Fallback to active project
+        if not project_id and session_key:
+            session_manager = get_session_manager()
+            active_project = await session_manager.get_active_project(session_key)
+            if active_project:
+                project_id = active_project.get("domain")
+
+        if not project_id:
+            return {"status": "error", "message": "No project specified. Please specify a project or set an active project."}
+
+        numeric_id = self._resolve_project_to_id(project_id, session_key)
+        if not numeric_id:
+            return {"status": "error", "message": f"Project '{project_id}' not found"}
+
+        try:
+            from services.scheduler import create_job as scheduler_create_job
+            job = scheduler_create_job(project_id=numeric_id, job_data={
+                "job_type": job_type,
+                "schedule_value": schedule_value,
+                "task_type": task_type,
+                "payload": payload,
+            })
+
+            return {
+                "status": "success",
+                "message": f"Created {job_type} job '{task_type}' scheduled every {schedule_value}",
+                "result": {"job": job}
+            }
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+        except RuntimeError as e:
+            return {"status": "error", "message": f"Rate limited: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Error creating scheduler job: {e}")
+            return {"status": "error", "message": f"Failed to create job: {str(e)}"}
+
+    async def _execute_scheduler_update_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing scheduler job."""
+        job_id = args.get("job_id")
+        if not job_id:
+            return {"status": "error", "message": "Missing job_id"}
+
+        updates = {}
+        if args.get("schedule_value"):
+            updates["schedule_value"] = args["schedule_value"]
+        if args.get("payload"):
+            updates["payload"] = args["payload"]
+        if args.get("status"):
+            updates["status"] = args["status"]
+
+        if not updates:
+            return {"status": "error", "message": "No fields to update. Provide schedule_value, payload, or status."}
+
+        try:
+            from services.scheduler import update_job as scheduler_update_job
+            job = scheduler_update_job(int(job_id), updates)
+
+            return {
+                "status": "success",
+                "message": f"Updated job {job_id}: {', '.join(updates.keys())}",
+                "result": {"job": job}
+            }
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+        except Exception as e:
+            logger.error(f"Error updating scheduler job: {e}")
+            return {"status": "error", "message": f"Failed to update job: {str(e)}"}
+
+    async def _execute_scheduler_pause_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Pause an active scheduler job."""
+        job_id = args.get("job_id")
+        if not job_id:
+            return {"status": "error", "message": "Missing job_id"}
+
+        try:
+            from services.scheduler import pause_job as scheduler_pause_job, get_job as scheduler_get_job
+            job = scheduler_get_job(int(job_id))
+            if not job:
+                return {"status": "error", "message": f"Job {job_id} not found"}
+            if job.get("status") != "active":
+                return {"status": "error", "message": f"Job {job_id} is already {job.get('status')}"}
+
+            scheduler_pause_job(int(job_id))
+
+            return {
+                "status": "success",
+                "message": f"Paused job {job_id} ({job.get('task_type', 'unknown')})",
+                "result": {"job_id": int(job_id), "status": "paused"}
+            }
+        except Exception as e:
+            logger.error(f"Error pausing scheduler job: {e}")
+            return {"status": "error", "message": f"Failed to pause job: {str(e)}"}
+
+    async def _execute_scheduler_resume_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Resume a paused scheduler job."""
+        job_id = args.get("job_id")
+        if not job_id:
+            return {"status": "error", "message": "Missing job_id"}
+
+        try:
+            from services.scheduler import resume_job as scheduler_resume_job
+            scheduler_resume_job(int(job_id))
+
+            return {
+                "status": "success",
+                "message": f"Resumed job {job_id}",
+                "result": {"job_id": int(job_id), "status": "active"}
+            }
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+        except Exception as e:
+            logger.error(f"Error resuming scheduler job: {e}")
+            return {"status": "error", "message": f"Failed to resume job: {str(e)}"}
+
+    async def _execute_scheduler_run_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Trigger a scheduler job to run immediately."""
+        job_id = args.get("job_id")
+        if not job_id:
+            return {"status": "error", "message": "Missing job_id"}
+
+        try:
+            from services.scheduler import run_job_now as scheduler_run_job_now
+            job = scheduler_run_job_now(int(job_id))
+
+            return {
+                "status": "success",
+                "message": f"Triggered job {job_id} for immediate execution",
+                "result": {"job": job}
+            }
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+        except Exception as e:
+            logger.error(f"Error running scheduler job: {e}")
+            return {"status": "error", "message": f"Failed to trigger job: {str(e)}"}
+
+    async def _execute_scheduler_job_logs(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get execution logs for a scheduler job."""
+        job_id = args.get("job_id")
+        limit = args.get("limit", 20)
+        if not job_id:
+            return {"status": "error", "message": "Missing job_id"}
+
+        try:
+            with get_db() as cur:
+                cur.execute("""
+                    SELECT id, job_id, status, message, created_at
+                    FROM scheduler_logs
+                    WHERE job_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, (int(job_id), limit))
+                rows = cur.fetchall()
+                logs = [dict(r) for r in rows]
+
+            if not logs:
+                return {
+                    "status": "success",
+                    "message": f"No execution logs found for job {job_id}",
+                    "result": {"logs": [], "count": 0}
+                }
+
+            return {
+                "status": "success",
+                "message": f"Found {len(logs)} log entries for job {job_id}",
+                "result": {"logs": logs, "count": len(logs)}
+            }
+        except Exception as e:
+            logger.error(f"Error getting scheduler job logs: {e}")
+            return {"status": "error", "message": f"Failed to get logs: {str(e)}"}
+
+    async def _execute_scheduler_delete_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Delete a scheduler job permanently."""
+        job_id = args.get("job_id")
+        if not job_id:
+            return {"status": "error", "message": "Missing job_id"}
+
+        try:
+            from services.scheduler import delete_job as scheduler_delete_job
+            deleted = scheduler_delete_job(int(job_id))
+
+            if not deleted:
+                return {"status": "error", "message": f"Job {job_id} not found"}
+
+            return {
+                "status": "success",
+                "message": f"Deleted job {job_id}",
+                "result": {"job_id": int(job_id)}
+            }
+        except Exception as e:
+            logger.error(f"Error deleting scheduler job: {e}")
+            return {"status": "error", "message": f"Failed to delete job: {str(e)}"}
+
+    async def _execute_scheduler_clear_jobs(
+        self, args: Dict[str, Any], session_key: str = None
+    ) -> Dict[str, Any]:
+        """Delete all jobs for a project."""
+        project_id = args.get("project_id")
+
+        # Fallback to active project
+        if not project_id and session_key:
+            session_manager = get_session_manager()
+            active_project = await session_manager.get_active_project(session_key)
+            if active_project:
+                project_id = active_project.get("domain")
+
+        if not project_id:
+            return {"status": "error", "message": "No project specified."}
+
+        numeric_id = self._resolve_project_to_id(project_id, session_key)
+        if not numeric_id:
+            return {"status": "error", "message": f"Project '{project_id}' not found"}
+
+        try:
+            from services.scheduler import clear_jobs as scheduler_clear_jobs
+            count = scheduler_clear_jobs(numeric_id)
+
+            return {
+                "status": "success",
+                "message": f"Deleted {count} job(s) for project {project_id}",
+                "result": {"deleted_count": count}
+            }
+        except Exception as e:
+            logger.error(f"Error clearing scheduler jobs: {e}")
+            return {"status": "error", "message": f"Failed to clear jobs: {str(e)}"}
 
 
 # Singleton instance

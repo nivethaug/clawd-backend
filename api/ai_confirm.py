@@ -132,24 +132,24 @@ async def ai_confirm(request: AIConfirmRequest):
             elif tool_name == "stop_all_projects":
                 # Stop all projects
                 await session_manager.clear_pending_intent(request.session_id)
-                
+
                 from database_postgres import get_db
                 from apps_service import pm2_action
-                
+
                 with get_db() as conn:
                     result = conn.execute(
                         "SELECT domain FROM projects WHERE status != %s",
                         ("deleted",)
                     ).fetchall()
-                    
+
                     projects = [row["domain"] for row in result]
-                
+
                 successes = 0
                 for domain in projects:
                     res = pm2_action(domain, "stop")
                     if res.get("success"):
                         successes += 1
-                
+
                 return {
                     "type": "execution",
                     "text": f"Stopped {successes}/{len(projects)} projects",
@@ -157,6 +157,42 @@ async def ai_confirm(request: AIConfirmRequest):
                     "message": f"Stopped {successes} out of {len(projects)} projects",
                     "details": None
                 }
+
+            elif tool_name == "scheduler_delete_job":
+                # Delete a scheduler job
+                await session_manager.clear_pending_intent(request.session_id)
+
+                executor = get_tool_executor()
+                result = await executor._execute_scheduler_delete_job(args)
+
+                if result["status"] == "success":
+                    return {
+                        "type": "execution",
+                        "text": result["message"],
+                        "progress": [result],
+                        "message": result["message"],
+                        "details": None
+                    }
+                else:
+                    return error_response(result.get("message", "Failed to delete job"))
+
+            elif tool_name == "scheduler_clear_jobs":
+                # Clear all scheduler jobs for a project
+                await session_manager.clear_pending_intent(request.session_id)
+
+                executor = get_tool_executor()
+                result = await executor._execute_scheduler_clear_jobs(args, session_key=request.session_id)
+
+                if result["status"] == "success":
+                    return {
+                        "type": "execution",
+                        "text": result["message"],
+                        "progress": [result],
+                        "message": result["message"],
+                        "details": None
+                    }
+                else:
+                    return error_response(result.get("message", "Failed to clear jobs"))
             
             else:
                 # Generic execution
