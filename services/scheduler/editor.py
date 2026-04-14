@@ -24,8 +24,10 @@ except ImportError:
 class SchedulerEditor:
     """AI-powered scheduler executor enhancer."""
 
-    def __init__(self, project_path: str):
+    def __init__(self, project_path: str, project_id: int = None, backend_url: str = None):
         self.project_path = Path(project_path)
+        self.project_id = project_id
+        self.backend_url = backend_url or "http://localhost:8002"
         self.executor_path = self.project_path / "scheduler" / "executor.py"
         self.api_client_path = self.project_path / "services" / "api_client.py"
         self.backup_executor = self.project_path / "scheduler" / "executor.py.backup"
@@ -85,10 +87,13 @@ class SchedulerEditor:
 
     def _build_prompt(self, description: str, project_name: str) -> str:
         """Build AI prompt for executor enhancement."""
+        # Build the job creation API instruction
+        jobs_api_url = f"{self.backend_url}/api/scheduler/projects/{self.project_id}/jobs"
+
         return f"""
 Enhance the scheduler executor for: {description}
 
-Project: {project_name}
+Project: {project_name} (ID: {self.project_id})
 
 Allowed files to modify ONLY:
 - scheduler/executor.py (add task handlers + routes)
@@ -109,6 +114,7 @@ During initial creation, you have FULL AUTONOMY to:
 4. Add task handlers to scheduler/executor.py
 5. Register new routes in execute_task()
 6. Add FETCH_DATA_REGISTRY entries for dynamic content
+7. Create the scheduled job via the REST API (see below)
 
 EXAMPLES:
 - "weather update every hour" → add get_weather() to api_client, add _weather_alert() to executor, register as "weather_alert"
@@ -122,7 +128,7 @@ EXECUTOR.PY STRUCTURE
 
 The executor has TWO extension points:
 
-1. FETCH_DATA_REGISTRY - for dynamic {{variable}} resolution:
+1. FETCH_DATA_REGISTRY - for dynamic {{{{variable}}}} resolution:
    FETCH_DATA_REGISTRY["btc_price"] = lambda: _fetch_crypto("bitcoin")
 
 2. execute_task() routing - for task_type handlers:
@@ -132,26 +138,29 @@ The executor has TWO extension points:
 Add your handlers BELOW existing ones. Keep existing handlers intact.
 
 ==================================================
-JOB MANAGEMENT - CREATE JOBS
+JOB CREATION - REQUIRED FINAL STEP
 ==================================================
 
-After adding handlers, create the job using job_manager:
+After modifying executor.py and api_client.py, you MUST create the job
+by calling the REST API with curl:
 
-    from scheduler import job_manager
+    curl -X POST {jobs_api_url} \\
+      -H "Content-Type: application/json" \\
+      -d '{{"
+        "job_type": "interval",
+        "schedule_value": "10m",
+        "task_type": "YOUR_TASK_TYPE",
+        "payload": {{{{
+            "message": "BTC: {{{{btc_price}}}}"
+        }}}}
+      }}'
 
-    job_manager.create(
-        job_type="interval",          # interval, daily, once
-        schedule_value="10m",         # 30s, 5m, 1h, 2d, daily:09:00
-        task_type="btc_email",        # MUST match your executor route
-        payload={{
-            "to": "user@email.com",
-            "subject": "BTC Price",
-            "body": "Bitcoin: {{{{btc_price}}}}",   # dynamic content
-            "fetch": ["btc_price"]                    # resolved before sending
-        }}
-    )
-
-IMPORTANT: task_type in create() MUST match the elif route in execute_task().
+Rules:
+- task_type MUST match the elif route you added in execute_task()
+- job_type: "interval" (recurring), "daily" (once per day at time), or "once"
+- schedule_value: "30s", "5m", "1h", "2d", or "daily:09:00"
+- Derive schedule from the user description (e.g., "every 10min" → "10m")
+- This is MANDATORY — do not skip this step
 
 ==================================================
 CRITICAL RULES
@@ -165,13 +174,7 @@ CRITICAL RULES
 6. DO NOT add imports that aren't available
 7. Use services.api_client for ALL external API calls
 8. Use {{variable}} with fetch list for dynamic content when possible
-
-==================================================
-OUTPUT
-==================================================
-
-Return the COMPLETE updated executor.py and api_client.py files.
-Include the job_manager.create() call to register the job.
+9. YOU MUST create the job via curl after modifying files — this is not optional
 """
 
     def _run_claude(self, prompt: str) -> dict:

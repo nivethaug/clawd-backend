@@ -103,7 +103,11 @@ def run_scheduler_pipeline(
         # Step 3: AI enhance executor.py
         logger.info("📋 Step 3/4: AI enhancement of executor.py...")
         try:
-            editor = SchedulerEditor(project_path)
+            editor = SchedulerEditor(
+                project_path,
+                project_id=project_id,
+                backend_url=backend_url,
+            )
             success, edit_result = editor.enhance_executor(description, project_name)
 
             if success:
