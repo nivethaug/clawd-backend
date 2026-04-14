@@ -279,20 +279,38 @@ def run_job_now(job_id: int) -> dict:
 
 def clear_jobs(project_id: int = None) -> int:
     """
-    Delete jobs. If project_id given, only that project's jobs.
-    Returns number of deleted rows.
+    Delete jobs and their logs. If project_id given, only that project's jobs.
+    Also clears the executor cache for the project.
+    Returns number of deleted jobs.
     """
     with get_db() as cur:
         if project_id:
+            # Delete logs first (explicit, even though CASCADE exists)
+            cur.execute("""
+                DELETE FROM scheduler_logs
+                WHERE job_id IN (SELECT id FROM scheduler_jobs WHERE project_id = %s)
+            """, (project_id,))
             cur.execute("DELETE FROM scheduler_jobs WHERE project_id = %s", (project_id,))
-            logger.info(f"Cleared all jobs for project {project_id}")
+            logger.info(f"Cleared all jobs and logs for project {project_id}")
         else:
+            cur.execute("DELETE FROM scheduler_logs")
             cur.execute("DELETE FROM scheduler_jobs")
-            logger.info("Cleared ALL scheduler jobs")
+            logger.info("Cleared ALL scheduler jobs and logs")
         count = cur._cursor.rowcount
         conn = cur._connection
         conn.commit()
-        return count
+
+    # Clear executor cache so the deleted project's module is unloaded
+    try:
+        from services.scheduler.execution_engine import clear_cache
+        if project_id:
+            clear_cache(project_id)
+        else:
+            clear_cache()
+    except Exception as e:
+        logger.warning(f"Failed to clear executor cache: {e}")
+
+    return count
 
 
 def _count_project_jobs(project_id: int) -> int:
