@@ -213,20 +213,23 @@ When sending messages via Telegram or Discord:
 JOB CREATION - REQUIRED FINAL STEP
 ==================================================
 
-After modifying executor.py and api_client.py, you MUST create the job
-by calling the REST API with curl:
+After modifying files, you MUST create the job by EXECUTING this curl command.
+Do NOT just print it — actually RUN it using Bash:
 
-    curl -X POST {jobs_api_url} \\
+    curl -s -X POST {jobs_api_url} \\
       -H "Content-Type: application/json" \\
       -d '{{"
         "job_type": "interval",
-        "schedule_value": "10m",
+        "schedule_value": "5m",
         "task_type": "YOUR_TASK_TYPE",
         "payload": {{{{
             "text": "BTC Price: {{{{btc_price}}}}",
             "fetch": ["btc_price"]
         }}}}
       }}'
+
+The backend API is running and ready to accept this request.
+Execute the curl command NOW — this is step 6 of your task, not optional.
 
 Variable names in {{{{}}}} MUST match keys in FETCH_DATA_REGISTRY exactly.
 Current registry keys: btc_price, eth_price, weather, news.
@@ -239,9 +242,7 @@ Rules:
 - job_type: "interval" (recurring), "daily" (once per day at time), or "once"
 - schedule_value: "30s", "5m", "1h", "2d", or "daily:09:00"
 - Derive schedule from the user description (e.g., "every 10min" → "10m")
-- The "fetch" array is REQUIRED when using {{{{variable}}}} placeholders —
-  list the FETCH_DATA_REGISTRY keys used in your text (e.g., ["btc_price", "eth_price"])
-- This is MANDATORY — do not skip this step
+- The "fetch" array is REQUIRED when using {{{{variable}}}} placeholders
 
 ==================================================
 CRITICAL RULES

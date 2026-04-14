@@ -913,7 +913,7 @@ async def create_project(request: CreateProjectRequest):
             logger.info(f"[SCHEDULER] Import successful!")
 
             # Get backend URL for job_manager
-            backend_url = f"http://localhost:{os.getenv('PORT', '8000')}"
+            backend_url = f"http://localhost:{os.getenv('PORT', '8002')}"
 
             # Run scheduler pipeline in background thread
             def run_scheduler_worker():
