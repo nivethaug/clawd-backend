@@ -14,6 +14,14 @@ import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+# Configure logging for standalone daemon process
+# (When run as PM2 process, no other logging config exists)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s:%(name)s:%(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
+
 from services.scheduler.jobs import get_due_jobs, update_job_run
 from services.scheduler.parser import calculate_next_run
 from services.scheduler.logger import log_job
