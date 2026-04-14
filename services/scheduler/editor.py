@@ -114,20 +114,61 @@ INTENT DETECTION & API SELECTION
 
 ANALYZE user description: "{description}"
 
+STEP 1: Read .env to find which channels are configured:
+- TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID → Telegram available
+- DISCORD_WEBHOOK_URL → Discord available
+- SMTP_HOST + EMAIL_TO → Email available
+- API_ENDPOINT → API available
+
+STEP 2: Determine target channels from description:
+- "send to telegram" → Telegram only
+- "send to discord" → Discord only
+- "send to email" → Email only
+- "send to telegram and email" → BOTH Telegram + Email
+- "send to all channels" → ALL configured channels
+- If description doesn't specify a channel → send to ALL configured channels
+
+STEP 3: Build your handler to send to ALL target channels.
+The executor already has these sender functions you can call:
+- _send_telegram({{"text": msg, "chat_id": "..."}})
+- _send_discord({{"content": msg}})
+- _send_email({{"to": "...", "subject": "...", "body": msg}})
+- _call_api({{"url": "...", "body": {{}}}})
+
+MULTI-CHANNEL HANDLER PATTERN:
+    def _btc_alert(payload: dict) -> Tuple[str, str]:
+        price = ...  # fetch data
+
+        results = []
+        # Send to each configured channel
+        if TELEGRAM_BOT_TOKEN:
+            s, m = _send_telegram({{"text": f"BTC: {{price}}"}})
+            results.append(("telegram", s))
+        if DISCORD_WEBHOOK_URL:
+            s, m = _send_discord({{"content": f"BTC: {{price}}"}})
+            results.append(("discord", s))
+        if EMAIL_TO:
+            s, m = _send_email({{"subject": "BTC", "body": f"BTC: {{price}}"}})
+            results.append(("email", s))
+
+        failed = [r for r in results if r[1] == "failed"]
+        if failed:
+            return ("failed", f"Failed: {{failed}}")
+        return ("success", f"Sent to {{len(results)}} channels")
+
 During initial creation, you have FULL AUTONOMY to:
-1. Match description to BEST category from /llm/categories/index.json
-2. Select appropriate public APIs from that category
-3. Add helper functions to services/api_client.py
-4. Add task handlers to scheduler/executor.py
-5. Register new routes in execute_task()
-6. Add FETCH_DATA_REGISTRY entries for dynamic content
-7. Create the scheduled job via the REST API (see below)
+1. Read .env to detect configured channels
+2. Select appropriate public APIs from api_client
+3. Add task handlers to scheduler/executor.py
+4. Register new routes in execute_task()
+5. Add FETCH_DATA_REGISTRY entries for dynamic content
+6. Create the scheduled job via the REST API (see below)
 
 EXAMPLES:
-- "weather update every hour" → add get_weather() to api_client, add _weather_alert() to executor, register as "weather_alert"
-- "BTC price via email every 10min" → add get_crypto_price() to api_client, add _btc_email() to executor, register as "btc_email"
-- "news digest daily" → add get_news() to api_client, add _news_digest() to executor, register as "news_digest"
-- "monitor website every 5min" → add check_website() to api_client, add _monitor_site() to executor, register as "site_monitor"
+- "BTC price to telegram every 10min" → _btc_alert() sends to Telegram only
+- "BTC price to discord every 10min" → _btc_alert() sends to Discord only
+- "BTC price to telegram and email" → _btc_alert() sends to BOTH Telegram + Email
+- "weather alert every hour" → sends to ALL configured channels
 
 ==================================================
 EXECUTOR.PY STRUCTURE
