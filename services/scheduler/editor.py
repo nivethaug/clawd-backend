@@ -156,6 +156,12 @@ by calling the REST API with curl:
         }}}}
       }}'
 
+Variable names in {{{{}}}} MUST match keys in FETCH_DATA_REGISTRY exactly.
+Current registry keys: btc_price, eth_price, weather, news.
+
+The "fetch" array is REQUIRED — without it, {{{{variable}}}} placeholders
+will NOT be resolved and will be sent as literal text.
+
 Rules:
 - task_type MUST match the elif route you added in execute_task()
 - job_type: "interval" (recurring), "daily" (once per day at time), or "once"
