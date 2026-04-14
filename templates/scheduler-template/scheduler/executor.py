@@ -57,28 +57,52 @@ FETCH_DATA_REGISTRY = {
 }
 
 
+# Simple per-execution cache to avoid hitting APIs multiple times per job
+_api_cache: dict = {}
+_CACHE_TTL = 60  # seconds
+
+
+def _cached_fetch(key: str, fetcher, ttl: int = _CACHE_TTL) -> str:
+    """Cache fetcher results for TTL seconds to avoid rate limits."""
+    import time
+    now = time.time()
+    if key in _api_cache:
+        cached_val, cached_at = _api_cache[key]
+        if now - cached_at < ttl:
+            return cached_val
+    result = fetcher()
+    _api_cache[key] = (result, now)
+    return result
+
+
 def _fetch_crypto(coin: str) -> str:
     """Fetch crypto price, returns formatted string."""
-    result = api_client.get_crypto_price(coin)
-    if result.get("success"):
-        return f"${result['price']:,.2f}"
-    return f"unavailable ({result.get('error', 'unknown')})"
+    def _do_fetch():
+        result = api_client.get_crypto_price(coin)
+        if result.get("success"):
+            return f"${result['price']:,.2f}"
+        return f"unavailable ({result.get('error', 'unknown')})"
+    return _cached_fetch(f"crypto_price_{coin}", _do_fetch)
 
 
 def _fetch_weather() -> str:
     """Fetch weather data, returns formatted string."""
-    result = api_client.get_weather()
-    if result.get("success"):
-        return f"{result['temperature']}C, wind {result['windspeed']}km/h"
-    return f"unavailable ({result.get('error', 'unknown')})"
+    def _do_fetch():
+        result = api_client.get_weather()
+        if result.get("success"):
+            return f"{result['temperature']}C, wind {result['windspeed']}km/h"
+        return f"unavailable ({result.get('error', 'unknown')})"
+    return _cached_fetch("weather", _do_fetch)
 
 
 def _fetch_news() -> str:
     """Fetch top news, returns formatted string."""
-    result = api_client.get_news()
-    if result.get("success"):
-        return " | ".join(result.get("stories", [])[:3])
-    return f"unavailable ({result.get('error', 'unknown')})"
+    def _do_fetch():
+        result = api_client.get_news()
+        if result.get("success"):
+            return " | ".join(result.get("stories", [])[:3])
+        return f"unavailable ({result.get('error', 'unknown')})"
+    return _cached_fetch("news", _do_fetch)
 
 
 def resolve_content(payload: dict) -> dict:
