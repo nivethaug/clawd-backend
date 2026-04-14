@@ -151,7 +151,8 @@ by calling the REST API with curl:
         "schedule_value": "10m",
         "task_type": "YOUR_TASK_TYPE",
         "payload": {{{{
-            "message": "BTC: {{{{btc_price}}}}"
+            "text": "BTC Price: {{{{btc_price}}}}",
+            "fetch": ["btc_price"]
         }}}}
       }}'
 
@@ -160,6 +161,8 @@ Rules:
 - job_type: "interval" (recurring), "daily" (once per day at time), or "once"
 - schedule_value: "30s", "5m", "1h", "2d", or "daily:09:00"
 - Derive schedule from the user description (e.g., "every 10min" → "10m")
+- The "fetch" array is REQUIRED when using {{{{variable}}}} placeholders —
+  list the FETCH_DATA_REGISTRY keys used in your text (e.g., ["btc_price", "eth_price"])
 - This is MANDATORY — do not skip this step
 
 ==================================================
