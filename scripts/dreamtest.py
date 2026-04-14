@@ -75,10 +75,20 @@ def log_check(message: str) -> None:
     log("CHECK", message)
 
 
-def create_project(name: str, description: str = "", type_id: int = 1, bot_token: str = None) -> Optional[Dict]:
+def create_project(
+    name: str,
+    description: str = "",
+    type_id: int = 1,
+    bot_token: str = None,
+    telegram_bot_token: str = None,
+    telegram_chat_id: str = None,
+    discord_webhook_url: str = None,
+    email_to: str = None,
+    api_endpoint: str = None,
+) -> Optional[Dict]:
     """
     Create a new project via API.
-    
+
     Returns project data including ID and domain.
     """
     log_info(f"Creating project: {name}")
@@ -95,6 +105,18 @@ def create_project(name: str, description: str = "", type_id: int = 1, bot_token
     # Add bot_token for bot projects
     if type_id in (2, 3) and bot_token:
         payload["bot_token"] = bot_token
+
+    # Add scheduler sender channels
+    if telegram_bot_token:
+        payload["telegram_bot_token"] = telegram_bot_token
+    if telegram_chat_id:
+        payload["telegram_chat_id"] = telegram_chat_id
+    if discord_webhook_url:
+        payload["discord_webhook_url"] = discord_webhook_url
+    if email_to:
+        payload["email_to"] = email_to
+    if api_endpoint:
+        payload["api_endpoint"] = api_endpoint
     
     try:
         response = requests.post(
@@ -705,15 +727,27 @@ def run_scheduler_pipeline_test(
     description: str = "",
     timeout: int = DEFAULT_TIMEOUT,
     agent_mode: bool = False,
-    skip_verify: bool = False
+    skip_verify: bool = False,
+    telegram_bot_token: str = None,
+    telegram_chat_id: str = None,
+    discord_webhook_url: str = None,
+    email_to: str = None,
+    api_endpoint: str = None,
 ) -> Dict:
     """
     Run Scheduler project pipeline test.
 
     Returns result dict with status and project info.
     """
-    # Step 1: Create scheduler project (no bot_token needed)
-    project = create_project(name, description, type_id=5)
+    # Step 1: Create scheduler project with sender channels
+    project = create_project(
+        name, description, type_id=5,
+        telegram_bot_token=telegram_bot_token,
+        telegram_chat_id=telegram_chat_id,
+        discord_webhook_url=discord_webhook_url,
+        email_to=email_to,
+        api_endpoint=api_endpoint,
+    )
     if not project:
         return {
             "success": False,
@@ -772,6 +806,12 @@ def run_scheduler_pipeline_test(
         print(f"Name:          {project.get('name')}")
         print(f"Status:        {final_status}")
         print()
+        print("Sender Channels:")
+        print(f"  Telegram:    {'configured' if telegram_bot_token else 'not set'}")
+        print(f"  Discord:     {'configured' if discord_webhook_url else 'not set'}")
+        print(f"  Email:       {'configured' if email_to else 'not set'}")
+        print(f"  API:         {'configured' if api_endpoint else 'not set'}")
+        print()
         print("API Endpoints:")
         print(f"  Jobs:        {API_BASE_URL}/api/scheduler/projects/{project_id}/jobs")
         print(f"  Logs:        {API_BASE_URL}/api/scheduler/projects/{project_id}/logs")
@@ -790,7 +830,12 @@ def cmd_scheduler(args) -> int:
         description=args.desc or "",
         timeout=args.timeout,
         agent_mode=args.agent,
-        skip_verify=args.skip_verify
+        skip_verify=args.skip_verify,
+        telegram_bot_token=getattr(args, 'telegram_token', None),
+        telegram_chat_id=getattr(args, 'telegram_chat_id', None),
+        discord_webhook_url=getattr(args, 'discord_webhook', None),
+        email_to=getattr(args, 'email_to', None),
+        api_endpoint=getattr(args, 'api_endpoint', None),
     )
 
     if args.agent:
@@ -1105,6 +1150,17 @@ Examples:
                                   help="Agent mode - output JSON only")
     scheduler_parser.add_argument("--skip-verify", action="store_true",
                                   help="Skip API verification")
+    # Scheduler sender channels
+    scheduler_parser.add_argument("--telegram-token", dest="telegram_token",
+                                  help="Telegram bot token for scheduler notifications")
+    scheduler_parser.add_argument("--telegram-chat-id", dest="telegram_chat_id",
+                                  help="Default Telegram chat ID")
+    scheduler_parser.add_argument("--discord-webhook", dest="discord_webhook",
+                                  help="Discord webhook URL for notifications")
+    scheduler_parser.add_argument("--email-to", dest="email_to",
+                                  help="Email recipient for scheduler notifications")
+    scheduler_parser.add_argument("--api-endpoint", dest="api_endpoint",
+                                  help="API endpoint URL for notifications")
 
     args = parser.parse_args()
 
