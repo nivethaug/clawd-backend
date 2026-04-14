@@ -138,6 +138,22 @@ The executor has TWO extension points:
 Add your handlers BELOW existing ones. Keep existing handlers intact.
 
 ==================================================
+MESSAGE FORMATTING RULES
+==================================================
+
+When sending messages via Telegram or Discord:
+- Use plain text ONLY (no parse_mode)
+- Do NOT use $ before {{{{variable}}}} — the variable already includes formatting
+  Example: "BTC: {{btc_price}}" → "BTC: $84,234.00" (correct)
+  NOT: "BTC: ${{btc_price}}" → "BTC: $$84,234.00" (wrong — double $)
+- Keep messages concise and scannable
+- Use simple ASCII art or unicode symbols, NOT emoji codes
+- Good template example:
+    "BTC Price Update\n\nPrice: {{btc_price}}\nChange 24h: {{btc_change}}\n\nUpdated: auto"
+- BAD template example:
+    "💰 BTC Price: ${{price}}" (double $, wrong variable name)
+
+==================================================
 JOB CREATION - REQUIRED FINAL STEP
 ==================================================
 
