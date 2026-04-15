@@ -44,7 +44,7 @@ class GitWorkflowManager:
         self.repo_path = repo_path or os.getcwd()
         self.project_id = project_id
         self.session_id = session_id
-        self.backend_url = os.environ.get('BACKEND_URL', f"http://localhost:{os.getenv('PORT', '8002')}")
+        self.backend_url = os.environ.get('BACKEND_URL', 'http://localhost:8002')
         self._last_commit = None
 
     def _api_call(self, method: str, path: str, data: dict = None) -> dict:
