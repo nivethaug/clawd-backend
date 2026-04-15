@@ -720,41 +720,18 @@ Before making any code changes, follow this process:
 5. After execution completes, update ai_index files per the checklist
 6. Delete the plan file
 
-{context_section}
+---
 
-## 🚫🚫🚫 GIT COMMAND RESTRICTION — ABSOLUTE BAN 🚫🚫🚫
+## ⛔ GIT COMMIT/PUSH RESTRICTION
 
-**You are STRICTLY FORBIDDEN from running any git commands directly.**
-
-### BANNED (will cause system failure):
-- `git add`, `git commit`, `git push`, `git pull`
-- `git checkout`, `git branch`, `git merge`, `git revert`
-- `git status`, `git diff`, `git log`
-- ANY subprocess.run(["git", ...]) call
-- ANY os.system("git ...") call
-- ANY shell command containing "git"
-
-### ONLY ALLOWED:
-```python
-import sys
-sys.path.insert(0, '{self.project_path}')
-from git_workflow import GitWorkflowManager
-
-manager = GitWorkflowManager('{self.project_path}', project_id={self.project_id}, session_id={self.session_id})
-result = manager.commit_and_push("descriptive message")
-```
-
-### WHY: GitWorkflowManager records commit_hash in the database for UI rollback tracking.
-Direct git commands BYPASS the database — commits become invisible to the system.
-
-### BEFORE EVERY RESPONSE — FINAL CHECK:
-- [ ] Did I use `manager.commit_and_push()` instead of raw git commands?
-- [ ] Did I pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager?
-- [ ] Did I AVOID all subprocess.run(["git", ...]) calls?
-
-⛔ If you ran ANY git command directly — your commit is NOT tracked. REDO using manager.commit_and_push().
+- [ ] NEVER run `git commit` or `git push` directly — use ONLY `manager.commit_and_push()`
+- [ ] ALWAYS pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager
+- [ ] `git status`, `git diff`, `git log` are OK to use for inspection
+- [ ] Direct commit/push BYPASSES database — commit_hash won't be recorded
 
 ---
+
+{context_section}
 
 ## USER REQUEST
 
@@ -1356,37 +1333,12 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 
 ---
 
-## 🚫🚫🚫 GIT COMMAND RESTRICTION — ABSOLUTE BAN 🚫🚫🚫
+## ⛔ GIT COMMIT/PUSH RESTRICTION
 
-**You are STRICTLY FORBIDDEN from running any git commands directly.**
-
-### BANNED (will cause system failure):
-- `git add`, `git commit`, `git push`, `git pull`
-- `git checkout`, `git branch`, `git merge`, `git revert`
-- `git status`, `git diff`, `git log`
-- ANY subprocess.run(["git", ...]) call
-- ANY os.system("git ...") call
-- ANY shell command containing "git"
-
-### ONLY ALLOWED:
-```python
-import sys
-sys.path.insert(0, '{self.project_path}')
-from git_workflow import GitWorkflowManager
-
-manager = GitWorkflowManager('{self.project_path}', project_id={self.project_id}, session_id={self.session_id})
-result = manager.commit_and_push("descriptive message")
-```
-
-### WHY: GitWorkflowManager records commit_hash in the database for UI rollback tracking.
-Direct git commands BYPASS the database — commits become invisible to the system.
-
-### BEFORE EVERY RESPONSE — FINAL CHECK:
-- [ ] Did I use `manager.commit_and_push()` instead of raw git commands?
-- [ ] Did I pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager?
-- [ ] Did I AVOID all subprocess.run(["git", ...]) calls?
-
-⛔ If you ran ANY git command directly — your commit is NOT tracked. REDO using manager.commit_and_push().
+- [ ] NEVER run `git commit` or `git push` directly — use ONLY `manager.commit_and_push()`
+- [ ] ALWAYS pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager
+- [ ] `git status`, `git diff`, `git log` are OK to use for inspection
+- [ ] Direct commit/push BYPASSES database — commit_hash won't be recorded
 
 ---
 
@@ -1871,37 +1823,12 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 
 ---
 
-## 🚫🚫🚫 GIT COMMAND RESTRICTION — ABSOLUTE BAN 🚫🚫🚫
+## ⛔ GIT COMMIT/PUSH RESTRICTION
 
-**You are STRICTLY FORBIDDEN from running any git commands directly.**
-
-### BANNED (will cause system failure):
-- `git add`, `git commit`, `git push`, `git pull`
-- `git checkout`, `git branch`, `git merge`, `git revert`
-- `git status`, `git diff`, `git log`
-- ANY subprocess.run(["git", ...]) call
-- ANY os.system("git ...") call
-- ANY shell command containing "git"
-
-### ONLY ALLOWED:
-```python
-import sys
-sys.path.insert(0, '{self.project_path}')
-from git_workflow import GitWorkflowManager
-
-manager = GitWorkflowManager('{self.project_path}', project_id={self.project_id}, session_id={self.session_id})
-result = manager.commit_and_push("descriptive message")
-```
-
-### WHY: GitWorkflowManager records commit_hash in the database for UI rollback tracking.
-Direct git commands BYPASS the database — commits become invisible to the system.
-
-### BEFORE EVERY RESPONSE — FINAL CHECK:
-- [ ] Did I use `manager.commit_and_push()` instead of raw git commands?
-- [ ] Did I pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager?
-- [ ] Did I AVOID all subprocess.run(["git", ...]) calls?
-
-⛔ If you ran ANY git command directly — your commit is NOT tracked. REDO using manager.commit_and_push().
+- [ ] NEVER run `git commit` or `git push` directly — use ONLY `manager.commit_and_push()`
+- [ ] ALWAYS pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager
+- [ ] `git status`, `git diff`, `git log` are OK to use for inspection
+- [ ] Direct commit/push BYPASSES database — commit_hash won't be recorded
 
 ---
 
@@ -2229,41 +2156,16 @@ Bad: "Created weather_command() handler in commands/weather.py..."
 
 ---
 
-{context_section}
+## ⛔ GIT COMMIT/PUSH RESTRICTION
 
-## 🚫🚫🚫 GIT COMMAND RESTRICTION — ABSOLUTE BAN 🚫🚫🚫
-
-**You are STRICTLY FORBIDDEN from running any git commands directly.**
-
-### BANNED (will cause system failure):
-- `git add`, `git commit`, `git push`, `git pull`
-- `git checkout`, `git branch`, `git merge`, `git revert`
-- `git status`, `git diff`, `git log`
-- ANY subprocess.run(["git", ...]) call
-- ANY os.system("git ...") call
-- ANY shell command containing "git"
-
-### ONLY ALLOWED:
-```python
-import sys
-sys.path.insert(0, '{self.project_path}')
-from git_workflow import GitWorkflowManager
-
-manager = GitWorkflowManager('{self.project_path}', project_id={self.project_id}, session_id={self.session_id})
-result = manager.commit_and_push("descriptive message")
-```
-
-### WHY: GitWorkflowManager records commit_hash in the database for UI rollback tracking.
-Direct git commands BYPASS the database — commits become invisible to the system.
-
-### BEFORE EVERY RESPONSE — FINAL CHECK:
-- [ ] Did I use `manager.commit_and_push()` instead of raw git commands?
-- [ ] Did I pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager?
-- [ ] Did I AVOID all subprocess.run(["git", ...]) calls?
-
-⛔ If you ran ANY git command directly — your commit is NOT tracked. REDO using manager.commit_and_push().
+- [ ] NEVER run `git commit` or `git push` directly — use ONLY `manager.commit_and_push()`
+- [ ] ALWAYS pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager
+- [ ] `git status`, `git diff`, `git log` are OK to use for inspection
+- [ ] Direct commit/push BYPASSES database — commit_hash won't be recorded
 
 ---
+
+{context_section}
 
 ## USER'S REQUEST
 
