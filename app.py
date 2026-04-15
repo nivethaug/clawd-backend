@@ -4557,6 +4557,7 @@ async def commit_and_push(project_id: int, req: CommitRequest):
                 commit_status = "pushed"
 
         # Update the latest assistant message in this session with commit_hash
+        # Also INSERT into commit_log for persistent history (survives session deletion)
         with get_db() as conn:
             message_row = conn.execute(
                 "SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
@@ -4570,8 +4571,16 @@ async def commit_and_push(project_id: int, req: CommitRequest):
                     "UPDATE messages SET commit_hash = ?, commit_status = ? WHERE id = ?",
                     (commit_hash, commit_status, message_id)
                 )
-                conn.commit()
+
+            # Dual-write: also persist in commit_log (independent of messages table)
+            conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, ?)",
+                (project_id, req.session_id, message_id, commit_hash, req.message, commit_status)
+            )
+            conn.commit()
+            if message_id:
                 logger.info(f"✓ Updated message {message_id} with commit_hash={commit_hash[:8]}, status={commit_status}")
+            logger.info(f"✓ Inserted commit_log entry for project {project_id}, hash={commit_hash[:8]}")
 
         return {
             "success": True,
@@ -4590,26 +4599,30 @@ async def commit_and_push(project_id: int, req: CommitRequest):
 
 @app.get("/projects/{project_id}/commits")
 async def get_commit_history(project_id: int, limit: int = 20, offset: int = 0):
-    """Get commit history for a project (messages with commit_hash)."""
+    """Get commit history for a project from commit_log (survives session/message deletion)."""
     with get_db() as conn:
         rows = conn.execute(
-            """SELECT id, session_id, role, content, commit_hash, commit_status, 
-                      reverted_message_id, created_at
-               FROM messages 
-               WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?) 
-                 AND commit_hash IS NOT NULL 
+            """SELECT id, project_id, session_id, message_id, commit_hash, commit_message, 
+                      status, reverted_by, created_at
+               FROM commit_log 
+               WHERE project_id = ? 
                ORDER BY created_at DESC 
                LIMIT ? OFFSET ?""",
             (project_id, limit, offset)
         ).fetchall()
 
+        total = conn.execute(
+            "SELECT COUNT(*) as cnt FROM commit_log WHERE project_id = ?",
+            (project_id,)
+        ).fetchone()["cnt"]
+
         commits = [dict(row) for row in rows]
-        return {"commits": commits, "total": len(commits)}
+        return {"commits": commits, "total": total}
 
 
 @app.get("/projects/{project_id}/commits/{message_id}")
 async def get_commit_detail(project_id: int, message_id: int):
-    """Get single commit detail by message_id."""
+    """Get single commit detail by message_id (legacy — queries messages table)."""
     with get_db() as conn:
         row = conn.execute(
             "SELECT * FROM messages WHERE id = ? AND commit_hash IS NOT NULL",
@@ -4622,16 +4635,31 @@ async def get_commit_detail(project_id: int, message_id: int):
         return dict(row)
 
 
+@app.get("/projects/{project_id}/commits/log/{log_id}")
+async def get_commit_log_detail(project_id: int, log_id: int):
+    """Get single commit detail from commit_log by log_id."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM commit_log WHERE id = ? AND project_id = ?",
+            (log_id, project_id)
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Commit log entry {log_id} not found")
+
+        return dict(row)
+
+
 @app.post("/projects/{project_id}/commits/{message_id}/rollback")
 async def rollback_commit(project_id: int, message_id: int):
     """
-    Rollback a commit by reverting it via git.
+    Rollback a commit by reverting it via git (legacy — by message_id).
     Creates a new message row for the revert with reverted_message_id pointing to the original.
+    Also writes to commit_log for persistent history.
     """
     import traceback
 
     with get_db() as conn:
-        # Get the original commit message
         original = conn.execute(
             "SELECT commit_hash, session_id FROM messages WHERE id = ? AND commit_hash IS NOT NULL AND commit_status = 'pushed'",
             (message_id,)
@@ -4640,7 +4668,6 @@ async def rollback_commit(project_id: int, message_id: int):
         if not original:
             raise HTTPException(status_code=404, detail=f"No pushed commit found for message {message_id}")
 
-        # Get project path
         project = conn.execute(
             "SELECT project_path FROM projects WHERE id = ?",
             (project_id,)
@@ -4653,7 +4680,6 @@ async def rollback_commit(project_id: int, message_id: int):
         session_id = original["session_id"]
 
     try:
-        # Git revert
         revert_result = subprocess.run(
             ["git", "-C", project_path, "revert", original_hash, "--no-edit"],
             capture_output=True, text=True, timeout=60
@@ -4663,14 +4689,12 @@ async def rollback_commit(project_id: int, message_id: int):
             logger.error(f"Git revert failed: {revert_result.stderr}")
             return {"success": False, "error": revert_result.stderr, "status": "failed"}
 
-        # Get revert commit hash
         hash_result = subprocess.run(
             ["git", "-C", project_path, "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10
         )
         revert_hash = hash_result.stdout.strip()
 
-        # Push the revert
         push_result = subprocess.run(
             ["git", "-C", project_path, "push", "origin", "main"],
             capture_output=True, text=True, timeout=60
@@ -4679,29 +4703,150 @@ async def rollback_commit(project_id: int, message_id: int):
             logger.error(f"Git push revert failed: {push_result.stderr}")
             return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
 
-        # Update original message status to 'reverted'
         with get_db() as conn:
             conn.execute(
                 "UPDATE messages SET commit_status = 'reverted' WHERE id = ?",
                 (message_id,)
             )
 
-            # Create new message row for the revert
             cursor = conn.execute(
                 """INSERT INTO messages (session_id, role, content, commit_hash, commit_status, reverted_message_id)
                    VALUES (?, 'assistant', ?, ?, 'pushed', ?)""",
                 (session_id, f"Reverted commit {original_hash[:8]}", revert_hash, message_id)
             )
             revert_message_id = cursor.lastrowid
+
+            # Dual-write: also persist in commit_log
+            original_log = conn.execute(
+                "SELECT id FROM commit_log WHERE commit_hash = ? AND project_id = ?",
+                (original_hash, project_id)
+            ).fetchone()
+
+            conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed')",
+                (project_id, session_id, revert_message_id, revert_hash, f"Revert {original_hash[:8]}")
+            )
+            revert_log_id = cursor.lastrowid
+
+            if original_log:
+                conn.execute(
+                    "UPDATE commit_log SET status = 'reverted', reverted_by = ? WHERE id = ?",
+                    (revert_log_id, original_log["id"])
+                )
+
             conn.commit()
 
-        logger.info(f"✓ Reverted commit {original_hash[:8]}, new message_id={revert_message_id}")
+        logger.info(f"✓ Reverted commit {original_hash[:8]}, message_id={revert_message_id}, log_id={revert_log_id}")
 
         return {
             "success": True,
             "commit_hash": revert_hash,
             "message_id": revert_message_id,
             "reverted_message_id": message_id,
+            "status": "pushed"
+        }
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Git revert timeout for project {project_id}")
+        return {"success": False, "error": "Git operation timed out", "status": "failed"}
+    except Exception as e:
+        logger.error(f"Rollback error for project {project_id}: {e}\n{traceback.format_exc()}")
+        return {"success": False, "error": str(e), "status": "failed"}
+
+
+@app.post("/projects/{project_id}/commits/log/{log_id}/rollback")
+async def rollback_commit_by_log_id(project_id: int, log_id: int):
+    """
+    Rollback a commit by commit_log id (works even after session/message deletion).
+    Uses commit_log as the source of truth for commit hash.
+    """
+    import traceback
+
+    with get_db() as conn:
+        original = conn.execute(
+            "SELECT commit_hash, session_id, message_id FROM commit_log WHERE id = ? AND project_id = ? AND status = 'pushed'",
+            (log_id, project_id)
+        ).fetchone()
+
+        if not original:
+            raise HTTPException(status_code=404, detail=f"No pushed commit found for log_id {log_id}")
+
+        project = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+        project_path = project["project_path"]
+        original_hash = original["commit_hash"]
+        session_id = original["session_id"]
+        original_message_id = original["message_id"]
+
+    try:
+        revert_result = subprocess.run(
+            ["git", "-C", project_path, "revert", original_hash, "--no-edit"],
+            capture_output=True, text=True, timeout=60
+        )
+
+        if revert_result.returncode != 0:
+            logger.error(f"Git revert failed: {revert_result.stderr}")
+            return {"success": False, "error": revert_result.stderr, "status": "failed"}
+
+        hash_result = subprocess.run(
+            ["git", "-C", project_path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10
+        )
+        revert_hash = hash_result.stdout.strip()
+
+        push_result = subprocess.run(
+            ["git", "-C", project_path, "push", "origin", "main"],
+            capture_output=True, text=True, timeout=60
+        )
+        if push_result.returncode != 0:
+            logger.error(f"Git push revert failed: {push_result.stderr}")
+            return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
+
+        with get_db() as conn:
+            # Update original commit_log entry
+            conn.execute(
+                "UPDATE commit_log SET status = 'reverted' WHERE id = ?",
+                (log_id,)
+            )
+
+            # Insert revert entry into commit_log
+            cursor = conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed')",
+                (project_id, session_id, original_message_id, revert_hash, f"Revert {original_hash[:8]}")
+            )
+            revert_log_id = cursor.lastrowid
+
+            # Set reverted_by on original
+            conn.execute(
+                "UPDATE commit_log SET reverted_by = ? WHERE id = ?",
+                (revert_log_id, log_id)
+            )
+
+            # Also update messages table if message still exists
+            if original_message_id:
+                msg_exists = conn.execute(
+                    "SELECT id FROM messages WHERE id = ?", (original_message_id,)
+                ).fetchone()
+                if msg_exists:
+                    conn.execute(
+                        "UPDATE messages SET commit_status = 'reverted' WHERE id = ?",
+                        (original_message_id,)
+                    )
+
+            conn.commit()
+
+        logger.info(f"✓ Reverted commit {original_hash[:8]} via log_id={log_id}, revert_log_id={revert_log_id}")
+
+        return {
+            "success": True,
+            "commit_hash": revert_hash,
+            "log_id": revert_log_id,
+            "reverted_log_id": log_id,
             "status": "pushed"
         }
 
