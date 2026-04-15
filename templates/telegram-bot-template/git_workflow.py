@@ -1,351 +1,182 @@
 #!/usr/bin/env python3
 """
-Git Workflow Manager
-Enforces strict branching rules and manages Pull Requests programmatically.
-This replaces direct gh CLI usage with a controlled, validated workflow.
+Git Workflow Manager — API Client
+Calls the backend API to commit, push, and manage git operations.
+All git operations happen server-side; this is a thin HTTP client.
 """
 
-import subprocess
-import sys
 import os
+import sys
 import json
-from datetime import datetime
 from typing import Optional, Dict, List
+
+try:
+    import urllib.request
+    import urllib.error
+    _HAS_URLLIB = True
+except ImportError:
+    _HAS_URLLIB = False
+
+try:
+    import requests
+    _HAS_REQUESTS = True
+except ImportError:
+    _HAS_REQUESTS = False
+
 
 class GitWorkflowError(Exception):
     """Custom exception for git workflow errors."""
     pass
 
+
 class GitWorkflowManager:
-    """Manages git branching and PR workflow with strict rules."""
+    """Thin API client for git commit/push/rollback operations."""
 
-    def __init__(self, repo_path: str = None):
-        """Initialize the workflow manager."""
+    def __init__(self, repo_path: str, project_id: int = None, session_id: int = None):
+        """
+        Initialize the workflow manager.
+
+        Args:
+            repo_path: Path to the git repository (kept for backward compat, not used for git ops)
+            project_id: Project ID for API calls
+            session_id: Session ID for API calls (used to find the assistant message to tag)
+        """
         self.repo_path = repo_path or os.getcwd()
-        self.original_branch = self._get_current_branch()
-        self.feature_branch = None
-        self.pr_number = None
+        self.project_id = project_id
+        self.session_id = session_id
+        self.backend_url = os.environ.get('BACKEND_URL', f"http://localhost:{os.getenv('PORT', '8002')}")
+        self._last_commit = None
 
-    def _run_command(self, command: List[str], capture_output: bool = True, check: bool = True) -> subprocess.CompletedProcess:
-        """Run a shell command safely."""
-        try:
-            result = subprocess.run(
-                command,
-                cwd=self.repo_path,
-                capture_output=capture_output,
-                text=True,
-                check=check
-            )
-            return result
-        except subprocess.CalledProcessError as e:
-            if check:
-                raise GitWorkflowError(f"Command failed: {' '.join(command)}\nError: {e.stderr}")
-            return e
+    def _api_call(self, method: str, path: str, data: dict = None) -> dict:
+        """Make an HTTP API call to the backend."""
+        url = f"{self.backend_url}{path}"
+        headers = {"Content-Type": "application/json"}
+        body = json.dumps(data).encode() if data else None
 
-    def _get_current_branch(self) -> str:
-        """Get the current git branch."""
-        result = self._run_command(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
-        return result.stdout.strip()
-
-    def _is_main_branch(self, branch: str) -> bool:
-        """Check if branch is main or master."""
-        return branch in ['main', 'master']
-
-    def _check_git_status(self) -> Dict[str, any]:
-        """Check git status for uncommitted changes."""
-        result = self._run_command(['git', 'status', '--porcelain'])
-        has_changes = bool(result.stdout.strip())
-
-        # Check if branch is ahead of origin
-        ahead_result = self._run_command(['git', 'status', '-sb'])
-        ahead = 'ahead' in ahead_result.stdout
-
-        return {
-            'has_uncommitted_changes': has_changes,
-            'is_ahead_of_origin': ahead
-        }
-
-    def validate_repo_state(self) -> bool:
-        """Validate repository is ready for workflow."""
-        status = self._check_git_status()
-
-        if status['has_uncommitted_changes']:
-            raise GitWorkflowError("❌ You have uncommitted changes. Please commit or stash them first.")
-
-        if not self._is_main_branch(self.original_branch):
-            print(f"⚠️  Warning: You're on '{self.original_branch}', not 'main'")
-            response = input("Continue anyway? (y/N): ")
-            if response.lower() != 'y':
-                return False
-
-        return True
-
-    def create_branch(self, branch_type: str = 'feature', branch_name: str = None) -> str:
-        """
-        Create a new branch from main.
-
-        Args:
-            branch_type: Type of branch (feature, fix, refactor, etc.)
-            branch_name: Optional custom branch name
-
-        Returns:
-            Name of the created branch
-        """
-        if not branch_name:
-            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-            branch_name = f"{branch_type}/task-{timestamp}"
-
-        # Ensure we're on main first
-        if not self._is_main_branch(self.original_branch):
-            print(f"🔄 Switching to main branch...")
-            self._run_command(['git', 'checkout', 'main'])
-            self._run_command(['git', 'pull', 'origin', 'main'])
-
-        # Create and checkout new branch
-        print(f"🌿 Creating new branch: {branch_name}")
-        self._run_command(['git', 'checkout', '-b', branch_name])
-
-        self.feature_branch = branch_name
-        print(f"✅ Branch '{branch_name}' created successfully")
-        return branch_name
-
-    def commit_changes(self, commit_message: str = None) -> str:
-        """
-        Commit changes with automatic message generation.
-
-        Args:
-            commit_message: Optional custom commit message
-
-        Returns:
-            Commit hash
-        """
-        status = self._check_git_status()
-
-        if not status['has_uncommitted_changes']:
-            print("ℹ️  No changes to commit")
-            return None
-
-        # Stage all changes
-        print("📝 Staging changes...")
-        self._run_command(['git', 'add', '-A'])
-
-        # Generate commit message if not provided
-        if not commit_message:
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
-            commit_message = f"Update - {timestamp}\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
-
-        # Commit changes
-        print("💾 Committing changes...")
-        result = self._run_command(['git', 'commit', '-m', commit_message])
-
-        # Get commit hash
-        hash_result = self._run_command(['git', 'rev-parse', 'HEAD'])
-        commit_hash = hash_result.stdout.strip()[:8]
-
-        print(f"✅ Changes committed: {commit_hash}")
-        return commit_hash
-
-    def push_branch(self) -> bool:
-        """Push the feature branch to remote."""
-        if not self.feature_branch:
-            raise GitWorkflowError("❌ No feature branch to push. Create one first.")
-
-        print(f"📤 Pushing branch '{self.feature_branch}' to remote...")
-        self._run_command(['git', 'push', '-u', 'origin', self.feature_branch])
-        print("✅ Branch pushed successfully")
-        return True
-
-    def create_pull_request(self, title: str = None, body: str = None) -> int:
-        """
-        Create a pull request using gh CLI.
-
-        Args:
-            title: PR title
-            body: PR description body
-
-        Returns:
-            Pull request number
-        """
-        if not self.feature_branch:
-            raise GitWorkflowError("❌ No feature branch. Create one first.")
-
-        # Generate PR title if not provided
-        if not title:
-            title = f"Update from {self.feature_branch}"
-
-        # Generate PR body if not provided
-        if not body:
-            body = f"""## Summary
-This PR includes changes from feature branch `{self.feature_branch}`.
-
-## Changes
-- Updates and improvements
-
-## Test Plan
-- [ ] Tested on local environment
-- [ ] Tested on live site
-- [ ] Verified no console errors
-- [ ] Verified no network failures
-
----
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-"""
-
-        print(f"🔨 Creating pull request...")
-
-        # Use gh CLI to create PR
-        pr_body_file = f"/tmp/pr_body_{self.feature_branch.replace('/', '_')}.txt"
-        with open(pr_body_file, 'w') as f:
-            f.write(body)
-
-        try:
-            result = self._run_command([
-                'gh', 'pr', 'create',
-                '--title', title,
-                '--body-file', pr_body_file,
-                '--base', 'main'
-            ])
-
-            # Extract PR number from output
-            output = result.stdout
-            if 'github.com' in output:
-                # Parse PR URL to get number
-                pr_url = output.strip()
-                self.pr_number = pr_url.split('/')[-1]
-                print(f"✅ Pull request created: #{self.pr_number}")
-                print(f"🔗 {pr_url}")
-                return int(self.pr_number)
+        if _HAS_REQUESTS:
+            if method == "GET":
+                resp = requests.get(url, params=data)
+            elif method == "POST":
+                resp = requests.post(url, json=data)
             else:
-                raise GitWorkflowError("Could not parse PR URL from gh output")
+                raise GitWorkflowError(f"Unsupported method: {method}")
+            return resp.json()
 
-        finally:
-            # Clean up temp file
-            if os.path.exists(pr_body_file):
-                os.remove(pr_body_file)
+        elif _HAS_URLLIB:
+            if method == "GET":
+                if data:
+                    query = "&".join(f"{k}={v}" for k, v in data.items())
+                    url = f"{url}?{query}"
+                req = urllib.request.Request(url)
+            elif method == "POST":
+                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+            else:
+                raise GitWorkflowError(f"Unsupported method: {method}")
 
-    def check_pr_status(self) -> Dict[str, any]:
-        """Check the status of the pull request."""
-        if not self.pr_number:
-            raise GitWorkflowError("❌ No pull request to check.")
-
-        result = self._run_command([
-            'gh', 'pr', 'view', str(self.pr_number),
-            '--json', 'title,state,mergeable,reviewDecision'
-        ])
-
-        pr_data = json.loads(result.stdout)
-        return pr_data
-
-    def merge_pull_request(self, merge_method: str = 'merge') -> bool:
-        """
-        Merge the pull request.
-
-        Args:
-            merge_method: How to merge (merge, squash, rebase)
-        """
-        if not self.pr_number:
-            raise GitWorkflowError("❌ No pull request to merge.")
-
-        print(f"🔀 Merging pull request #{self.pr_number}...")
-
-        # Check PR status first
-        status = self.check_pr_status()
-        print(f"   PR Status: {status['state']}")
-        print(f"   Mergeable: {status.get('mergeable', 'unknown')}")
-
-        # Merge the PR
-        self._run_command([
-            'gh', 'pr', 'merge', str(self.pr_number),
-            '--merge',  # Always use merge commit
-            '--delete-branch'  # Delete branch after merge
-        ])
-
-        print("✅ Pull request merged successfully")
-        return True
-
-    def cleanup_branch(self) -> bool:
-        """Clean up: switch back to main and pull latest changes."""
-        print("🧹 Cleaning up...")
-
-        # Switch back to main
-        print("   Switching to main...")
-        self._run_command(['git', 'checkout', 'main'])
-
-        # Pull latest changes
-        print("   Pulling latest changes...")
-        self._run_command(['git', 'pull', 'origin', 'main'])
-
-        # Delete local feature branch if it still exists
-        if self.feature_branch:
             try:
-                self._run_command([
-                    'git', 'branch', '-D', self.feature_branch
-                ], check=False)
-                print(f"   Deleted local branch '{self.feature_branch}'")
-            except:
-                pass  # Branch might not exist locally
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    return json.loads(resp.read().decode())
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode() if e.fp else str(e)
+                raise GitWorkflowError(f"API error {e.code}: {error_body}")
+            except urllib.error.URLError as e:
+                raise GitWorkflowError(f"Cannot connect to backend at {url}: {e}")
 
-        print("✅ Cleanup complete")
-        return True
+        else:
+            raise GitWorkflowError("No HTTP library available. Install requests or use Python 3+.")
 
-    def complete_workflow(self, title: str = None, body: str = None, commit_message: str = None) -> Dict[str, any]:
+    def commit_and_push(self, message: str) -> dict:
         """
-        Execute the complete workflow: commit → push → create PR → merge → cleanup.
+        Commit and push changes via backend API.
+        Backend finds the latest assistant message in this session and
+        updates it with commit_hash for UI rollback.
 
         Args:
-            title: PR title
-            body: PR body
-            commit_message: Commit message
+            message: Commit message (used as git commit -m)
 
         Returns:
-            Dictionary with workflow results
+            { 'success': bool, 'commit_hash': str, 'message_id': int, 'status': str }
         """
-        result = {
-            'success': False,
-            'commit': None,
-            'pr_number': None,
-            'error': None
-        }
+        if not self.project_id:
+            raise GitWorkflowError("project_id is required. Pass it to GitWorkflowManager().")
+        if not self.session_id:
+            raise GitWorkflowError("session_id is required. Pass it to GitWorkflowManager().")
 
-        try:
-            # Step 1: Commit changes
-            commit = self.commit_changes(commit_message)
-            result['commit'] = commit
+        result = self._api_call("POST", f"/projects/{self.project_id}/commits", {
+            "session_id": self.session_id,
+            "message": message,
+            "auto_push": True
+        })
 
-            # Step 2: Push branch
-            self.push_branch()
-
-            # Step 3: Create PR
-            pr_number = self.create_pull_request(title, body)
-            result['pr_number'] = pr_number
-
-            # Step 4: Ask for approval
-            print("\n" + "="*60)
-            print("⏸️  WAITING FOR YOUR APPROVAL")
-            print("="*60)
-            print(f"📋 Pull Request #{pr_number} is ready for review")
-            print(f"🔗 View PR: gh pr view {pr_number}")
-            print("\nAre you satisfied with the current changes?")
-            response = input("Confirm approval to merge (y/N): ")
-
-            if response.lower() != 'y':
-                print("❌ Merge cancelled. PR remains open for manual review.")
-                return result
-
-            # Step 5: Merge PR
-            self.merge_pull_request()
-
-            # Step 6: Cleanup
-            self.cleanup_branch()
-
-            result['success'] = True
-            print("\n✅ Workflow completed successfully!")
-
-        except Exception as e:
-            result['error'] = str(e)
-            print(f"\n❌ Workflow failed: {e}")
-
+        self._last_commit = result
         return result
+
+    def rollback(self, message_id: int = None) -> dict:
+        """
+        Rollback a specific commit by message_id.
+
+        Args:
+            message_id: The message_id to rollback. Defaults to last commit.
+
+        Returns:
+            { 'success': bool, 'commit_hash': str, 'message_id': int, 'reverted_message_id': int }
+        """
+        if not self.project_id:
+            raise GitWorkflowError("project_id is required.")
+
+        target_id = message_id
+        if target_id is None:
+            if not self._last_commit or 'message_id' not in self._last_commit:
+                raise GitWorkflowError("No previous commit to rollback. Pass message_id explicitly.")
+            target_id = self._last_commit['message_id']
+
+        result = self._api_call("POST", f"/projects/{self.project_id}/commits/{target_id}/rollback")
+        return result
+
+    def get_history(self, limit: int = 20) -> list:
+        """
+        Get commit history for this project.
+
+        Args:
+            limit: Max number of commits to return
+
+        Returns:
+            List of commit records
+        """
+        if not self.project_id:
+            raise GitWorkflowError("project_id is required.")
+
+        result = self._api_call("GET", f"/projects/{self.project_id}/commits", {"limit": limit})
+        return result.get("commits", [])
+
+    # --- Backward compat (deprecated) ---
+
+    def complete_workflow(self, message: str = None) -> dict:
+        """
+        DEPRECATED: Use commit_and_push() instead.
+        Kept for backward compatibility with existing prompts.
+        """
+        return self.commit_and_push(message or "Changes applied")
+
+    def create_branch(self, *args, **kwargs):
+        """DEPRECATED: Branching is no longer supported."""
+        raise GitWorkflowError("Branching is no longer supported. Use commit_and_push() to commit directly to main.")
+
+    def push_branch(self, *args, **kwargs):
+        """DEPRECATED: Use commit_and_push() instead."""
+        raise GitWorkflowError("Branching is no longer supported. Use commit_and_push() to commit directly to main.")
+
+    def create_pull_request(self, *args, **kwargs):
+        """DEPRECATED: PRs are no longer supported."""
+        raise GitWorkflowError("Pull requests are no longer supported. Use commit_and_push() to commit directly to main.")
+
+    def merge_pull_request(self, *args, **kwargs):
+        """DEPRECATED: PRs are no longer supported."""
+        raise GitWorkflowError("Pull requests are no longer supported. Use commit_and_push() to commit directly to main.")
+
+    def cleanup_branch(self, *args, **kwargs):
+        """DEPRECATED: Branching is no longer supported."""
+        raise GitWorkflowError("Branching is no longer supported. No cleanup needed.")
 
 
 def main():

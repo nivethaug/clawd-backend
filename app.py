@@ -83,6 +83,7 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
         handler = get_acp_chat_handler(request.session_key, project_path, project_type_id=project_type_id, project_id=project_id_from_db)
         if not handler:
             return f"Error: ACP mode not available for project '{project_name}'. Make sure the project directory exists."
+        handler.set_session_id(session_id)
     except Exception as e:
         logger.error(f"[ACP-CHAT] Failed to create handler: {e}")
         return f"Error: Failed to initialize ACP mode: {str(e)}"
@@ -189,6 +190,10 @@ class MessageResponse(BaseModel):
     content: str
     image: Optional[str] = None
     created_at: str  # Changed from datetime to str for PostgreSQL compatibility
+    # Commit tracking (nullable — only set for messages that triggered commits)
+    commit_hash: Optional[str] = None
+    commit_status: Optional[str] = None
+    reverted_message_id: Optional[int] = None
 
 class ProjectResponse(BaseModel):
     id: int
@@ -2874,6 +2879,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                 logger.error(f"[ACP-STREAM] Failed to get ACP handler - project not found")
                 raise ValueError("Could not initialize ACP handler - project not found or invalid path")
             
+            handler.set_session_id(session_id)
+            
             logger.info(f"[ACP-STREAM] Handler initialized for project: {handler.project_name}")
             logger.info(f"[ACP-STREAM] Frontend path: {handler.frontend_src_path}")
 
@@ -3443,6 +3450,7 @@ async def chat_endpoint(request: ChatRequest):
                 logger.error(f"[ACP-MODE] Failed to get ACP handler - project not found")
                 assistant_content = "Error: Could not initialize ACP handler - project not found or invalid path"
             else:
+                handler.set_session_id(session_id)
                 logger.info(f"[ACP-MODE] Handler initialized for project: {handler.project_name}")
                 logger.info(f"[ACP-MODE] Frontend path: {handler.frontend_src_path}")
                 
@@ -4477,6 +4485,232 @@ async def execute_app_action(
     except Exception as e:
         logger.error(f"Failed to execute app action: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Commit Tracking Endpoints
+# ============================================================================
+
+class CommitRequest(BaseModel):
+    session_id: int
+    message: str
+    auto_push: bool = True
+
+@app.post("/projects/{project_id}/commits")
+async def commit_and_push(project_id: int, req: CommitRequest):
+    """
+    Commit and push changes via backend API.
+    Finds the latest assistant message in the session and updates it with commit_hash.
+    """
+    import traceback
+
+    with get_db() as conn:
+        # Get project path
+        project = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+        project_path = project["project_path"]
+
+    try:
+        # Git add all changes
+        subprocess.run(
+            ["git", "-C", project_path, "add", "-A"],
+            capture_output=True, text=True, timeout=30
+        )
+
+        # Git commit
+        commit_result = subprocess.run(
+            ["git", "-C", project_path, "commit", "-m", req.message],
+            capture_output=True, text=True, timeout=30
+        )
+        if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stderr:
+            logger.error(f"Git commit failed for project {project_id}: {commit_result.stderr}")
+            return {"success": False, "error": commit_result.stderr, "status": "failed"}
+
+        # Get commit hash
+        hash_result = subprocess.run(
+            ["git", "-C", project_path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10
+        )
+        commit_hash = hash_result.stdout.strip()
+
+        # If nothing was committed, still return the current HEAD
+        if "nothing to commit" in commit_result.stderr:
+            logger.info(f"No changes to commit for project {project_id}, returning current HEAD")
+
+        commit_status = "committed"
+
+        # Push if requested
+        if req.auto_push:
+            push_result = subprocess.run(
+                ["git", "-C", project_path, "push", "origin", "main"],
+                capture_output=True, text=True, timeout=60
+            )
+            if push_result.returncode != 0:
+                logger.error(f"Git push failed for project {project_id}: {push_result.stderr}")
+                commit_status = "committed"  # committed but not pushed
+            else:
+                commit_status = "pushed"
+
+        # Update the latest assistant message in this session with commit_hash
+        with get_db() as conn:
+            message_row = conn.execute(
+                "SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+                (req.session_id,)
+            ).fetchone()
+
+            message_id = None
+            if message_row:
+                message_id = message_row["id"]
+                conn.execute(
+                    "UPDATE messages SET commit_hash = ?, commit_status = ? WHERE id = ?",
+                    (commit_hash, commit_status, message_id)
+                )
+                conn.commit()
+                logger.info(f"✓ Updated message {message_id} with commit_hash={commit_hash[:8]}, status={commit_status}")
+
+        return {
+            "success": True,
+            "commit_hash": commit_hash,
+            "status": commit_status,
+            "message_id": message_id
+        }
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Git operation timeout for project {project_id}")
+        return {"success": False, "error": "Git operation timed out", "status": "failed"}
+    except Exception as e:
+        logger.error(f"Commit error for project {project_id}: {e}\n{traceback.format_exc()}")
+        return {"success": False, "error": str(e), "status": "failed"}
+
+
+@app.get("/projects/{project_id}/commits")
+async def get_commit_history(project_id: int, limit: int = 20, offset: int = 0):
+    """Get commit history for a project (messages with commit_hash)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT id, session_id, role, content, commit_hash, commit_status, 
+                      reverted_message_id, created_at
+               FROM messages 
+               WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?) 
+                 AND commit_hash IS NOT NULL 
+               ORDER BY created_at DESC 
+               LIMIT ? OFFSET ?""",
+            (project_id, limit, offset)
+        ).fetchall()
+
+        commits = [dict(row) for row in rows]
+        return {"commits": commits, "total": len(commits)}
+
+
+@app.get("/projects/{project_id}/commits/{message_id}")
+async def get_commit_detail(project_id: int, message_id: int):
+    """Get single commit detail by message_id."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM messages WHERE id = ? AND commit_hash IS NOT NULL",
+            (message_id,)
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Commit message {message_id} not found")
+
+        return dict(row)
+
+
+@app.post("/projects/{project_id}/commits/{message_id}/rollback")
+async def rollback_commit(project_id: int, message_id: int):
+    """
+    Rollback a commit by reverting it via git.
+    Creates a new message row for the revert with reverted_message_id pointing to the original.
+    """
+    import traceback
+
+    with get_db() as conn:
+        # Get the original commit message
+        original = conn.execute(
+            "SELECT commit_hash, session_id FROM messages WHERE id = ? AND commit_hash IS NOT NULL AND commit_status = 'pushed'",
+            (message_id,)
+        ).fetchone()
+
+        if not original:
+            raise HTTPException(status_code=404, detail=f"No pushed commit found for message {message_id}")
+
+        # Get project path
+        project = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+        project_path = project["project_path"]
+        original_hash = original["commit_hash"]
+        session_id = original["session_id"]
+
+    try:
+        # Git revert
+        revert_result = subprocess.run(
+            ["git", "-C", project_path, "revert", original_hash, "--no-edit"],
+            capture_output=True, text=True, timeout=60
+        )
+
+        if revert_result.returncode != 0:
+            logger.error(f"Git revert failed: {revert_result.stderr}")
+            return {"success": False, "error": revert_result.stderr, "status": "failed"}
+
+        # Get revert commit hash
+        hash_result = subprocess.run(
+            ["git", "-C", project_path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10
+        )
+        revert_hash = hash_result.stdout.strip()
+
+        # Push the revert
+        push_result = subprocess.run(
+            ["git", "-C", project_path, "push", "origin", "main"],
+            capture_output=True, text=True, timeout=60
+        )
+        if push_result.returncode != 0:
+            logger.error(f"Git push revert failed: {push_result.stderr}")
+            return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
+
+        # Update original message status to 'reverted'
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE messages SET commit_status = 'reverted' WHERE id = ?",
+                (message_id,)
+            )
+
+            # Create new message row for the revert
+            cursor = conn.execute(
+                """INSERT INTO messages (session_id, role, content, commit_hash, commit_status, reverted_message_id)
+                   VALUES (?, 'assistant', ?, ?, 'pushed', ?)""",
+                (session_id, f"Reverted commit {original_hash[:8]}", revert_hash, message_id)
+            )
+            revert_message_id = cursor.lastrowid
+            conn.commit()
+
+        logger.info(f"✓ Reverted commit {original_hash[:8]}, new message_id={revert_message_id}")
+
+        return {
+            "success": True,
+            "commit_hash": revert_hash,
+            "message_id": revert_message_id,
+            "reverted_message_id": message_id,
+            "status": "pushed"
+        }
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Git revert timeout for project {project_id}")
+        return {"success": False, "error": "Git operation timed out", "status": "failed"}
+    except Exception as e:
+        logger.error(f"Rollback error for project {project_id}: {e}\n{traceback.format_exc()}")
+        return {"success": False, "error": str(e), "status": "failed"}
 
 
 if __name__ == "__main__":

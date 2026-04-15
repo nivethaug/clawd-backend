@@ -40,7 +40,9 @@ def build_website_plan_prompt(
 
 ### Git Workflow
 - Use `git_workflow.py` GitWorkflowManager at `{project_path}/git_workflow.py`
-- Always create branch, commit, PR, merge via the manager
+- Initialize with project_id and session_id
+- Use manager.commit_and_push("message") after user approval
+- No branching — work directly on main
 """
 
     return build_base_plan_prompt(

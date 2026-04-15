@@ -322,6 +322,14 @@ def init_schema():
                 logger.info("✓ Added mode column to messages table")
             _run_migration(migrate_mode)
 
+            # Messages table migration: add commit tracking columns
+            def migrate_commit_tracking():
+                cur.execute("ALTER TABLE messages ADD COLUMN commit_hash VARCHAR(40)")
+                cur.execute("ALTER TABLE messages ADD COLUMN commit_status VARCHAR(20) DEFAULT 'pending'")
+                cur.execute("ALTER TABLE messages ADD COLUMN reverted_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL")
+                logger.info("✓ Added commit tracking columns to messages table")
+            _run_migration(migrate_commit_tracking)
+
             # Plans table
             cur.execute("""CREATE TABLE IF NOT EXISTS plans (
                 id SERIAL PRIMARY KEY,

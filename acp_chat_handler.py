@@ -56,6 +56,7 @@ class ACPChatHandler:
         self.project_path = Path(project_path)
         self.project_name = project_name
         self.project_id = project_id
+        self.session_id = None  # Set via set_session_id() before each chat
         self.frontend_path = self.project_path / "frontend"
         self.frontend_src_path = self.frontend_path / "src"
         self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)
@@ -95,6 +96,10 @@ class ACPChatHandler:
     def set_existing_plan(self, plan_content: str):
         """Set existing plan content for continue mode."""
         self._existing_plan = plan_content
+
+    def set_session_id(self, session_id: int):
+        """Set the current session ID (called before each chat)."""
+        self.session_id = session_id
 
     def _get_project_type_str(self) -> str:
         """Return project type string for plan prompt dispatch."""
@@ -592,11 +597,10 @@ FIRST list jobs to find the job ID, THEN perform the action. Always show the res
 
 ---
 
-## GIT WORKFLOW AUTOMATION (MANDATORY)
+## GIT WORKFLOW (MANDATORY)
 
-### NEVER USE DIRECT git OR gh COMMANDS
-**ALWAYS use the GitWorkflowManager class for ALL git operations.**
-Direct `git checkout`, `git branch`, `gh pr create`, etc. are FORBIDDEN.
+### WORK DIRECTLY ON MAIN — NO BRANCHING
+Branches, PRs, and merges are FORBIDDEN. All work happens on main directly.
 
 ### Script Location
 - Path: `{self.project_path}/git_workflow.py`
@@ -607,34 +611,35 @@ import sys
 sys.path.insert(0, '{self.project_path}')
 from git_workflow import GitWorkflowManager
 
-manager = GitWorkflowManager('{self.project_path}')
+manager = GitWorkflowManager(
+    '{self.project_path}',
+    project_id={self.project_id},
+    session_id={self.session_id}
+)
 ```
 
 ### Available Methods
 | Method | Purpose |
 |--------|---------|
-| `manager.create_branch(branch_type, branch_name)` | Create new branch from main |
-| `manager.commit_changes(commit_message)` | Stage + commit all changes |
-| `manager.push_branch()` | Push branch to remote |
-| `manager.create_pull_request(title, body)` | Create PR on GitHub |
-| `manager.merge_pull_request()` | Merge PR to main |
-| `manager.cleanup_branch()` | Delete branch, return to main |
-| `manager.complete_workflow(title, body)` | Full end-to-end: commit, PR, merge, cleanup |
+| `manager.commit_and_push(message)` | Stage all changes, commit, push to main |
+| `manager.rollback(message_id)` | Revert a specific commit |
+| `manager.get_history(limit)` | Get commit history |
 
-### Quick Reference
+### After user approves your changes:
 ```python
-# Start: create a branch
-manager.create_branch("feature", "add-weather-task")
-
-# During work: commit changes
-manager.commit_changes("Add weather alert task")
-
-# After user approval: complete everything
-manager.complete_workflow(
-    title="Feature: Add weather alert",
-    body="Added weather alert task handler and job"
+result = manager.commit_and_push(
+    "feat: add weather alert task\n\n"
+    "- Modified executor.py: added weather handler\n"
+    "- Added api_client method: fetch_weather_data"
 )
+# Returns: {{ 'success': True, 'commit_hash': 'a1b2c3d4', 'message_id': 42 }}
 ```
+
+### Rules
+- NEVER create branches or PRs
+- ALWAYS pass project_id and session_id to constructor
+- ALWAYS include a descriptive commit message with details
+- The manager handles git add, commit, and push automatically
 
 ---
 
@@ -650,14 +655,14 @@ manager.complete_workflow(
 8. EXECUTE curl commands for ALL job management — never just print them
 9. AFTER editing any .py file, run: `python -c "import py_compile; py_compile.compile('FILE', doraise=True)"`
 10. When editing existing jobs, ALWAYS list jobs first to get the correct job ID
-11. NEVER use direct git/gh commands — use GitWorkflowManager for all git operations
-12. ALWAYS ask user for approval before merging changes
+11. NEVER create branches or PRs — use GitWorkflowManager.commit_and_push() after approval
+12. ALWAYS ask user for approval before committing changes
 
 ---
 
 ## FINAL CHECKLIST BEFORE RESPONDING
 
-- [ ] Did I INITIALIZE GitWorkflowManager and create a branch?
+- [ ] Did I INITIALIZE GitWorkflowManager with project_id and session_id?
 - [ ] Did I read agent/ai_index files before making changes?
 - [ ] Did I modify only executor.py and/or api_client.py?
 - [ ] Did I run py_compile on all edited files?
@@ -692,10 +697,10 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
 - ALWAYS ask this after completing work and testing
 - Use this EXACT wording (or very similar)
 - NEVER skip this question
-- NEVER proceed to merge without user approval
+- NEVER commit without user approval
 
 **After approval:**
-1. Use `manager.complete_workflow(title, body)` to commit, push, PR, merge, cleanup
+1. Use `manager.commit_and_push("message")` to commit and push
 2. Update `agent/ai_index/*.json` files to reflect all changes
 
 ## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
@@ -751,15 +756,14 @@ Before making any code changes, follow this process:
 
 **Follow this exact order every time:**
 
-1. INITIALIZE GitWorkflowManager (see GIT WORKFLOW section below)
+1. INITIALIZE GitWorkflowManager with project_id and session_id (see GIT WORKFLOW section below)
 2. READ agent README
-3. CREATE branch using manager.create_branch()
-4. MAKE code changes
-5. UPDATE agent folder
-6. RUN buildpublish.py (handles install + build + deploy automatically)
-7. ⭐ TEST with Chrome DevTools on LIVE site ⭐
-8. ASK user for approval
-9. AFTER approval: use manager.complete_workflow() to merge
+3. MAKE code changes
+4. UPDATE agent folder
+5. RUN buildpublish.py (handles install + build + deploy automatically)
+6. ⭐ TEST with Chrome DevTools on LIVE site ⭐
+7. ASK user for approval
+8. AFTER approval: manager.commit_and_push("descriptive message")
  
 ---
  
@@ -783,11 +787,10 @@ Both agent folders have `ai_index/` with:
  
 ---
  
-## 🔧 GIT WORKFLOW AUTOMATION (MANDATORY)
+## 🔧 GIT WORKFLOW (MANDATORY)
 
-### ⛔ NEVER USE DIRECT git OR gh COMMANDS
-**ALWAYS use the GitWorkflowManager class for ALL git operations.**
-Direct `git checkout`, `git branch`, `gh pr create`, etc. are FORBIDDEN.
+### WORK DIRECTLY ON MAIN — NO BRANCHING
+Branches, PRs, and merges are FORBIDDEN. All work happens on main directly.
 
 ### Script Location
 - Path: `{self.project_path}/git_workflow.py`
@@ -798,63 +801,43 @@ import sys
 sys.path.insert(0, '{self.project_path}')
 from git_workflow import GitWorkflowManager
 
-manager = GitWorkflowManager('{self.project_path}')
+manager = GitWorkflowManager(
+    '{self.project_path}',
+    project_id={self.project_id},
+    session_id={self.session_id}
+)
 ```
 
 ### Available Methods
 | Method | Purpose |
 |--------|---------|
-| `manager.create_branch(branch_type, branch_name)` | Create new branch from main |
-| `manager.commit_changes(commit_message)` | Stage + commit all changes |
-| `manager.push_branch()` | Push branch to remote |
-| `manager.create_pull_request(title, body)` | Create PR on GitHub |
-| `manager.check_pr_status()` | Check if PR is mergeable |
-| `manager.merge_pull_request()` | Merge PR to main |
-| `manager.cleanup_branch()` | Delete branch, return to main |
-| `manager.complete_workflow(title, body)` | Full end-to-end: commit, PR, merge, cleanup |
+| `manager.commit_and_push(message)` | Stage all changes, commit, push to main |
+| `manager.rollback(message_id)` | Revert a specific commit |
+| `manager.get_history(limit)` | Get commit history |
 
-### Quick Reference
+### After user approves your changes:
 ```python
-# Start: create a branch
-manager.create_branch("feature", "add-contact-form")
-
-# During work: commit changes
-manager.commit_changes("Add contact form with validation")
-
-# After user approval: complete everything
-manager.complete_workflow(
-    title="Feature: Add contact form",
-    body="Added contact form with name, email, message fields and validation"
+result = manager.commit_and_push(
+    "feat: add contact form with validation\n\n"
+    "- Modified ContactForm.tsx: added fields\n"
+    "- Added validation.ts: email validator"
 )
+# Returns: {{ 'success': True, 'commit_hash': 'a1b2c3d4', 'message_id': 42 }}
 ```
+
+### Rules
+- NEVER create branches or PRs
+- ALWAYS pass project_id and session_id to constructor
+- ALWAYS include a descriptive commit message with details
+- The manager handles git add, commit, and push automatically
 
 ---
 
-## 🌿 BRANCHING & SAFE WORKFLOW (MANDATORY)
+## 🌿 DIRECT COMMIT WORKFLOW (MANDATORY)
 
-### 1. Task Workspace Rule (MANDATORY)
-Each new chat/session = NEW task
-MUST use GitWorkflowManager to create branch from main
-NEVER work directly on main
-NEVER use direct git commands
-
-**Initialize and create branch:**
-```python
-from git_workflow import GitWorkflowManager
-manager = GitWorkflowManager('{self.project_path}')
-manager.create_branch("feature", "your-task-name")
-```
-
-Branch naming:
-- `feature/` for new features
-- `fix/` for bug fixes
-- `refactor/` for code refactoring
-
-### 2. Development Rule
-All work must happen inside the task workspace
-No direct changes to production
-
-### 3. Approval Rule (CRITICAL)
+### 1. Work Directly on Main
+All work happens on main directly. No branching.
+### 2. Approval Rule (CRITICAL)
 After completing work → **STOP**
 Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
 
@@ -863,12 +846,12 @@ You MUST NOT show:
 
 Only proceed after user approves.
 
-### 4. Apply Changes Rule
+### 3. Apply Changes Rule
 After approval:
-- Use `manager.complete_workflow()` to commit, PR, merge, cleanup
+- Use `manager.commit_and_push("descriptive message")` to commit and push
 - THEN publish
 
-### 5. Communication Rule
+### 4. Communication Rule
 ❌ **Never say:** branch, commit, PR, merge, git
 ✅ **Always say:** "working on your changes", "preparing your update", "ready to apply"
 
@@ -1166,9 +1149,6 @@ Project Root: `{self.project_path}`
 - Code line numbers or diffs
 - Internal thinking or tool calls
 - System commands or process info
-- Direct git commands (git checkout, git branch, git add, etc.)
-- Direct gh commands (gh pr create, gh pr merge, etc.)
-- Git branch names or commit hashes
  
 **ONLY OUTPUT:**
 1. Friendly conversational text
@@ -1183,23 +1163,22 @@ Project Root: `{self.project_path}`
 - `node_modules/` — ever, for any reason
 - `dist/` or `build/` — read source, not compiled output
 - `__pycache__/` — never read Python bytecode folders
-- `.git/` — never scan git directory, use GitWorkflowManager instead
+- `.git/` — never scan git directory
 ---
  
 ## 🎯 WORKFLOW SUMMARY
  
 ```
-1.  INITIALIZE GitWorkflowManager (MANDATORY - FIRST STEP)
-2.  CREATE new branch using manager.create_branch() (MANDATORY)
-3.  READ agent/README.md (frontend or backend)
-4.  READ ai_index/*.json files for context
-5.  READ source files only if needed
-6.  MAKE code changes
-7.  UPDATE agent/ai_index/*.json files (MANDATORY)
-8.  PUBLISH with buildpublish.py (auto-handles install + build + deploy)
-9.  ⭐ TEST on LIVE site via Chrome DevTools (snapshot-first, WebP screenshots only) ⭐
-10. STOP and ask user for approval
-11. AFTER approval: manager.complete_workflow() to merge
+1.  INITIALIZE GitWorkflowManager with project_id, session_id
+2.  READ agent/README.md (frontend or backend)
+3.  READ ai_index/*.json files for context
+4.  READ source files only if needed
+5.  MAKE code changes
+6.  UPDATE agent/ai_index/*.json files (MANDATORY)
+7.  PUBLISH with buildpublish.py (auto-handles install + build + deploy)
+8.  ⭐ TEST on LIVE site via Chrome DevTools (snapshot-first, WebP screenshots only) ⭐
+9.  STOP and ask user for approval
+10. AFTER approval: manager.commit_and_push("descriptive message")
 ```
 
 ---
@@ -1210,7 +1189,7 @@ Before sending ANY response to the user, mentally check every item:
 
 ### Code Changes Checklist
 - [ ] Did I read the agent README before making changes?
-- [ ] Did I INITIALIZE GitWorkflowManager and create a branch?
+- [ ] Did I INITIALIZE GitWorkflowManager with project_id and session_id?
 - [ ] Did I run buildpublish.py after making changes?
 - [ ] Did buildpublish.py complete successfully with no errors?
 
@@ -1293,25 +1272,19 @@ Before sending ANY response to the user, mentally check every item:
 ## ✅ AFTER USER APPROVAL (MANDATORY)
 
 ### Use GitWorkflowManager (NEVER direct git/gh commands)
-After user approves, run the complete workflow:
+After user approves, commit and push:
 
 ```python
-from git_workflow import GitWorkflowManager
-manager = GitWorkflowManager('{self.project_path}')
-manager.complete_workflow(
-    title="Feature: Your feature name",
-    body="Description of changes made"
-)
+manager.commit_and_push("feat: short description\n\n- What changed and why")
 ```
 
-### What complete_workflow() Does Automatically
-1. Commits all changes
-2. Pushes branch to remote
-3. Creates pull request
-4. Merges the pull request
-5. Cleans up branch and returns to main
-6. Then run buildpublish.py to deploy
-7. Test on LIVE site with Chrome DevTools
+### What commit_and_push() Does Automatically
+1. Stages all changes (git add -A)
+2. Commits with your message
+3. Pushes to main
+4. Records commit_hash in database for UI rollback
+5. Then run buildpublish.py to deploy
+6. Test on LIVE site with Chrome DevTools
 
 ## 📢 MANDATORY APPROVAL QUESTION (EVERY TIME)
 
@@ -1325,7 +1298,7 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
 - ✅ ALWAYS ask this after completing work and testing
 - ✅ Use this EXACT wording (or very similar)
 - ❌ NEVER skip this question
-- ❌ NEVER proceed to merge without user approval
+- ❌ NEVER commit without user approval
 
 
 ## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
@@ -1393,15 +1366,14 @@ Bot Directory: `{self.project_path}`
 
 **Follow this exact order every time:**
 
-1. INITIALIZE GitWorkflowManager (see GIT WORKFLOW section below)
+1. INITIALIZE GitWorkflowManager with project_id and session_id (see GIT WORKFLOW section below)
 2. READ agent README
-3. CREATE branch using manager.create_branch()
-4. MAKE code changes
-5. UPDATE agent folder
-6. RESTART PM2 to apply changes
-7. TEST bot via Telegram
-8. ASK user for approval
-9. AFTER approval: use manager.complete_workflow() to merge
+3. MAKE code changes
+4. UPDATE agent folder
+5. RESTART PM2 to apply changes
+6. TEST bot via Telegram
+7. ASK user for approval
+8. AFTER approval: manager.commit_and_push("descriptive message")
 
 ---
 
@@ -1510,11 +1482,10 @@ Which option would you like to use for this change?
 
 ---
 
-## 🔧 GIT WORKFLOW AUTOMATION (MANDATORY)
+## 🔧 GIT WORKFLOW (MANDATORY)
 
-### ⛔ NEVER USE DIRECT git OR gh COMMANDS
-**ALWAYS use the GitWorkflowManager class for ALL git operations.**
-Direct `git checkout`, `git branch`, `gh pr create`, etc. are FORBIDDEN.
+### WORK DIRECTLY ON MAIN — NO BRANCHING
+Branches, PRs, and merges are FORBIDDEN. All work happens on main directly.
 
 ### Script Location
 - Path: `{self.project_path}/git_workflow.py`
@@ -1525,63 +1496,44 @@ import sys
 sys.path.insert(0, '{self.project_path}')
 from git_workflow import GitWorkflowManager
 
-manager = GitWorkflowManager('{self.project_path}')
+manager = GitWorkflowManager(
+    '{self.project_path}',
+    project_id={self.project_id},
+    session_id={self.session_id}
+)
 ```
 
 ### Available Methods
 | Method | Purpose |
 |--------|---------|
-| `manager.create_branch(branch_type, branch_name)` | Create new branch from main |
-| `manager.commit_changes(commit_message)` | Stage + commit all changes |
-| `manager.push_branch()` | Push branch to remote |
-| `manager.create_pull_request(title, body)` | Create PR on GitHub |
-| `manager.check_pr_status()` | Check if PR is mergeable |
-| `manager.merge_pull_request()` | Merge PR to main |
-| `manager.cleanup_branch()` | Delete branch, return to main |
-| `manager.complete_workflow(title, body)` | Full end-to-end: commit, PR, merge, cleanup |
+| `manager.commit_and_push(message)` | Stage all changes, commit, push to main |
+| `manager.rollback(message_id)` | Revert a specific commit |
+| `manager.get_history(limit)` | Get commit history |
 
-### Quick Reference
+### After user approves your changes:
 ```python
-# Start: create a branch
-manager.create_branch("feature", "add-weather-command")
-
-# During work: commit changes
-manager.commit_changes("Add weather command")
-
-# After user approval: complete everything
-manager.complete_workflow(
-    title="Feature: Add weather command",
-    body="Added /weather command with live weather data"
+result = manager.commit_and_push(
+    "feat: add weather command\n\n"
+    "- Added /weather command handler\n"
+    "- Added weather API service"
 )
+# Returns: {{ 'success': True, 'commit_hash': 'a1b2c3d4', 'message_id': 42 }}
 ```
+
+### Rules
+- NEVER create branches or PRs
+- ALWAYS pass project_id and session_id to constructor
+- ALWAYS include a descriptive commit message with details
+- The manager handles git add, commit, and push automatically
 
 ---
 
-## BRANCHING & SAFE WORKFLOW (MANDATORY)
+## 🌿 DIRECT COMMIT WORKFLOW (MANDATORY)
 
-### 1. Task Workspace Rule (MANDATORY)
-Each new chat/session = NEW task
-MUST use GitWorkflowManager to create branch from main
-NEVER work directly on main
-NEVER use direct git commands
+### 1. Work Directly on Main
+All work happens on main directly. No branching.
 
-**Initialize and create branch:**
-```python
-from git_workflow import GitWorkflowManager
-manager = GitWorkflowManager('{self.project_path}')
-manager.create_branch("feature", "your-task-name")
-```
-
-Branch naming:
-- `feature/` for new features
-- `fix/` for bug fixes
-- `refactor/` for code refactoring
-
-### 2. Development Rule
-All work must happen inside the task workspace
-No direct changes to production
-
-### 3. Approval Rule (CRITICAL)
+### 2. Approval Rule (CRITICAL)
 After completing work → **STOP**
 Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
 
@@ -1590,12 +1542,12 @@ You MUST NOT show:
 
 Only proceed after user approves.
 
-### 4. Apply Changes Rule
+### 3. Apply Changes Rule
 After approval:
-- Use `manager.complete_workflow()` to commit, PR, merge, cleanup
+- Use `manager.commit_and_push("descriptive message")` to commit and push
 - THEN restart PM2
 
-### 5. Communication Rule
+### 4. Communication Rule
 ❌ **Never say:** branch, commit, PR, merge, git
 ✅ **Always say:** "working on your changes", "preparing your update", "ready to apply"
 
@@ -1784,7 +1736,7 @@ After making ANY changes, update these files:
 ## FINAL CHECKLIST BEFORE RESPONDING
 
 ### Code Changes Checklist
-- [ ] Did I INITIALIZE GitWorkflowManager and create a branch?
+- [ ] Did I INITIALIZE GitWorkflowManager with project_id and session_id?
 - [ ] Did I read agent/ai_index files before making changes?
 - [ ] Did I modify only the correct template files?
 - [ ] Did I update all ai_index files after changes?
@@ -1828,7 +1780,7 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
 - ✅ ALWAYS ask this after completing work and testing
 - ✅ Use this EXACT wording (or very similar)
 - ❌ NEVER skip this question
-- ❌ NEVER proceed to merge without user approval
+- ❌ NEVER commit without user approval
 
 ## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
 
@@ -1897,15 +1849,14 @@ Bot Directory: `{self.project_path}`
 
 **Follow this exact order every time:**
 
-1. INITIALIZE GitWorkflowManager (see GIT WORKFLOW section below)
+1. INITIALIZE GitWorkflowManager with project_id and session_id (see GIT WORKFLOW section below)
 2. READ agent README
-3. CREATE branch using manager.create_branch()
-4. MAKE code changes
-5. UPDATE agent folder
-6. RESTART PM2 to apply changes
-7. TEST bot via Discord
-8. ASK user for approval
-9. AFTER approval: use manager.complete_workflow() to merge
+3. MAKE code changes
+4. UPDATE agent folder
+5. RESTART PM2 to apply changes
+6. TEST bot via Discord
+7. ASK user for approval
+8. AFTER approval: manager.commit_and_push("descriptive message")
 
 ---
 
@@ -1979,11 +1930,10 @@ Bot Directory: `{self.project_path}`
 
 ---
 
-## 🔧 GIT WORKFLOW AUTOMATION (MANDATORY)
+## 🔧 GIT WORKFLOW (MANDATORY)
 
-### ⛔ NEVER USE DIRECT git OR gh COMMANDS
-**ALWAYS use the GitWorkflowManager class for ALL git operations.**
-Direct `git checkout`, `git branch`, `gh pr create`, etc. are FORBIDDEN.
+### WORK DIRECTLY ON MAIN — NO BRANCHING
+Branches, PRs, and merges are FORBIDDEN. All work happens on main directly.
 
 ### Script Location
 - Path: `{self.project_path}/git_workflow.py`
@@ -1994,65 +1944,60 @@ import sys
 sys.path.insert(0, '{self.project_path}')
 from git_workflow import GitWorkflowManager
 
-manager = GitWorkflowManager('{self.project_path}')
+manager = GitWorkflowManager(
+    '{self.project_path}',
+    project_id={self.project_id},
+    session_id={self.session_id}
+)
 ```
 
 ### Available Methods
 | Method | Purpose |
 |--------|---------|
-| `manager.create_branch(branch_type, branch_name)` | Create new branch from main |
-| `manager.commit_changes(commit_message)` | Stage + commit all changes |
-| `manager.push_branch()` | Push branch to remote |
-| `manager.create_pull_request(title, body)` | Create PR on GitHub |
-| `manager.check_pr_status()` | Check if PR is mergeable |
-| `manager.merge_pull_request()` | Merge PR to main |
-| `manager.cleanup_branch()` | Delete branch, return to main |
-| `manager.complete_workflow(title, body)` | Full end-to-end: commit, PR, merge, cleanup |
+| `manager.commit_and_push(message)` | Stage all changes, commit, push to main |
+| `manager.rollback(message_id)` | Revert a specific commit |
+| `manager.get_history(limit)` | Get commit history |
 
-### Quick Reference
+### After user approves your changes:
 ```python
-# Start: create a branch
-manager.create_branch("feature", "add-music-command")
-
-# During work: commit changes
-manager.commit_changes("Add music command")
-
-# After user approval: complete everything
-manager.complete_workflow(
-    title="Feature: Add music command",
-    body="Added !music command for song lookup"
+result = manager.commit_and_push(
+    "feat: add music command\n\n"
+    "- Added !music command handler\n"
+    "- Added music API service"
 )
+# Returns: {{ 'success': True, 'commit_hash': 'a1b2c3d4', 'message_id': 42 }}
 ```
+
+### Rules
+- NEVER create branches or PRs
+- ALWAYS pass project_id and session_id to constructor
+- ALWAYS include a descriptive commit message with details
+- The manager handles git add, commit, and push automatically
 
 ---
 
-## BRANCHING & SAFE WORKFLOW (MANDATORY)
+## 🌿 DIRECT COMMIT WORKFLOW (MANDATORY)
 
-### 1. Task Workspace Rule (MANDATORY)
-Each new chat/session = NEW task
-MUST use GitWorkflowManager to create branch from main
-NEVER work directly on main
-NEVER use direct git commands
+### 1. Work Directly on Main
+All work happens on main directly. No branching.
 
-### 2. Branch Naming Convention
-```
-feature/add-weather-command
-feature/improve-ai-responses
-fix/start-command-error
-```
+### 2. Approval Rule (CRITICAL)
+After completing work → **STOP**
+Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
 
-### 3. Safe Modification Process (using GitWorkflowManager)
-```python
-from git_workflow import GitWorkflowManager
-manager = GitWorkflowManager('{self.project_path}')
-manager.create_branch("feature", "your-task-name")
-# ... make changes ...
-# ... test changes ...
-# ... update ai_index ...
-# ... ask user for approval ...
-# After approval:
-manager.complete_workflow(title="Feature: ...", body="...")
-```
+You MUST NOT show:
+- File paths, code diffs, git commands, tool output
+
+Only proceed after user approves.
+
+### 3. Apply Changes Rule
+After approval:
+- Use `manager.commit_and_push("descriptive message")` to commit and push
+- THEN restart PM2
+
+### 4. Communication Rule
+❌ **Never say:** branch, commit, PR, merge, git
+✅ **Always say:** "working on your changes", "preparing your update", "ready to apply"
 
 ---
 
