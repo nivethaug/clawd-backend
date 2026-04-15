@@ -248,6 +248,7 @@ class ChatRequest(BaseModel):
     stream: bool = False
     image: Optional[str] = None
     acp_mode: bool = True  # Default to ACP mode for frontend editing via ACPX
+    mode: str = "dream"  # "dream" or "plan"
 
 class ChatResponse(BaseModel):
     id: int
@@ -2841,9 +2842,10 @@ async def chat_stream_endpoint(request: ChatRequest):
         user_content = last_user_message.content
 
         # Save user message to database and commit
+        msg_mode = getattr(request, 'mode', 'dream')
         conn.execute(
-            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-            (session_id, 'user', user_content)
+            "INSERT INTO messages (session_id, role, content, mode) VALUES (?, ?, ?, ?)",
+            (session_id, 'user', user_content, msg_mode)
         )
         conn.commit()
         logger.info(f"[STREAM ENDPOINT] User message saved for session {session_id}")
@@ -2874,6 +2876,21 @@ async def chat_stream_endpoint(request: ChatRequest):
             
             logger.info(f"[ACP-STREAM] Handler initialized for project: {handler.project_name}")
             logger.info(f"[ACP-STREAM] Frontend path: {handler.frontend_src_path}")
+
+            # ── PLAN MODE ROUTING ─────────────────────────────────────────────
+            mode = getattr(request, 'mode', 'dream')
+            if mode == 'plan' and handler:
+                handler._plan_mode = True
+
+                # Check if a plan file already exists for this session
+                from plan_manager import PlanManager
+                existing_plan = PlanManager.find_active_plan(session_id, project_id)
+                if existing_plan:
+                    handler.set_existing_plan(existing_plan)
+                    logger.info(f"[ACP-STREAM] Found existing plan for session {session_id}, continuing plan mode")
+                else:
+                    logger.info(f"[ACP-STREAM] No existing plan found, starting new plan discussion")
+            # ── END PLAN MODE ROUTING ─────────────────────────────────────────
 
             # Register handler for cancellation support
             active_handlers[request.session_key] = handler
@@ -3568,6 +3585,28 @@ async def chat_endpoint(request: ChatRequest):
             content=assistant_content,
             created_at=datetime.now().isoformat()
         )
+
+# ============================================================================
+# Plan API Routes
+# ============================================================================
+
+@app.get("/plans/{project_id}")
+async def get_plans(project_id: int):
+    """Get all plans for a project."""
+    from plan_manager import PlanManager
+    plans = PlanManager.get_plans_for_project(project_id)
+    return {"plans": plans}
+
+
+@app.get("/plans/{project_id}/{plan_id}/content")
+async def get_plan_content(project_id: int, plan_id: int):
+    """Get plan file content."""
+    from plan_manager import PlanManager
+    content = PlanManager.get_plan_content(plan_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return {"content": content}
+
 
 # ============================================================================
 # File API Routes

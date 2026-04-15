@@ -66,7 +66,11 @@ class ACPChatHandler:
 
         # Query completion tracking for background save
         self._query_complete = asyncio.Event()
-        
+
+        # Plan mode state
+        self._plan_mode = False
+        self._existing_plan = None  # type: Optional[str]
+
         # Determine project type from database (not detection)
         # type_id 1 = website, type_id 2 = telegrambot, type_id 3 = discordbot, type_id 5 = scheduler
         self.is_telegram_bot = (project_type_id == 2)
@@ -86,7 +90,21 @@ class ACPChatHandler:
             # Web apps need frontend/src
             if not self.frontend_src_path.exists():
                 raise ValueError(f"Frontend src path does not exist: {self.frontend_src_path}")
-    
+
+
+    def set_existing_plan(self, plan_content: str):
+        """Set existing plan content for continue mode."""
+        self._existing_plan = plan_content
+
+    def _get_project_type_str(self) -> str:
+        """Return project type string for plan prompt dispatch."""
+        if self.is_telegram_bot:
+            return 'telegram'
+        elif self.is_discord_bot:
+            return 'discord'
+        elif self.is_scheduler:
+            return 'scheduler'
+        return 'website'
 
     def _load_project_metadata(self):
         """Load project domain from database to populate prompt placeholders."""
@@ -679,6 +697,23 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
 **After approval:**
 1. Use `manager.complete_workflow(title, body)` to commit, push, PR, merge, cleanup
 2. Update `agent/ai_index/*.json` files to reflect all changes
+
+## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
+
+Before making any code changes, follow this process:
+
+1. If the user's request is clear and unambiguous → proceed directly (no questions needed)
+2. If the request is unclear or has multiple interpretations → ask clarification questions
+   - Maximum 2 rounds of clarification
+   - After 2 rounds, proceed with your best understanding
+3. After clarification (or if request was clear), create a quick plan file at:
+   `{self.project_path}/plans/plan_YYYYMMDD_HHMMSS.md`
+   - This plan is for YOUR reference during execution
+   - Keep it brief: just the steps and target files
+   - Include the ai_index update checklist
+4. Then execute the plan
+5. After execution completes, update ai_index files per the checklist
+6. Delete the plan file
 
 {context_section}
 
@@ -1293,6 +1328,25 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
 - ❌ NEVER proceed to merge without user approval
 
 
+## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
+
+Before making any code changes, follow this process:
+
+1. If the user's request is clear and unambiguous → proceed directly (no questions needed)
+2. If the request is unclear or has multiple interpretations → ask clarification questions
+   - Maximum 2 rounds of clarification
+   - After 2 rounds, proceed with your best understanding
+3. After clarification (or if request was clear), create a quick plan file at:
+   `{self.project_path}/plans/plan_YYYYMMDD_HHMMSS.md`
+   - This plan is for YOUR reference during execution
+   - Keep it brief: just the steps and target files
+   - Include the ai_index update checklist
+4. Then execute the plan
+5. After execution completes, update ai_index files per the checklist
+6. Delete the plan file
+
+This ensures even Dream Mode has a lightweight plan-and-execute workflow.
+
 ---
 
 {context_section}
@@ -1775,6 +1829,25 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
 - ✅ Use this EXACT wording (or very similar)
 - ❌ NEVER skip this question
 - ❌ NEVER proceed to merge without user approval
+
+## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
+
+Before making any code changes, follow this process:
+
+1. If the user's request is clear and unambiguous → proceed directly (no questions needed)
+2. If the request is unclear or has multiple interpretations → ask clarification questions
+   - Maximum 2 rounds of clarification
+   - After 2 rounds, proceed with your best understanding
+3. After clarification (or if request was clear), create a quick plan file at:
+   `{self.project_path}/plans/plan_YYYYMMDD_HHMMSS.md`
+   - This plan is for YOUR reference during execution
+   - Keep it brief: just the steps and target files
+   - Include the ai_index update checklist
+4. Then execute the plan
+5. After execution completes, update ai_index files per the checklist
+6. Delete the plan file
+
+This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 
 ---
 
@@ -2642,7 +2715,22 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         """
         # Check if we have an enhanced prompt from preprocessor
         enhanced = getattr(self, '_enhanced_prompt', None)
-        if enhanced:
+        msg = enhanced or user_message
+
+        # Plan mode routing — use plan prompts instead of dream mode prompts
+        if self._plan_mode:
+            from plan import build_plan_prompt
+            prompt = build_plan_prompt(
+                project_type=self._get_project_type_str(),
+                user_message=msg,
+                session_context=session_context,
+                project_path=str(self.project_path),
+                project_name=self.project_name,
+                existing_plan=self._existing_plan,
+            )
+            if enhanced:
+                self._enhanced_prompt = None  # Reset
+        elif enhanced:
             # Build prompt based on project type
             if self.is_telegram_bot:
                 prompt = self._build_chat_prompt_telegram(enhanced, session_context)
@@ -2663,7 +2751,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 prompt = self._build_chat_prompt_scheduler(user_message, session_context)
             else:
                 prompt = self._build_chat_prompt(user_message, session_context)
-        
+
         logger.info(f"[ACP-CHAT] === CLAUDE STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars")
         
@@ -2875,7 +2963,22 @@ Bad: "Created weather_command() handler in commands/weather.py..."
     def run_acpx_chat_streaming(self, user_message: str, session_context: str = ""):
         # Check if we have an enhanced prompt from preprocessor
         enhanced = getattr(self, '_enhanced_prompt', None)
-        if enhanced:
+        msg = enhanced or user_message
+
+        # Plan mode routing — use plan prompts instead of dream mode prompts
+        if self._plan_mode:
+            from plan import build_plan_prompt
+            prompt = build_plan_prompt(
+                project_type=self._get_project_type_str(),
+                user_message=msg,
+                session_context=session_context,
+                project_path=str(self.project_path),
+                project_name=self.project_name,
+                existing_plan=self._existing_plan,
+            )
+            if enhanced:
+                self._enhanced_prompt = None  # Reset
+        elif enhanced:
             # Build prompt based on project type
             if self.is_telegram_bot:
                 prompt = self._build_chat_prompt_telegram(enhanced, session_context)
@@ -2896,7 +2999,6 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 prompt = self._build_chat_prompt_scheduler(user_message, session_context)
             else:
                 prompt = self._build_chat_prompt(user_message, session_context)
-        
         logger.info(f"[ACP-CHAT] === STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars, timeout: {ACPX_TIMEOUT}s")
 

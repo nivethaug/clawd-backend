@@ -316,6 +316,27 @@ def init_schema():
                 cur.execute("ALTER TABLE messages ADD COLUMN image TEXT")
             _run_migration(migrate_image)
 
+            # Messages table migration: add mode column
+            def migrate_mode():
+                cur.execute("ALTER TABLE messages ADD COLUMN mode VARCHAR(20) DEFAULT 'dream'")
+                logger.info("✓ Added mode column to messages table")
+            _run_migration(migrate_mode)
+
+            # Plans table
+            cur.execute("""CREATE TABLE IF NOT EXISTS plans (
+                id SERIAL PRIMARY KEY,
+                session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                title TEXT,
+                status VARCHAR(20) DEFAULT 'draft',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                approved_at TIMESTAMP,
+                executed_at TIMESTAMP
+            )""")
+            conn.commit()
+            logger.info("✓ Created plans table")
+
             # AI Sessions table (for AI chat system)
             # active_project_id stores project domain (TEXT), not numeric ID
             cur.execute("""CREATE TABLE IF NOT EXISTS ai_sessions (
