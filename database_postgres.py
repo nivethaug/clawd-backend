@@ -331,24 +331,29 @@ def init_schema():
             _run_migration(migrate_commit_tracking)
 
             # Commit log table — persistent commit history (survives session/message deletion)
-            cur.execute("""CREATE TABLE IF NOT EXISTS commit_log (
-                id SERIAL PRIMARY KEY,
-                project_id INTEGER NOT NULL,
-                session_id INTEGER,
-                message_id INTEGER,
-                commit_hash VARCHAR(40) NOT NULL,
-                commit_message TEXT NOT NULL,
-                status VARCHAR(20) DEFAULT 'pushed',
-                reverted_by INTEGER REFERENCES commit_log(id) ON DELETE SET NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )""")
-            conn.commit()
             try:
-                cur.execute("CREATE INDEX idx_commit_log_project ON commit_log(project_id, created_at DESC)")
+                cur.execute("""CREATE TABLE IF NOT EXISTS commit_log (
+                    id SERIAL PRIMARY KEY,
+                    project_id INTEGER NOT NULL,
+                    session_id INTEGER,
+                    message_id INTEGER,
+                    commit_hash VARCHAR(40) NOT NULL,
+                    commit_message TEXT NOT NULL,
+                    status VARCHAR(20) DEFAULT 'pushed',
+                    reverted_by INTEGER REFERENCES commit_log(id) ON DELETE SET NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )""")
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"commit_log table creation failed (may already exist): {e}")
+            try:
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_commit_log_project ON commit_log(project_id, created_at DESC)")
                 conn.commit()
                 logger.info("✓ Created commit_log table with index")
-            except Exception:
-                pass  # Index may already exist
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"commit_log index creation failed: {e}")
 
             # Plans table
             cur.execute("""CREATE TABLE IF NOT EXISTS plans (
