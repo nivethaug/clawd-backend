@@ -280,6 +280,36 @@ def init_schema():
                 logger.info("✓ Added repo_url column for GitHub repository URL")
             _run_migration(migrate_repo_url)
 
+            # Backfill repo_url for existing projects that have a git remote but empty repo_url
+            try:
+                import subprocess
+                projects = cur.execute(
+                    "SELECT id, project_path FROM projects WHERE (repo_url IS NULL OR repo_url = '') AND project_path IS NOT NULL AND project_path != ''"
+                ).fetchall()
+                backfilled = 0
+                for p in projects:
+                    try:
+                        result = subprocess.run(
+                            ["git", "-C", p["project_path"], "remote", "get-url", "origin"],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        remote_url = result.stdout.strip()
+                        if remote_url:
+                            # Normalize SSH to HTTPS for consistency
+                            if remote_url.startswith("git@github.com:"):
+                                remote_url = remote_url.replace("git@github.com:", "https://github.com/").rstrip(".git")
+                            elif remote_url.endswith(".git"):
+                                remote_url = remote_url[:-4]
+                            cur.execute("UPDATE projects SET repo_url = ? WHERE id = ?", (remote_url, p["id"]))
+                            backfilled += 1
+                    except Exception:
+                        pass
+                if backfilled:
+                    conn.commit()
+                    logger.info(f"✓ Backfilled repo_url for {backfilled} existing projects")
+            except Exception as e:
+                logger.warning(f"repo_url backfill failed: {e}")
+
             def migrate_active_session_id():
                 cur.execute("ALTER TABLE projects ADD COLUMN active_session_id INTEGER")
                 logger.info("✓ Added active_session_id column for session locking")

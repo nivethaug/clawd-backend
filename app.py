@@ -4601,6 +4601,12 @@ async def commit_and_push(project_id: int, req: CommitRequest):
 async def get_commit_history(project_id: int, limit: int = 20, offset: int = 0):
     """Get commit history for a project from commit_log (survives session/message deletion)."""
     with get_db() as conn:
+        # Get repo_url for building commit links
+        project = conn.execute(
+            "SELECT repo_url FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        repo_url = dict(project).get("repo_url", "") if project else ""
+
         rows = conn.execute(
             """SELECT id, project_id, session_id, message_id, commit_hash, commit_message, 
                       status, reverted_by, created_at
@@ -4617,7 +4623,7 @@ async def get_commit_history(project_id: int, limit: int = 20, offset: int = 0):
         ).fetchone()["cnt"]
 
         commits = [dict(row) for row in rows]
-        return {"commits": commits, "total": total}
+        return {"commits": commits, "total": total, "repo_url": repo_url}
 
 
 @app.get("/projects/{project_id}/commits/{message_id}")
