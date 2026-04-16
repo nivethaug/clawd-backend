@@ -50,28 +50,6 @@ def parse_args() -> argparse.Namespace:
 
 
 async def run_tests(repo_path: str, timeout: float, stream: bool, interactive: bool) -> int:
-    if interactive:
-        test_prompts = []
-        print("Interactive mode: Enter prompts (type 'quit' to exit)")
-        while True:
-            try:
-                prompt = input("Prompt: ").strip()
-                if prompt.lower() in ('quit', 'exit', 'q'):
-                    break
-                if prompt:
-                    test_prompts.append(prompt)
-                else:
-                    print("Empty prompt, try again.")
-            except (EOFError, KeyboardInterrupt):
-                print("\nExiting interactive mode.")
-                break
-    else:
-        test_prompts = [
-            "Give a one-sentence summary of this repository.",
-            "List 5 key Python modules in this repository and their purpose in one line each.",
-            "What is the main FastAPI entry file in this repo?",
-        ]
-
     streamed_chunks: list[str] = []
     progress_events: list[str] = []
     current_test = 0
@@ -92,14 +70,42 @@ async def run_tests(repo_path: str, timeout: float, stream: bool, interactive: b
         on_text=on_text,
         on_progress=on_progress,
     ) as agent:
-        for idx, prompt in enumerate(test_prompts, start=1):
-            current_test = idx
-            print(f"\n[TEST {idx}] Prompt: {prompt}")
-            response = await agent.query(prompt, timeout=timeout)
-            if not response:
-                print(f"[TEST {idx}] FAIL: empty response")
-                return 1
-            print(f"[TEST {idx}] PASS: {response[:300]}")
+        if interactive:
+            print("Interactive mode: Enter prompts (type 'quit' to exit)")
+            idx = 0
+            while True:
+                try:
+                    prompt = input("Prompt: ").strip()
+                    if prompt.lower() in ('quit', 'exit', 'q'):
+                        break
+                    if not prompt:
+                        print("Empty prompt, try again.")
+                        continue
+                    idx += 1
+                    current_test = idx
+                    print(f"\n[TEST {idx}] Prompt: {prompt}")
+                    response = await agent.query(prompt, timeout=timeout)
+                    if not response:
+                        print(f"[TEST {idx}] FAIL: empty response")
+                        return 1
+                    print(f"[TEST {idx}] PASS: {response[:300]}")
+                except (EOFError, KeyboardInterrupt):
+                    print("\nExiting interactive mode.")
+                    break
+        else:
+            test_prompts = [
+                "Give a one-sentence summary of this repository.",
+                "List 5 key Python modules in this repository and their purpose in one line each.",
+                "What is the main FastAPI entry file in this repo?",
+            ]
+            for idx, prompt in enumerate(test_prompts, start=1):
+                current_test = idx
+                print(f"\n[TEST {idx}] Prompt: {prompt}")
+                response = await agent.query(prompt, timeout=timeout)
+                if not response:
+                    print(f"[TEST {idx}] FAIL: empty response")
+                    return 1
+                print(f"[TEST {idx}] PASS: {response[:300]}")
 
     print(f"\nDone. Stream chunks: {len(streamed_chunks)}, Progress events: {len(progress_events)}")
     return 0
