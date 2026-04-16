@@ -1635,15 +1635,56 @@ Note the port you end up using — you need it in the next step.
 After serving, use Chrome DevTools MCP to do a quick check:
 
 **1. Open the app**
-\navigate to: http://localhost:PORT   ← use the actual port from Step 6
-\
-**2. Take a screenshot** — confirm page is not blank/white, layout renders correctly.
+```text
+navigate to: http://localhost:PORT   ← use the actual port from Step 6
+```
 
-**3. Check console** — no React runtime errors, no failed imports.
+**2. Check console**
+- No React runtime errors
+- No failed imports
+
+**3. Run JavaScript eval checks (no screenshot/snapshot required)**
+Use DevTools MCP `evaluate_script` and verify:
+- Page has enough visible text content (not blank)
+- Required pages expose accessible names (`aria-label` where needed)
+
+Example checks:
+```javascript
+() => {{
+    const bodyText = (document.body?.innerText || "").trim();
+    const hasEnoughText = bodyText.length >= 200;
+
+    const unlabeledIconButtons = Array.from(document.querySelectorAll('button'))
+        .filter((btn) => {{
+            const hasLabel = btn.hasAttribute('aria-label') || btn.textContent.trim().length > 0;
+            const hasIconOnly = btn.querySelector('svg') && btn.textContent.trim().length === 0;
+            return hasIconOnly && !hasLabel;
+        }})
+        .length;
+
+    const unlabeledInputs = Array.from(document.querySelectorAll('input, textarea, select'))
+        .filter((el) => {{
+            const hasAria = el.hasAttribute('aria-label');
+            const id = el.getAttribute('id');
+            const hasLabel = id ? !!document.querySelector(`label[for="${{id}}"]`) : false;
+            return !hasAria && !hasLabel;
+        }})
+        .length;
+
+    return {{
+        hasEnoughText,
+        textLength: bodyText.length,
+        unlabeledIconButtons,
+        unlabeledInputs,
+        pass: hasEnoughText && unlabeledIconButtons === 0 && unlabeledInputs === 0,
+    }};
+}}
+```
 
 **4. Close browser and kill server:**
-\\ash
-kill \
+```bash
+kill $(lsof -t -i:PORT)
+```
 ---
 
 ## STEP 8 — UPDATE AI INDEX
@@ -1665,7 +1706,7 @@ After a successful build, update all four AI index files:
       {required_pages_str}
 - [ ] All pages follow a11y rules (semantic `<button>`, `aria-label` on icon buttons and inputs, `role="dialog"` on modals, `aria-hidden="true"` on decorative SVGs, `aria-live` on dynamic content)
 - [ ] `npm run build` succeeds with zero errors
-- [ ] Browser check: screenshot taken, page not blank, no console errors
+- [ ] Browser check: console clean, JS eval confirms enough page text and aria-label coverage
 - [ ] Server stopped (`kill $(lsof -t -i:PORT)`)
 - [ ] AI index files updated (symbols, files, dependencies, summaries)
 """
