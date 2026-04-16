@@ -4,8 +4,8 @@
   "version": "1.0.1",
   "last_updated": "2026-04-16",
   "total_categories": 20,
-  "total_apis": 66,
-  "total_endpoints": 82,
+  "total_apis": 71,
+  "total_endpoints": 87,
   "navigation_guide": {
     "how_to_use": "Based on the user's request, identify the category that best matches their needs, then reference the corresponding JSON file for detailed API information",
     "category_selection": "Match keywords in user queries to the 'keywords' field in each category below"
@@ -126,29 +126,31 @@
       "id": "images",
       "name": "Images & Photos",
       "json_file": "images.json",
-      "description": "Image search, photos, and visual content - Free no-auth APIs",
-      "apis_count": 8,
-      "endpoints_count": 8,
-      "keywords": ["image", "images", "photo", "photos", "picture", "pictures", "search", "placeholder", "stock photo", "cat", "dog", "bear", "kitten"],
-      "use_when": "User needs to search for or retrieve images and photos without authentication",
+      "description": "Image search, photos, and visual content - Includes both free and auth APIs",
+      "apis_count": 11,
+      "endpoints_count": 11,
+      "keywords": ["image", "images", "photo", "photos", "picture", "pictures", "search", "placeholder", "stock photo", "unsplash", "pixabay", "pexels", "cat", "dog", "bear", "kitten"],
+      "use_when": "User needs to search for or retrieve images and photos (free and auth options available)",
       "sample_questions": [
         "Search for images of nature",
         "Get random photos",
         "Find placeholder images",
         "Get a placeholder image",
         "Find cat pictures",
-        "Create mockup images"
+        "Create mockup images",
+        "Search Unsplash for professional photos",
+        "Find stock photos with API key"
       ]
     },
     {
       "id": "videos",
       "name": "Videos & Media",
       "json_file": "videos.json",
-      "description": "Video search, clips, and media content - Free no-auth APIs",
-      "apis_count": 2,
-      "endpoints_count": 2,
-      "keywords": ["video", "videos", "clip", "clips", "movie", "film", "media", "stock video", "coverr", "mixkit"],
-      "use_when": "User needs to search for or retrieve videos and media content without authentication",
+      "description": "Video search, clips, and media content - Includes both free and auth APIs",
+      "apis_count": 4,
+      "endpoints_count": 4,
+      "keywords": ["video", "videos", "clip", "clips", "movie", "film", "media", "stock video", "coverr", "mixkit", "pexels", "pixabay"],
+      "use_when": "User needs to search for or retrieve videos and media content (free and auth options available)",
       "sample_questions": [
         "Search for videos of nature",
         "Get random video clips",

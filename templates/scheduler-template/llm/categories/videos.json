@@ -1,0 +1,80 @@
+{
+  "category": "videos",
+  "name": "Videos & Media",
+  "description": "High-quality videos, clips, and media content - Free no-auth APIs",
+  "prefix": "/videos",
+  "apis": [
+    {
+      "id": "coverr",
+      "name": "Coverr API",
+      "base_url": "https://api.coverr.co",
+      "auth_required": false,
+      "status": "ACTIVE",
+      "status_notes": "Free API for stock videos. No authentication required. High-quality 4K videos.",
+      "endpoints": [
+        {
+          "path": "/videos/coverr/random",
+          "method": "GET",
+          "summary": "Get random stock video from Coverr",
+          "direct_url": "https://api.coverr.co/videos/random",
+          "sample_request": "https://api.coverr.co/videos/random",
+          "sample_response": {
+            "id": "12345",
+            "title": "Beautiful Nature Scene",
+            "description": "A stunning video of nature",
+            "duration": 30,
+            "width": 1920,
+            "height": 1080,
+            "url": "https://cdn.coverr.co/videos/cover/12345",
+            "thumbnail": "https://cdn.coverr.co/videos/thumbnails/12345.jpg",
+            "tags": ["nature", "forest", "beautiful"],
+            "created_at": "2023-01-01T00:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mixkit",
+      "name": "Mixkit Free Videos",
+      "base_url": "https://api.mixkit.co",
+      "auth_required": false,
+      "status": "ACTIVE",
+      "status_notes": "Free stock videos from Mixkit. No authentication required.",
+      "endpoints": [
+        {
+          "path": "/videos/mixkit/search",
+          "method": "GET",
+          "summary": "Search for free videos on Mixkit",
+          "direct_url": "https://api.mixkit.co/videos/search?q={query}",
+          "parameters": [
+            {"name": "q", "type": "query", "required": true, "description": "Search query"},
+            {"name": "limit", "type": "query", "default": 20, "description": "Number of results"}
+          ],
+          "sample_request": "https://api.mixkit.co/videos/search?q=nature&limit=10",
+          "sample_response": {
+            "videos": [
+              {
+                "id": "12345",
+                "name": "Beautiful Forest",
+                "url": "https://assets.mixkit.co/videos/12345.mp4",
+                "thumbnail": "https://assets.mixkit.co/videos/thumbnails/12345.jpg",
+                "duration": 30,
+                "width": 1920,
+                "height": 1080,
+                "tags": ["nature", "forest"],
+                "license": "free"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Get high-quality stock videos without authentication",
+    "Find background videos for websites",
+    "Access free video content",
+    "Get videos for multimedia projects",
+    "Find 4K video content"
+  ]
+}

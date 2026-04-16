@@ -1134,14 +1134,87 @@ Project Root: `{self.project_path}`
 - `backend/agent/README.md` - AI guide for backend (READ FIRST)
 - `frontend/` - React app (pages, components)
 - `backend/` - API server
+- `llm/categories/` - LLM API catalog for public APIs, images, and videos
  
 **Project Details:**
 - Frontend URL: `https://{self.frontend_domain}`
 - Backend URL: `https://{self.backend_domain}`
 
- 
 ---
- 
+
+## 🔌 LLM API CATALOG (MANDATORY FOR PUBLIC API REQUESTS)
+
+Use the LLM catalog first for any public API, images, or videos.
+
+### Catalog Location
+- Path: `{self.project_path}/llm/categories/`
+- Index: `llm/categories/index.json` (20 categories, 71 APIs, 87 endpoints)
+
+### Use Catalog For
+- Any public API request
+- Weather, crypto, news, stocks, entertainment, food, health, science, sports, travel, location, security, utilities, jobs, AI/NLP, knowledge, e-commerce
+- Images and videos
+
+### How to Use
+1. Read `llm/categories/index.json`
+2. Match user keywords to a category file
+3. Read that category JSON for the exact API URL and params
+4. Use the catalog `direct_url` in frontend or backend code
+
+Never invent API URLs.
+
+### Images & Videos: Ask First
+
+Before using any image or video API, ask the user:
+
+```
+For images/videos, I can use these sources:
+
+🆓 FREE APIs (No API Key Needed):
+- Random animal photos (cats, dogs, bears)
+- Placeholder images with custom text
+- Free stock photos from Picsum
+- Free stock videos from Coverr/Mixkit
+
+🔑 PREMIUM APIs (API Key Required):
+- Professional stock photos (Unsplash, Pixabay, Pexels)
+- Professional stock videos (Pexels, Pixabay)
+
+Which would you like me to use?
+```
+
+**Rules:**
+- ✅ Show free + premium options
+- ✅ Ask before using premium APIs
+- ✅ Never auto-select without confirmation
+- ❌ Never invent URLs - use catalog only
+
+### Code Examples
+
+**Frontend:**
+```typescript
+// frontend/services/apiClient.ts
+export async function getCryptoPrice(coin: string) {{
+  const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=' + coin);
+  return response.json();
+}}
+```
+
+**Backend:**
+```python
+# backend/routes/api.py
+from fastapi import FastAPI
+
+@app.get("/api/weather")
+async def get_weather(lat: float, lon: float):
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={{lat}}&longitude={{lon}}"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url)
+        return response.json()
+```
+
+---
+
 ## 📝 RESPONSE STYLE
  
 **You are helping a NON-TECHNICAL person build their app.**
@@ -1207,11 +1280,19 @@ Project Root: `{self.project_path}`
 
 Before sending ANY response to the user, mentally check every item:
 
+### LLM API Catalog Checklist
+- [ ] User requests public API, images, or videos?
+- [ ] Read `llm/categories/index.json` to find category
+- [ ] Read specific category JSON file (e.g., `images.json`)
+- [ ] Use exact `direct_url` from catalog (not invented)
+- [ ] **IF images/videos:** Ask user which API source (free vs premium)?
+- [ ] Integrate API correctly into code
+
 ### Code Changes Checklist
-- [ ] Did I read the agent README before making changes?
-- [ ] Did I INITIALIZE GitWorkflowManager with project_id and session_id?
-- [ ] Did I run buildpublish.py after making changes?
-- [ ] Did buildpublish.py complete successfully with no errors?
+- [ ] Read the agent README before making changes?
+- [ ] INITIALIZE GitWorkflowManager with project_id and session_id?
+- [ ] Run buildpublish.py after making changes?
+- [ ] buildpublish.py complete successfully with no errors?
 
 ### Live Testing Checklist
 - [ ] Did I open `https://{self.frontend_domain}` (NOT localhost)?
@@ -1325,6 +1406,40 @@ Are you satisfied with the current changes? Kindly confirm your approval or sugg
 
 Before making any code changes, follow this process:
 
+### Step 1: Check if Public API, Images, or Videos are Needed
+**Does user request involve:**
+- Weather, crypto, news, stocks, or any external data?
+- Images, photos, stock photos?
+- Videos, clips, stock videos?
+- Translation, sentiment analysis, QR codes?
+- ANY public API integration?
+
+**If YES → Go to Step 2a (LLM API Catalog Flow)**
+**If NO → Go to Step 2b (Standard Flow)**
+
+### Step 2a: LLM API Catalog Flow (for Public API Requests)
+1. Read `llm/categories/index.json` to find matching category
+2. Read specific category JSON file (e.g., `images.json`, `weather.json`)
+3. **IF images/videos requested:** Ask user which API source to use (free vs premium):
+   ```
+   For images/videos, I can use these sources:
+   
+   🆓 FREE APIs (No API Key):
+   - Random animal photos (cats, dogs, bears)
+   - Placeholder images with custom text
+   - Free stock photos from Picsum
+   - Free stock videos from Coverr/Mixkit
+   
+   🔑 PREMIUM APIs (API Key):
+   - Professional stock photos (Unsplash, Pixabay, Pexels)
+   - Professional stock videos (Pexels, Pixabay)
+   
+   Which would you like me to use?
+   ```
+4. Integrate the chosen API into frontend or backend code
+5. Update agent/ai_index files to reflect the API integration
+
+### Step 2b: Standard Flow (for Non-API Requests)
 1. If the user's request is clear and unambiguous → proceed directly (no questions needed)
 2. If the request is unclear or has multiple interpretations → ask clarification questions
    - Maximum 2 rounds of clarification
@@ -1338,7 +1453,10 @@ Before making any code changes, follow this process:
 5. After execution completes, update ai_index files per the checklist
 6. Delete the plan file
 
-This ensures even Dream Mode has a lightweight plan-and-execute workflow.
+### Step 3: Final Execution
+After clarifying API source (or confirming request is clear), proceed with code changes and follow all other checklists.
+
+This ensures even Dream Mode has a lightweight plan-and-execute workflow, with mandatory API catalog usage for public APIs.
 
 ---
 
@@ -1774,6 +1892,14 @@ After making ANY changes, update these files:
 ---
 
 ## FINAL CHECKLIST BEFORE RESPONDING
+
+### LLM API Catalog Checklist (MANDATORY for Public API Requests)
+- [ ] Did user request ANY public API, images, or videos?
+- [ ] Did I read `llm/categories/index.json` to find matching category?
+- [ ] Did I read the specific category JSON file (e.g., `images.json`, `weather.json`)?
+- [ ] Did I use the exact `direct_url` from the catalog (not invented)?
+- [ ] If images/videos requested: Did I ask user which API source to use (free vs premium)?
+- [ ] Did I integrate the API correctly into frontend or backend code?
 
 ### Code Changes Checklist
 - [ ] Did I INITIALIZE GitWorkflowManager with project_id and session_id?

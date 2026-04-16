@@ -1,0 +1,353 @@
+{
+  "category": "images",
+  "name": "Images & Media",
+  "description": "High-quality images, photos, and media content - Includes both free and auth APIs",
+  "prefix": "/images",
+  "apis": [
+    {
+      "id": "dogceo",
+      "name": "Dog CEO",
+      "base_url": "https://dog.ceo/api",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/images/dogceo/random",
+          "method": "GET",
+          "summary": "Get random dog image",
+          "direct_url": "https://dog.ceo/api/breeds/image/random",
+          "sample_request": "https://dog.ceo/api/breeds/image/random",
+          "sample_response": {
+            "message": "https://images.dog.ceo/breeds/terrier-american/n02093428_11085.jpg",
+            "status": "success"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cataas",
+      "name": "Cat as a Service (CATAAS)",
+      "base_url": "https://cataas.com",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/images/cataas/random",
+          "method": "GET",
+          "summary": "Get random cat image",
+          "direct_url": "https://cataas.com/cat?json=true",
+          "sample_request": "https://cataas.com/cat?json=true",
+          "sample_response": {
+            "_id": "5e9c9f8f8e8f9c0001b8e8f9",
+            "mimetype": "image/jpeg",
+            "size": 45678,
+            "tags": ["cute", "funny"],
+            "url": "/cat/5e9c9f8f8e8f9c0001b8e8f9"
+          }
+        }
+      ]
+    },
+    {
+      "id": "picsum",
+      "name": "Picsum (Lorem Picsum)",
+      "base_url": "https://picsum.photos",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/images/picsum",
+          "method": "GET",
+          "summary": "Get random placeholder image",
+          "direct_url": "https://picsum.photos/{width}/{height}",
+          "parameters": [
+            {"name": "width", "type": "path", "default": 800, "description": "Image width"},
+            {"name": "height", "type": "path", "default": 600, "description": "Image height"}
+          ],
+          "sample_request": "https://picsum.photos/800/600",
+          "sample_response": "Returns image binary data",
+          "note": "This endpoint returns actual image data, not JSON"
+        }
+      ]
+    },
+    {
+      "id": "placekitten",
+      "name": "PlaceKitten",
+      "base_url": "https://placekitten.com",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/images/placekitten",
+          "method": "GET",
+          "summary": "Get placeholder cat image",
+          "direct_url": "https://placekitten.com/{width}/{height}",
+          "parameters": [
+            {"name": "width", "type": "path", "default": 800, "description": "Image width"},
+            {"name": "height", "type": "path", "default": 600, "description": "Image height"}
+          ],
+          "sample_request": "https://placekitten.com/800/600",
+          "sample_response": "Returns image binary data",
+          "note": "Returns cute kitten placeholder images"
+        }
+      ]
+    },
+    {
+      "id": "placedog",
+      "name": "PlaceDog",
+      "base_url": "https://placedog.net",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/images/placedog",
+          "method": "GET",
+          "summary": "Get placeholder dog image",
+          "direct_url": "https://placedog.net/{width}/{height}",
+          "parameters": [
+            {"name": "width", "type": "path", "default": 800, "description": "Image width"},
+            {"name": "height", "type": "path", "default": 600, "description": "Image height"}
+          ],
+          "sample_request": "https://placedog.net/800/600",
+          "sample_response": "Returns image binary data",
+          "note": "Returns dog placeholder images"
+        }
+      ]
+    },
+    {
+      "id": "placebear",
+      "name": "PlaceBear",
+      "base_url": "https://placebear.com",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/images/placebear",
+          "method": "GET",
+          "summary": "Get placeholder bear image",
+          "direct_url": "https://placebear.com/{width}/{height}",
+          "parameters": [
+            {"name": "width", "type": "path", "default": 800, "description": "Image width"},
+            {"name": "height", "type": "path", "default": 600, "description": "Image height"}
+          ],
+          "sample_request": "https://placebear.com/800/600",
+          "sample_response": "Returns image binary data",
+          "note": "Returns bear placeholder images"
+        }
+      ]
+    },
+    {
+      "id": "dummyimage",
+      "name": "Dummy Image",
+      "base_url": "https://dummyimage.com",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/images/dummyimage",
+          "method": "GET",
+          "summary": "Get customizable placeholder image",
+          "direct_url": "https://dummyimage.com/{width}x{height}/{bgcolor}/{fgcolor}",
+          "parameters": [
+            {"name": "width", "type": "path", "default": 800, "description": "Image width"},
+            {"name": "height", "type": "path", "default": 600, "description": "Image height"},
+            {"name": "bgcolor", "type": "path", "default": "cccccc", "description": "Background color (hex)"},
+            {"name": "fgcolor", "type": "path", "default": "000000", "description": "Foreground/text color (hex)"}
+          ],
+          "sample_request": "https://dummyimage.com/800x600/cccccc/000000",
+          "sample_response": "Returns image binary data",
+          "note": "Customizable placeholder with text showing dimensions"
+        }
+      ]
+    },
+    {
+      "id": "via_placeholder",
+      "name": "Via Placeholder",
+      "base_url": "https://via.placeholder.com",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/images/via_placeholder",
+          "method": "GET",
+          "summary": "Get customizable placeholder image",
+          "direct_url": "https://via.placeholder.com/{width}x{height}",
+          "parameters": [
+            {"name": "width", "type": "path", "default": 800, "description": "Image width"},
+            {"name": "height", "type": "path", "default": 600, "description": "Image height"}
+          ],
+          "sample_request": "https://via.placeholder.com/800x600",
+          "sample_response": "Returns image binary data",
+          "note": "Simple placeholder images with dimensions as text"
+        }
+      ]
+    },
+    {
+      "id": "unsplash",
+      "name": "Unsplash API",
+      "base_url": "https://api.unsplash.com",
+      "auth_required": true,
+      "auth_type": "OAuth2",
+      "auth_instructions": "Register at https://unsplash.com/developers to get API key. Free tier: 50 requests/hour.",
+      "status": "ACTIVE",
+      "status_notes": "Requires valid API key. Demo keys do not work. Verified operational on 2026-04-01.",
+      "endpoints": [
+        {
+          "path": "/images/unsplash/random",
+          "method": "GET",
+          "summary": "Get random photo from Unsplash",
+          "direct_url": "https://api.unsplash.com/photos/random",
+          "headers": {
+            "Authorization": "Client-ID YOUR_ACCESS_KEY"
+          },
+          "sample_request": "https://api.unsplash.com/photos/random?client_id=YOUR_ACCESS_KEY",
+          "sample_response": {
+            "id": "Dwu85P9SOIQ",
+            "created_at": "2016-05-03T11:00:28-04:00",
+            "width": 2448,
+            "height": 3264,
+            "color": "#6E633A",
+            "blur_hash": "LFC$y~wcT0WBx]WCx]WCx]WCx]WC",
+            "downloads": 1345,
+            "likes": 24,
+            "urls": {
+              "raw": "https://images.unsplash.com/photo-1417325384643-aac51acc9e5d",
+              "full": "https://images.unsplash.com/photo-1417325384643-aac51acc9e5d?q=75&fm=jpg",
+              "regular": "https://images.unsplash.com/photo-1417325384643-aac51acc9e5d?q=75&fm=jpg&w=1080",
+              "small": "https://images.unsplash.com/photo-1417325384643-aac51acc9e5d?q=75&fm=jpg&w=400",
+              "thumb": "https://images.unsplash.com/photo-1417325384643-aac51acc9e5d?q=75&fm=jpg&w=200"
+            },
+            "user": {
+              "id": "pXhwzz1Jt1M",
+              "username": "fantasticnature",
+              "name": "Fantastic Nature",
+              "links": {
+                "self": "https://api.unsplash.com/users/fantasticnature",
+                "html": "https://unsplash.com/@fantasticnature"
+              }
+            }
+          },
+          "error_response": {
+            "errors": ["OAuth error: The access token is invalid"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pixabay",
+      "name": "Pixabay API",
+      "base_url": "https://pixabay.com/api/",
+      "auth_required": true,
+      "auth_type": "API Key",
+      "auth_instructions": "Register at https://pixabay.com/api/docs/ to get free API key. Rate limit: 5000 requests/hour.",
+      "status": "ACTIVE",
+      "status_notes": "Requires API key. Free tier available. High-quality stock photos.",
+      "endpoints": [
+        {
+          "path": "/images/pixabay/search",
+          "method": "GET",
+          "summary": "Search for images on Pixabay",
+          "direct_url": "https://pixabay.com/api/?key=YOUR_API_KEY&q={query}&image_type=photo",
+          "parameters": [
+            {"name": "key", "type": "query", "required": true, "description": "Your Pixabay API key"},
+            {"name": "q", "type": "query", "required": true, "description": "Search query"},
+            {"name": "image_type", "type": "query", "default": "photo", "description": "Type of image: photo, illustration, vector"},
+            {"name": "per_page", "type": "query", "default": 20, "description": "Number of results per page (3-200)"}
+          ],
+          "sample_request": "https://pixabay.com/api/?key=YOUR_API_KEY&q=nature&image_type=photo&per_page=10",
+          "sample_response": {
+            "total": 4692,
+            "totalHits": 500,
+            "hits": [
+              {
+                "id": 195893,
+                "pageURL": "https://pixabay.com/en/blossom-bloom-flower-195893/",
+                "type": "photo",
+                "tags": "blossom, bloom, flower",
+                "previewURL": "https://cdn.pixabay.com/photo/2013/10/15/09/12/flower-195893_150.jpg",
+                "previewWidth": 150,
+                "previewHeight": 84,
+                "webformatURL": "https://pixabay.com/get/35bbf209e13e39d2_640.jpg",
+                "webformatWidth": 640,
+                "webformatHeight": 360,
+                "largeImageURL": "https://pixabay.com/get/ed6a99_1.jpg",
+                "imageWidth": 4000,
+                "imageHeight": 2250,
+                "imageSize": 4731420,
+                "views": 7671,
+                "downloads": 6439,
+                "favorites": 1,
+                "likes": 5,
+                "comments": 2,
+                "user_id": 48777,
+                "user": "Josch13",
+                "userImageURL": "https://cdn.pixabay.com/user/2013/11/05/02-10-23-764_250x250.jpg"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pexels",
+      "name": "Pexels API",
+      "base_url": "https://api.pexels.com/v1",
+      "auth_required": true,
+      "auth_type": "API Key",
+      "auth_instructions": "Register at https://www.pexels.com/api/ to get free API key. Rate limit: 200 requests/hour.",
+      "status": "ACTIVE",
+      "status_notes": "Requires API key. Free tier available. Curated stock photos.",
+      "endpoints": [
+        {
+          "path": "/images/pexels/search",
+          "method": "GET",
+          "summary": "Search for photos on Pexels",
+          "direct_url": "https://api.pexels.com/v1/search",
+          "headers": {
+            "Authorization": "YOUR_API_KEY"
+          },
+          "parameters": [
+            {"name": "query", "type": "query", "required": true, "description": "Search query"},
+            {"name": "per_page", "type": "query", "default": 15, "description": "Number of results per page (1-80)"},
+            {"name": "page", "type": "query", "default": 1, "description": "Page number"}
+          ],
+          "sample_request": "https://api.pexels.com/v1/search?query=nature&per_page=10",
+          "sample_response": {
+            "total_results": 10000,
+            "page": 1,
+            "per_page": 10,
+            "photos": [
+              {
+                "id": 2014422,
+                "width": 3024,
+                "height": 3024,
+                "url": "https://www.pexels.com/photo/brown-rocks-during-golden-hour-2014422/",
+                "photographer": "Joey Farina",
+                "photographer_url": "https://www.pexels.com/@joey",
+                "photographer_id": 680589,
+                "avg_color": "#978E82",
+                "src": {
+                  "original": "https://images.pexels.com/photos/2014422/pexels-photo-2014422.jpeg",
+                  "large2x": "https://images.pexels.com/photos/2014422/pexels-photo-2014422.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+                  "large": "https://images.pexels.com/photos/2014422/pexels-photo-2014422.jpeg?auto=compress&cs=tinysrgb&h=650&w=940",
+                  "medium": "https://images.pexels.com/photos/2014422/pexels-photo-2014422.jpeg?auto=compress&cs=tinysrgb&h=350",
+                  "small": "https://images.pexels.com/photos/2014422/pexels-photo-2014422.jpeg?auto=compress&cs=tinysrgb&h=130",
+                  "portrait": "https://images.pexels.com/photos/2014422/pexels-photo-2014422.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=1200&w=800",
+                  "landscape": "https://images.pexels.com/photos/2014422/pexels-photo-2014422.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=627&w=1200",
+                  "tiny": "https://images.pexels.com/photos/2014422/pexels-photo-2014422.jpeg?auto=compress&cs=tinysrgb&dpr=1&fit=crop&h=200&w=280"
+                },
+                "liked": false,
+                "alt": "Brown Rocks During Golden Hour"
+              }
+            ],
+            "next_page": "https://api.pexels.com/v1/search/?page=2&per_page=10&query=nature"
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Get high-quality images (free and auth options)",
+    "Generate placeholder images",
+    "Access professional stock photos (with API key)",
+    "Get random animal images",
+    "Search curated photo collections",
+    "Create customizable placeholders",
+    "Find free stock photography",
+    "Get images for web development",
+    "Access high-resolution photos"
+  ]
+}
+    
+

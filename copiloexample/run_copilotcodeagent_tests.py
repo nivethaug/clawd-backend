@@ -36,10 +36,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable agent logging",
     )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Print streamed agent output and progress messages live",
+    )
     return parser.parse_args()
 
 
-async def run_tests(repo_path: str, timeout: float) -> int:
+async def run_tests(repo_path: str, timeout: float, stream: bool) -> int:
     test_prompts = [
         "Give a one-sentence summary of this repository.",
         "List 5 key Python modules in this repository and their purpose in one line each.",
@@ -48,12 +53,17 @@ async def run_tests(repo_path: str, timeout: float) -> int:
 
     streamed_chunks: list[str] = []
     progress_events: list[str] = []
+    current_test = 0
 
     def on_text(text: str) -> None:
         streamed_chunks.append(text)
+        if stream:
+            print(f"[TEST {current_test}] STREAM: {text}", flush=True)
 
     def on_progress(message: str) -> None:
         progress_events.append(message)
+        if stream:
+            print(f"[TEST {current_test}] PROGRESS: {message}", flush=True)
 
     print(f"Running CopilotCodeAgent tests in: {repo_path}")
     async with CopilotCodeAgent(
@@ -62,6 +72,7 @@ async def run_tests(repo_path: str, timeout: float) -> int:
         on_progress=on_progress,
     ) as agent:
         for idx, prompt in enumerate(test_prompts, start=1):
+            current_test = idx
             print(f"\n[TEST {idx}] Prompt: {prompt}")
             response = await agent.query(prompt, timeout=timeout)
             if not response:
@@ -77,7 +88,7 @@ def main() -> int:
     args = parse_args()
     if args.verbose:
         configure_logging()
-    return asyncio.run(run_tests(args.repo_path, args.timeout))
+    return asyncio.run(run_tests(args.repo_path, args.timeout, args.stream))
 
 
 if __name__ == "__main__":

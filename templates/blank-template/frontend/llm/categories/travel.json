@@ -1,0 +1,152 @@
+{
+  "category": "travel",
+  "name": "Travel",
+  "description": "Travel information, attractions, timezones, and destinations",
+  "prefix": "/travel",
+  "apis": [
+    {
+      "id": "rest_countries_travel",
+      "name": "REST Countries (Travel)",
+      "base_url": "https://restcountries.com/v3.1",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/travel/capital/{country}",
+          "method": "GET",
+          "summary": "Get capital city by country",
+          "direct_url": "https://restcountries.com/v3.1/name/{country}",
+          "parameters": [
+            {"name": "country", "type": "path", "description": "Country name"}
+          ],
+          "sample_request": "https://restcountries.com/v3.1/name/france",
+          "sample_response": [
+            {
+              "name": {"common": "France", "official": "French Republic"},
+              "capital": ["Paris"],
+              "region": "Europe",
+              "population": 67390000,
+              "latlng": [46.0, 2.0],
+              "area": 640679.0,
+              "currencies": {"EUR": {"name": "Euro", "symbol": "€"}},
+              "languages": {"fra": "French"}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "nominatim",
+      "name": "Nominatim (OpenStreetMap)",
+      "base_url": "https://nominatim.openstreetmap.org",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/travel/geocode/search",
+          "method": "GET",
+          "summary": "Geocoding - search for places by name",
+          "direct_url": "https://nominatim.openstreetmap.org/search.php?city=paris&format=jsonv2",
+          "parameters": [
+            {"name": "city", "type": "query", "description": "City name to search"},
+            {"name": "country", "type": "query", "description": "Country code (e.g., fr, de, us)"},
+            {"name": "postalcode", "type": "query", "description": "Postal code"},
+            {"name": "format", "type": "query", "default": "jsonv2", "description": "Response format"}
+          ],
+          "sample_request": "https://nominatim.openstreetmap.org/search.php?city=paris&format=jsonv2",
+          "sample_response": [
+            {
+              "place_id": 7444,
+              "licence": "Data © OpenStreetMap contributors, ODbL 1.0",
+              "osm_type": "node",
+              "osm_id": 530938,
+              "boundingbox": ["48.815573", "48.902145", "2.224199", "2.469921"],
+              "lat": "48.856614",
+              "lon": "2.3522219",
+              "display_name": "Paris, Île-de-France, France métropolitaine, France",
+              "class": "place",
+              "type": "city",
+              "importance": 0.93871845046758,
+              "icon": "https://nominatim.openstreetmap.org/ui/mapicons/poi_place_city.p.20.png"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "geonames",
+      "name": "GeoNames",
+      "base_url": "http://api.geonames.org",
+      "auth_required": false,
+      "rate_limited": true,
+      "endpoints": [
+        {
+          "path": "/travel/geonames/search",
+          "method": "GET",
+          "summary": "Search for places and geographical data",
+          "direct_url": "http://api.geonames.org/searchJSON?q=paris&maxRows=10",
+          "parameters": [
+            {"name": "q", "type": "query", "required": true, "description": "Search query"},
+            {"name": "maxRows", "type": "query", "default": 10, "description": "Maximum number of results"},
+            {"name": "featureClass", "type": "query", "description": "Feature class (P, A, H, L, T, etc.)"},
+            {"name": "country", "type": "query", "description": "Country code to limit search"}
+          ],
+          "sample_request": "http://api.geonames.org/searchJSON?q=paris&maxRows=10",
+          "sample_response": {
+            "totalResultsCount": 1234,
+            "geonames": [
+              {
+                "geonameId": 2988507,
+                "name": "Paris",
+                "lat": 48.85341,
+                "lng": 2.3488,
+                "countryCode": "FR",
+                "countryName": "France",
+                "fcl": "P",
+                "fcode": "PPLC",
+                "population": 2138551
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "zippopotamus",
+      "name": "Zippopotam.us",
+      "base_url": "https://api.zippopotam.us",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/travel/zipcode/{country}/{zip}",
+          "method": "GET",
+          "summary": "Get location information by zip code",
+          "direct_url": "https://api.zippopotam.us/us/90210",
+          "parameters": [
+            {"name": "country", "type": "path", "description": "Country code (e.g., us, ca, gb)"},
+            {"name": "zip", "type": "path", "description": "Zip code"}
+          ],
+          "sample_request": "https://api.zippopotam.us/us/90210",
+          "sample_response": {
+            "country abbreviation": "US",
+            "places": [
+              {
+                "place name": "Beverly Hills",
+                "longitude": -118.4006,
+                "state": "California",
+                "state abbreviation": "CA",
+                "latitude": 34.0736,
+                "post code": "90210"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Find travel attractions and landmarks",
+    "Plan trips",
+    "Get country information",
+    "Check timezones for travel destinations",
+    "Find nearby points of interest"
+  ]
+}

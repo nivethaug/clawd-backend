@@ -2,10 +2,10 @@
   "name": "Public API Explorer - Category Index",
   "description": "Master index for LLMs to navigate API categories and find relevant endpoints",
   "version": "1.0.1",
-  "last_updated": "2026-04-09",
-  "total_categories": 19,
-  "total_apis": 60,
-  "total_endpoints": 76,
+  "last_updated": "2026-04-16",
+  "total_categories": 20,
+  "total_apis": 66,
+  "total_endpoints": 82,
   "navigation_guide": {
     "how_to_use": "Based on the user's request, identify the category that best matches their needs, then reference the corresponding JSON file for detailed API information",
     "category_selection": "Match keywords in user queries to the 'keywords' field in each category below"
@@ -126,16 +126,35 @@
       "id": "images",
       "name": "Images & Photos",
       "json_file": "images.json",
-      "description": "Image search, photos, and visual content",
-      "apis_count": 4,
-      "endpoints_count": 4,
-      "keywords": ["image", "images", "photo", "photos", "picture", "pictures", "search", "unsplash", "pixabay", "stock photo"],
-      "use_when": "User needs to search for or retrieve images and photos",
+      "description": "Image search, photos, and visual content - Free no-auth APIs",
+      "apis_count": 8,
+      "endpoints_count": 8,
+      "keywords": ["image", "images", "photo", "photos", "picture", "pictures", "search", "placeholder", "stock photo", "cat", "dog", "bear", "kitten"],
+      "use_when": "User needs to search for or retrieve images and photos without authentication",
       "sample_questions": [
         "Search for images of nature",
         "Get random photos",
-        "Find stock photos",
-        "Search for pictures"
+        "Find placeholder images",
+        "Get a placeholder image",
+        "Find cat pictures",
+        "Create mockup images"
+      ]
+    },
+    {
+      "id": "videos",
+      "name": "Videos & Media",
+      "json_file": "videos.json",
+      "description": "Video search, clips, and media content - Free no-auth APIs",
+      "apis_count": 2,
+      "endpoints_count": 2,
+      "keywords": ["video", "videos", "clip", "clips", "movie", "film", "media", "stock video", "coverr", "mixkit"],
+      "use_when": "User needs to search for or retrieve videos and media content without authentication",
+      "sample_questions": [
+        "Search for videos of nature",
+        "Get random video clips",
+        "Find stock videos",
+        "Search for background videos",
+        "Get free video content"
       ]
     },
     {

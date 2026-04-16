@@ -1,0 +1,97 @@
+{
+  "category": "weather",
+  "name": "Weather",
+  "description": "Weather forecasts, current conditions, and alerts",
+  "prefix": "/weather",
+  "apis": [
+    {
+      "id": "open_meteo",
+      "name": "Open-Meteo",
+      "base_url": "https://api.open-meteo.com/v1",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/weather/open-meteo",
+          "method": "GET",
+          "summary": "Get current weather and forecast",
+          "direct_url": "https://api.open-meteo.com/v1/forecast",
+          "parameters": [
+            {"name": "latitude", "type": "query", "required": true, "description": "Latitude (-90 to 90)"},
+            {"name": "longitude", "type": "query", "required": true, "description": "Longitude (-180 to 180)"},
+            {"name": "current_weather", "type": "query", "default": "true", "description": "Include current weather"}
+          ],
+          "sample_request": "https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.01&current_weather=true",
+          "sample_response": {
+            "latitude": 40.71,
+            "longitude": -74.01,
+            "generationtime_ms": 0.123,
+            "utc_offset_seconds": -14400,
+            "timezone": "America/New_York",
+            "current_weather": {
+              "temperature": 18.5,
+              "windspeed": 12.3,
+              "winddirection": 225,
+              "weathercode": 3,
+              "time": "2025-03-31T14:30"
+            },
+            "hourly": {
+              "time": ["2025-03-31T00:00", "2025-03-31T01:00"],
+              "temperature_2m": [15.2, 14.8],
+              "precipitation": [0.0, 0.1]
+            },
+            "daily": {
+              "time": ["2025-03-31", "2025-04-01"],
+              "temperature_2m_max": [22.5, 21.3],
+              "temperature_2m_min": [12.1, 11.8]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "nws",
+      "name": "US National Weather Service",
+      "base_url": "https://api.weather.gov",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/weather/nws/alerts",
+          "method": "GET",
+          "summary": "Get US weather alerts",
+          "direct_url": "https://api.weather.gov/alerts",
+          "parameters": [
+            {"name": "state", "type": "query", "description": "US state code (e.g., CA, NY)"}
+          ],
+          "sample_request": "https://api.weather.gov/alerts?area=CA",
+          "sample_response": {
+            "@context": ["https://raw.githubusercontent.com/GeoNet/Earthquake-Feeds/master/contexts/event.jsonld"],
+            "type": "FeatureCollection",
+            "features": [
+              {
+                "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.1234567890",
+                "type": "Feature",
+                "properties": {
+                  "id": "1234567890",
+                  "areaDesc": "San Francisco Bay Area",
+                  "event": "Wind Advisory",
+                  "severity": "Moderate",
+                  "headline": "Wind Advisory issued March 31 at 2:00PM PDT",
+                  "description": "South winds 25 to 35 mph with gusts up to 50 mph expected.",
+                  "effective": "2025-03-31T21:00:00+00:00",
+                  "expires": "2025-04-01T06:00:00+00:00"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Get current weather conditions",
+    "Get weather forecasts",
+    "Check weather alerts",
+    "Monitor severe weather warnings",
+    "Plan outdoor activities"
+  ]
+}
