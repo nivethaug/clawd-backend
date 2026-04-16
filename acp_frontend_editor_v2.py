@@ -1632,6 +1632,8 @@ Note the port you end up using — you need it in the next step.
 
 ## STEP 7 — BROWSER VERIFICATION WITH CHROME DEVTOOLS MCP
 
+⛔ DO NOT use `mcp__chrome-devtools__take_screenshot` — use JS eval checks instead (faster, no image overhead).
+
 After serving, use Chrome DevTools MCP to do a quick check:
 
 **1. Open the app**
