@@ -15,9 +15,10 @@
       "files": [
         "services/ai_logic.py",
         "services/api_client.py",
+        "services/web_scraper.py",
         "services/mock_data.py"
       ],
-      "responsibility": "Process user input, make API calls, provide fallback responses"
+      "responsibility": "Process user input, make API calls, scrape dynamic websites via CDP, provide fallback responses"
     },
     "models": {
       "description": "Database models and CRUD operations",

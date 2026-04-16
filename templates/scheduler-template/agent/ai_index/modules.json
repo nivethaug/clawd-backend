@@ -17,10 +17,12 @@
     "description": "External API helpers - AI adds new data source functions here",
     "files": [
       "services/api_client.py",
+      "services/web_scraper.py",
       "services/__init__.py"
     ],
     "responsibilities": [
       "Public API calls (crypto, weather, news, etc.)",
+      "Dynamic website scraping via CDP for JS-rendered pages",
       "Generic fetch_json() and safe_get() utilities",
       "AI-extensible helper functions"
     ]

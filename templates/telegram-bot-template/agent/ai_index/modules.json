@@ -16,11 +16,13 @@
     "description": "Business logic and external API integration",
     "files": [
       "services/api_client.py",
+      "services/web_scraper.py",
       "services/ai_logic.py",
       "services/database.py"
     ],
     "responsibilities": [
       "External API calls (crypto prices, weather, etc.)",
+      "Dynamic web scraping with CDP (JS-rendered pages)",
       "Core bot intelligence and user interaction logic",
       "Database operations (CRUD users, alerts, etc.)"
     ]

@@ -32,6 +32,16 @@
       "get_news() - Hacker News integration"
     ]
   },
+  "services/web_scraper.py": {
+    "summary": "CDP-based web scraping module using chrome-devtools-mcp. Enables extraction from JS-heavy websites with config-driven selectors, pagination, auth support, and extensible scraper registry.",
+    "key_components": [
+      "ScrapeConfig and ScrapeResult dataclasses",
+      "MCPClient with browser lifecycle management",
+      "WebScraper base class with extraction helpers",
+      "register_scraper/get_scraper registry",
+      "scrape_url() for standalone scraping"
+    ]
+  },
   "services/__init__.py": {
     "summary": "Package init for services module.",
     "key_components": []

@@ -98,6 +98,7 @@ Project: {project_name} (ID: {self.project_id})
 Allowed files to modify:
 - scheduler/executor.py (add task handlers + routes) — PRIMARY file to modify
 - services/api_client.py — ONLY if you need a NEW API function that doesn't exist yet
+- services/web_scraper.py — ONLY to extend the existing scraper when website data is required
 
 DO NOT modify any other files.
 
@@ -107,6 +108,20 @@ IMPORTANT: api_client.py already has these functions:
 - get_news(query, page)
 - fetch_json(url, params) — generic JSON fetcher
 Only add to api_client.py if you need an API NOT listed above.
+
+==================================================
+WEBSITE DATA (MANDATORY)
+==================================================
+
+If the user request requires fetching website data (scraping):
+1. USE the existing CDP scraper in services/web_scraper.py (do NOT create a new scraper system).
+2. Add a helper wrapper in services/api_client.py that builds a ScrapeConfig and calls scrape_url().
+3. If site-specific steps are needed, subclass WebScraper in services/web_scraper.py and register it.
+4. Always include the target URL in ScrapeConfig.url and keep selectors specific.
+
+Add a utility helper for each website-based request:
+- Name it for the intent, e.g., scrape_site_headlines(), scrape_product_prices().
+- Keep it pure: accept url + optional params, return {success, data, errors}.
 
 ==================================================
 INTENT DETECTION & API SELECTION

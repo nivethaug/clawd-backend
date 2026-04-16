@@ -50,6 +50,16 @@
       "Rate limiting awareness"
     ]
   },
+  "services/web_scraper.py": {
+    "summary": "CDP-based web scraping module using chrome-devtools-mcp. Supports config-driven extraction, custom scraper classes, pagination, auth flows, and JS-based extraction for dynamic pages.",
+    "key_components": [
+      "ScrapeConfig and ScrapeResult dataclasses",
+      "MCPClient browser connection and tool calls",
+      "WebScraper base class with extraction helpers",
+      "register_scraper/get_scraper extensibility",
+      "scrape_url() standalone entrypoint"
+    ]
+  },
   "services/database.py": {
     "summary": "Database service layer. Provides high-level database operations for user management, alerts, and other persistent data. Abstracts SQLAlchemy complexity.",
     "key_components": [

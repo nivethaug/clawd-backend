@@ -45,6 +45,22 @@
     ],
     "used_by": ["services/ai_logic.py"]
   },
+  "services/web_scraper.py": {
+    "imports": [
+      "subprocess",
+      "json",
+      "time",
+      "re",
+      "os",
+      "shutil",
+      "urllib.request",
+      "pathlib",
+      "dataclasses",
+      "typing",
+      "datetime"
+    ],
+    "used_by": ["services/api_client.py", "services/ai_logic.py", "AI agent (direct import)"]
+  },
   "services/database.py": {
     "imports": [
       "core.database",

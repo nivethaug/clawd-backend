@@ -56,6 +56,13 @@
       "exports": ["fetch_data", "fetch_bitcoin_price", "get_json", "post_json"],
       "endpoints": []
     },
+    "services/web_scraper.py": {
+      "type": "python",
+      "lines": 700,
+      "purpose": "CDP web scraper service for dynamic website extraction",
+      "exports": ["ScrapeConfig", "ScrapeResult", "MCPClient", "WebScraper", "register_scraper", "get_scraper", "scrape_url"],
+      "endpoints": []
+    },
     "services/mock_data.py": {
       "type": "python",
       "lines": 35,

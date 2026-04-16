@@ -57,6 +57,46 @@
       "description": "Get current Bitcoin price in USD"
     },
     {
+      "name": "ScrapeConfig",
+      "type": "class",
+      "file": "services/web_scraper.py",
+      "start_line": 45,
+      "end_line": 57,
+      "description": "Per-site scraping configuration dataclass"
+    },
+    {
+      "name": "WebScraper",
+      "type": "class",
+      "file": "services/web_scraper.py",
+      "start_line": 267,
+      "end_line": 572,
+      "description": "Base scraper with CDP navigation, interaction, extraction, and pagination helpers"
+    },
+    {
+      "name": "scrape_url",
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 618,
+      "end_line": 656,
+      "description": "Standalone scraper entrypoint for one-off config-driven scraping"
+    },
+    {
+      "name": "register_scraper",
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 602,
+      "end_line": 604,
+      "description": "Register a custom scraper class for named lookup"
+    },
+    {
+      "name": "get_scraper",
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 607,
+      "end_line": 614,
+      "description": "Instantiate a registered scraper by name and config"
+    },
+    {
       "name": "get_mock_response",
       "type": "function",
       "file": "services/mock_data.py",

@@ -59,6 +59,18 @@
       "get_crypto_price()"
     ]
   },
+  "services/web_scraper.py": {
+    "path": "services/web_scraper.py",
+    "lines": 700,
+    "type": "scraper_service",
+    "purpose": "CDP web scraping for dynamic website extraction",
+    "commands": [],
+    "functions": [
+      "scrape_url()",
+      "register_scraper()",
+      "get_scraper()"
+    ]
+  },
   "services/database.py": {
     "path": "services/database.py",
     "lines": 75,

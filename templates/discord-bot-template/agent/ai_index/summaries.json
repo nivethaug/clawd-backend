@@ -8,6 +8,7 @@
     "commands/status.py": "!status command handler. Shows bot status, guild count, and latency.",
     "services/ai_logic.py": "Core AI decision engine. Detects intent from user text, calls APIs, returns responses. This is the primary file to modify for bot behavior.",
     "services/api_client.py": "External API client. All HTTP requests go here. Uses requests library with timeout.",
+    "services/web_scraper.py": "CDP web scraper using chrome-devtools-mcp. Supports config-driven extraction, custom scraper classes, pagination, auth, JS extraction, and scraper registry for LLM extensibility.",
     "services/mock_data.py": "Fallback mock responses when API is unavailable or intent is unclear.",
     "models/user.py": "User model with database CRUD operations. Supports Discord user auto-creation.",
     "core/database.py": "PostgreSQL connection manager. Provides get_db() context manager and table initialization.",

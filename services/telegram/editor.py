@@ -148,6 +148,7 @@ Bot: {bot_name}
 Allowed files to modify ONLY:
 - services/ai_logic.py
 - services/api_client.py (helper functions only)
+- services/web_scraper.py (extend existing scraper only when needed)
 - handlers/start.py (ONLY update welcome message text)
 - handlers/message.py (ONLY if absolutely required)
 
@@ -192,7 +193,7 @@ NOTE: User provides title + description - AI MUST decide APIs autonomously
 
 3. DO NOT break existing handlers
 
-4. DO NOT add new imports
+4. DO NOT add new imports (EXCEPT importing services.web_scraper in api_client.py if needed)
 
 5. DO NOT create new files
 
@@ -340,6 +341,35 @@ If API fails:
 3. YES "api" keyword → Use existing internal functions
 4. Public APIs: Call direct_url directly
 5. Fallback: Always return friendly message on failure
+
+==================================================
+🌐 WEBSITE DATA (MANDATORY)
+==================================================
+
+If the user request requires fetching website data (scraping):
+1. USE the existing CDP scraper in services/web_scraper.py (do NOT create a new scraper system).
+2. Add a small helper wrapper in services/api_client.py that builds a ScrapeConfig and calls scrape_url().
+3. If site-specific steps are needed, subclass WebScraper in services/web_scraper.py and register it.
+4. Always include the target URL in ScrapeConfig.url and keep selectors specific.
+
+Add a utility helper for each website-based request:
+- Name it for the intent, e.g., scrape_site_headlines(), scrape_product_prices().
+- Keep it pure: accept url + optional params, return {success, data, errors}.
+
+Example pattern:
+
+from services.web_scraper import ScrapeConfig, scrape_url
+
+def scrape_site_headlines(url: str) -> dict:
+    config = ScrapeConfig(
+        url=url,
+        items_selector="article",
+        fields={"title": "h2, h3", "link": "a"},
+        max_pages=1,
+        scroll=True
+    )
+    result = scrape_url(url, config)
+    return {"success": len(result.errors) == 0, "data": result.data, "errors": result.errors}
 
 ==================================================
 📦 FEATURE RULES

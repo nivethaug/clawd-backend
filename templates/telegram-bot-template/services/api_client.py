@@ -116,10 +116,10 @@ def get_crypto_price(coin_id: str = "bitcoin", currency: str = "usd") -> dict:
 def get_weather(city: str) -> dict:
     """
     Fetch weather data (placeholder for future implementation).
-    
+
     Args:
         city: City name
-    
+
     Returns:
         dict with weather data or error info
     """
@@ -129,3 +129,71 @@ def get_weather(city: str) -> dict:
         "success": False,
         "error": "Weather API not configured yet"
     }
+
+
+# ============================================================================
+# WEB SCRAPER USAGE EXAMPLE (Commented)
+# ============================================================================
+
+# The web_scraper.py module provides Chrome DevTools Protocol (CDP) scraping
+# capabilities. Here's how to use it in your bot:
+#
+# from services.web_scraper import WebScraper, ScrapeConfig, scrape_url
+# from services.web_scraper import register_scraper, get_scraper
+#
+# # Example 1: Simple standalone scrape
+# def scrape_example_site(url: str) -> dict:
+#     """Scrape a website with simple item list."""
+#     config = ScrapeConfig(
+#         url=url,
+#         items_selector=".article",  # CSS selector for list items
+#         fields={
+#             "title": "h2",           # Article title
+#             "link": "a",             # Article link
+#             "summary": ".summary"     # Article summary
+#         },
+#         max_pages=5,                 # Scrape up to 5 pages
+#         scroll=True                  # Scroll for lazy-loaded content
+#     )
+#     result = scrape_url(url, config)
+#     return {
+#         "success": len(result.errors) == 0,
+#         "data": result.data,
+#         "metadata": result.metadata,
+#         "errors": result.errors
+#     }
+#
+# # Example 2: Custom scraper subclass
+# class MyCustomScraper(WebScraper):
+#     """Custom scraper for specific website."""
+#
+#     def scrape(self) -> ScrapeResult:
+#         """Custom scrape logic."""
+#         self.navigate(self.config.url)
+#         self.wait_for_text("loaded")
+#         return self.extract_by_config(self.config)
+#
+# # Register custom scraper (optional, for LLM extensibility)
+# register_scraper("custom", MyCustomScraper)
+#
+# # Example 3: Use registered scraper
+# def scrape_with_custom(name: str, url: str) -> dict:
+#     """Scrape using a registered scraper."""
+#     config = ScrapeConfig(
+#         url=url,
+#         items_selector=".item",
+#         fields={"title": ".title"}
+#     )
+#     result = scrape_with_scraper(name, config)
+#     return {
+#         "success": len(result.errors) == 0,
+#         "data": result.data
+#     }
+#
+# NOTE: The web_scraper requires Chrome/Edge with remote debugging port 9222.
+# The scraper will automatically launch Chrome if not running.
+#
+# For more examples, see:
+# - NewsScraperExample
+# - EcommerceScraperExample
+# (at the bottom of web_scraper.py)

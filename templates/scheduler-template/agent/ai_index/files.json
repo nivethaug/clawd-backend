@@ -58,6 +58,17 @@
       "get_news()"
     ]
   },
+  "services/web_scraper.py": {
+    "path": "services/web_scraper.py",
+    "lines": 700,
+    "type": "scraper_service",
+    "purpose": "CDP web scraper for dynamic content extraction and config-driven scraping workflows.",
+    "functions": [
+      "scrape_url()",
+      "register_scraper()",
+      "get_scraper()"
+    ]
+  },
   "services/__init__.py": {
     "path": "services/__init__.py",
     "lines": 3,

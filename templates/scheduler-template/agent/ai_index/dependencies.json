@@ -26,6 +26,22 @@
     ],
     "used_by": ["scheduler/executor.py"]
   },
+  "services/web_scraper.py": {
+    "imports": [
+      "subprocess",
+      "json",
+      "time",
+      "re",
+      "os",
+      "shutil",
+      "urllib.request",
+      "pathlib",
+      "dataclasses",
+      "typing",
+      "datetime"
+    ],
+    "used_by": ["services/api_client.py", "scheduler/executor.py", "AI agent (direct import)"]
+  },
   "services/__init__.py": {
     "imports": [],
     "used_by": ["services/api_client.py"]

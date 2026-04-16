@@ -182,5 +182,45 @@
     "end_line": 155,
     "module": "services",
     "description": "get_news(query, page) - Fetch top stories from Hacker News API."
+  },
+  "ScrapeConfig": {
+    "type": "class",
+    "file": "services/web_scraper.py",
+    "start_line": 45,
+    "end_line": 57,
+    "module": "services",
+    "description": "ScrapeConfig - Dataclass describing config-driven scraping settings."
+  },
+  "WebScraper": {
+    "type": "class",
+    "file": "services/web_scraper.py",
+    "start_line": 267,
+    "end_line": 572,
+    "module": "services",
+    "description": "WebScraper - Base class for CDP navigation, extraction, and pagination."
+  },
+  "scrape_url": {
+    "type": "function",
+    "file": "services/web_scraper.py",
+    "start_line": 618,
+    "end_line": 656,
+    "module": "services",
+    "description": "scrape_url(url, config) - Standalone scraping helper for one-off jobs."
+  },
+  "register_scraper": {
+    "type": "function",
+    "file": "services/web_scraper.py",
+    "start_line": 602,
+    "end_line": 604,
+    "module": "services",
+    "description": "register_scraper(name, scraper_class) - Registers custom scraper implementation."
+  },
+  "get_scraper": {
+    "type": "function",
+    "file": "services/web_scraper.py",
+    "start_line": 607,
+    "end_line": 614,
+    "module": "services",
+    "description": "get_scraper(name, config) - Instantiates registered scraper by name."
   }
 }

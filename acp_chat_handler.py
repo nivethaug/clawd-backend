@@ -301,7 +301,8 @@ Backend API: `{backend_url}/api/scheduler`
     ├── executor.py          ← YOU MODIFY THIS (add task handlers)
     └── ...
 └── services/
-    └── api_client.py        ← YOU MODIFY THIS (add API helpers)
+    ├── api_client.py        ← YOU MODIFY THIS (add API helpers)
+    └── web_scraper.py       ← USE for website data (CDP scraper)
 ```
 
 ---
@@ -341,6 +342,14 @@ api_client.py already has:
 - fetch_json(url, params) — generic JSON fetcher
 
 Only add a NEW function if you need an API NOT listed above.
+
+### Website Data (Scraping)
+
+If the request involves fetching website data:
+1. Use the existing CDP scraper in services/web_scraper.py (do NOT create a new scraping system).
+2. Add a helper wrapper in services/api_client.py that builds a ScrapeConfig and calls scrape_url().
+3. If site-specific steps are required, subclass WebScraper and register it.
+4. Add a utility helper per request (e.g., scrape_site_headlines()).
 
 ### Step 3: Add task handler to scheduler/executor.py
 
@@ -1502,6 +1511,17 @@ Which option would you like to use for this change?
 
 ---
 
+## WEBSITE DATA (SCRAPING) — REQUIRED FLOW
+
+If the user request needs website data:
+1. Use the existing CDP scraper in `services/web_scraper.py` (do NOT build a new scraper).
+2. Add a helper wrapper in `services/api_client.py` that builds `ScrapeConfig` and calls `scrape_url()`.
+3. If site-specific steps are needed, subclass `WebScraper` and register it.
+4. Add a utility helper per request (e.g., `scrape_site_headlines()`).
+5. Keep selectors specific and cap pagination.
+
+---
+
 ## 🔧 GIT WORKFLOW (MANDATORY)
 
 ### WORK DIRECTLY ON MAIN — NO BRANCHING
@@ -2074,6 +2094,7 @@ def process_user_input(text: str) -> str:
 
 - `services/ai_logic.py` - Main AI logic (primary modification target)
 - `services/api_client.py` - API helper functions
+- `services/web_scraper.py` - CDP web scraper (extend existing scraper only)
 - `commands/start.py` - Welcome message text only
 - `commands/ask.py` - Query routing
 
@@ -2105,6 +2126,17 @@ def process_user_input(text: str) -> str:
 3. Read `llm/categories/weather.json` -> find Open-Meteo endpoint
 4. Add `get_weather()` to `services/api_client.py`
 5. Add `!weather` handler in `services/ai_logic.py`
+
+---
+
+## WEBSITE DATA (SCRAPING) — REQUIRED FLOW
+
+If the user request requires website data:
+1. Use the existing CDP scraper in `services/web_scraper.py` (do NOT build a new scraper).
+2. Add a helper wrapper in `services/api_client.py` that builds `ScrapeConfig` and calls `scrape_url()`.
+3. If site-specific steps are needed, subclass `WebScraper` and register it.
+4. Add a utility helper per request (e.g., `scrape_site_headlines()`).
+5. Keep selectors specific and cap pagination.
 
 ---
 

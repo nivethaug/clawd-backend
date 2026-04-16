@@ -54,6 +54,50 @@ Edit `services/ai_logic.py` → `process_user_input(text)`:
 2. Create a fetch function
 3. Call from `services/ai_logic.py`
 
+## How LLM Extends Web Scraping
+
+Use `services/web_scraper.py` when data needs JavaScript rendering (dynamic sites, infinite scroll, client-side UI).
+
+### Preferred Integration Flow
+
+1. Add a wrapper function in `services/api_client.py` that builds `ScrapeConfig`.
+2. Call `scrape_url(url, config)` for simple cases.
+3. For complex sites, subclass `WebScraper`, then `register_scraper("name", MyScraper)`.
+4. Consume results in `services/ai_logic.py` and return a plain response string.
+
+### Minimal Example
+
+```python
+from services.web_scraper import ScrapeConfig, scrape_url
+
+def scrape_news_homepage(url: str) -> dict:
+    config = ScrapeConfig(
+        url=url,
+        items_selector="article",
+        fields={
+            "title": "h2, h3",
+            "link": "a"
+        },
+        max_pages=1,
+        scroll=True
+    )
+    result = scrape_url(url, config)
+    return {
+        "success": len(result.errors) == 0,
+        "items": result.data,
+        "errors": result.errors,
+        "metadata": result.metadata
+    }
+```
+
+### LLM Extension Rules
+
+- Put scraping logic in `services/api_client.py` or `services/web_scraper.py`.
+- Keep command handlers in `commands/` as routing only.
+- Use specific CSS selectors and set `max_pages` to bound crawl size.
+- If auth is needed, use `ScrapeConfig.auth` fields.
+- After structural changes, update `agent/ai_index/*.json`.
+
 ## How to Modify Database
 
 1. Add table creation in `core/database.py` → `init_db()`
@@ -88,3 +132,4 @@ pm2 stop dc-bot-{project_id}
 - NO API calls in commands
 - NO structure changes without updating ai_index
 - AI can modify ONLY: `services/ai_logic.py`, `services/api_client.py`
+- For scraper extensions, also modify: `services/web_scraper.py` and keep command files unchanged

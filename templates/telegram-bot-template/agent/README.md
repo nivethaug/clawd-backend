@@ -461,6 +461,41 @@ def get_bitcoin_price():
     return f"{data['bitcoin']['usd']:.2f}"
 ```
 
+### Extending with Web Scraping (LLM Guide)
+
+Use `services/web_scraper.py` for JS-rendered pages, infinite scroll, or websites where plain `requests` cannot extract content.
+
+1. Create a wrapper in `services/api_client.py` using `ScrapeConfig`.
+2. Use `scrape_url(url, config)` for simple extraction.
+3. For site-specific workflows, subclass `WebScraper` and register it with `register_scraper()`.
+4. Call the wrapper from `services/ai_logic.py` and return a text response.
+
+```python
+from services.web_scraper import ScrapeConfig, scrape_url
+
+def scrape_articles(url: str) -> dict:
+    config = ScrapeConfig(
+        url=url,
+        items_selector="article",
+        fields={"title": "h2, h3", "link": "a"},
+        max_pages=1,
+        scroll=True
+    )
+    result = scrape_url(url, config)
+    return {
+        "success": len(result.errors) == 0,
+        "items": result.data,
+        "errors": result.errors,
+        "metadata": result.metadata
+    }
+```
+
+Rules:
+- Keep command handlers in `handlers/` as routing only.
+- Put scraping logic in `services/api_client.py` or `services/web_scraper.py`.
+- Use bounded scraping (`max_pages`, precise selectors).
+- Update `agent/ai_index/*.json` after structural changes.
+
 ### Best Practices
 
 1. **Keep ai_logic.py clean** - Only decision logic

@@ -306,6 +306,58 @@ Check `llm/categories/index.json` for the full catalog with endpoints and parame
 
 ---
 
+## Web Scraping Extension (LLM How-To)
+
+Use `services/web_scraper.py` when the target site requires browser rendering or user-like interaction.
+
+### Where to Extend
+
+1. Add scraping helper wrapper in `services/api_client.py`.
+2. Optionally create custom class in `services/web_scraper.py` by subclassing `WebScraper`.
+3. Register custom scraper using `register_scraper("name", MyScraper)`.
+4. Use returned data in `scheduler/executor.py` (new `FETCH_DATA_REGISTRY` key or task handler).
+
+### Minimal Pattern
+
+```python
+from services.web_scraper import ScrapeConfig, scrape_url
+
+def scrape_market_headlines(url: str) -> dict:
+    config = ScrapeConfig(
+        url=url,
+        items_selector="article",
+        fields={"title": "h2, h3", "link": "a"},
+        max_pages=1,
+        scroll=True
+    )
+    result = scrape_url(url, config)
+    return {
+        "success": len(result.errors) == 0,
+        "items": result.data,
+        "errors": result.errors
+    }
+```
+
+### Integration Example in Scheduler
+
+```python
+# scheduler/executor.py
+FETCH_DATA_REGISTRY["market_news"] = lambda: _fetch_market_news()
+
+def _fetch_market_news() -> str:
+    result = api_client.scrape_market_headlines("https://example.com")
+    if result.get("success") and result.get("items"):
+        return " | ".join(item.get("title", "") for item in result["items"][:3])
+    return "unavailable"
+```
+
+Rules:
+- Keep scheduler routing in `scheduler/executor.py`; keep scraping internals in `services/`.
+- Use precise selectors and bounded pagination.
+- Update `agent/ai_index/*.json` after adding new scraper helpers.
+
+---
+
 ## File Structure
 
 ```
