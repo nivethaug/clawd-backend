@@ -25,6 +25,7 @@ class GroqService:
     DEFAULT_TEMPERATURE = 0.4
     DEFAULT_MAX_TOKENS = 2000
     TIMEOUT_SECONDS = 30
+    MAX_PAGES = 4  # Maximum pages to return from inference
 
     def __init__(self):
         """Initialize Groq service with environment configuration."""
@@ -144,9 +145,10 @@ Identify the product type and generate 4-8 realistic pages:
 
 RULES:
 1. Return ONLY JSON - no markdown, no explanation, no text
-2. 4-8 pages, PascalCase, 1-3 words each
+2. Exactly 4 pages, PascalCase, 1-3 words each
 3. Never empty array
-4. Match product type contextually"""
+4. Match product type contextually
+5. Pick the 4 MOST IMPORTANT pages only — do not list every section"""
 
         messages = [{"role": "user", "content": prompt}]
 
@@ -194,8 +196,14 @@ RULES:
                 if clean and len(clean) < 30:  # Skip absurdly long names
                     cleaned.append(clean)
 
+            # Enforce max pages limit
+            if len(cleaned) > self.MAX_PAGES:
+                logger.warning(f"[Groq] Trimmed {len(cleaned)} pages to {self.MAX_PAGES} max")
+                print(f"⚠️  GROQ_PAGE_LIMIT: Trimmed {len(cleaned)} → {self.MAX_PAGES} pages")
+                cleaned = cleaned[:self.MAX_PAGES]
+
             print(f"✅ GROQ_CLEANED_PAGES: {cleaned}")
-            print(f"📊 GROQ_PAGE_COUNT: {len(cleaned)} pages")
+            print(f"📊 GROQ_PAGE_COUNT: {len(cleaned)} pages (max: {self.MAX_PAGES})")
             print("="*60)
             print("🔍 GROQ PAGE INFERENCE COMPLETE")
             print("="*60 + "\n")
