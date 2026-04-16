@@ -3,7 +3,7 @@
 Simple CopilotCodeAgent test runner.
 
 Run:
-    python3 copiloexample/run_copilotcodeagent_tests.py
+    python3 copiloexample/run_copilotcodeagent_tests.py [--interactive] [--stream] [--verbose]
 """
 
 import argparse
@@ -41,15 +41,36 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print streamed agent output and progress messages live",
     )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Run in interactive mode: prompt for queries from terminal",
+    )
     return parser.parse_args()
 
 
-async def run_tests(repo_path: str, timeout: float, stream: bool) -> int:
-    test_prompts = [
-        "Give a one-sentence summary of this repository.",
-        "List 5 key Python modules in this repository and their purpose in one line each.",
-        "What is the main FastAPI entry file in this repo?",
-    ]
+async def run_tests(repo_path: str, timeout: float, stream: bool, interactive: bool) -> int:
+    if interactive:
+        test_prompts = []
+        print("Interactive mode: Enter prompts (type 'quit' to exit)")
+        while True:
+            try:
+                prompt = input("Prompt: ").strip()
+                if prompt.lower() in ('quit', 'exit', 'q'):
+                    break
+                if prompt:
+                    test_prompts.append(prompt)
+                else:
+                    print("Empty prompt, try again.")
+            except (EOFError, KeyboardInterrupt):
+                print("\nExiting interactive mode.")
+                break
+    else:
+        test_prompts = [
+            "Give a one-sentence summary of this repository.",
+            "List 5 key Python modules in this repository and their purpose in one line each.",
+            "What is the main FastAPI entry file in this repo?",
+        ]
 
     streamed_chunks: list[str] = []
     progress_events: list[str] = []
@@ -88,7 +109,7 @@ def main() -> int:
     args = parse_args()
     if args.verbose:
         configure_logging()
-    return asyncio.run(run_tests(args.repo_path, args.timeout, args.stream))
+    return asyncio.run(run_tests(args.repo_path, args.timeout, args.stream, args.interactive))
 
 
 if __name__ == "__main__":
