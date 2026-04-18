@@ -592,7 +592,8 @@ class ClaudeCodeAgent:
                             token_usage = self._extract_token_usage(data)
                             if token_usage:
                                 self._last_token_usage = token_usage
-                                logger.info(f"[CLAUDE-AGENT] Token usage: input={token_usage.get('input_tokens')}, output={token_usage.get('output_tokens')}, cost=${token_usage.get('cost_usd', 0):.4f}")
+                                cost = token_usage.get('cost_usd') or 0
+                                logger.info(f"[CLAUDE-AGENT] Token usage: input={token_usage.get('input_tokens')}, output={token_usage.get('output_tokens')}, cost=${cost:.4f}")
 
                         elif msg_type == "system":
                             # Capture session_id from system init message
