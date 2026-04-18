@@ -583,6 +583,7 @@ class ClaudeCodeAgent:
                             session_id = data.get("session_id")
                             if session_id:
                                 self._last_session_id = session_id
+                                logger.info(f"[CLAUDE-AGENT] Session captured from result: {session_id}")
                             if result_text:
                                 all_chunks.append(result_text)
                                 logger.info(f"[CLAUDE-AGENT] Result: {result_text[:100]}")
