@@ -868,6 +868,9 @@ class ACPFrontendEditorV2:
         # to avoid path doubling in PageManifest which appends frontend/src/
         self.manifest_manager = PageManifest(str(self.frontend_path.parent))
 
+        # Token usage from last query
+        self._last_token_usage = None
+
     async def apply_changes(
         self,
         goal_description: str,
@@ -892,6 +895,7 @@ class ACPFrontendEditorV2:
 
         # Clear cache for each new execution to ensure fresh page inference
         self._cached_pages = None
+        self._last_token_usage = None  # Reset token usage for new execution
 
         # Track issues for partial_success determination
         issues: List[str] = []
@@ -1079,7 +1083,8 @@ class ACPFrontendEditorV2:
                 "files_modified": len(files_modified),
                 "files_removed": len(files_removed),
                 "build_output": "Build skipped - handled by infrastructure pipeline",
-                "rollback": False
+                "rollback": False,
+                "token_usage": self._last_token_usage,
             }
             
             logger.info(f"[CLAUDE-AGENT] ✅ Final status: {status}")
@@ -1266,6 +1271,11 @@ class ACPFrontendEditorV2:
                     
                     # Execute the query with timeout
                     result = await agent.query(prompt, timeout=CLAUDE_TIMEOUT)
+
+                    # Capture token usage from the agent
+                    self._last_token_usage = agent.last_token_usage
+                    if self._last_token_usage:
+                        logger.info(f"[ACPX-V2] Token usage: input={self._last_token_usage.get('input_tokens')}, output={self._last_token_usage.get('output_tokens')}, cost=${self._last_token_usage.get('cost_usd', 0):.4f}")
 
                     # Determine return code based on result
                     return_code = 0 if result is not None else 1

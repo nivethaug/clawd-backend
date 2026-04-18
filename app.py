@@ -3015,19 +3015,30 @@ async def chat_stream_endpoint(request: ChatRequest):
                 full_response = []
                 
                 async def save_response_to_db(content: str):
-                    """Save response to DB."""
+                    """Save response to DB with token usage."""
                     try:
+                        # Get token usage from handler if available
+                        token_usage_json = None
+                        if hasattr(handler, 'get_last_token_usage') and handler.get_last_token_usage():
+                            token_usage_json = json.dumps(handler.get_last_token_usage())
+
                         with get_db() as save_conn:
-                            save_conn.execute(
-                                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                                (session_id, 'assistant', content)
-                            )
+                            if token_usage_json:
+                                save_conn.execute(
+                                    "INSERT INTO messages (session_id, role, content, token_usage) VALUES (?, ?, ?, ?)",
+                                    (session_id, 'assistant', content, token_usage_json)
+                                )
+                            else:
+                                save_conn.execute(
+                                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                                    (session_id, 'assistant', content)
+                                )
                             save_conn.execute(
                                 "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
                                 (session_id,)
                             )
                             save_conn.commit()
-                        logger.info(f"[ACP-STREAM] Saved assistant message ({len(content)} chars)")
+                        logger.info(f"[ACP-STREAM] Saved assistant message ({len(content)} chars, token_usage={'yes' if token_usage_json else 'no'})")
                     except Exception as save_err:
                         logger.error(f"[ACP-STREAM] Failed to save message: {save_err}")
                 
@@ -3537,11 +3548,22 @@ async def chat_endpoint(request: ChatRequest):
             
             # Save assistant message
             logger.info(f"[ACP-MODE] Saving assistant message to database...")
+            # Get token usage from handler if available
+            token_usage_json = None
+            if hasattr(handler, 'get_last_token_usage') and handler.get_last_token_usage():
+                token_usage_json = json.dumps(handler.get_last_token_usage())
+
             with get_db() as save_conn:
-                save_conn.execute(
-                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                    (session_id, 'assistant', assistant_content)
-                )
+                if token_usage_json:
+                    save_conn.execute(
+                        "INSERT INTO messages (session_id, role, content, token_usage) VALUES (?, ?, ?, ?)",
+                        (session_id, 'assistant', assistant_content, token_usage_json)
+                    )
+                else:
+                    save_conn.execute(
+                        "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                        (session_id, 'assistant', assistant_content)
+                    )
                 save_conn.execute(
                     "UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (session_id,)

@@ -360,6 +360,12 @@ def init_schema():
                 logger.info("✓ Added commit tracking columns to messages table")
             _run_migration(migrate_commit_tracking)
 
+            # Messages table migration: add token_usage column (JSONB for flexibility)
+            def migrate_token_usage():
+                cur.execute("ALTER TABLE messages ADD COLUMN token_usage JSONB")
+                logger.info("✓ Added token_usage column to messages table")
+            _run_migration(migrate_token_usage)
+
             # Commit log table — persistent commit history (survives session/message deletion)
             try:
                 cur.execute("""CREATE TABLE IF NOT EXISTS commit_log (

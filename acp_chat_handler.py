@@ -68,6 +68,9 @@ class ACPChatHandler:
         # Query completion tracking for background save
         self._query_complete = asyncio.Event()
 
+        # Token usage from last query
+        self._last_token_usage = None
+
         # Plan mode state
         self._plan_mode = False
         self._existing_plan = None  # type: Optional[str]
@@ -177,6 +180,16 @@ class ACPChatHandler:
     def is_query_running(self) -> bool:
         """Check if a query is currently running."""
         return self._active_agent is not None and not self._query_complete.is_set()
+
+    def get_last_token_usage(self) -> Optional[Dict[str, Any]]:
+        """
+        Get token usage from the most recent query.
+
+        Returns:
+            Dict with token usage metrics (input_tokens, output_tokens, total_tokens, cost_usd, etc.)
+            or None if no token data is available.
+        """
+        return self._last_token_usage
 
     def _get_chrome_devtools_pids(self) -> set:
         """
@@ -2903,6 +2916,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         # Reset progress mapper for new session
         self.progress_mapper.reset()
         self._query_complete.clear()  # Reset completion event
+        self._last_token_usage = None  # Reset token usage for new query
         query_start_time = datetime.now()
 
         # Use asyncio.Queue for real-time streaming
@@ -2980,6 +2994,13 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     response = await agent.query(prompt)
                     logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars (extracted answer)")
+
+                    # Capture token usage from the agent
+                    self._last_token_usage = agent.last_token_usage
+                    if self._last_token_usage:
+                        logger.info(f"[ACP-CHAT] Token usage captured: {self._last_token_usage}")
+                    else:
+                        logger.debug("[ACP-CHAT] No token usage data available from this query")
 
                     # Build full response from all streamed text chunks (not the extracted short answer)
                     # Filter out TOOL: prefixes, PROGRESS:, and JSON noise to get clean content

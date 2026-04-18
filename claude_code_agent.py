@@ -103,6 +103,7 @@ class ClaudeCodeAgent:
         self._running = False
         self._current_process = None  # Track running subprocess for cancellation
         self._progress_dots_offset = 0  # For dot animation (1-2-3 cycling)
+        self._last_token_usage = None  # Token usage from last query result
 
         # Load Claude Code settings
         self._settings = self._load_settings()
@@ -248,6 +249,65 @@ class ClaudeCodeAgent:
                 return line
         
         return lines[-1] if lines else None
+
+    def _extract_token_usage(self, result_data: dict) -> Optional[dict]:
+        """
+        Extract token usage from a stream-json result message.
+
+        Claude CLI stream-json output includes usage data in the result message:
+        - input_tokens: Total input tokens (including cache)
+        - output_tokens: Total output tokens
+        - cache_creation_input_tokens: Tokens written to cache
+        - cache_read_input_tokens: Tokens read from cache
+        - cost_usd: Estimated cost in USD
+
+        Args:
+            result_data: Parsed JSON from a 'result' type stream message
+
+        Returns:
+            Dict with token usage metrics, or None if not available
+        """
+        # Try direct fields on the result data
+        usage_fields = {
+            "input_tokens": None,
+            "output_tokens": None,
+            "cache_creation_input_tokens": None,
+            "cache_read_input_tokens": None,
+            "cost_usd": None,
+        }
+
+        found_any = False
+        for field in usage_fields:
+            if field in result_data:
+                usage_fields[field] = result_data[field]
+                found_any = True
+
+        # Also check nested 'usage' object (some CLI versions use this)
+        if not found_any:
+            usage_obj = result_data.get("usage", {})
+            if isinstance(usage_obj, dict):
+                for field in usage_fields:
+                    if field in usage_obj:
+                        usage_fields[field] = usage_obj[field]
+                        found_any = True
+
+        if not found_any:
+            return None
+
+        # Calculate total if not provided directly
+        input_tokens = usage_fields.get("input_tokens") or 0
+        cache_creation = usage_fields.get("cache_creation_input_tokens") or 0
+        cache_read = usage_fields.get("cache_read_input_tokens") or 0
+        output_tokens = usage_fields.get("output_tokens") or 0
+
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_creation_input_tokens": cache_creation,
+            "cache_read_input_tokens": cache_read,
+            "total_tokens": input_tokens + output_tokens + cache_creation + cache_read,
+            "cost_usd": usage_fields.get("cost_usd"),
+        }
 
     def _get_progress_message(self, elapsed: float) -> str:
         """Generate phase-appropriate progress message."""
@@ -464,6 +524,7 @@ class ClaudeCodeAgent:
             all_chunks = []
             stderr_lines = []
             query_start_time = datetime.now()
+            self._last_token_usage = None  # Reset token usage for new query
             last_progress_time = query_start_time
             
             # Read stdout line by line (plain text, not JSON-RPC) with progress updates
@@ -515,6 +576,12 @@ class ClaudeCodeAgent:
                             if result_text:
                                 all_chunks.append(result_text)
                                 logger.info(f"[CLAUDE-AGENT] Result: {result_text[:100]}")
+
+                            # Extract token usage from result message
+                            token_usage = self._extract_token_usage(data)
+                            if token_usage:
+                                self._last_token_usage = token_usage
+                                logger.info(f"[CLAUDE-AGENT] Token usage: input={token_usage.get('input_tokens')}, output={token_usage.get('output_tokens')}, cost=${token_usage.get('cost_usd', 0):.4f}")
 
                         elif msg_type == "system":
                             # Skip system init message
@@ -623,6 +690,11 @@ class ClaudeCodeAgent:
     def is_running(self) -> bool:
         """Check if the agent is currently running."""
         return self._running
+
+    @property
+    def last_token_usage(self) -> Optional[dict]:
+        """Get token usage from the most recent query."""
+        return self._last_token_usage
 
 
 @asynccontextmanager
