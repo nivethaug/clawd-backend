@@ -75,6 +75,7 @@ class ClaudeCodeAgent:
         on_progress: Optional[Callable[[str], None]] = None,
         claude_path: Optional[str] = None,
         progress_interval: float = 30.0,
+        resume_session_id: Optional[str] = None,
     ):
         """
         Initialize Claude Code Agent.
@@ -104,6 +105,7 @@ class ClaudeCodeAgent:
         self._current_process = None  # Track running subprocess for cancellation
         self._progress_dots_offset = 0  # For dot animation (1-2-3 cycling)
         self._last_token_usage = None  # Token usage from last query result
+        self._last_session_id: Optional[str] = resume_session_id
 
         # Load Claude Code settings
         self._settings = self._load_settings()
@@ -472,6 +474,11 @@ class ClaudeCodeAgent:
             command.extend(["--model", self._settings["model"]])
             logger.debug(f"Using model from settings: {self._settings['model']}")
 
+        # Resume existing session if available (warm cache, cheaper tokens)
+        if self._last_session_id:
+            command.extend(["--resume", self._last_session_id])
+            logger.info(f"[CLAUDE-AGENT] Resuming session: {self._last_session_id}")
+
         # Add prompt flag first
         command.extend(["-p", prompt])
 
@@ -573,6 +580,9 @@ class ClaudeCodeAgent:
 
                         elif msg_type == "result":
                             result_text = data.get("result", "").strip()
+                            session_id = data.get("session_id")
+                            if session_id:
+                                self._last_session_id = session_id
                             if result_text:
                                 all_chunks.append(result_text)
                                 logger.info(f"[CLAUDE-AGENT] Result: {result_text[:100]}")
@@ -584,7 +594,11 @@ class ClaudeCodeAgent:
                                 logger.info(f"[CLAUDE-AGENT] Token usage: input={token_usage.get('input_tokens')}, output={token_usage.get('output_tokens')}, cost=${token_usage.get('cost_usd', 0):.4f}")
 
                         elif msg_type == "system":
-                            # Skip system init message
+                            # Capture session_id from system init message
+                            session_id = data.get("session_id")
+                            if session_id:
+                                self._last_session_id = session_id
+                                logger.info(f"[CLAUDE-AGENT] Session started: {session_id}")
                             continue
 
                     except (json.JSONDecodeError, AttributeError):
@@ -695,6 +709,11 @@ class ClaudeCodeAgent:
     def last_token_usage(self) -> Optional[dict]:
         """Get token usage from the most recent query."""
         return self._last_token_usage
+
+    @property
+    def last_session_id(self) -> Optional[str]:
+        """Get session ID from the most recent query (for --resume on next call)."""
+        return self._last_session_id
 
 
 @asynccontextmanager

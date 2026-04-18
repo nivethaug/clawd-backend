@@ -33,6 +33,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Module-level Claude session cache: project_path -> claude session_id
+# Survives across handler instances so session resume works between messages
+_claude_session_ids: Dict[str, str] = {}
+
 # Configuration
 ACPX_TIMEOUT = 1800  # 15 minutes for interactive chat
 ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
@@ -2988,11 +2992,14 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 async with ClaudeCodeAgent(
                     repo_path,
                     on_text=on_chunk,
-                    on_progress=on_progress
+                    on_progress=on_progress,
+                    resume_session_id=_claude_session_ids.get(repo_path),
                 ) as agent:
                     self._active_agent = agent  # Track for cancellation
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     response = await agent.query(prompt)
+                    if agent.last_session_id:
+                        _claude_session_ids[repo_path] = agent.last_session_id
                     logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars (extracted answer)")
 
                     # Capture token usage from the agent

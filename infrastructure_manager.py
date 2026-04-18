@@ -654,6 +654,9 @@ class ServiceManager:
         Returns:
             True if successful, False otherwise
         """
+        # Reset Claude session for this build's fix attempts
+        self._claude_fix_session_id = None
+
         # Copy system environment to ensure npm/node are accessible
         env = os.environ.copy()
         
@@ -1548,6 +1551,7 @@ class InfrastructureManager:
         self.dns_provisioner = DNSProvisioner()
 
         self.ports = {}
+        self._claude_fix_session_id: Optional[str] = None
         self.domains = {}
         self.database_info = {}
         self.dns_results = {}
@@ -1928,8 +1932,12 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             async def run_background_query():
                 """Run the query in a background task (shielded from cancellation)."""
                 nonlocal response
-                async with ClaudeCodeAgent(str(frontend_src_path)) as agent:
+                async with ClaudeCodeAgent(
+                    str(frontend_src_path),
+                    resume_session_id=self._claude_fix_session_id,
+                ) as agent:
                     response = await agent.query(fix_prompt, timeout=CLAUDE_FIX_TIMEOUT)
+                    self._claude_fix_session_id = agent.last_session_id
                 return response
             
             # Create background task (shielded from cancellation)
