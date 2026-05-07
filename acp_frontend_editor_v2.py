@@ -921,10 +921,6 @@ class ACPFrontendEditorV2:
                 logger.warning(f"[CLAUDE-AGENT] ⚠️ Snapshot issue (continuing): {snapshot_msg}")
             else:
                 logger.info(f"[CLAUDE-AGENT] ✓ Snapshot created")
-            subprocess.run(
-            ["chown", "-R", "dreampilot:dreampilot", str(self.backup_dir)],
-            capture_output=True
-        )
 
             # Step 2: Generate page manifest from planner (Phase 5 - NEW)
             logger.info(f"[CLAUDE-AGENT] Step 2: Generating page manifest (Phase 5)...")
