@@ -256,7 +256,10 @@ class ACPSnapshotManager:
                 )
             else:
                 (self.backup_dir / "frontend").mkdir(parents=True)
-
+            subprocess.run(
+            ["chown", "-R", "dreampilot:dreampilot", str(self.backup_dir)],
+            capture_output=True
+        )
             # logger.info(f"[Snapshot] ✓ Snapshot created successfully")
             return True, str(self.backup_dir)
 
@@ -410,6 +413,10 @@ class ACPBuildGate:
         try:
             # Step 1: Install dependencies (npm only - pnpm disabled for consistency)
             output.append("\n--- Installing Dependencies ---")
+            subprocess.run(
+        ["chown", "-R", "dreampilot:dreampilot", str(self.frontend_path)],
+        capture_output=True
+    )
             install_success, install_msg = install_dependencies(self.frontend_path)
             output.append(install_msg)
             
@@ -914,6 +921,10 @@ class ACPFrontendEditorV2:
                 logger.warning(f"[CLAUDE-AGENT] ⚠️ Snapshot issue (continuing): {snapshot_msg}")
             else:
                 logger.info(f"[CLAUDE-AGENT] ✓ Snapshot created")
+            subprocess.run(
+            ["chown", "-R", "dreampilot:dreampilot", str(self.backup_dir)],
+            capture_output=True
+        )
 
             # Step 2: Generate page manifest from planner (Phase 5 - NEW)
             logger.info(f"[CLAUDE-AGENT] Step 2: Generating page manifest (Phase 5)...")
