@@ -521,7 +521,8 @@ async def create_project(request: CreateProjectRequest):
     # Step 2: Create project folder with Git initialization
     project_manager = ProjectFileManager()
     project_folder_path, folder_success = project_manager.create_project_with_git(project_id, request.name, type_id)
-
+    subprocess.run(["chown", "-R", "dreampilot:dreampilot", project_folder_path], check=False)
+    subprocess.run(["chmod", "-R", "755", project_folder_path], check=False)
     if not folder_success:
         # Rollback: Delete project from database
         with get_db() as conn:
