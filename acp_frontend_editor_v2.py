@@ -71,10 +71,10 @@ FORBIDDEN_EDIT_PATHS = [
 MAX_NEW_FILES = 15  # Maximum new files per execution
 
 # Build settings
-BUILD_TIMEOUT = 2100  # 30 minutes
+BUILD_TIMEOUT = 3000  # 30 minutes
 
 # Claude Code Agent settings
-CLAUDE_TIMEOUT = int(os.getenv("CLAUDE_TIMEOUT", "2100"))  # 21 minutes default
+CLAUDE_TIMEOUT = int(os.getenv("CLAUDE_TIMEOUT", "3000"))  # 21 minutes default
 
 # =============================================================================
 # PATH VALIDATION
