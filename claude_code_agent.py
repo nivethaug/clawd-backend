@@ -533,6 +533,10 @@ class ClaudeCodeAgent:
             query_start_time = datetime.now()
             self._last_token_usage = None  # Reset token usage for new query
             last_progress_time = query_start_time
+            result_seen = False
+            terminated_after_result = False
+            exit_on_result = os.environ.get("CLAUDE_AGENT_EXIT_ON_RESULT", "1").lower() not in {"0", "false", "no"}
+            result_exit_grace = float(os.environ.get("CLAUDE_AGENT_RESULT_EXIT_GRACE_SECONDS", "2.0"))
             
             # Read stdout line by line (plain text, not JSON-RPC) with progress updates
             while True:
@@ -579,6 +583,7 @@ class ClaudeCodeAgent:
                                     text_content = block.get("text", "").strip()
 
                         elif msg_type == "result":
+                            result_seen = True
                             result_text = data.get("result", "").strip()
                             session_id = data.get("session_id")
                             if session_id:
@@ -594,6 +599,10 @@ class ClaudeCodeAgent:
                                 self._last_token_usage = token_usage
                                 cost = token_usage.get('cost_usd') or 0
                                 logger.info(f"[CLAUDE-AGENT] Token usage: input={token_usage.get('input_tokens')}, output={token_usage.get('output_tokens')}, cost=${cost:.4f}")
+
+                            if exit_on_result:
+                                logger.info("[CLAUDE-AGENT] Final stream-json result received; stopping stdout read loop")
+                                break
 
                         elif msg_type == "system":
                             # Capture session_id from system init message
@@ -645,6 +654,44 @@ class ClaudeCodeAgent:
                     # Continue reading
                     continue
 
+            if result_seen and process.returncode is None:
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=result_exit_grace)
+                    logger.info("[CLAUDE-AGENT] Subprocess exited after final result")
+                except asyncio.TimeoutError:
+                    terminated_after_result = True
+                    pid = process.pid
+                    logger.warning(
+                        f"[CLAUDE-AGENT] Subprocess still running {result_exit_grace}s after final result; "
+                        f"terminating process group {pid}"
+                    )
+                    try:
+                        os.killpg(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    except Exception as e:
+                        logger.warning(f"[CLAUDE-AGENT] Could not SIGTERM process group {pid}: {e}; terminating process")
+                        try:
+                            process.terminate()
+                        except ProcessLookupError:
+                            pass
+
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[CLAUDE-AGENT] SIGTERM did not stop process group {pid}; sending SIGKILL")
+                        try:
+                            os.killpg(pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        except Exception as e:
+                            logger.warning(f"[CLAUDE-AGENT] Could not SIGKILL process group {pid}: {e}; killing process")
+                            try:
+                                process.kill()
+                            except ProcessLookupError:
+                                pass
+                        await process.wait()
+
             # Read any stderr output (kept separate from answer chunks)
             stderr_data = await process.stderr.read()
             if stderr_data:
@@ -666,7 +713,7 @@ class ClaudeCodeAgent:
                 logger.info(f"[CLAUDE-AGENT] Last 3 chunks: {all_chunks[-3:]}")
 
             # Check for errors
-            if returncode != 0:
+            if returncode != 0 and not (result_seen and terminated_after_result and all_chunks):
                 error_msg = f"Claude CLI exited with code {returncode}"
                 if stderr_lines:
                     error_msg += f": {' '.join(stderr_lines[-3:])}"
