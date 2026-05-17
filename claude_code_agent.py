@@ -19,6 +19,7 @@ import signal
 import sys
 import re
 import shutil
+import shlex
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -111,6 +112,192 @@ class ClaudeCodeAgent:
         self._settings = self._load_settings()
 
         logger.info(f"ClaudeCodeAgent initialized: repo_path={self.repo_path}, settings_path={self.settings_path}")
+
+    @staticmethod
+    def _env_bool(name: str, default: bool = False) -> bool:
+        """Read a permissive boolean env flag."""
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        return value.strip().lower() not in {"0", "false", "no", "off", ""}
+
+    def _cleanup_user(self) -> Optional[str]:
+        """Return the Unix user whose agent helper processes should be cleaned up."""
+        if os.name != "posix":
+            return None
+        if os.geteuid() == 0:
+            return os.environ.get("CLAUDE_RUN_AS_USER", "dreampilot")
+        return None
+
+    def _project_root_for_cleanup(self) -> Path:
+        """Use the project root, not just frontend/src, for matching escaped serve processes."""
+        path = self.repo_path
+        parts = path.parts
+        for marker in ("frontend", "src"):
+            if marker in parts:
+                return Path(*parts[:parts.index(marker)])
+        return path
+
+    @staticmethod
+    def _read_proc_cmdline(pid: int) -> str:
+        try:
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+            return raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+        except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+            return ""
+
+    @staticmethod
+    def _read_proc_cwd(pid: int) -> Optional[Path]:
+        try:
+            return Path(os.readlink(f"/proc/{pid}/cwd")).resolve()
+        except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+            return None
+
+    @staticmethod
+    def _same_or_child_path(candidate: Optional[Path], root: Path) -> bool:
+        if candidate is None:
+            return False
+        try:
+            candidate.relative_to(root)
+            return True
+        except ValueError:
+            return candidate == root
+
+    async def _terminate_pids(self, pids: set[int], label: str, grace_seconds: float = 1.5) -> None:
+        """TERM then KILL a set of pids, ignoring processes that already exited."""
+        pids.discard(os.getpid())
+        if not pids:
+            return
+
+        logger.info(f"[CLAUDE-AGENT] Cleaning up {len(pids)} {label} process(es): {sorted(pids)}")
+        for pid in sorted(pids):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except PermissionError as e:
+                logger.warning(f"[CLAUDE-AGENT] Permission denied SIGTERM {label} pid={pid}: {e}")
+            except Exception as e:
+                logger.warning(f"[CLAUDE-AGENT] Could not SIGTERM {label} pid={pid}: {e}")
+
+        await asyncio.sleep(grace_seconds)
+
+        for pid in sorted(pids):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                continue
+            except PermissionError:
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except PermissionError as e:
+                logger.warning(f"[CLAUDE-AGENT] Permission denied SIGKILL {label} pid={pid}: {e}")
+            except Exception as e:
+                logger.warning(f"[CLAUDE-AGENT] Could not SIGKILL {label} pid={pid}: {e}")
+
+    async def _terminate_process_group(self, pgid: Optional[int], label: str, grace_seconds: float = 1.5) -> None:
+        """TERM then KILL the process group opened for the current Claude query."""
+        if os.name != "posix" or not pgid:
+            return
+
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+            logger.info(f"[CLAUDE-AGENT] Sent SIGTERM to {label} process group {pgid}")
+        except ProcessLookupError:
+            return
+        except Exception as e:
+            logger.warning(f"[CLAUDE-AGENT] Could not SIGTERM {label} process group {pgid}: {e}")
+            return
+
+        await asyncio.sleep(grace_seconds)
+
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+        except Exception:
+            return
+
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            logger.warning(f"[CLAUDE-AGENT] Sent SIGKILL to lingering {label} process group {pgid}")
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            logger.warning(f"[CLAUDE-AGENT] Could not SIGKILL {label} process group {pgid}: {e}")
+
+    async def _cleanup_project_serve_processes(self) -> None:
+        """Kill preview servers that Claude left behind for this repo/project only."""
+        if os.name != "posix" or not self._env_bool("CLAUDE_AGENT_CLEANUP_PROJECT_SERVERS", False):
+            return
+
+        project_root = self._project_root_for_cleanup().resolve()
+        repo_path = self.repo_path.resolve()
+        candidates: set[int] = set()
+
+        for proc_dir in Path("/proc").iterdir():
+            if not proc_dir.name.isdigit():
+                continue
+            pid = int(proc_dir.name)
+            cmdline = self._read_proc_cmdline(pid)
+            if not cmdline:
+                continue
+
+            lower_cmd = cmdline.lower()
+            looks_like_serve = (
+                "npx serve" in lower_cmd
+                or " serve dist" in lower_cmd
+                or "node_modules/.bin/serve" in lower_cmd
+            )
+            if not looks_like_serve:
+                continue
+
+            cwd = self._read_proc_cwd(pid)
+            cmd_mentions_project = str(project_root) in cmdline or str(repo_path) in cmdline
+            cwd_in_project = self._same_or_child_path(cwd, project_root)
+            if cmd_mentions_project or cwd_in_project:
+                candidates.add(pid)
+
+        await self._terminate_pids(candidates, "project preview server")
+
+    async def _cleanup_optional_global_helpers(self) -> None:
+        """Optionally kill stale global Claude/Chrome helpers after a run.
+
+        These are disabled by default because multiple Claude Code sessions can run in
+        parallel. Enable only on workers where one job owns the browser helper.
+        """
+        if os.name != "posix":
+            return
+
+        patterns: list[tuple[str, str]] = []
+        if self._env_bool("CLAUDE_AGENT_CLEANUP_CHROME_DEVTOOLS", False):
+            patterns.append(("chrome-devtools helper", "chrome-devtools-mcp"))
+        if self._env_bool("CLAUDE_AGENT_CLEANUP_STALE_CLAUDE", False):
+            patterns.append(("stale claude cli", "/usr/bin/claude -p"))
+
+        if not patterns:
+            return
+
+        cleanup_user = self._cleanup_user()
+        user_filter = f"-u {shlex.quote(cleanup_user)} " if cleanup_user else ""
+
+        for label, pattern in patterns:
+            command = f"pkill -TERM {user_filter}-f {shlex.quote(pattern)} || true"
+            logger.info(f"[CLAUDE-AGENT] Optional cleanup: {command}")
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+
+    async def _cleanup_after_query(self) -> None:
+        """Cleanup helpers that may survive Claude's final result."""
+        await self._cleanup_project_serve_processes()
+        await self._cleanup_optional_global_helpers()
 
     def _load_settings(self) -> dict[str, Any]:
         """Load Claude Code configuration from settings.json."""
@@ -395,6 +582,7 @@ class ClaudeCodeAgent:
                 pass
 
             self._current_process = None
+            await self._cleanup_after_query()
             return True
         logger.info("[CLAUDE-AGENT] Cancel called but no running process found")
         return False
@@ -510,6 +698,7 @@ class ClaudeCodeAgent:
 
         # Run subprocess with cwd set to repo_path
         process = None
+        process_group_id: Optional[int] = None
 
         try:
             # Create subprocess with larger buffer limit for screenshot data
@@ -525,6 +714,7 @@ class ClaudeCodeAgent:
                 start_new_session=True  # New process group so we can kill entire tree
             )
             self._current_process = process  # Store for cancellation
+            process_group_id = process.pid
             logger.debug(f"Subprocess started with PID: {process.pid}")
 
             # Accumulate plain text lines from stdout (stderr kept separate)
@@ -746,8 +936,35 @@ class ClaudeCodeAgent:
             self._current_process = None
             if process and process.returncode is None:
                 logger.debug("Cleaning up subprocess in finally block")
-                process.kill()
-                await process.wait()
+                pid = process.pid
+                try:
+                    os.killpg(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                except Exception as e:
+                    logger.warning(f"[CLAUDE-AGENT] Could not SIGTERM process group {pid} in finally: {e}; killing process")
+                    try:
+                        process.terminate()
+                    except ProcessLookupError:
+                        pass
+
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    logger.warning(f"[CLAUDE-AGENT] SIGTERM did not stop process group {pid} in finally; sending SIGKILL")
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    except Exception as e:
+                        logger.warning(f"[CLAUDE-AGENT] Could not SIGKILL process group {pid} in finally: {e}; killing process")
+                        try:
+                            process.kill()
+                        except ProcessLookupError:
+                            pass
+                    await process.wait()
+            await self._terminate_process_group(process_group_id, "current Claude")
+            await self._cleanup_after_query()
 
     @property
     def is_running(self) -> bool:
