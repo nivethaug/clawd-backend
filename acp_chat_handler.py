@@ -737,14 +737,15 @@ Before making any code changes, follow this process:
 2. If the request is unclear or has multiple interpretations → ask clarification questions
    - Maximum 2 rounds of clarification
    - After 2 rounds, proceed with your best understanding
-3. After clarification (or if request was clear), create a quick plan file at:
+3. For clear, small UI/code edits, DO NOT create a plan file. Proceed directly to the target source files.
+4. Create a quick plan file only when the request is ambiguous, large, multi-system, or API-heavy:
    `{self.project_path}/plans/plan_YYYYMMDD_HHMMSS.md`
    - This plan is for YOUR reference during execution
    - Keep it brief: just the steps and target files
    - Include the ai_index update checklist
-4. Then execute the plan
-5. After execution completes, update ai_index files per the checklist
-6. Delete the plan file
+5. Then execute the plan, if you created one
+6. After execution completes, update ai_index files per the checklist
+7. Delete the plan file, if you created one
 
 ---
 
@@ -909,13 +910,13 @@ After approval:
 - ✅ Snapshots are token-efficient and show page structure
 
 ### Step 3: Check Console (MANDATORY)
-- Run `mcp__chrome-devtools__list_console_messages` with `level: "error"`
+- Run `mcp__chrome-devtools__list_console_messages` with `types: ["error"], pageSize: 200`
 - Look for: CORS errors, 500 errors, undefined variables
 - Only check errors (ignore warnings/info to save tokens)
 - If ANY errors exist → FIX THEM before saying "ready"
 
 ### Step 4: Check Network (MANDATORY)
-- Run `mcp__chrome-devtools__list_network_requests` with `includeStatic: false`
+- Run `mcp__chrome-devtools__list_network_requests` with `resourceTypes: ["fetch", "xhr"], pageSize: 200`
 - Look for: Failed API calls, 401/403/500 errors
 - Skip static resources (images, fonts, CSS) to save tokens
 - If authentication involved → verify login API returns 200
@@ -986,10 +987,10 @@ Saves 60-70% tokens vs PNG. Never use PNG for routine testing.
 ### 2. ALWAYS FILTER RESULTS
 ```javascript
 // Console - errors only
-list_console_messages(level: "error")
+list_console_messages(types: ["error"], pageSize: 200)
 
 // Network - API calls only
-list_network_requests(includeStatic: false)
+list_network_requests(resourceTypes: ["fetch", "xhr"], pageSize: 200)
 ```
 Never query all messages/requests (10k+ tokens wasted).
 
@@ -1024,8 +1025,8 @@ NEVER use localhost, 127.0.0.1, or port-based URLs.
 ```javascript
 new_page(url: "https://{self.frontend_domain}")
 take_snapshot()  // Verify page loaded
-list_console_messages(level: "error")  // Check for JS errors
-list_network_requests(includeStatic: false)  // Check API failures
+list_console_messages(types: ["error"], pageSize: 200)  // Check for JS errors
+list_network_requests(resourceTypes: ["fetch", "xhr"], pageSize: 200)  // Check API failures
 // Test the specific feature you changed
 close_page(pageId: 0)
 ```
@@ -1314,8 +1315,8 @@ Before sending ANY response to the user, mentally check every item:
 ### Live Testing Checklist
 - [ ] Did I open `https://{self.frontend_domain}` (NOT localhost)?
 - [ ] Did I use **snapshot** (NOT screenshot) for initial verification?
-- [ ] Did I run list_console_messages with `level: "error"` only?
-- [ ] Did I run list_network_requests with `includeStatic: false`?
+- [ ] Did I run list_console_messages with `types: ["error"], pageSize: 200` only?
+- [ ] Did I run list_network_requests with `resourceTypes: ["fetch", "xhr"], pageSize: 200`?
 - [ ] Did I test the specific feature I changed?
 - [ ] Did I only screenshot if visual proof absolutely required?
 - [ ] If screenshot needed, did I use WebP 75% (~5KB)?
@@ -1461,14 +1462,15 @@ Before making any code changes, follow this process:
 2. If the request is unclear or has multiple interpretations → ask clarification questions
    - Maximum 2 rounds of clarification
    - After 2 rounds, proceed with your best understanding
-3. After clarification (or if request was clear), create a quick plan file at:
+3. For clear, small UI/code edits, DO NOT create a plan file. Proceed directly to the target source files.
+4. Create a quick plan file only when the request is ambiguous, large, multi-system, or API-heavy:
    `{self.project_path}/plans/plan_YYYYMMDD_HHMMSS.md`
    - This plan is for YOUR reference during execution
    - Keep it brief: just the steps and target files
    - Include the ai_index update checklist
-4. Then execute the plan
-5. After execution completes, update ai_index files per the checklist
-6. Delete the plan file
+5. Then execute the plan, if you created one
+6. After execution completes, update ai_index files per the checklist
+7. Delete the plan file, if you created one
 
 ### Step 3: Final Execution
 After clarifying API source (or confirming request is clear), proceed with code changes and follow all other checklists.
@@ -1973,14 +1975,15 @@ Before making any code changes, follow this process:
 2. If the request is unclear or has multiple interpretations → ask clarification questions
    - Maximum 2 rounds of clarification
    - After 2 rounds, proceed with your best understanding
-3. After clarification (or if request was clear), create a quick plan file at:
+3. For clear, small UI/code edits, DO NOT create a plan file. Proceed directly to the target source files.
+4. Create a quick plan file only when the request is ambiguous, large, multi-system, or API-heavy:
    `{self.project_path}/plans/plan_YYYYMMDD_HHMMSS.md`
    - This plan is for YOUR reference during execution
    - Keep it brief: just the steps and target files
    - Include the ai_index update checklist
-4. Then execute the plan
-5. After execution completes, update ai_index files per the checklist
-6. Delete the plan file
+5. Then execute the plan, if you created one
+6. After execution completes, update ai_index files per the checklist
+7. Delete the plan file, if you created one
 
 This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 
