@@ -1417,8 +1417,10 @@ Project Description: {goal_description}
 4. Create each required page (fully implemented, 800+ chars)
 5. Run `npm run build` — fix all errors until it succeeds
 6. Serve dist: `npx serve dist -l 3004`
-7. Quick browser check — screenshot homepage, check console, verify not blank
+7. Quick browser check — open localhost, run JS eval, check console, verify not blank
 8. Update AI index files (symbols, files, dependencies, summaries)
+
+Wrapper compatibility: if required page files already exist as one-line scaffolds, overwrite all non-Welcome required page files with complete implementations first. Do not edit `src/pages/Welcome.tsx`.
 
 ---
 
@@ -1582,16 +1584,7 @@ return <div className="p-4">Page content coming soon</div>
 
 This is an initial UI build — focus on SPEED + visual completeness. Static/mock data is fine.
 
-**For all UI/UX decisions, use the ui-ux-pro-max skill:**
-- Skill name: `ui-ux-pro-max`
-- GitHub: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
-- Invoke with: `/ui-ux-pro-max [your request]`
-- Examples:
-  - `/ui-ux-pro-max review my dashboard component`
-  - `/ui-ux-pro-max create a glassmorphism button`
-  - `/ui-ux-pro-max improve the accessibility of my form`
-
-This skill covers: modern component patterns, responsive design, WCAG 2.1 accessibility, color theory, typography, layout composition, micro-interactions, mobile-first design, professional polish.
+Use ui-ux-pro-max principles as design guidance, but do not call external Skill tools during this run.
 
 **Before implementing any UI component:**
 1. Apply ui-ux-pro-max principles
@@ -1631,16 +1624,22 @@ Verify before serving:
 - Each page file is 800+ characters
 - No files contain "placeholder", "TODO", or "coming soon"
 
-Then serve. Multiple Claude Code sessions may be running in parallel — always check if the port is in use before serving:
+Then serve. Multiple Claude Code sessions may be running in parallel — always check if the port is in use before serving. The serve command MUST run in the background and MUST print `SERVE_STARTED on port <PORT>`:
 
 ```bash
-# Check if 3004 is in use; if so, find a free port in the 4000–5000 range
-lsof -i :3004 && echo "Port 3004 in use" || npx serve dist -l 3004
-
-# If 3004 is taken, run this instead:
-for port in 4000 4001 4002 4003 4004 4005; do
-  lsof -i :$port > /dev/null 2>&1 || {{ echo "Using port $port"; npx serve dist -l $port; break; }}
-done
+PORT=$(python3 - <<'PY'
+import socket
+for p in [3004, 4002, 4003, 4004, 4005, 8080, 8888]:
+    s = socket.socket()
+    try:
+        s.bind(('0.0.0.0', p)); s.close(); print(p); break
+    except OSError:
+        s.close()
+else:
+    print(3004)
+PY
+)
+npx serve dist -l "$PORT" > /tmp/context-serve.log 2>&1 & echo "SERVE_STARTED on port $PORT"
 ```
 
 Note the port you end up using — you need it in the next step.

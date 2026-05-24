@@ -151,6 +151,7 @@
 | [publish_frontend.md](./publish_frontend.md) | Frontend build & publish |
 | [publish_backend.md](./publish_backend.md) | Backend build & publish |
 | [scheduler.md](./scheduler.md) | Centralized job scheduling daemon + REST API |
+| [context_api_wrapper_claude_code.md](./context_api_wrapper_claude_code.md) | Context wrapper architecture + Dream Agent create/edit support gap analysis |
 3. **Find the exact file and line numbers** for the code you need
 4. **Make targeted changes** using the line references
 
