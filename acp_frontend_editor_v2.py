@@ -1416,7 +1416,7 @@ Project Description: {goal_description}
 3. Integrate Navbar into `Layout.tsx`
 4. Create each required page (fully implemented, 800+ chars)
 5. Run `npm run build` — fix all errors until it succeeds
-6. Serve dist: `npx serve dist -l 3004`
+6. Serve dist: `npx serve -s dist -l 3004`
 7. Quick browser check — open localhost, run JS eval, check console, verify not blank
 8. Update AI index files (symbols, files, dependencies, summaries)
 
@@ -1639,7 +1639,7 @@ else:
     print(3004)
 PY
 )
-npx serve dist -l "$PORT" > /tmp/context-serve.log 2>&1 & echo "SERVE_STARTED on port $PORT"
+npx serve -s dist -l "$PORT" > /tmp/context-serve.log 2>&1 & echo "SERVE_STARTED on port $PORT"
 ```
 
 Note the port you end up using — you need it in the next step.
@@ -1654,7 +1654,7 @@ After serving, use Chrome DevTools MCP to do a quick check:
 
 **1. Open the app**
 ```text
-navigate to: http://localhost:PORT   ← use the actual port from Step 6
+navigate to: http://localhost:PORT/   ← use the actual port from Step 6
 ```
 
 **2. Check console**
