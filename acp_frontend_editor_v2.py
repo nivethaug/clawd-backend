@@ -1156,17 +1156,31 @@ class ACPFrontendEditorV2:
         print("="*60, flush=True)
 
         required_pages = []
+        explicit_pages = []
+        for match in re.finditer(
+            r"(?im)^\s*(?:\d+[\.\)]\s*|[-*]\s+)([A-Za-z][A-Za-z0-9 &/+-]{1,50}?)\s+PAGE\b",
+            goal_description,
+        ):
+            label = re.sub(r"[^A-Za-z0-9]+", " ", match.group(1)).strip()
+            if label:
+                explicit_pages.append("".join(part.capitalize() for part in label.split()) + "page")
+        if len(set(explicit_pages)) >= 2:
+            required_pages = list(dict.fromkeys(explicit_pages))
+            print(f"PLANNER-EXPLICIT-PAGES: Using pages from prompt: {required_pages}", flush=True)
 
         # Step 1: Try Groq AI inference
         try:
-            from groq_service import GroqService
-            groq = GroqService()
+            if required_pages:
+                inferred_pages = []
+            else:
+                from groq_service import GroqService
+                groq = GroqService()
+                inferred_pages = await groq.infer_pages(goal_description)
                     
-            inferred_pages = await groq.infer_pages(goal_description)
-            if inferred_pages and len(inferred_pages) >= 3:
+            if not required_pages and inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
                 print(f"✅ PLANNER-GROQ-SUCCESS: Using {len(inferred_pages)} pages: {inferred_pages}", flush=True)
-            else:
+            elif not required_pages:
                 print(f"⚠️  PLANNER-GROQ-INSUFFICIENT: Got {len(inferred_pages) if inferred_pages else 0} pages, need >= 3", flush=True)
         except Exception as e:
             logger.warning(f"[Planner] Groq inference failed: {e}")
@@ -1409,7 +1423,7 @@ Project Description: {goal_description}
 
 Do not assume this is a SaaS/admin/dashboard app unless the user explicitly requested it.
 Follow the product category, audience, navigation pattern, theme, and visual style in the Project Description.
-For consumer, dating, social, lifestyle, marketplace, game, portfolio, or mobile-app prompts, build the actual
+For consumer, social, lifestyle, marketplace, game, portfolio, or mobile-app prompts, build the actual
 domain experience instead of generic dashboard/table sections.
 
 ---
@@ -1495,7 +1509,7 @@ Create `src/layout/Navbar.tsx` with these requirements:
 - Touch-friendly tap targets (min 44px height)
 - Smooth open/close transitions
 - Import Navbar in `Layout.tsx` and place it in the header section
-- For dating/social/mobile-app prompts, avoid admin sidebars, table-heavy layouts, and generic SaaS dashboard chrome.
+- For consumer/social/mobile-app prompts, avoid admin sidebars, table-heavy layouts, and generic SaaS dashboard chrome.
 
 **Navigation link rule** — always wrap multiple children in a single element:
 
@@ -1610,7 +1624,7 @@ Use ui-ux-pro-max principles as design guidance, but do not call external Skill 
 - gradient accents: blue → purple headers and icon backgrounds
 - transitions: `transition-all duration-300` on all interactive elements
 - If the prompt requests dark/light mode or a theme switcher, implement visible theme state and a toggle control.
-- For consumer/dating/social/mobile prompts, use polished app-like layouts rather than tables or admin cards.
+- For consumer/social/mobile prompts, use polished app-like layouts rather than tables or admin cards.
 - Stripe / Linear aesthetic — not flat or plain white sections
 
 **Per page:** 2–3 main UI sections max. No over-engineering, no edge cases, no deeply nested layouts.
