@@ -1402,18 +1402,23 @@ class ACPFrontendEditorV2:
         # Determine which page should be the default route
         default_page = required_pages_list[0] if required_pages_list else "Dashboard"
 
-        return f"""You are editing a React + Vite + TypeScript SaaS application.
+        return f"""You are editing a React + Vite + TypeScript application.
 
 Project Name: {self.project_name}
 Project Description: {goal_description}
+
+Do not assume this is a SaaS/admin/dashboard app unless the user explicitly requested it.
+Follow the product category, audience, navigation pattern, theme, and visual style in the Project Description.
+For consumer, dating, social, lifestyle, marketplace, game, portfolio, or mobile-app prompts, build the actual
+domain experience instead of generic dashboard/table sections.
 
 ---
 
 ## EXECUTION ORDER — FOLLOW THIS EXACTLY
 
 1. Fix routing (remove Welcome route, set `{default_page}` at `"/"`)
-2. Create `src/layout/Navbar.tsx` with mobile hamburger menu
-3. Integrate Navbar into `Layout.tsx`
+2. Create domain-appropriate navigation in `src/layout/Navbar.tsx`
+3. Integrate navigation into `Layout.tsx`
 4. Create each required page (fully implemented, 800+ chars)
 5. Run `npm run build` — fix all errors until it succeeds
 6. Serve dist: `npx serve -s dist -l 3004`
@@ -1481,12 +1486,16 @@ Verify routing is correct BEFORE creating pages. Wrong routing = blank page.
 ## STEP 2 — NAVBAR
 
 Create `src/layout/Navbar.tsx` with these requirements:
-- Desktop: horizontal menu (`hidden md:flex`) with links to all required pages: {', '.join(required_pages_list)}
-- Mobile: hamburger (`md:hidden`) toggles full-screen overlay or slide-in sidebar
+- Use the navigation pattern requested by the Project Description.
+- If the prompt asks for mobile sticky bottom navigation, implement sticky bottom tabs on mobile.
+- If the prompt asks for a desktop sidebar/floating nav, implement that on desktop.
+- Otherwise, use a simple responsive top navigation.
+- Navigation MUST expose links/tabs to all required pages: {', '.join(required_pages_list)}
 - Use `NavLink` from `react-router-dom` for active link highlighting
 - Touch-friendly tap targets (min 44px height)
 - Smooth open/close transitions
 - Import Navbar in `Layout.tsx` and place it in the header section
+- For dating/social/mobile-app prompts, avoid admin sidebars, table-heavy layouts, and generic SaaS dashboard chrome.
 
 **Navigation link rule** — always wrap multiple children in a single element:
 
@@ -1595,15 +1604,18 @@ Use ui-ux-pro-max principles as design guidance, but do not call external Skill 
 6. Follow accessibility best practices
 
 **Premium UI — apply to all pages:**
+- Respect the prompt's domain and requested theme; do not force SaaS/dashboard visuals.
 - glassmorphism: `backdrop-blur-xl` + semi-transparent backgrounds
 - depth: soft shadows, `hover:shadow-xl`, `hover:scale-[1.02]` on cards
 - gradient accents: blue → purple headers and icon backgrounds
 - transitions: `transition-all duration-300` on all interactive elements
+- If the prompt requests dark/light mode or a theme switcher, implement visible theme state and a toggle control.
+- For consumer/dating/social/mobile prompts, use polished app-like layouts rather than tables or admin cards.
 - Stripe / Linear aesthetic — not flat or plain white sections
 
 **Per page:** 2–3 main UI sections max. No over-engineering, no edge cases, no deeply nested layouts.
 
-**Avoid:** flat UI, plain white sections without depth, static non-interactive components.
+**Avoid:** flat UI, plain white sections without depth, static non-interactive components, and dashboard/table patterns unless requested.
 
 **For complex features, build UI shell only:**
 - Block editor → UI layout only
@@ -1670,7 +1682,10 @@ Example checks:
 ```javascript
 () => {{
     const bodyText = (document.body?.innerText || "").trim();
-    const hasEnoughText = bodyText.length >= 200;
+    const hasEnoughText = bodyText.length >= 260;
+    const requiredLabels = {required_pages_list!r};
+    const lowerText = bodyText.toLowerCase();
+    const missingRequiredLabels = requiredLabels.filter((label) => !lowerText.includes(String(label).toLowerCase()));
 
     const unlabeledIconButtons = Array.from(document.querySelectorAll('button'))
         .filter((btn) => {{
@@ -1692,9 +1707,10 @@ Example checks:
     return {{
         hasEnoughText,
         textLength: bodyText.length,
+        missingRequiredLabels,
         unlabeledIconButtons,
         unlabeledInputs,
-        pass: hasEnoughText && unlabeledIconButtons === 0 && unlabeledInputs === 0,
+        pass: hasEnoughText && missingRequiredLabels.length === 0 && unlabeledIconButtons === 0 && unlabeledInputs === 0,
     }};
 }}
 ```
@@ -1719,6 +1735,7 @@ After a successful build, update all four AI index files:
 
 - [ ] Routing fixed — Welcome removed, single `{default_page}` at `"/"`, all routes inside Layout wrapper
 - [ ] `src/layout/Navbar.tsx` created — mobile hamburger, NavLink to all required pages: {', '.join(required_pages_list)}
+- [ ] Navigation matches the product prompt (mobile bottom tabs/sidebar/theme controls when requested)
 - [ ] Navbar integrated into `Layout.tsx` header
 - [ ] All required pages created with exact filenames, 800+ chars, real content, no placeholders:
       {required_pages_str}
