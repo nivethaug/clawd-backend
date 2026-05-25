@@ -1157,9 +1157,17 @@ class ACPFrontendEditorV2:
 
         required_pages = []
         explicit_pages = []
+        pages_section = ""
+        pages_match = re.search(r"(?im)^\s*pages\s*:\s*$", goal_description)
+        if pages_match:
+            pages_section = goal_description[pages_match.end():]
+            next_section = re.search(r"(?m)^\s*[A-Z][A-Z0-9 /&()_-]{2,}\s*:\s*$", pages_section)
+            if next_section:
+                pages_section = pages_section[:next_section.start()]
+
         for match in re.finditer(
             r"(?im)^\s*(?:\d+[\.\)]\s*|[-*]\s+)([A-Za-z][A-Za-z0-9 &/+-]{1,50}?)\s+PAGE\b",
-            goal_description,
+            pages_section,
         ):
             label = re.sub(r"[^A-Za-z0-9]+", " ", match.group(1)).strip()
             if label:
@@ -1407,6 +1415,15 @@ class ACPFrontendEditorV2:
 
         # Build required artifacts list
         required_pages_list = required_pages
+        required_page_labels = []
+        for page in required_pages_list:
+            stem = re.sub(r"\.tsx$", "", str(page), flags=re.IGNORECASE)
+            stem = re.sub(r"page$", "", stem, flags=re.IGNORECASE)
+            stem = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", stem)
+            label = re.sub(r"[^A-Za-z0-9]+", " ", stem).strip()
+            if label:
+                required_page_labels.append(label)
+        required_page_labels = list(dict.fromkeys(required_page_labels))
 
         required_pages_str = "\n".join([f"- src/pages/{page}.tsx" for page in required_pages_list])
 
@@ -1425,6 +1442,9 @@ Do not assume this is a SaaS/admin/dashboard app unless the user explicitly requ
 Follow the product category, audience, navigation pattern, theme, and visual style in the Project Description.
 For consumer, social, lifestyle, marketplace, game, portfolio, or mobile-app prompts, build the actual
 domain experience instead of generic dashboard/table sections.
+Build a complete desktop web experience by default. Mobile responsiveness is required, but do not output
+only a narrow mobile mockup centered on an empty desktop canvas unless the user explicitly requested
+mobile-only output.
 
 ---
 
@@ -1500,11 +1520,14 @@ Verify routing is correct BEFORE creating pages. Wrong routing = blank page.
 ## STEP 2 — NAVBAR
 
 Create `src/layout/Navbar.tsx` with these requirements:
+- Navigation is mandatory. The finished website must have a visible desktop menu/header/sidebar on the first viewport.
 - Use the navigation pattern requested by the Project Description.
 - If the prompt asks for mobile sticky bottom navigation, implement sticky bottom tabs on mobile.
 - If the prompt asks for a desktop sidebar/floating nav, implement that on desktop.
-- Otherwise, use a simple responsive top navigation.
+- Otherwise, use a polished responsive top navigation with visible text links on desktop.
 - Navigation MUST expose links/tabs to all required pages: {', '.join(required_pages_list)}
+- Desktop navigation MUST NOT be hidden behind a hamburger/menu icon at `md` and larger breakpoints.
+- Navigation labels should be human-readable page names, for example `Discover` not `Discoverpage`.
 - Use `NavLink` from `react-router-dom` for active link highlighting
 - Touch-friendly tap targets (min 44px height)
 - Smooth open/close transitions
@@ -1554,6 +1577,9 @@ Create exactly these pages, no more, no less:
 - Functional interactions (clicks, forms, modals)
 - Loading states and error handling
 - Mobile-responsive design
+- Desktop web composition: use the available width intentionally, with visible navigation and primary actions above the fold
+- Do not clip the primary card/content at the bottom of the first viewport
+- Do not hide core actions below a large blank area on desktop
 - TypeScript types properly defined
 - 800+ characters — no stubs, no TODOs, no "coming soon", no placeholders
 
@@ -1697,9 +1723,22 @@ Example checks:
 () => {{
     const bodyText = (document.body?.innerText || "").trim();
     const hasEnoughText = bodyText.length >= 260;
-    const requiredLabels = {required_pages_list!r};
+    const requiredLabels = {required_page_labels!r};
     const lowerText = bodyText.toLowerCase();
     const missingRequiredLabels = requiredLabels.filter((label) => !lowerText.includes(String(label).toLowerCase()));
+    const navText = Array.from(document.querySelectorAll('nav, header, aside, [role="navigation"], a'))
+        .map((el) => el.textContent || el.getAttribute('aria-label') || '')
+        .join(' ')
+        .toLowerCase();
+    const missingNavLabels = requiredLabels.filter((label) => !navText.includes(String(label).toLowerCase()));
+    const visibleInteractive = Array.from(document.querySelectorAll('button, a, [role="button"], input, textarea, select'))
+        .filter((el) => {{
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
+        }})
+        .length;
+    const mainRect = (document.querySelector('main') || document.getElementById('root'))?.getBoundingClientRect();
+    const primaryContentStartsInViewport = !!mainRect && mainRect.top < window.innerHeight * 0.85 && mainRect.bottom > 120;
 
     const unlabeledIconButtons = Array.from(document.querySelectorAll('button'))
         .filter((btn) => {{
@@ -1722,9 +1761,18 @@ Example checks:
         hasEnoughText,
         textLength: bodyText.length,
         missingRequiredLabels,
+        missingNavLabels,
+        visibleInteractive,
+        primaryContentStartsInViewport,
         unlabeledIconButtons,
         unlabeledInputs,
-        pass: hasEnoughText && missingRequiredLabels.length === 0 && unlabeledIconButtons === 0 && unlabeledInputs === 0,
+        pass: hasEnoughText
+            && missingRequiredLabels.length === 0
+            && missingNavLabels.length === 0
+            && visibleInteractive >= Math.max(requiredLabels.length ? 4 : 1, requiredLabels.length)
+            && primaryContentStartsInViewport
+            && unlabeledIconButtons === 0
+            && unlabeledInputs === 0,
     }};
 }}
 ```
