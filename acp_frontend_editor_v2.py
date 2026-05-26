@@ -1473,6 +1473,7 @@ Wrapper compatibility: if required page files already exist as one-line scaffold
 - Create pages not in the required list
 - Leave any page as a stub, placeholder, or under 800 characters
 - Change project architecture
+- Create alternate layout paths such as `src/app/layouts/`, `src/app/layout/`, `src/layouts/`, or `AppLayout.tsx`
 
 **Only modify files in:**
 - `src/pages/`
@@ -1507,11 +1508,13 @@ Read `src/App.tsx`. Delete ALL routes at `path="/"`. Add exactly one. Do this BE
 Rules:
 - Exactly ONE route at `"/"` — there may be multiple duplicates in the file, delete them all
 - All routes nested inside `<Route element={{<Layout />}}>`
+- `Layout` must come from `src/layout/Layout.tsx`; do not create or use alternate layout paths
 - If no Layout wrapper exists, add it
 - Layout MUST use `<Outlet />`, not a `children` prop
 - Pages render at `<Outlet />`, not via children prop
 - Layout uses flex for full-screen layout with overflow handling
 - Do not leave Welcome at `"/"`
+- Do not route pages directly under `<Routes>` without the Layout wrapper
 
 Verify routing is correct BEFORE creating pages. Wrong routing = blank page.
 
@@ -1532,6 +1535,8 @@ Create `src/layout/Navbar.tsx` with these requirements:
 - Touch-friendly tap targets (min 44px height)
 - Smooth open/close transitions
 - Import Navbar in `Layout.tsx` and place it in the header section
+- `src/layout/Layout.tsx` MUST render `<Navbar />` and `<main><Outlet /></main>`
+- `src/App.tsx` MUST import `Layout` from `src/layout/Layout.tsx` and wrap all generated routes with it
 - For consumer/social/mobile-app prompts, avoid admin sidebars, table-heavy layouts, and generic SaaS dashboard chrome.
 
 **Navigation link rule** — always wrap multiple children in a single element:
