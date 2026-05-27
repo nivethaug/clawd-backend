@@ -391,7 +391,7 @@ def run_telegram_bot_pipeline(
         # Step 10: AI enhance logic (now that base is deployed and working)
         logger.info("📋 Step 10/12: AI enhancement of bot logic...")
         try:
-            editor = TelegramBotEditor(telegram_path)
+            editor = TelegramBotEditor(telegram_path, project_id=project_id)
             success, edit_result = editor.enhance_bot_logic(description, project_name)
             
             if success:

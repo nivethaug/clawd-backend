@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Tuple
 from utils.logger import logger
+from workflow_prompt_meta import build_workflow_meta_block
 
 # Try to import Claude Code Agent
 try:
@@ -24,7 +25,7 @@ class DiscordBotEditor:
     Modifies services/ai_logic.py based on user description.
     """
 
-    def __init__(self, project_path: str):
+    def __init__(self, project_path: str, project_id: int = None):
         """
         Initialize editor.
 
@@ -32,6 +33,7 @@ class DiscordBotEditor:
             project_path: Path to discord/ directory
         """
         self.project_path = Path(project_path)
+        self.project_id = project_id
 
         # Core logic files
         self.ai_logic_path = self.project_path / "services" / "ai_logic.py"
@@ -127,7 +129,18 @@ class DiscordBotEditor:
 
     def _build_enhancement_prompt(self, description: str, bot_name: str) -> str:
         """Build AI prompt for Discord bot enhancement with dynamic command generation."""
-        return f"""
+        meta_block = build_workflow_meta_block(
+            project_type_id=3,
+            project_type="discord",
+            operation="create",
+            workflow="discord_create",
+            project_name=bot_name,
+            project_id=self.project_id,
+            project_path=self.project_path,
+            service_path=self.project_path,
+            prompt_kind="discord_ai_enhancement",
+        )
+        return f"""{meta_block}
 Enhance Discord bot for: {description}
 
 Bot: {bot_name}

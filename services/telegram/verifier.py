@@ -29,6 +29,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from claude_code_agent import ClaudeCodeAgent
+from workflow_prompt_meta import build_workflow_meta_block
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +96,21 @@ async def verify_telegram_bot_webhook(domain: str, project_path: str = None, tim
             logger.info("="*60)
             
             # Build verification prompt for Claude agent
+            meta_block = build_workflow_meta_block(
+                project_type_id=2,
+                project_type="telegram",
+                operation="verify",
+                workflow="telegram_verify",
+                project_name=domain,
+                project_path=project_path,
+                service_path=project_path,
+                domain=domain,
+                prompt_kind="telegram_verify_retry" if retry_count else "telegram_verify",
+            )
             if retry_count == 0:
                 # Initial verification prompt
-                verification_prompt = f"""Verify the Telegram bot webhook endpoints for domain: {domain}
+                verification_prompt = f"""{meta_block}
+Verify the Telegram bot webhook endpoints for domain: {domain}
 
 Use Chrome DevTools MCP to perform these verification steps:
 
@@ -148,7 +161,8 @@ Return a JSON object with these fields:
                 if verification_info["network_errors"]:
                     previous_errors.append(f"Network errors: {verification_info['network_errors']}")
                 
-                verification_prompt = f"""Previous verification failed for {domain}. Issues detected:
+                verification_prompt = f"""{meta_block}
+Previous verification failed for {domain}. Issues detected:
 {chr(10).join(f'- {err}' for err in previous_errors)}
 
 **Your task**: Diagnose and fix the issues, then retest.
@@ -427,7 +441,9 @@ def verify_telegram_bot_webhook_sync(domain: str, timeout: int = 120, max_retrie
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     
-    return loop.run_until_complete(verify_telegram_bot_webhook(domain, timeout, max_retries))
+    return loop.run_until_complete(
+        verify_telegram_bot_webhook(domain, timeout=timeout, max_retries=max_retries)
+    )
 
 
 if __name__ == "__main__":

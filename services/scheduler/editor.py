@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Tuple
 
 from utils.logger import logger
+from workflow_prompt_meta import build_workflow_meta_block
 
 try:
     from claude_code_agent import ClaudeCodeAgent
@@ -89,8 +90,19 @@ class SchedulerEditor:
         """Build AI prompt for executor enhancement."""
         # Build the job creation API instruction
         jobs_api_url = f"{self.backend_url}/api/scheduler/projects/{self.project_id}/jobs"
+        meta_block = build_workflow_meta_block(
+            project_type_id=5,
+            project_type="scheduler",
+            operation="create",
+            workflow="scheduler_create",
+            project_name=project_name,
+            project_id=self.project_id,
+            project_path=self.project_path,
+            service_path=self.project_path / "scheduler",
+            prompt_kind="scheduler_ai_enhancement",
+        )
 
-        return f"""
+        return f"""{meta_block}
 Enhance the scheduler executor for: {description}
 
 Project: {project_name} (ID: {self.project_id})

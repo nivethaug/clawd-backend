@@ -19,6 +19,7 @@ from pathlib import Path
 
 # Import progress mapper for user-friendly messages
 from acp_progress_mapper import ClaudeProgressMapper
+from workflow_prompt_meta import build_workflow_meta_block
 
 # Try to import ClaudeCodeAgent (preferred backend)
 try:
@@ -60,6 +61,7 @@ class ACPChatHandler:
         self.project_path = Path(project_path)
         self.project_name = project_name
         self.project_id = project_id
+        self.project_type_id = project_type_id
         self.session_id = None  # Set via set_session_id() before each chat
         self.frontend_path = self.project_path / "frontend"
         self.frontend_src_path = self.frontend_path / "src"
@@ -117,6 +119,23 @@ class ACPChatHandler:
         elif self.is_scheduler:
             return 'scheduler'
         return 'website'
+
+    def _workflow_meta_block(self, *, operation: str, prompt_kind: str) -> str:
+        """Machine-readable workflow envelope consumed by context_api.py."""
+        project_type = self._get_project_type_str()
+        return build_workflow_meta_block(
+            project_type_id=self.project_type_id,
+            project_type=project_type,
+            operation=operation,
+            workflow=f"{project_type}_{operation}",
+            project_name=self.project_name,
+            project_id=self.project_id,
+            project_path=self.project_path,
+            domain=getattr(self, "domain", None),
+            frontend_path=self.frontend_path if project_type == "website" else None,
+            service_path=self.project_path if project_type != "website" else None,
+            prompt_kind=prompt_kind,
+        )
 
     def _load_project_metadata(self):
         """Load project domain from database to populate prompt placeholders."""
@@ -283,7 +302,8 @@ class ACPChatHandler:
 ---
 """
 
-        return f"""You are a friendly AI assistant helping a user with their **{self.project_name}** scheduler project.
+        return f"""{self._workflow_meta_block(operation="edit", prompt_kind="scheduler_chat_edit")}
+You are a friendly AI assistant helping a user with their **{self.project_name}** scheduler project.
 
 ---
 
@@ -786,7 +806,8 @@ Before making any code changes, follow this process:
 ---
 """
         
-        return  f"""You are a friendly AI assistant helping a user build their **{self.project_name}** web application.
+        return  f"""{self._workflow_meta_block(operation="edit", prompt_kind="website_chat_edit")}
+You are a friendly AI assistant helping a user build their **{self.project_name}** web application.
  
 ---
  
@@ -1516,7 +1537,8 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow, with m
 ---
 """
         
-        return f"""You are a friendly AI assistant helping a user modify their **{self.project_name}** Telegram bot.
+        return f"""{self._workflow_meta_block(operation="edit", prompt_kind="telegram_chat_edit")}
+You are a friendly AI assistant helping a user modify their **{self.project_name}** Telegram bot.
 
 ---
 
@@ -2028,7 +2050,8 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 ---
 """
 
-        return f"""You are a friendly AI assistant helping a user modify their **{self.project_name}** Discord bot.
+        return f"""{self._workflow_meta_block(operation="edit", prompt_kind="discord_chat_edit")}
+You are a friendly AI assistant helping a user modify their **{self.project_name}** Discord bot.
 
 ---
 
@@ -2889,6 +2912,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 project_name=self.project_name,
                 existing_plan=self._existing_plan,
             )
+            prompt = self._workflow_meta_block(operation="edit", prompt_kind="plan_chat_edit") + "\n" + prompt
             if enhanced:
                 self._enhanced_prompt = None  # Reset
         elif enhanced:
@@ -3148,6 +3172,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 project_name=self.project_name,
                 existing_plan=self._existing_plan,
             )
+            prompt = self._workflow_meta_block(operation="edit", prompt_kind="plan_chat_edit") + "\n" + prompt
             if enhanced:
                 self._enhanced_prompt = None  # Reset
         elif enhanced:

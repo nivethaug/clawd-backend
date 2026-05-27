@@ -817,7 +817,7 @@ That's all. Execute Phase {phase} now.
                 from acp_frontend_editor_v2 import ACPFrontendEditorV2
 
                 print("🔴 PHASE_9_V2_INIT: Initializing ACPFrontendEditorV2")
-                editor_v2 = ACPFrontendEditorV2(frontend_src_path, self.project_name)
+                editor_v2 = ACPFrontendEditorV2(frontend_src_path, self.project_name, project_id=self.project_id)
                 logger.info("✓ ACP Frontend Editor V2 initialized")
 
                 print("🔴 PHASE_9_APPLY: Calling apply_changes_via_acpx (Filesystem Diff Architecture)")

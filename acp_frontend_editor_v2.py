@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Tuple, Any, Set
 
 # Page manifest system
 from page_manifest import PageManifest, create_page_manifest, scaffold_pages
+from workflow_prompt_meta import build_workflow_meta_block
 
 # Claude Code Agent - direct Claude CLI wrapper (replaces ACPX)
 try:
@@ -845,7 +846,7 @@ class ACPFrontendEditorV2:
     6. On failure: rollback
     """
 
-    def __init__(self, frontend_src_path: str, project_name: str, max_new_files: int = 15):
+    def __init__(self, frontend_src_path: str, project_name: str, max_new_files: int = 15, project_id: int = None):
         """
         Initialize ACP Frontend Editor v2.
 
@@ -853,10 +854,13 @@ class ACPFrontendEditorV2:
             frontend_src_path: Absolute path to frontend/src directory
             project_name: Name of the project for logging
             max_new_files: Maximum number of new files allowed per execution
+            project_id: Optional database project ID for workflow metadata
         """
         self.frontend_src_path = Path(frontend_src_path).resolve()
         self.frontend_path = self.frontend_src_path.parent
+        self.project_path = self.frontend_path.parent
         self.project_name = project_name
+        self.project_id = project_id
         self.max_new_files = max_new_files
 
         # Initialize components
@@ -1433,7 +1437,20 @@ class ACPFrontendEditorV2:
         # Determine which page should be the default route
         default_page = required_pages_list[0] if required_pages_list else "Dashboard"
 
-        return f"""You are editing a React + Vite + TypeScript application.
+        meta_block = build_workflow_meta_block(
+            project_type_id=1,
+            project_type="website",
+            operation="create",
+            workflow="website_create",
+            project_name=self.project_name,
+            project_id=self.project_id,
+            project_path=self.project_path,
+            frontend_path=self.frontend_path,
+            prompt_kind="website_create",
+        )
+
+        return f"""{meta_block}
+You are editing a React + Vite + TypeScript application.
 
 Project Name: {self.project_name}
 Project Description: {goal_description}

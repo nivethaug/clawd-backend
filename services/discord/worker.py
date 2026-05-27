@@ -319,7 +319,7 @@ def run_discord_bot_pipeline(
         # Step 10: AI enhance logic
         logger.info("Step 10/12: AI enhancement of bot logic...")
         try:
-            editor = DiscordBotEditor(discord_path)
+            editor = DiscordBotEditor(discord_path, project_id=project_id)
             success, edit_result = editor.enhance_bot_logic(description, project_name)
 
             if success:
