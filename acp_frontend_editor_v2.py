@@ -1467,13 +1467,13 @@ mobile-only output.
 
 ## EXECUTION ORDER — FOLLOW THIS EXACTLY
 
-1. Fix routing (remove Welcome route, set `{default_page}` at `"/"`)
-2. Create domain-appropriate navigation in `src/layout/Navbar.tsx`
-3. Integrate navigation into `Layout.tsx`
-4. Create each required page (fully implemented, 800+ chars)
-5. Run `npm run build` — fix all errors until it succeeds
+1. Create each required non-Welcome page (fully implemented, 800+ chars)
+2. Fix and validate routing before build (remove Welcome route, set `{default_page}` at `"/"`)
+3. Create domain-appropriate navigation in `src/layout/Navbar.tsx`
+4. Integrate navigation into `Layout.tsx`
+5. Run `npm run build` only after router validation passes
 6. Serve dist: `npx serve -s dist -l 3004`
-7. Quick browser check — open localhost, run JS eval, check console, verify not blank
+7. Quick browser check — open localhost, run JS eval, check console, verify not blank/starter
 8. Update AI index files (symbols, files, dependencies, summaries)
 
 Wrapper compatibility: if required page files already exist as one-line scaffolds, overwrite all non-Welcome required page files with complete implementations first. Do not edit `src/pages/Welcome.tsx`.
@@ -1508,9 +1508,9 @@ Button, Card, Input, Label, Select, Textarea, Dialog, Sheet, Dropdown, Popover, 
 
 ---
 
-## STEP 1 — FIX ROUTING
+## STEP 1 — FIX AND VALIDATE ROUTING
 
-Read `src/App.tsx`. Delete ALL routes at `path="/"`. Add exactly one. Do this BEFORE creating any pages.
+Read `src/App.tsx`. Delete ALL routes at `path="/"`. Add exactly one. Do this BEFORE running `npm run build`.
 
 ```tsx
 <Routes>
@@ -1533,7 +1533,15 @@ Rules:
 - Do not leave Welcome at `"/"`
 - Do not route pages directly under `<Routes>` without the Layout wrapper
 
-Verify routing is correct BEFORE creating pages. Wrong routing = blank page.
+Router validation MUST pass before build:
+- `/` renders `{default_page}`, not `Welcome`
+- exactly one root route at `"/"`
+- all generated pages are imported and routed
+- all routes are wrapped in the active `Layout`
+- `Layout.tsx` renders `<Outlet />`
+- desktop navigation visibly exposes all required page labels
+
+Do not run build, serve, or browser verification until this router check is complete. Wrong routing = the browser renders the starter page even when build succeeds.
 
 ---
 
@@ -1692,11 +1700,14 @@ Use ui-ux-pro-max principles as design guidance, but do not call external Skill 
 npm run build
 ```
 
+Do not run this command until router validation has passed. If `src/App.tsx` still routes `/` to `Welcome`, or if the active layout does not render `<Outlet />`, fix routing first.
+
 If it fails, fix ALL TypeScript and build errors. Re-run until it passes.
 
 Verify before serving:
 - Each page file is 800+ characters
 - No files contain "placeholder", "TODO", or "coming soon"
+- `src/App.tsx` has exactly one root route and it renders `{default_page}`, not `Welcome`
 
 Then serve. Multiple Claude Code sessions may be running in parallel — always check if the port is in use before serving. The serve command MUST run in the background and MUST print `SERVE_STARTED on port <PORT>`:
 
@@ -1739,6 +1750,8 @@ navigate to: http://localhost:PORT/   ← use the actual port from Step 6
 Use DevTools MCP `evaluate_script` and verify:
 - Page has enough visible text content (not blank)
 - Required pages expose accessible names (`aria-label` where needed)
+- The page is not the starter scaffold (`DreamPilot Generated App` / `Start building your application`)
+- `/` renders the generated app, not `Welcome`
 
 Example checks:
 ```javascript
@@ -1747,6 +1760,8 @@ Example checks:
     const hasEnoughText = bodyText.length >= 260;
     const requiredLabels = {required_page_labels!r};
     const lowerText = bodyText.toLowerCase();
+    const starterMarkers = ['dreampilot generated app', 'start building your application'];
+    const genericPlaceholderHits = starterMarkers.filter((marker) => lowerText.includes(marker));
     const missingRequiredLabels = requiredLabels.filter((label) => !lowerText.includes(String(label).toLowerCase()));
     const navText = Array.from(document.querySelectorAll('nav, header, aside, [role="navigation"], a'))
         .map((el) => el.textContent || el.getAttribute('aria-label') || '')
@@ -1786,9 +1801,11 @@ Example checks:
         missingNavLabels,
         visibleInteractive,
         primaryContentStartsInViewport,
+        genericPlaceholderHits,
         unlabeledIconButtons,
         unlabeledInputs,
         pass: hasEnoughText
+            && genericPlaceholderHits.length === 0
             && missingRequiredLabels.length === 0
             && missingNavLabels.length === 0
             && visibleInteractive >= Math.max(requiredLabels.length ? 4 : 1, requiredLabels.length)
@@ -1818,6 +1835,9 @@ After a successful build, update all four AI index files:
 ## FINAL CHECKLIST
 
 - [ ] Routing fixed — Welcome removed, single `{default_page}` at `"/"`, all routes inside Layout wrapper
+- [ ] Router validation completed before `npm run build`
+- [ ] `/` renders the generated page, not `Welcome` or the starter scaffold
+- [ ] `Layout.tsx` renders `<Outlet />`
 - [ ] `src/layout/Navbar.tsx` created — mobile hamburger, NavLink to all required pages: {', '.join(required_pages_list)}
 - [ ] Navigation matches the product prompt (mobile bottom tabs/sidebar/theme controls when requested)
 - [ ] Navbar integrated into `Layout.tsx` header
@@ -1825,7 +1845,7 @@ After a successful build, update all four AI index files:
       {required_pages_str}
 - [ ] All pages follow a11y rules (semantic `<button>`, `aria-label` on icon buttons and inputs, `role="dialog"` on modals, `aria-hidden="true"` on decorative SVGs, `aria-live` on dynamic content)
 - [ ] `npm run build` succeeds with zero errors
-- [ ] Browser check: console clean, JS eval confirms enough page text and aria-label coverage
+- [ ] Browser check: console clean, JS eval confirms enough page text, no starter scaffold, required labels, and aria-label coverage
 - [ ] Server stopped (`kill $(lsof -t -i:PORT)`)
 - [ ] AI index files updated (symbols, files, dependencies, summaries)
 """
