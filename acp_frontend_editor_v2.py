@@ -1419,23 +1419,30 @@ class ACPFrontendEditorV2:
 
         # Build required artifacts list
         required_pages_list = required_pages
+
+        # Strip trailing "page" suffix for clean route/display names
+        # e.g. "Historypage" → "History" for routes and nav labels
+        def _clean_page_name(name: str) -> str:
+            return re.sub(r"page$", "", name, flags=re.IGNORECASE) or name
+
+        clean_page_names = [_clean_page_name(p) for p in required_pages_list]
+
         required_page_labels = []
-        for page in required_pages_list:
-            stem = re.sub(r"\.tsx$", "", str(page), flags=re.IGNORECASE)
-            stem = re.sub(r"page$", "", stem, flags=re.IGNORECASE)
-            stem = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", stem)
+        for name in clean_page_names:
+            stem = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
             label = re.sub(r"[^A-Za-z0-9]+", " ", stem).strip()
             if label:
                 required_page_labels.append(label)
         required_page_labels = list(dict.fromkeys(required_page_labels))
 
+        # File paths use original names (must match files on disk)
         required_pages_str = "\n".join([f"- src/pages/{page}.tsx" for page in required_pages_list])
 
         # Phase 4: Build page specs section (NEW)
         page_specs_section = self._build_page_specs_section(required_pages)
 
-        # Determine which page should be the default route
-        default_page = required_pages_list[0] if required_pages_list else "Dashboard"
+        # Determine which page should be the default route (clean name for JSX component)
+        default_page = clean_page_names[0] if clean_page_names else "Dashboard"
 
         meta_block = build_workflow_meta_block(
             project_type_id=1,
@@ -1554,7 +1561,7 @@ Create `src/layout/Navbar.tsx` with these requirements:
 - If the prompt asks for mobile sticky bottom navigation, implement sticky bottom tabs on mobile.
 - If the prompt asks for a desktop sidebar/floating nav, implement that on desktop.
 - Otherwise, use a polished responsive top navigation with visible text links on desktop.
-- Navigation MUST expose links/tabs to all required pages: {', '.join(required_pages_list)}
+- Navigation MUST expose links/tabs to all required pages: {', '.join(clean_page_names)}
 - Desktop navigation MUST NOT be hidden behind a hamburger/menu icon at `md` and larger breakpoints.
 - Navigation labels should be human-readable page names, for example `Discover` not `Discoverpage`.
 - Use `NavLink` from `react-router-dom` for active link highlighting
@@ -1839,7 +1846,7 @@ After a successful build, update all four AI index files:
 - [ ] Router validation completed before `npm run build`
 - [ ] `/` renders the generated page, not `Welcome` or the starter scaffold
 - [ ] `Layout.tsx` renders `<Outlet />`
-- [ ] `src/layout/Navbar.tsx` created — mobile hamburger, NavLink to all required pages: {', '.join(required_pages_list)}
+- [ ] `src/layout/Navbar.tsx` created — mobile hamburger, NavLink to all required pages: {', '.join(clean_page_names)}
 - [ ] Navigation matches the product prompt (mobile bottom tabs/sidebar/theme controls when requested)
 - [ ] Navbar integrated into `Layout.tsx` header
 - [ ] All required pages created with exact filenames, 800+ chars, real content, no placeholders:
