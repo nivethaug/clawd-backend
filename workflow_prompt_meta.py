@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 
 META_START = "<DREAMPILOT_WORKFLOW_META>"
@@ -58,6 +58,7 @@ def build_workflow_meta(
     frontend_path: Optional[Any] = None,
     service_path: Optional[Any] = None,
     prompt_kind: Optional[str] = None,
+    pages: Optional[Sequence[str]] = None,
     source: str = "db",
 ) -> Dict[str, Any]:
     resolved_type = (project_type or project_type_from_id(project_type_id)).strip().lower()
@@ -75,6 +76,7 @@ def build_workflow_meta(
         "frontend_path": _clean_path(frontend_path),
         "service_path": _clean_path(service_path),
         "domain": domain,
+        "pages": list(pages) if pages else None,
         "source": source,
     }
     meta["checksum"] = checksum_workflow_meta(meta)

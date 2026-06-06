@@ -1447,6 +1447,7 @@ class ACPFrontendEditorV2:
             project_path=self.project_path,
             frontend_path=self.frontend_path,
             prompt_kind="website_create",
+            pages=required_pages_list,
         )
 
         return f"""{meta_block}
