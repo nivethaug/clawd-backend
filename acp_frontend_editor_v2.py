@@ -882,9 +882,6 @@ class ACPFrontendEditorV2:
         # Token usage from last query
         self._last_token_usage = None
 
-        # Background task for Claude agent (survives early return)
-        self._claude_query_task = None
-
     async def apply_changes(
         self,
         goal_description: str,
@@ -1233,6 +1230,7 @@ class ACPFrontendEditorV2:
             raise RuntimeError("ClaudeCodeAgent not available - check claude_code_agent.py import")
 
         import asyncio
+        import threading
         from datetime import datetime
         from acp_progress_mapper import ClaudeProgressMapper
 
@@ -1244,10 +1242,8 @@ class ACPFrontendEditorV2:
         progress_mapper = ClaudeProgressMapper()
         query_result = {"return_code": 1, "stdout": "", "stderr": "", "completed": False}
 
-        # Early-return signal: fire when AI index files are being written
-        # (the last step in Claude's workflow). This means build + browser
-        # verify are done — only index JSON writes remain.
-        ai_index_event = asyncio.Event()
+        # Threading event for AI index detection (cross-thread, survives event loop closure)
+        ai_index_detected = threading.Event()
 
         def _check_ai_index_writing(text: str) -> bool:
             """Return True if Claude is writing AI index files (last workflow step)."""
@@ -1267,8 +1263,8 @@ class ACPFrontendEditorV2:
             logger.info(f"[ACPX-V2] on_text chunk #{chunk_count}: {text[:100]}{'...' if len(text) > 100 else ''}")
 
             # Detect AI index write — last step, safe to return early
-            if not ai_index_event.is_set() and _check_ai_index_writing(text):
-                ai_index_event.set()
+            if not ai_index_detected.is_set() and _check_ai_index_writing(text):
+                ai_index_detected.set()
                 logger.info(f"[ACPX-V2] 🟢 AI INDEX DETECTED — firing early-return signal (build+verify done)")
                 print(f"🟢 AI-INDEX-DETECTED: Build & verify done, Claude writing index — returning to caller", flush=True)
             
@@ -1299,14 +1295,19 @@ class ACPFrontendEditorV2:
             logger.info(f"[ACPX-V2] Phase progress ({elapsed:.0f}s): {friendly}")
             print(f"⏱️ [{elapsed:.0f}s] {friendly}", flush=True)
 
-        async def run_background_query():
-            """Run the query in a background task (shielded from cancellation)."""
+        async def run_query_in_own_loop():
+            """Run the Claude query in this thread's own event loop.
+            
+            This function runs inside a daemon thread with its OWN asyncio event
+            loop. When _run_claude_agent() returns early and the caller's event
+            loop (from asyncio.run()) closes, this thread + loop keep running —
+            Claude's subprocess finishes AI index writes uninterrupted.
+            """
             nonlocal query_result
             
-            logger.info(f"[ACPX-V2] Background query task starting...")
+            logger.info(f"[ACPX-V2] Background query thread starting (own event loop)...")
             
             try:
-                # Create Claude Code Agent instance
                 async with ClaudeCodeAgent(
                     repo_path=str(self.frontend_src_path),
                     on_text=on_text,
@@ -1314,16 +1315,13 @@ class ACPFrontendEditorV2:
                 ) as agent:
                     logger.info(f"[ACPX-V2] ClaudeCodeAgent created, calling query...")
                     
-                    # Execute the query with timeout
                     result = await agent.query(prompt, timeout=CLAUDE_TIMEOUT)
 
-                    # Capture token usage from the agent
                     self._last_token_usage = agent.last_token_usage
                     if self._last_token_usage:
                         cost = self._last_token_usage.get('cost_usd') or 0
                         logger.info(f"[ACPX-V2] Token usage: input={self._last_token_usage.get('input_tokens')}, output={self._last_token_usage.get('output_tokens')}, cost=${cost:.4f}")
 
-                    # Determine return code based on result
                     return_code = 0 if result is not None else 1
                     elapsed = (datetime.now() - query_start_time).total_seconds()
 
@@ -1333,7 +1331,7 @@ class ACPFrontendEditorV2:
                     logger.info(f"[ACPX-V2] Elapsed time: {elapsed:.1f}s")
 
                     print("=" * 80, flush=True)
-                    print("✅ CLAUDE CODE AGENT - COMPLETED", flush=True)
+                    print("✅ CLAUDE CODE AGENT - BACKGROUND COMPLETED", flush=True)
                     print(f"   Return code: {return_code}", flush=True)
                     print(f"   Total chunks: {chunk_count}", flush=True)
                     print(f"   Elapsed time: {elapsed:.1f}s", flush=True)
@@ -1370,6 +1368,16 @@ class ACPFrontendEditorV2:
                     "completed": True
                 }
 
+        def _background_thread_target():
+            """Entry point for daemon thread — creates its own event loop."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(run_query_in_own_loop())
+            finally:
+                loop.close()
+                logger.info(f"[ACPX-V2] Background thread event loop closed")
+
         logger.info(f"[ACPX-V2] === CLAUDE CODE AGENT STARTING (BACKGROUND MODE) ===")
         logger.info(f"[ACPX-V2] Working directory: {self.frontend_src_path}")
         logger.info(f"[ACPX-V2] Prompt length: {len(prompt)} chars")
@@ -1382,48 +1390,28 @@ class ACPFrontendEditorV2:
         print(f"   Timeout: {CLAUDE_TIMEOUT}s", flush=True)
         print("=" * 80, flush=True)
 
-        # Create background task (shielded from cancellation).
-        # Store on self so the task survives after early return — Claude's
-        # subprocess keeps running and finishes AI index writes etc.
-        logger.info(f"[ACPX-V2] Creating background query task...")
-        self._claude_query_task = asyncio.create_task(run_background_query())
-        query_task = self._claude_query_task
+        # Launch Claude in a daemon thread with its own event loop.
+        # This survives the caller's asyncio.run() closing its loop.
+        logger.info(f"[ACPX-V2] Launching background daemon thread...")
+        bg_thread = threading.Thread(target=_background_thread_target, daemon=True, name="claude-bg-query")
+        bg_thread.start()
         
-        try:
-            # STRATEGY: Wait for AI index write signal.
-            # AI index is the last step in Claude's workflow — by the time
-            # it starts writing symbols.json / files.json, build + browser
-            # verify are done. Return early so the pipeline can proceed.
-            try:
-                await asyncio.wait_for(
-                    ai_index_event.wait(),
-                    timeout=CLAUDE_TIMEOUT,
-                )
-                # AI index detected — build & verify done, return early.
-                # query_task keeps running (stored on self) so Claude
-                # finishes AI index writes in the background.
-                logger.info(f"[ACPX-V2] 🟢 AI index writing — returning early (Claude finishes in background)")
-                print(f"🟢 CLAUDE-AGENT: AI index detected, returning to pipeline (Claude finishes in background)", flush=True)
-                return (0, '\n'.join(stdout_lines), "")
-            except asyncio.TimeoutError:
-                # AI index signal never fired — fall through to wait for full task
-                logger.warning(f"[ACPX-V2] AI index signal not received after {CLAUDE_TIMEOUT}s, waiting for full completion")
-
-            # Fallback: wait for the background task to complete normally
-            await asyncio.shield(query_task)
-            logger.info(f"[ACPX-V2] Background task completed normally")
-            
-        except asyncio.CancelledError:
-            # Caller disconnected - log but DON'T cancel the query
-            logger.warning(f"[ACPX-V2] Caller disconnected, query continues in background...")
-            # Wait for query to complete (shielded from this cancellation)
-            try:
-                await asyncio.shield(query_task)
-                logger.info(f"[ACPX-V2] Background query completed after caller disconnect")
-            except asyncio.CancelledError:
-                logger.info(f"[ACPX-V2] Shield cancelled, but query completed")
+        # Wait for AI index detection signal (threading.Event, cross-thread safe)
+        if ai_index_detected.wait(timeout=CLAUDE_TIMEOUT):
+            # AI index detected — build & verify done, return early.
+            # bg_thread keeps running in background (own event loop).
+            logger.info(f"[ACPX-V2] 🟢 AI index writing — returning early (Claude finishes in background)")
+            print(f"🟢 CLAUDE-AGENT: AI index detected, returning to pipeline (Claude finishes in background)", flush=True)
+            return (0, '\n'.join(stdout_lines), "")
         
-        # Return the result from the background task
+        # AI index signal not received within timeout — wait for thread to finish
+        logger.warning(f"[ACPX-V2] AI index signal not received after {CLAUDE_TIMEOUT}s, waiting for full completion")
+        bg_thread.join(timeout=CLAUDE_TIMEOUT)
+        
+        if bg_thread.is_alive():
+            logger.warning(f"[ACPX-V2] Background thread still running after join timeout")
+        
+        # Return the result from the background thread
         return (
             query_result["return_code"],
             query_result["stdout"],
