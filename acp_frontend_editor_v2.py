@@ -882,6 +882,9 @@ class ACPFrontendEditorV2:
         # Token usage from last query
         self._last_token_usage = None
 
+        # Background task for Claude agent (survives early return)
+        self._claude_query_task = None
+
     async def apply_changes(
         self,
         goal_description: str,
@@ -1241,21 +1244,15 @@ class ACPFrontendEditorV2:
         progress_mapper = ClaudeProgressMapper()
         query_result = {"return_code": 1, "stdout": "", "stderr": "", "completed": False}
 
-        # Early-return signal: fire when build is verified so the caller
-        # can proceed while Claude finishes AI index / browser checks.
-        build_verified_event = asyncio.Event()
+        # Early-return signal: fire when AI index files are being written
+        # (the last step in Claude's workflow). This means build + browser
+        # verify are done — only index JSON writes remain.
+        ai_index_event = asyncio.Event()
 
-        def _check_build_verified(text: str) -> bool:
-            """Return True if the text chunk indicates a successful build."""
+        def _check_ai_index_writing(text: str) -> bool:
+            """Return True if Claude is writing AI index files (last workflow step)."""
             lowered = text.lower()
-            # Strong signals: Vite/esbuild success output
-            if any(marker in lowered for marker in ("✓ built in", "built in", "0 errors", "build succeeded")):
-                return True
-            # npm build exit
-            if "npm run build" in lowered and ("exit code 0" in lowered or "0 errors" in lowered):
-                return True
-            # dist/ asset verification
-            if "dist/index.html" in lowered and ("200" in lowered or "verified" in lowered or "exists" in lowered):
+            if "ai_index" in lowered and any(ext in lowered for ext in ("symbols.json", "files.json", "summaries.json", "dependencies.json")):
                 return True
             return False
         
@@ -1268,11 +1265,11 @@ class ACPFrontendEditorV2:
             # Verbose logging for PM2
             logger.info(f"[ACPX-V2] on_text chunk #{chunk_count}: {text[:100]}{'...' if len(text) > 100 else ''}")
 
-            # Detect build success and fire early-return signal
-            if not build_verified_event.is_set() and _check_build_verified(text):
-                build_verified_event.set()
-                logger.info(f"[ACPX-V2] 🟢 BUILD VERIFIED — firing early-return signal (Claude continues in background)")
-                print(f"🟢 BUILD-VERIFIED: Build success detected — returning to caller, Claude continues in background", flush=True)
+            # Detect AI index write — last step, safe to return early
+            if not ai_index_event.is_set() and _check_ai_index_writing(text):
+                ai_index_event.set()
+                logger.info(f"[ACPX-V2] 🟢 AI INDEX DETECTED — firing early-return signal (build+verify done)")
+                print(f"🟢 AI-INDEX-DETECTED: Build & verify done, Claude writing index — returning to caller", flush=True)
             
             # Get friendly progress message from keyword mapper
             friendly = progress_mapper.get_friendly_message(text)
@@ -1383,29 +1380,32 @@ class ACPFrontendEditorV2:
         print(f"   Timeout: {CLAUDE_TIMEOUT}s", flush=True)
         print("=" * 80, flush=True)
 
-        # Create background task (shielded from cancellation)
+        # Create background task (shielded from cancellation).
+        # Store on self so the task survives after early return — Claude's
+        # subprocess keeps running and finishes AI index writes etc.
         logger.info(f"[ACPX-V2] Creating background query task...")
-        query_task = asyncio.create_task(run_background_query())
+        self._claude_query_task = asyncio.create_task(run_background_query())
+        query_task = self._claude_query_task
         
         try:
-            # STRATEGY: Wait for build-verified signal first.
-            # If build succeeds before the full Claude run finishes, return
-            # immediately so the pipeline can proceed. Claude keeps running
-            # in the background (AI index, browser checks, cleanup).
+            # STRATEGY: Wait for AI index write signal.
+            # AI index is the last step in Claude's workflow — by the time
+            # it starts writing symbols.json / files.json, build + browser
+            # verify are done. Return early so the pipeline can proceed.
             try:
                 await asyncio.wait_for(
-                    build_verified_event.wait(),
+                    ai_index_event.wait(),
                     timeout=CLAUDE_TIMEOUT,
                 )
-                # Build was verified — return early with success
-                logger.info(f"[ACPX-V2] 🟢 Build verified — returning early (Claude continues in background)")
-                print(f"🟢 CLAUDE-AGENT: Build verified, returning to pipeline (Claude continues in background)", flush=True)
-                # Don't cancel the task — let it finish AI index etc.
-                # Just return success immediately
+                # AI index detected — build & verify done, return early.
+                # query_task keeps running (stored on self) so Claude
+                # finishes AI index writes in the background.
+                logger.info(f"[ACPX-V2] 🟢 AI index writing — returning early (Claude finishes in background)")
+                print(f"🟢 CLAUDE-AGENT: AI index detected, returning to pipeline (Claude finishes in background)", flush=True)
                 return (0, '\n'.join(stdout_lines), "")
             except asyncio.TimeoutError:
-                # Build signal never fired — fall through to wait for full task
-                logger.warning(f"[ACPX-V2] Build-verified signal not received after {CLAUDE_TIMEOUT}s, waiting for full completion")
+                # AI index signal never fired — fall through to wait for full task
+                logger.warning(f"[ACPX-V2] AI index signal not received after {CLAUDE_TIMEOUT}s, waiting for full completion")
 
             # Fallback: wait for the background task to complete normally
             await asyncio.shield(query_task)
