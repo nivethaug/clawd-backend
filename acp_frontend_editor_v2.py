@@ -1007,15 +1007,31 @@ class ACPFrontendEditorV2:
                 # (wrapper-v2) continues the workflow via server-side state tracking.
                 if return_code != 0:
                     created_files = list(self.frontend_src_path.glob("**/*.tsx"))
+                    dist_index = self.frontend_path / "dist" / "index.html"
+                    has_build = dist_index.exists()
+
                     if return_code == 124:
                         issues.append(f"Timeout exceeded ({CLAUDE_TIMEOUT}s)")
-                        logger.warning(f"[CLAUDE-AGENT] ⚠️ Timeout ({CLAUDE_TIMEOUT}s) — {len(created_files)} files exist, continuing pipeline")
-                        print(f"⚠️ CLAUDE-AGENT-TIMEOUT: {len(created_files)} files exist, continuing pipeline (no rollback)", flush=True)
+                        if has_build:
+                            logger.warning(f"[CLAUDE-AGENT] ⚠️ Timeout ({CLAUDE_TIMEOUT}s) — build exists ({len(created_files)} .tsx files), continuing pipeline")
+                            print(f"⚠️ CLAUDE-AGENT-TIMEOUT: Build exists, {len(created_files)} files — continuing pipeline (partial_success)", flush=True)
+                            status = "partial_success"
+                        else:
+                            logger.error(f"[CLAUDE-AGENT] 🔴 Timeout ({CLAUDE_TIMEOUT}s) — NO build output, pipeline likely broken")
+                            print(f"🔴 CLAUDE-AGENT-TIMEOUT: No build output! {len(created_files)} .tsx files exist but dist/index.html missing", flush=True)
+                            issues.append("No build output (dist/index.html missing)")
+                            status = "partial_success"
                     else:
-                        issues.append(f"Claude Agent exited with code {return_code}")
-                        logger.warning(f"[CLAUDE-AGENT] ⚠️ Non-zero exit ({return_code}) — {len(created_files)} files exist, continuing pipeline")
-                        print(f"⚠️ CLAUDE-AGENT-ERROR: code {return_code}, {len(created_files)} files exist, continuing pipeline", flush=True)
-                    status = "partial_success"
+                        if has_build:
+                            issues.append(f"Claude Agent exited with code {return_code}")
+                            logger.warning(f"[CLAUDE-AGENT] ⚠️ Non-zero exit ({return_code}) — build exists, continuing pipeline")
+                            print(f"⚠️ CLAUDE-AGENT-ERROR: code {return_code}, build exists — continuing pipeline (partial_success)", flush=True)
+                            status = "partial_success"
+                        else:
+                            logger.error(f"[CLAUDE-AGENT] 🔴 Non-zero exit ({return_code}) — NO build output")
+                            print(f"🔴 CLAUDE-AGENT-ERROR: code {return_code}, no build output (dist/index.html missing)", flush=True)
+                            issues.append(f"Claude Agent exited with code {return_code}, no build output")
+                            status = "partial_success"
 
             except RuntimeError as e:
                 # Claude Agent execution exception - ROLLBACK
@@ -1230,25 +1246,18 @@ class ACPFrontendEditorV2:
             raise RuntimeError("ClaudeCodeAgent not available - check claude_code_agent.py import")
 
         import asyncio
-        import threading
         from datetime import datetime
         from acp_progress_mapper import ClaudeProgressMapper
 
-        # Shared state for background task
         stdout_lines = []
         stderr_lines = []
         chunk_count = 0
         query_start_time = datetime.now()
         progress_mapper = ClaudeProgressMapper()
-        query_result = {"return_code": 1, "stdout": "", "stderr": "", "completed": False}
-
-        # Threading event for AI index detection (cross-thread, survives event loop closure)
-        ai_index_detected = threading.Event()
 
         def _check_ai_index_writing(text: str) -> bool:
             """Return True if Claude is writing AI index files (last workflow step)."""
             lowered = text.lower()
-            # Claude says "Now update AI index files" or similar
             if "ai index" in lowered or "ai_index" in lowered:
                 return True
             return False
@@ -1262,11 +1271,10 @@ class ACPFrontendEditorV2:
             # Verbose logging for PM2
             logger.info(f"[ACPX-V2] on_text chunk #{chunk_count}: {text[:100]}{'...' if len(text) > 100 else ''}")
 
-            # Detect AI index write — last step, safe to return early
-            if not ai_index_detected.is_set() and _check_ai_index_writing(text):
-                ai_index_detected.set()
-                logger.info(f"[ACPX-V2] 🟢 AI INDEX DETECTED — firing early-return signal (build+verify done)")
-                print(f"🟢 AI-INDEX-DETECTED: Build & verify done, Claude writing index — returning to caller", flush=True)
+            # Detect AI index write — log milestone for monitoring
+            if _check_ai_index_writing(text):
+                logger.info(f"[ACPX-V2] 🟢 AI INDEX DETECTED — Claude writing index files")
+                print(f"🟢 AI-INDEX-DETECTED: Claude writing index files", flush=True)
             
             # Get friendly progress message from keyword mapper
             friendly = progress_mapper.get_friendly_message(text)
@@ -1295,128 +1303,58 @@ class ACPFrontendEditorV2:
             logger.info(f"[ACPX-V2] Phase progress ({elapsed:.0f}s): {friendly}")
             print(f"⏱️ [{elapsed:.0f}s] {friendly}", flush=True)
 
-        async def run_query_in_own_loop():
-            """Run the Claude query in this thread's own event loop.
-            
-            This function runs inside a daemon thread with its OWN asyncio event
-            loop. When _run_claude_agent() returns early and the caller's event
-            loop (from asyncio.run()) closes, this thread + loop keep running —
-            Claude's subprocess finishes AI index writes uninterrupted.
-            """
-            nonlocal query_result
-            
-            logger.info(f"[ACPX-V2] Background query thread starting (own event loop)...")
-            
-            try:
-                async with ClaudeCodeAgent(
-                    repo_path=str(self.frontend_src_path),
-                    on_text=on_text,
-                    on_progress=on_progress,
-                ) as agent:
-                    logger.info(f"[ACPX-V2] ClaudeCodeAgent created, calling query...")
-                    
-                    result = await agent.query(prompt, timeout=CLAUDE_TIMEOUT)
-
-                    self._last_token_usage = agent.last_token_usage
-                    if self._last_token_usage:
-                        cost = self._last_token_usage.get('cost_usd') or 0
-                        logger.info(f"[ACPX-V2] Token usage: input={self._last_token_usage.get('input_tokens')}, output={self._last_token_usage.get('output_tokens')}, cost=${cost:.4f}")
-
-                    return_code = 0 if result is not None else 1
-                    elapsed = (datetime.now() - query_start_time).total_seconds()
-
-                    logger.info(f"[ACPX-V2] === BACKGROUND QUERY COMPLETED ===")
-                    logger.info(f"[ACPX-V2] Return code: {return_code}")
-                    logger.info(f"[ACPX-V2] Total chunks: {chunk_count}")
-                    logger.info(f"[ACPX-V2] Elapsed time: {elapsed:.1f}s")
-
-                    print("=" * 80, flush=True)
-                    print("✅ CLAUDE CODE AGENT - BACKGROUND COMPLETED", flush=True)
-                    print(f"   Return code: {return_code}", flush=True)
-                    print(f"   Total chunks: {chunk_count}", flush=True)
-                    print(f"   Elapsed time: {elapsed:.1f}s", flush=True)
-                    print("=" * 80, flush=True)
-
-                    query_result = {
-                        "return_code": return_code,
-                        "stdout": '\n'.join(stdout_lines),
-                        "stderr": '\n'.join(stderr_lines),
-                        "completed": True
-                    }
-
-            except asyncio.TimeoutError:
-                elapsed = (datetime.now() - query_start_time).total_seconds()
-                logger.error(f"[ACPX-V2] BACKGROUND TIMEOUT after {CLAUDE_TIMEOUT}s")
-                print(f"🔴 CLAUDE-AGENT-TIMEOUT: Exceeded {CLAUDE_TIMEOUT}s", flush=True)
-                query_result = {
-                    "return_code": 124,
-                    "stdout": '\n'.join(stdout_lines),
-                    "stderr": f"Timeout after {CLAUDE_TIMEOUT}s",
-                    "completed": True
-                }
-
-            except Exception as e:
-                elapsed = (datetime.now() - query_start_time).total_seconds()
-                logger.error(f"[ACPX-V2] BACKGROUND ERROR: {type(e).__name__}: {str(e)}")
-                print(f"🔴 CLAUDE-AGENT-ERROR: {type(e).__name__}: {str(e)}", flush=True)
-                import traceback
-                logger.error(f"[ACPX-V2] Traceback: {traceback.format_exc()}")
-                query_result = {
-                    "return_code": 1,
-                    "stdout": '\n'.join(stdout_lines),
-                    "stderr": str(e),
-                    "completed": True
-                }
-
-        def _background_thread_target():
-            """Entry point for daemon thread — creates its own event loop."""
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(run_query_in_own_loop())
-            finally:
-                loop.close()
-                logger.info(f"[ACPX-V2] Background thread event loop closed")
-
-        logger.info(f"[ACPX-V2] === CLAUDE CODE AGENT STARTING (BACKGROUND MODE) ===")
+        logger.info(f"[ACPX-V2] === CLAUDE CODE AGENT STARTING ===")
         logger.info(f"[ACPX-V2] Working directory: {self.frontend_src_path}")
         logger.info(f"[ACPX-V2] Prompt length: {len(prompt)} chars")
         logger.info(f"[ACPX-V2] Timeout: {CLAUDE_TIMEOUT}s")
 
         print("=" * 80, flush=True)
-        print("🤖 CLAUDE CODE AGENT - STARTING (BACKGROUND MODE)", flush=True)
+        print("🤖 CLAUDE CODE AGENT - STARTING", flush=True)
         print(f"   Working directory: {self.frontend_src_path}", flush=True)
         print(f"   Prompt length: {len(prompt)} chars", flush=True)
         print(f"   Timeout: {CLAUDE_TIMEOUT}s", flush=True)
         print("=" * 80, flush=True)
 
-        # Launch Claude in a daemon thread with its own event loop.
-        # This survives the caller's asyncio.run() closing its loop.
-        logger.info(f"[ACPX-V2] Launching background daemon thread...")
-        bg_thread = threading.Thread(target=_background_thread_target, daemon=True, name="claude-bg-query")
-        bg_thread.start()
-        
-        # Wait for AI index detection signal (threading.Event, cross-thread safe)
-        if ai_index_detected.wait(timeout=CLAUDE_TIMEOUT):
-            # AI index detected — build & verify done, return early.
-            # bg_thread keeps running in background (own event loop).
-            logger.info(f"[ACPX-V2] 🟢 AI index writing — returning early (Claude finishes in background)")
-            print(f"🟢 CLAUDE-AGENT: AI index detected, returning to pipeline (Claude finishes in background)", flush=True)
-            return (0, '\n'.join(stdout_lines), "")
-        
-        # AI index signal not received within timeout — wait for thread to finish
-        logger.warning(f"[ACPX-V2] AI index signal not received after {CLAUDE_TIMEOUT}s, waiting for full completion")
-        bg_thread.join(timeout=CLAUDE_TIMEOUT)
-        
-        if bg_thread.is_alive():
-            logger.warning(f"[ACPX-V2] Background thread still running after join timeout")
-        
-        # Return the result from the background thread
-        return (
-            query_result["return_code"],
-            query_result["stdout"],
-            query_result["stderr"]
-        )
+        # Run Claude directly — no background thread, no early return.
+        # The wrapper prompt enforces: after AI index write, STOP.
+        # No rebuild, no reinstall, no re-serve.
+        try:
+            async with ClaudeCodeAgent(
+                repo_path=str(self.frontend_src_path),
+                on_text=on_text,
+                on_progress=on_progress,
+            ) as agent:
+                logger.info(f"[ACPX-V2] ClaudeCodeAgent created, calling query...")
+                
+                result = await agent.query(prompt, timeout=CLAUDE_TIMEOUT)
+
+                self._last_token_usage = agent.last_token_usage
+                if self._last_token_usage:
+                    cost = self._last_token_usage.get('cost_usd') or 0
+                    logger.info(f"[ACPX-V2] Token usage: input={self._last_token_usage.get('input_tokens')}, output={self._last_token_usage.get('output_tokens')}, cost=${cost:.4f}")
+
+                return_code = 0 if result is not None else 1
+                elapsed = (datetime.now() - query_start_time).total_seconds()
+
+                logger.info(f"[ACPX-V2] === QUERY COMPLETED ===")
+                logger.info(f"[ACPX-V2] Return code: {return_code}")
+                logger.info(f"[ACPX-V2] Total chunks: {chunk_count}")
+                logger.info(f"[ACPX-V2] Elapsed time: {elapsed:.1f}s")
+
+                print("=" * 80, flush=True)
+                print("✅ CLAUDE CODE AGENT - COMPLETED", flush=True)
+                print(f"   Return code: {return_code}", flush=True)
+                print(f"   Total chunks: {chunk_count}", flush=True)
+                print(f"   Elapsed time: {elapsed:.1f}s", flush=True)
+                print("=" * 80, flush=True)
+
+                return (return_code, '\n'.join(stdout_lines), '\n'.join(stderr_lines))
+
+        except asyncio.TimeoutError:
+            elapsed = (datetime.now() - query_start_time).total_seconds()
+            logger.error(f"[ACPX-V2] === TIMEOUT after {CLAUDE_TIMEOUT}s ===")
+            print(f"🔴 CLAUDE-AGENT-TIMEOUT: Exceeded {CLAUDE_TIMEOUT}s ({elapsed:.1f}s elapsed, {chunk_count} chunks)", flush=True)
+            return (124, '\n'.join(stdout_lines), f"Timeout after {CLAUDE_TIMEOUT}s")
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
@@ -1513,6 +1451,7 @@ Wrapper compatibility: if required page files already exist as one-line scaffold
 ## CONSTRAINTS
 
 **Never do:**
+- Run any commands after AI index files are updated (Step 8 = hard stop)
 - Install new npm packages or modify `package.json`
 - Run `npm install`, `npm add`, or `npm update`
 - Modify files in `src/components/ui/` (use them, don't change them)
@@ -1859,6 +1798,24 @@ After a successful build, update all four AI index files:
 - **`agent/ai_index/files.json`** — add new file entries with line count and purpose; update routes array in App.tsx entry
 - **`agent/ai_index/dependencies.json`** — add new import relationships
 - **`agent/ai_index/summaries.json`** — add brief description for each new file
+
+---
+
+## ⛔ STEP 9 — HARD STOP
+
+After updating AI index files you are DONE. **STOP HERE.**
+
+**NEVER do ANY of the following after Step 8:**
+- ❌ Do NOT run `npm run build` again
+- ❌ Do NOT run `npm install`, `npm add`, or any package command
+- ❌ Do NOT run `npx serve` or start any server
+- ❌ Do NOT re-read, re-edit, or re-write any source file
+- ❌ Do NOT run any bash commands at all
+- ❌ Do NOT open any browser or devtools
+- ❌ Do NOT touch node_modules, dist/, or package.json
+
+The pipeline will handle cleanup (stopping servers, deleting node_modules, deploying dist/).
+Your job is finished after the AI index files are written. Stop immediately.
 
 ---
 
