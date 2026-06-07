@@ -1252,7 +1252,8 @@ class ACPFrontendEditorV2:
         def _check_ai_index_writing(text: str) -> bool:
             """Return True if Claude is writing AI index files (last workflow step)."""
             lowered = text.lower()
-            if "ai_index" in lowered and any(ext in lowered for ext in ("symbols.json", "files.json", "summaries.json", "dependencies.json")):
+            # Claude says "Now update AI index files" or similar
+            if "ai index" in lowered or "ai_index" in lowered:
                 return True
             return False
         
@@ -1319,7 +1320,8 @@ class ACPFrontendEditorV2:
                     # Capture token usage from the agent
                     self._last_token_usage = agent.last_token_usage
                     if self._last_token_usage:
-                        logger.info(f"[ACPX-V2] Token usage: input={self._last_token_usage.get('input_tokens')}, output={self._last_token_usage.get('output_tokens')}, cost=${self._last_token_usage.get('cost_usd', 0):.4f}")
+                        cost = self._last_token_usage.get('cost_usd') or 0
+                        logger.info(f"[ACPX-V2] Token usage: input={self._last_token_usage.get('input_tokens')}, output={self._last_token_usage.get('output_tokens')}, cost=${cost:.4f}")
 
                     # Determine return code based on result
                     return_code = 0 if result is not None else 1
