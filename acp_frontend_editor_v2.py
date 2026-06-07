@@ -999,33 +999,23 @@ class ACPFrontendEditorV2:
                 print("=" * 80, flush=True)
                 
                 # =============================================
-                # PARTIAL COMMIT: Timeout/error handling (NO ROLLBACK if files exist)
+                # PARTIAL COMMIT: Timeout/error handling (NEVER rollback — always continue)
                 # =============================================
                 
                 # Handle timeout (return code 124) or error (non-zero return code)
+                # Policy: never rollback on timeout. The infrastructure pipeline
+                # (wrapper-v2) continues the workflow via server-side state tracking.
                 if return_code != 0:
-                    # Check if any files were created
                     created_files = list(self.frontend_src_path.glob("**/*.tsx"))
-                    if created_files:
-                        if return_code == 124:
-                            issues.append(f"Timeout exceeded ({CLAUDE_TIMEOUT}s)")
-                            logger.warning(f"[CLAUDE-AGENT] ⚠️ Timeout ({CLAUDE_TIMEOUT}s) — keeping {len(created_files)} generated files")
-                            print(f"⚠️ CLAUDE-AGENT-TIMEOUT: Keeping {len(created_files)} generated files (partial success)", flush=True)
-                        else:
-                            issues.append(f"Claude Agent exited with code {return_code}")
-                            logger.warning(f"[CLAUDE-AGENT] ⚠️ Non-zero exit ({return_code}) — keeping {len(created_files)} generated files")
-                            print(f"⚠️ CLAUDE-AGENT-ERROR: Keeping {len(created_files)} generated files (partial success)", flush=True)
-                        status = "partial_success"
+                    if return_code == 124:
+                        issues.append(f"Timeout exceeded ({CLAUDE_TIMEOUT}s)")
+                        logger.warning(f"[CLAUDE-AGENT] ⚠️ Timeout ({CLAUDE_TIMEOUT}s) — {len(created_files)} files exist, continuing pipeline")
+                        print(f"⚠️ CLAUDE-AGENT-TIMEOUT: {len(created_files)} files exist, continuing pipeline (no rollback)", flush=True)
                     else:
-                        logger.error(f"[CLAUDE-AGENT] 🔴 Execution failed (code {return_code}) and NO files created — rollback")
-                        print(f"🔴 CLAUDE-AGENT-FAILED: No files created, rolling back", flush=True)
-                        self.snapshot_manager.rollback_and_cleanup()
-                        return {
-                            "status": "failed",
-                            "success": False,
-                            "message": f"Claude Agent failed (code {return_code}): {stderr_output}",
-                            "rollback": True
-                        }
+                        issues.append(f"Claude Agent exited with code {return_code}")
+                        logger.warning(f"[CLAUDE-AGENT] ⚠️ Non-zero exit ({return_code}) — {len(created_files)} files exist, continuing pipeline")
+                        print(f"⚠️ CLAUDE-AGENT-ERROR: code {return_code}, {len(created_files)} files exist, continuing pipeline", flush=True)
+                    status = "partial_success"
 
             except RuntimeError as e:
                 # Claude Agent execution exception - ROLLBACK
@@ -1250,6 +1240,24 @@ class ACPFrontendEditorV2:
         query_start_time = datetime.now()
         progress_mapper = ClaudeProgressMapper()
         query_result = {"return_code": 1, "stdout": "", "stderr": "", "completed": False}
+
+        # Early-return signal: fire when build is verified so the caller
+        # can proceed while Claude finishes AI index / browser checks.
+        build_verified_event = asyncio.Event()
+
+        def _check_build_verified(text: str) -> bool:
+            """Return True if the text chunk indicates a successful build."""
+            lowered = text.lower()
+            # Strong signals: Vite/esbuild success output
+            if any(marker in lowered for marker in ("✓ built in", "built in", "0 errors", "build succeeded")):
+                return True
+            # npm build exit
+            if "npm run build" in lowered and ("exit code 0" in lowered or "0 errors" in lowered):
+                return True
+            # dist/ asset verification
+            if "dist/index.html" in lowered and ("200" in lowered or "verified" in lowered or "exists" in lowered):
+                return True
+            return False
         
         def on_text(text: str) -> None:
             """Callback for streaming text output (persisted to DB)."""
@@ -1259,6 +1267,12 @@ class ACPFrontendEditorV2:
             
             # Verbose logging for PM2
             logger.info(f"[ACPX-V2] on_text chunk #{chunk_count}: {text[:100]}{'...' if len(text) > 100 else ''}")
+
+            # Detect build success and fire early-return signal
+            if not build_verified_event.is_set() and _check_build_verified(text):
+                build_verified_event.set()
+                logger.info(f"[ACPX-V2] 🟢 BUILD VERIFIED — firing early-return signal (Claude continues in background)")
+                print(f"🟢 BUILD-VERIFIED: Build success detected — returning to caller, Claude continues in background", flush=True)
             
             # Get friendly progress message from keyword mapper
             friendly = progress_mapper.get_friendly_message(text)
@@ -1374,8 +1388,26 @@ class ACPFrontendEditorV2:
         query_task = asyncio.create_task(run_background_query())
         
         try:
-            # Wait for the background task to complete
-            # Using shield to protect from cancellation
+            # STRATEGY: Wait for build-verified signal first.
+            # If build succeeds before the full Claude run finishes, return
+            # immediately so the pipeline can proceed. Claude keeps running
+            # in the background (AI index, browser checks, cleanup).
+            try:
+                await asyncio.wait_for(
+                    build_verified_event.wait(),
+                    timeout=CLAUDE_TIMEOUT,
+                )
+                # Build was verified — return early with success
+                logger.info(f"[ACPX-V2] 🟢 Build verified — returning early (Claude continues in background)")
+                print(f"🟢 CLAUDE-AGENT: Build verified, returning to pipeline (Claude continues in background)", flush=True)
+                # Don't cancel the task — let it finish AI index etc.
+                # Just return success immediately
+                return (0, '\n'.join(stdout_lines), "")
+            except asyncio.TimeoutError:
+                # Build signal never fired — fall through to wait for full task
+                logger.warning(f"[ACPX-V2] Build-verified signal not received after {CLAUDE_TIMEOUT}s, waiting for full completion")
+
+            # Fallback: wait for the background task to complete normally
             await asyncio.shield(query_task)
             logger.info(f"[ACPX-V2] Background task completed normally")
             
