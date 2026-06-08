@@ -960,12 +960,15 @@ class ACPFrontendEditorV2:
                 hashes_before = {}
                 issues.append(f"Pre-execution snapshot failed: {e}")
 
-            # Step 4: Scaffold pages from manifest (Phase 5 - NEW)
-            logger.info(f"[CLAUDE-AGENT] Step 4: Scaffolding pages from manifest...")
-            scaffold_result = self.manifest_manager.scaffold_pages(required_pages, create_placeholder=True)
-            if not scaffold_result:
-                issues.append("Some pages failed to scaffold")
-                logger.warning(f"[CLAUDE-AGENT] ⚠️ Some pages failed to scaffold, continuing...")
+            # Step 4: Write manifest only — do NOT create stub files on disk.
+            # Stub files cause Claude Code's Read-before-Write check to reject
+            # Write calls (files that exist but were never Read in a real turn).
+            # When files don't exist → Write is allowed directly → 4/4 success.
+            logger.info(f"[CLAUDE-AGENT] Step 4: Writing page manifest (no stub files)...")
+            manifest_result = self.manifest_manager.write_manifest(required_pages)
+            if not manifest_result:
+                issues.append("Failed to write page manifest")
+                logger.warning(f"[CLAUDE-AGENT] ⚠️ Manifest write failed, continuing...")
 
             # Step 5: Build prompt using manifest pages
             logger.info(f"[CLAUDE-AGENT] Step 5: Building prompt (using manifest pages)...")
