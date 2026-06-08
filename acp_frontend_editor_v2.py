@@ -1441,7 +1441,7 @@ mobile-only output.
 4. Integrate navigation into `Layout.tsx`
 5. Run `npm run build` only after router validation passes
 6. Serve dist: `npx serve -s dist -l 3004`
-7. Quick browser check — open localhost, run JS eval, check console, verify not blank/starter
+7. Quick HTTP check — curl/Node.js verify status 200, not starter scaffold, kill server
 8. Update AI index files (symbols, files, dependencies, summaries)
 
 Wrapper compatibility: if required page files already exist as one-line scaffolds, overwrite all non-Welcome required page files with complete implementations first. Do not edit `src/pages/Welcome.tsx`.
@@ -1700,95 +1700,32 @@ Note the port you end up using — you need it in the next step.
 
 ---
 
-## STEP 7 — BROWSER VERIFICATION WITH CHROME DEVTOOLS MCP
+## STEP 7 — QUICK HTTP VERIFICATION
 
-⛔ DO NOT use `mcp__chrome-devtools__take_screenshot` — use JS eval checks instead (faster, no image overhead).
+After serving, verify the app loads correctly using curl/Node.js (no browser or Chrome DevTools available).
 
-After serving, use Chrome DevTools MCP to do a quick check:
-
-**1. Open the app**
-```text
-navigate to: http://localhost:PORT/   ← use the actual port from Step 6
-```
-
-**2. Check console**
-- No React runtime errors
-- No failed imports
-
-**3. Run JavaScript eval checks (no screenshot/snapshot required)**
-Use DevTools MCP `evaluate_script` and verify:
-- Page has enough visible text content (not blank)
-- Required pages expose accessible names (`aria-label` where needed)
-- The page is not the starter scaffold (`DreamPilot Generated App` / `Start building your application`)
-- `/` renders the generated app, not `Welcome`
-
-Example checks:
-```javascript
-() => {{
-    const bodyText = (document.body?.innerText || "").trim();
-    const hasEnoughText = bodyText.length >= 260;
-    const requiredLabels = {required_page_labels!r};
-    const lowerText = bodyText.toLowerCase();
-    const starterMarkers = ['dreampilot generated app', 'start building your application'];
-    const genericPlaceholderHits = starterMarkers.filter((marker) => lowerText.includes(marker));
-    const missingRequiredLabels = requiredLabels.filter((label) => !lowerText.includes(String(label).toLowerCase()));
-    const navText = Array.from(document.querySelectorAll('nav, header, aside, [role="navigation"], a'))
-        .map((el) => el.textContent || el.getAttribute('aria-label') || '')
-        .join(' ')
-        .toLowerCase();
-    const missingNavLabels = requiredLabels.filter((label) => !navText.includes(String(label).toLowerCase()));
-    const visibleInteractive = Array.from(document.querySelectorAll('button, a, [role="button"], input, textarea, select'))
-        .filter((el) => {{
-            const rect = el.getBoundingClientRect();
-            return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
-        }})
-        .length;
-    const mainRect = (document.querySelector('main') || document.getElementById('root'))?.getBoundingClientRect();
-    const primaryContentStartsInViewport = !!mainRect && mainRect.top < window.innerHeight * 0.85 && mainRect.bottom > 120;
-
-    const unlabeledIconButtons = Array.from(document.querySelectorAll('button'))
-        .filter((btn) => {{
-            const hasLabel = btn.hasAttribute('aria-label') || btn.textContent.trim().length > 0;
-            const hasIconOnly = btn.querySelector('svg') && btn.textContent.trim().length === 0;
-            return hasIconOnly && !hasLabel;
-        }})
-        .length;
-
-    const unlabeledInputs = Array.from(document.querySelectorAll('input, textarea, select'))
-        .filter((el) => {{
-            const hasAria = el.hasAttribute('aria-label');
-            const id = el.getAttribute('id');
-            const hasLabel = id ? !!document.querySelector(`label[for="${{id}}"]`) : false;
-            return !hasAria && !hasLabel;
-        }})
-        .length;
-
-    return {{
-        hasEnoughText,
-        textLength: bodyText.length,
-        missingRequiredLabels,
-        missingNavLabels,
-        visibleInteractive,
-        primaryContentStartsInViewport,
-        genericPlaceholderHits,
-        unlabeledIconButtons,
-        unlabeledInputs,
-        pass: hasEnoughText
-            && genericPlaceholderHits.length === 0
-            && missingRequiredLabels.length === 0
-            && missingNavLabels.length === 0
-            && visibleInteractive >= Math.max(requiredLabels.length ? 4 : 1, requiredLabels.length)
-            && primaryContentStartsInViewport
-            && unlabeledIconButtons === 0
-            && unlabeledInputs === 0,
-    }};
-}}
-```
-
-**4. Close browser and kill server:**
+**1. Verify the served page is not the starter scaffold:**
 ```bash
-kill $(lsof -t -i:PORT)
+node -e "
+const http = require('http');
+http.get('http://localhost:' + process.argv[1] + '/', (res) => {{
+  let d = '';
+  res.on('data', c => d += c);
+  res.on('end', () => {{
+    const ok = res.statusCode === 200 && d.includes('root') && d.includes('script');
+    const starter = d.includes('DreamPilot Generated App') || d.includes('Start building your application');
+    console.log('Status:', res.statusCode, '| Has root+JS:', ok, '| Is starter:', starter, '| Body length:', d.length);
+  }});
+}});
+" $PORT
 ```
+
+**2. Kill the server:**
+```bash
+kill $(lsof -t -i:$PORT)
+```
+
+That is all. Do NOT attempt to open a browser, use Chrome DevTools, Puppeteer, or any browser automation tool. These are not available.
 ---
 
 ## STEP 8 — UPDATE AI INDEX
@@ -1832,7 +1769,7 @@ Your job is finished after the AI index files are written. Stop immediately.
       {required_pages_str}
 - [ ] All pages follow a11y rules (semantic `<button>`, `aria-label` on icon buttons and inputs, `role="dialog"` on modals, `aria-hidden="true"` on decorative SVGs, `aria-live` on dynamic content)
 - [ ] `npm run build` succeeds with zero errors
-- [ ] Browser check: console clean, JS eval confirms enough page text, no starter scaffold, required labels, and aria-label coverage
+- [ ] HTTP verification: status 200, has JS bundle, not starter scaffold, server killed
 - [ ] Server stopped (`kill $(lsof -t -i:PORT)`)
 - [ ] AI index files updated (symbols, files, dependencies, summaries)
 """
