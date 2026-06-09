@@ -916,139 +916,221 @@ After approval:
 
 ---
  
-## 🧪 TESTING IS NOT OPTIONAL - IT'S MANDATORY
+## 🧪 3-TIER VERIFICATION SYSTEM (MANDATORY)
  
-**BEFORE you say "changes are ready" or "it works":**
+**BEFORE you say "changes are ready" — run the appropriate tier below.**
+All tiers use `evaluate_script` for maximum token efficiency.
  
-### Step 1: Open Live Site (MANDATORY)
-- Use `mcp__chrome-devtools__new_page` with `https://{self.frontend_domain}`
-- NEVER skip this step
-- NEVER assume "it should work" without opening it
+### Tier Selection
  
-### Step 2: Snapshot (NOT Screenshot)
-- Use `mcp__chrome-devtools__take_snapshot` (text-based, ~500 chars)
-- ❌ NEVER take screenshots for initial verification
-- ✅ Snapshots are token-efficient and show page structure
-
-### Step 3: Check Console (MANDATORY)
-- Run `mcp__chrome-devtools__list_console_messages` with `types: ["error"], pageSize: 200`
-- Look for: CORS errors, 500 errors, undefined variables
-- Only check errors (ignore warnings/info to save tokens)
-- If ANY errors exist → FIX THEM before saying "ready"
-
-### Step 4: Check Network (MANDATORY)
-- Run `mcp__chrome-devtools__list_network_requests` with `resourceTypes: ["fetch", "xhr"], pageSize: 200`
-- Look for: Failed API calls, 401/403/500 errors
-- Skip static resources (images, fonts, CSS) to save tokens
-- If authentication involved → verify login API returns 200
-
-### Step 5: Actually Test the Feature (MANDATORY)
-- If login changed → Actually log in with test credentials
-- If redirect changed → Follow the flow and verify destination
-- If form changed → Submit the form and verify it works
-- Use snapshots for verification, only screenshot if visual proof required
-
-### Step 6: Screenshot ONLY If Needed
-**When to screenshot:**
-- User asks for visual proof
-- UI changes that can't be verified via snapshot
-- Documenting final result
-
-**Screenshot Format (Chrome DevTools MCP):**
-```javascript
-// WebP 75% = ~5KB (BEST - 60-70% smaller than PNG)
-await page.screenshot({{ type: 'webp', quality: 75, path: 'screenshot.webp' }});
-
-// Alternative: WebP 20% = ~3KB (low quality, only if needed)
-await page.screenshot({{ type: 'webp', quality: 20, path: 'screenshot.webp' }});
+| Edit Type | Tier | Tool Calls |
+|-----------|------|------------|
+| Button text, color, label | 1 Quick | 3 |
+| Single component change | 1 Quick | 3 |
+| New page, navigation, layout | 2 Health | 3 |
+| API endpoint, data fetch, list/table | 3 API | 3-4 |
+| Auth flow, login, form submit | 3 API | 3-4 |
+| When in doubt | 2 Health | 3 |
+ 
+---
+ 
+### 🟢 Tier 1 — QUICK VERIFY (3 tool calls, ~30s)
+**Use when**: Button text, color, label, single component change
+ 
 ```
-
-### Step 7: Clean Up (MANDATORY)
-- Run `mcp__chrome-devtools__close_page`
-- NEVER leave browser pages open
-
+Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/{page}")
+ 
+Step 2: mcp__chrome-devtools__evaluate_script:
+  const el = document.querySelector('[data-testid="TARGET"]');
+  return JSON.stringify({{
+    found: !!el,
+    text: el?.textContent?.trim(),
+    tag: el?.tagName,
+    total_testids: document.querySelectorAll('[data-testid]').length
+  }});
+ 
+Step 3: mcp__chrome-devtools__close_page
+```
+**Pass**: `found === true`, `text` has content.
+ 
+---
+ 
+### 🟡 Tier 2 — HEALTH VERIFY (3 tool calls, ~45s)
+**Use when**: New page, navigation, layout change, structural edits
+ 
+```
+Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/{page}")
+ 
+Step 2: mcp__chrome-devtools__evaluate_script:
+  return JSON.stringify({{
+    title: document.title,
+    url: window.location.href,
+    headings: Array.from(document.querySelectorAll('h1,h2,h3')).map(h => h.textContent),
+    testIds: Array.from(document.querySelectorAll('[data-testid]')).map(e => e.getAttribute('data-testid')),
+    hasMainLandmark: !!document.querySelector('main'),
+    bodyLength: document.body.innerText.length
+  }});
+ 
+Step 3: mcp__chrome-devtools__close_page
+```
+**Pass**: `title` set, `headings` has items, `bodyLength > 100`, `testIds` includes expected ids.
+ 
+---
+ 
+### 🔴 Tier 3 — API INTEGRATION VERIFY (3-4 tool calls, ~60s)
+**Use when**: API integration, data binding, auth flow, form submit, UI↔backend connection
+ 
+```
+Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/{page}")
+ 
+Step 2: mcp__chrome-devtools__evaluate_script — intercept fetch, trigger action, wait for API + render:
+  const captured = [];
+  const origFetch = window.fetch;
+  window.fetch = async (...args) => {{
+    const res = await origFetch(...args);
+    const clone = res.clone();
+    clone.json().then(data => captured.push({{url: args[0], status: res.status, data}}))
+      .catch(() => {{}});
+    return res;
+  }};
+  document.querySelector('[data-testid="TARGET_TRIGGER"]')?.click();
+  await new Promise(r => setTimeout(r, 3000));
+  const apiData = captured.find(c => c.url.includes('/api/'));
+  const uiElements = document.querySelectorAll('[data-testid*="TARGET_SECTION"]');
+  return JSON.stringify({{
+    api: {{
+      called: !!apiData,
+      url: apiData?.url,
+      status: apiData?.status,
+      hasData: apiData?.data ? Object.keys(apiData.data).length > 0 : false,
+      sampleKeys: apiData?.data ? Object.keys(apiData.data).slice(0, 5) : []
+    }},
+    ui: {{
+      rendered: uiElements.length > 0,
+      count: uiElements.length,
+      texts: Array.from(uiElements).slice(0, 5).map(e => ({{
+        testid: e.getAttribute('data-testid'),
+        text: e.textContent?.substring(0, 80)
+      }}))
+    }},
+    binding: apiData && uiElements.length > 0 ? "PASS" : "FAIL"
+  }});
+ 
+Step 3: mcp__chrome-devtools__close_page
+```
+**Pass**: `api.called === true`, `api.status === 200`, `api.hasData === true`, `ui.rendered === true`, `binding === "PASS"`.
+ 
+---
+ 
+### 🔐 Test Credentials (auto-managed)
+ 
+**For any page requiring authentication:**
+ 
+1. **First time** (no `backend/user.json`): Create test user via signup API, then Write `backend/user.json`:
+   ```json
+   {{
+     "email": "testbot_{self.project_id}@dreambigwithai.com",
+     "password": "TestBot_<random_8chars>!",
+     "created_at": "<ISO timestamp>"
+   }}
+   ```
+ 
+2. **Every subsequent edit**: Read `backend/user.json` first, use credentials in evaluate_script:
+   ```javascript
+   const creds = {{email: "...", password: "..."}}; // from user.json
+   const res = await fetch('/api/auth/login', {{
+     method: 'POST',
+     headers: {{'Content-Type': 'application/json'}},
+     body: JSON.stringify(creds)
+   }});
+   const {{token}} = await res.json();
+   localStorage.setItem('auth_token', token);
+   ```
+ 
+3. **Rules:**
+   - If `backend/user.json` exists → Read it and use those credentials for ALL tests
+   - If `backend/user.json` does NOT exist → Create test user via signup API, save creds, then use for all tests
+   - NEVER ask the user for test credentials — create them automatically
+   - NEVER hardcode credentials — always read from `backend/user.json`
+   - Add `backend/user.json` to `.gitignore` if not already there
+ 
+---
+ 
 ## ⛔⛔⛔ FORBIDDEN PATTERNS ⛔⛔⛔
-
+ 
 ❌ NEVER say: "The code looks correct so it should work"
 ❌ NEVER say: "I've published the changes" without testing first
 ❌ NEVER say: "Changes are ready" without Chrome DevTools verification
 ❌ NEVER rely on code review alone — ACTUAL testing is required
 ❌ NEVER test on localhost — always test on the LIVE site only
 ❌ NEVER take PNG screenshots (~48KB, 12,000 tokens)
-❌ NEVER take screenshots for initial verification — use snapshots
-
+❌ NEVER take screenshots for initial verification — use evaluate_script
+ 
 ## ✅ REQUIRED WORKFLOW (NO EXCEPTIONS)
-
+ 
 1. Make code changes
-2. Update agent folder
+2. Update agent folder (see checklist below)
 3. Run buildpublish.py
-4. OPEN Chrome DevTools on live site
-5. SNAPSHOT page (not screenshot)
-6. CHECK console errors only
-7. CHECK network failures only
-8. ACTUALLY test the feature
-9. SCREENSHOT only if needed (WebP 75%)
-10. CLOSE the page
-11. THEN say "changes are ready"
+4. Run the appropriate **verification tier** (1, 2, or 3)
+5. CLOSE the page
+6. THEN say "changes are ready"
 
 **No shortcuts. No assumptions. Actual verification only. Token-efficient always.**
 
 ---
 
-## 🌐 CHROME DEVTOOLS MCP - 7 CONSOLIDATED RULES
+## 🌐 CHROME DEVTOOLS MCP - REFERENCE
 
 **ALWAYS test on LIVE site - never localhost.**
 
-### 1. USE WEBP 75% (MANDATORY)
+### Primary Method: evaluate_script (Tier System)
+All verification uses `evaluate_script` — see 3-Tier System above.
+1 call replaces snapshot + console + network (saves ~80% tokens).
+
+### Screenshot Rules (ONLY for visual proof)
 ```javascript
-take_screenshot(format: "webp", quality: 75)
+take_screenshot(format: "webp", quality: 75)  // WebP 75% = ~5KB. NEVER use PNG.
 ```
-Saves 60-70% tokens vs PNG. Never use PNG for routine testing.
 
-### 2. ALWAYS FILTER RESULTS
+### Fallback: snapshot + console + network
+If `evaluate_script` fails, fall back to:
 ```javascript
-// Console - errors only
-list_console_messages(types: ["error"], pageSize: 200)
-
-// Network - API calls only
-list_network_requests(resourceTypes: ["fetch", "xhr"], pageSize: 200)
+take_snapshot()  // ~500 chars - page structure
+list_console_messages(types: ["error"], pageSize: 200)  // JS errors only
+list_network_requests(resourceTypes: ["fetch", "xhr"], pageSize: 200)  // API failures
 ```
-Never query all messages/requests (10k+ tokens wasted).
 
-### 3. VIEWPORT ONLY (DEFAULT)
-```javascript
-take_screenshot(format: "webp", quality: 75)  // ~1,500 tokens
-```
-Full page screenshots cost 600k+ tokens. Use only when necessary.
-
-### 4. SNAPSHOT-FIRST APPROACH
-```javascript
-take_snapshot()  // ~500 chars - use for verification
-```
-Use snapshots for initial verification. Only screenshot if visual proof needed.
-
-### 5. TEST ACTUAL FEATURE
-Don't just check for errors. Click buttons, fill forms, verify redirects work.
-
-### 6. CLOSE PAGES (MANDATORY)
+### CLOSE PAGES (MANDATORY)
 ```javascript
 close_page(pageId: 0)
 ```
 If you open it, you MUST close it. No exceptions.
 
-### 7. LIVE SITE ONLY
+### LIVE SITE ONLY
 ```javascript
 new_page(url: "https://{self.frontend_domain}")
 ```
 NEVER use localhost, 127.0.0.1, or port-based URLs.
 
-### ⚡ QUICK HEALTH CHECK WORKFLOW
+### ⚡ QUICK HEALTH CHECK = Tier 2 (use from 3-Tier System above)
 ```javascript
 new_page(url: "https://{self.frontend_domain}")
-take_snapshot()  // Verify page loaded
-list_console_messages(types: ["error"], pageSize: 200)  // Check for JS errors
-list_network_requests(resourceTypes: ["fetch", "xhr"], pageSize: 200)  // Check API failures
-// Test the specific feature you changed
+evaluate_script:  // Tier 2 — returns title, headings, testIds, bodyLength
+  return JSON.stringify({{
+    title: document.title, url: window.location.href,
+    headings: Array.from(document.querySelectorAll('h1,h2,h3')).map(h => h.textContent),
+    testIds: Array.from(document.querySelectorAll('[data-testid]')).map(e => e.getAttribute('data-testid')),
+    hasMainLandmark: !!document.querySelector('main'), bodyLength: document.body.innerText.length
+  }});
+close_page(pageId: 0)
+```
+
+**Fallback** (if `evaluate_script` fails): Use snapshot + console + network:
+```javascript
+new_page(url: "https://{self.frontend_domain}")
+take_snapshot()
+list_console_messages(types: ["error"], pageSize: 200)
+list_network_requests(resourceTypes: ["fetch", "xhr"], pageSize: 200)
 close_page(pageId: 0)
 ```
 
@@ -1108,13 +1190,12 @@ See Agent Folder Update Checklist at the bottom.
 ---
  
 ## 🧪 TESTING & QUALITY CHECK (MANDATORY)
- 
+
 ### Frontend Testing (React Changes)
 1. Update agent folder
 2. Run buildpublish.py
-3. Open `https://{self.frontend_domain}` via Chrome DevTools
-4. Run list_console_messages — verify no JavaScript errors
-5. Test the specific feature on the LIVE site only
+3. Run the appropriate **verification tier** (1, 2, or 3) via evaluate_script
+4. If evaluate_script fails, fallback to snapshot + console + network
  
 ### Backend Testing (Python/PostgreSQL Changes)
 1. Update agent folder
@@ -1126,9 +1207,8 @@ See Agent Folder Update Checklist at the bottom.
 ### Full Integration Testing
 1. Update both agent folders
 2. Publish both frontend and backend
-3. Test complete flow on LIVE site only
-4. Check console — no CORS errors, no 500s
-5. Verify data saves/retrieves correctly from PostgreSQL
+3. Run **Tier 3** (API Integration Verify) via evaluate_script
+4. Verify data saves/retrieves correctly from PostgreSQL
  
 **🚨 WARNING: Never assume code works without testing on the LIVE site!**
  
@@ -1308,7 +1388,7 @@ async def get_weather(lat: float, lon: float):
 5.  MAKE code changes
 6.  UPDATE agent/ai_index/*.json files (MANDATORY)
 7.  PUBLISH with buildpublish.py (auto-handles install + build + deploy)
-8.  ⭐ TEST on LIVE site via Chrome DevTools (snapshot-first, WebP screenshots only) ⭐
+8.  ⭐ TEST on LIVE site via Chrome DevTools (use appropriate Tier: 1/2/3) ⭐
 9.  STOP and ask user for approval
 10. AFTER approval: manager.commit_and_push("descriptive message")
 ```
@@ -1335,12 +1415,8 @@ Before sending ANY response to the user, mentally check every item:
 
 ### Live Testing Checklist
 - [ ] Did I open `https://{self.frontend_domain}` (NOT localhost)?
-- [ ] Did I use **snapshot** (NOT screenshot) for initial verification?
-- [ ] Did I run list_console_messages with `types: ["error"], pageSize: 200` only?
-- [ ] Did I run list_network_requests with `resourceTypes: ["fetch", "xhr"], pageSize: 200`?
-- [ ] Did I test the specific feature I changed?
-- [ ] Did I only screenshot if visual proof absolutely required?
-- [ ] If screenshot needed, did I use WebP 75% (~5KB)?
+- [ ] Did I run the appropriate **verification tier** (1, 2, or 3) via evaluate_script?
+- [ ] Did I verify the feature I changed works correctly?
 - [ ] Did I call close_page when done?
  
 ### Agent Folder Checklist
@@ -1399,13 +1475,12 @@ Before sending ANY response to the user, mentally check every item:
 > **Code review = finding logic errors**
 > **Actual testing = finding everything else**
 > **We need BOTH. Every time.**
-> **Token efficiency = snapshot-first, WebP screenshots only when needed**
+> **Token efficiency = evaluate_script-first (1 call vs 3 calls)**
 
 **If you catch yourself saying "it should work" → STOP and go test it.**
 **If you catch yourself skipping Chrome DevTools → STOP and open it.**
 **If you catch yourself testing on localhost → STOP and use the live site.**
-**If you catch yourself taking PNG screenshots → STOP and use WebP 75%.**
-**If you catch yourself taking screenshots for initial verification → STOP and use snapshots.**
+**If you catch yourself using snapshot+console+network → STOP and use evaluate_script (Tier 2).**
 
 **No exceptions. No shortcuts. Every single time. Token-efficient always.**
 

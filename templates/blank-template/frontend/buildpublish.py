@@ -231,7 +231,7 @@ def restart_pm2(project_name: str = None):
     if not project_name:
         project_name = "{project_name}"
     
-    return run(f"pm2 restart {project_name}-frontend")
+    return run(f"sudo pm2 restart {project_name}-frontend")
 
 
 def reload_nginx():

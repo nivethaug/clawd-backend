@@ -961,9 +961,10 @@ class ACPFrontendEditorV2:
                 issues.append(f"Pre-execution snapshot failed: {e}")
 
             # Step 4: Write manifest only — do NOT create stub files on disk.
-            # Stub files cause Claude Code's Read-before-Write check to reject
-            # Write calls (files that exist but were never Read in a real turn).
-            # When files don't exist → Write is allowed directly → 4/4 success.
+            # Claude Code's internal Write gate: if file exists on disk, it checks
+            # tool history for a prior Read/Write. No Read history → silent drop.
+            # When files DON'T exist → new file creation allowed → Write succeeds.
+            # Stubs would trigger the exist+no-history rejection path.
             logger.info(f"[CLAUDE-AGENT] Step 4: Writing page manifest (no stub files)...")
             manifest_result = self.manifest_manager.write_manifest(required_pages)
             if not manifest_result:
