@@ -1154,13 +1154,19 @@ curl -s -o /dev/null -w "%{{http_code}}" https://{self.frontend_domain}/TARGET_P
 # Expected: 200 (or 301/302 for redirects)
 ```
  
-**curl 200 on ALL pages = VERIFICATION COMPLETE.** 
-If curl returns 200 for every page and the HTML contains `<title>` and `<div id="root">` (or similar mount point), the site is confirmed working.
-STOP verification immediately. Do NOT attempt Chrome DevTools "for deeper testing."
-Do NOT re-read App.tsx or re-check `which google-chrome`.
-Just tell the user the changes are live.
+**Verification flow — follow this exact sequence, NO deviations:**
 
-If Chrome DevTools fails 2 times, STOP retrying. Use curl to confirm the site is up, then tell the user the changes are live. Do NOT loop on Chrome retries.
+1. **Try Chrome DevTools evaluate_script ONCE** on the main page (or the page you edited).
+   - If it succeeds → verification complete → respond to user.
+   - If it fails (error, timeout, connection refused) → go to step 2.
+2. **Fall back to curl** — check all pages return 200.
+   - If curl returns 200 for every page → verification complete → respond to user.
+3. **STOP.** Do NOT loop. Do NOT retry Chrome DevTools. Do NOT re-read files. Do NOT check `which google-chrome`.
+
+**Max 1 verification attempt total** — either Chrome DevTools OR curl, not both unless Chrome fails.
+After verification (successful or failed) → respond to the user immediately.
+
+If Chrome DevTools fails 1 time, STOP retrying. Use curl to confirm the site is up, then tell the user the changes are live. Do NOT loop on Chrome retries.
 
 ---
 
@@ -1170,9 +1176,10 @@ If Chrome DevTools fails 2 times, STOP retrying. Use curl to confirm the site is
 ❌ NEVER say: "I've published the changes" without testing first
 ❌ NEVER say: "Changes are ready" without testing (Chrome DevTools OR curl — either is sufficient)
 ❌ NEVER re-read the same file you already read in this session (e.g., reading App.tsx 3+ times)
-❌ NEVER check Chrome availability (`which google-chrome`) more than once
-❌ NEVER say "Now let me use Chrome DevTools to verify" if curl already returned 200 for all pages
+❌ NEVER check Chrome availability (`which google-chrome`) — just try evaluate_script directly, if it fails fall back to curl
+❌ NEVER say "Now let me use Chrome DevTools to verify" more than once
 ❌ NEVER spend more than 2 turns on verification after all code changes are made
+❌ NEVER retry Chrome DevTools after it fails once — fall back to curl immediately
 ❌ NEVER rely on code review alone — ACTUAL testing is required
 ❌ NEVER test on localhost — always test on the LIVE site only
 ❌ NEVER take PNG screenshots (~48KB, 12,000 tokens)
@@ -1608,10 +1615,11 @@ Before sending ANY response to the user, mentally check every item:
 > **Token efficiency = evaluate_script-first (1 call vs 3 calls)**
 
 **If you catch yourself saying "it should work" → STOP and go test it.**
-**If curl already returned 200 for all pages → STOP verifying. The site works. Respond to the user.**
+**If Chrome DevTools evaluate_script succeeded → STOP verifying. Respond to the user.**
+**If Chrome DevTools failed once → STOP retrying Chrome. Use curl. Then respond.**
+**If curl returned 200 for all pages → STOP verifying. The site works. Respond to the user.**
 **If you've already verified once → Do NOT verify again. Move on and respond.**
 **If you catch yourself re-reading the same file (e.g. App.tsx) → STOP. You already have the content.**
-**If Chrome DevTools fails 2 times → STOP retrying, use curl, and move on.**
 **If you catch yourself testing on localhost → STOP and use the live site.**
 **If you catch yourself using snapshot+console+network → STOP and use evaluate_script (Tier 2).**
 **If you've spent more than 2 turns on verification → STOP and respond to the user.**
