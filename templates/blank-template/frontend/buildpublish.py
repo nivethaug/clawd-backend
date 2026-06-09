@@ -137,7 +137,7 @@ def npm_build(cwd: str = None):
     )
     
     if result.returncode != 0:
-        print(f"✗ npm run build failed: {result.stderr[:500]}")
+        print(f"✗ npm run build failed: {result.stderr}")
         return False
     
     print("✓ npm run build completed")
@@ -241,6 +241,34 @@ def reload_nginx():
     print("="*50)
     return run("sudo nginx -s reload") or run("nginx -s reload")
 
+def fix_build_ownership():
+    """Fix dist ownership issues from previous root builds"""
+    print("\n" + "="*50)
+    print("FIX BUILD OWNERSHIP")
+    print("="*50)
+
+    dist_path = Path("dist")
+
+    if not dist_path.exists():
+        print("⚠ dist not found, skipping")
+        return True
+
+    try:
+        subprocess.run(
+            ["sudo", "chown", "-R", "dreampilot:dreampilot", "dist"],
+            check=False,
+            capture_output=True,
+            text=True
+        )
+
+        shutil.rmtree(dist_path, ignore_errors=True)
+
+        print("✓ Fixed ownership and removed dist")
+        return True
+
+    except Exception as e:
+        print(f"⚠ Ownership fix failed: {e}")
+        return False
 
 def main():
     parser = argparse.ArgumentParser(description="Frontend Build & Publish")
@@ -297,7 +325,9 @@ def main():
     if not args.skip_install:
         if not npm_install(cwd=str(frontend_dir)):
             success = False
-    
+    # Step 3.5: Fix ownership before build
+    if success:
+        fix_build_ownership()
     # Step 4: npm run build
     if not args.skip_build and success:
         if not npm_build(cwd=str(frontend_dir)):
