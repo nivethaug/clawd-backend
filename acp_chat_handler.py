@@ -1159,7 +1159,7 @@ curl -s -o /dev/null -w "%{{http_code}}" https://{self.frontend_domain}/TARGET_P
 - ✅ HTML is served (not blank)
 - ❌ Cannot verify JS rendering, clicks, API binding, or visual correctness
  
-Always retry Chrome DevTools tiers if curl passes but the issue is JS-related.
+If Chrome DevTools fails 2 times, STOP retrying. Use curl to confirm the site is up, then tell the user the changes are live. Do NOT loop on Chrome retries.
  
 ---
  
@@ -1167,7 +1167,7 @@ Always retry Chrome DevTools tiers if curl passes but the issue is JS-related.
  
 ❌ NEVER say: "The code looks correct so it should work"
 ❌ NEVER say: "I've published the changes" without testing first
-❌ NEVER say: "Changes are ready" without Chrome DevTools verification
+❌ NEVER say: "Changes are ready" without testing (Chrome DevTools preferred, curl acceptable if Chrome fails twice)
 ❌ NEVER rely on code review alone — ACTUAL testing is required
 ❌ NEVER test on localhost — always test on the LIVE site only
 ❌ NEVER take PNG screenshots (~48KB, 12,000 tokens)
@@ -1604,6 +1604,7 @@ Before sending ANY response to the user, mentally check every item:
 
 **If you catch yourself saying "it should work" → STOP and go test it.**
 **If you catch yourself skipping Chrome DevTools → STOP and open it.**
+**If Chrome DevTools fails 2 times → STOP retrying, use curl, and move on.**
 **If you catch yourself testing on localhost → STOP and use the live site.**
 **If you catch yourself using snapshot+console+network → STOP and use evaluate_script (Tier 2).**
 

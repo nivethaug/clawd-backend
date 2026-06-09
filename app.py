@@ -3153,7 +3153,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 logger.info(f"[ACP-STREAM] Background saved (partial, timeout): {len(content)} chars")
                                 await save_response_to_db(content)
                             else:
-                                logger.warning(f"[ACP-STREAM] Background save: no content after {max_wait}s")
+                                logger.warning(f"[ACP-STREAM] Background save: no content found after 600s wait")
                         except Exception as e:
                             logger.error(f"[ACP-STREAM] Background save error: {e}")
                         finally:

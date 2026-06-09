@@ -104,6 +104,7 @@ class ClaudeCodeAgent:
         # Internal state
         self._running = False
         self._current_process = None  # Track running subprocess for cancellation
+        self._cancelled = False  # Flag to distinguish cancel from real crash
         self._progress_dots_offset = 0  # For dot animation (1-2-3 cycling)
         self._last_token_usage = None  # Token usage from last query result
         self._last_session_id: Optional[str] = resume_session_id
@@ -554,6 +555,7 @@ class ClaudeCodeAgent:
         """
         if self._current_process and self._current_process.returncode is None:
             pid = self._current_process.pid
+            self._cancelled = True  # Mark as cancelled before killing
             logger.info(f"[CLAUDE-AGENT] Cancelling query - killing process group (PID: {pid})")
             try:
                 # Kill the entire process group (parent + all children)
@@ -584,6 +586,7 @@ class ClaudeCodeAgent:
             self._current_process = None
             await self._cleanup_after_query()
             return True
+        self._cancelled = False  # Reset if nothing to cancel
         logger.info("[CLAUDE-AGENT] Cancel called but no running process found")
         return False
 
@@ -902,7 +905,11 @@ class ClaudeCodeAgent:
             if all_chunks:
                 logger.info(f"[CLAUDE-AGENT] Last 3 chunks: {all_chunks[-3:]}")
 
-            # Check for errors
+            # Check for errors (skip if this was a user-initiated cancel)
+            if self._cancelled:
+                self._cancelled = False  # Reset flag
+                logger.info(f"[CLAUDE-AGENT] Query cancelled by user (exit code {returncode})")
+                return None
             if returncode != 0 and not (result_seen and terminated_after_result and all_chunks):
                 error_msg = f"Claude CLI exited with code {returncode}"
                 if stderr_lines:
