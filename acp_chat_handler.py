@@ -44,6 +44,80 @@ ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
 USE_PREPROCESSOR = os.getenv("ACP_USE_PREPROCESSOR", "false").lower() == "true"  # DISABLED for ClaudeCodeAgent migration testing
 USE_CLAUDE_AGENT = os.getenv("ACP_USE_CLAUDE_AGENT", "true").lower() == "true" and CLAUDE_AGENT_AVAILABLE  # Prefer Claude Agent
 
+# ---------------------------------------------------------------------------
+# Shared prompt fragments (website edit workflow)
+# Must stay in sync with wrapper-v2/src/wrapper_v2/workflows/prompt_fragments.py
+# ---------------------------------------------------------------------------
+
+_PROMPT_FRONTEND_STRUCTURE = """\
+### Frontend Structure (standard scaffold — no need to read these files)
+  frontend/src/
+    main.tsx            → renders <App />
+    App.tsx             → BrowserRouter → Routes → Route per page
+    Layout.tsx          → Navbar with links + <Outlet />
+    pages/              → one .tsx per page
+    components/ui/      → shadcn/ui primitives (see list below)
+  tailwind.config.js    → standard shadcn preset
+  vite.config.ts        → React plugin"""
+
+_PROMPT_AVAILABLE_COMPONENTS = """\
+### Available shadcn/ui components (import from @/components/ui/NAME)
+  button, card (Card, CardContent, CardDescription, CardHeader, CardTitle),
+  badge, input, label, textarea, select (Select, SelectContent, SelectItem, SelectTrigger, SelectValue),
+  dialog (Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger),
+  tabs (Tabs, TabsContent, TabsList, TabsTrigger), separator, avatar (Avatar, AvatarFallback, AvatarImage),
+  dropdown-menu (DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger),
+  sheet (Sheet, SheetContent, SheetTrigger), tooltip (Tooltip, TooltipContent, TooltipProvider, TooltipTrigger),
+  table (Table, TableBody, TableCell, TableHead, TableHeader, TableRow),
+  progress, switch, checkbox, radio-group, slider, toast, toaster, sonner.
+
+### Available icons (import from lucide-react)
+  ArrowUpRight, ArrowDownRight, TrendingUp, TrendingDown,
+  Wallet, Coins, DollarSign, Shield, Clock, Calendar, Search, Filter, Bell, Star, Settings,
+  Moon, Sun, Menu, X, ChevronDown, ChevronRight, ExternalLink, Copy, Check, AlertTriangle,
+  Activity, BarChart3, PieChart, RefreshCw, Zap, Sparkles, Eye, EyeOff, Plus, Minus, Trash2.
+
+Use ONLY these components and icons. No extra libraries."""
+
+_PROMPT_BACKEND_STRUCTURE = """\
+### Backend Structure (Python + FastAPI + PostgreSQL)
+  backend/
+    app.py              → FastAPI app entry point
+    routes/             → API endpoint handlers
+    models/             → SQLAlchemy / database models
+    services/           → Business logic layer
+    core/               → Config, auth, database setup
+    migrations/         → Alembic database migrations
+    requirements.txt    → Python dependencies"""
+
+_PROMPT_ACCESSIBILITY = """\
+### Accessibility & Test IDs (STRICT — every page MUST follow these)
+A11y rules — apply to ALL interactive and semantic elements:
+- Use <button> for all clickable actions. Never use <div onClick> or <span onClick>.
+- Every icon-only button MUST have aria-label (e.g., <button aria-label="Search"><Search /></button>).
+- Every <input>, <select>, <textarea> MUST have aria-label or an associated <label>.
+- Modals/dialogs MUST have role="dialog" and aria-modal="true" (shadcn Dialog adds these automatically — do NOT strip them).
+- Decorative SVGs and icons MUST have aria-hidden="true" (e.g., <Search aria-hidden="true" />). Only skip if the icon is the sole content of a labeled button.
+- Dynamic content (toasts, live counters, status updates, notification badges) MUST use aria-live="polite" on the container.
+- Heading hierarchy: exactly one <h1> per page, then <h2>, <h3> in order. Never skip levels.
+- Wrap page content in <main> landmark. Navigation MUST use <nav aria-label="Main navigation">.
+
+data-testid format: {{page-name}}-{{section}}-{{element}} (all lowercase, hyphens, no special chars).
+Every page MUST include data-testid on:
+  1. Page root container: data-testid="{{page-name}}-page" (e.g., data-testid="dashboard-page")
+  2. Every interactive element (buttons, inputs, selects, links, toggles):
+     data-testid="dashboard-search-input", data-testid="projects-create-button",
+     data-testid="settings-save-button", data-testid="collaboration-send-button"
+  3. Every distinct content card/section:
+     data-testid="dashboard-kpi-revenue", data-testid="projects-table",
+     data-testid="settings-profile-section"
+  4. Modal/dialog triggers AND their content containers:
+     data-testid="projects-delete-dialog-trigger", data-testid="projects-delete-dialog"
+  5. Navbar links: data-testid="navbar-link-{{page-name}}"
+  6. Sidebar/mobile toggles: data-testid="sidebar-toggle-button"
+
+These rules are NON-NEGOTIABLE. Pages missing data-testid or violating a11y rules will be rejected."""
+
 
 class ACPChatHandler:
     """Handles ACP chat mode for frontend editing."""
@@ -938,7 +1012,7 @@ All tiers use `evaluate_script` for maximum token efficiency.
 **Use when**: Button text, color, label, single component change
  
 ```
-Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/{page}")
+Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/ROUTE")   ← use URL route e.g. "dashboard" not file name
  
 Step 2: mcp__chrome-devtools__evaluate_script:
   const el = document.querySelector('[data-testid="TARGET"]');
@@ -959,7 +1033,7 @@ Step 3: mcp__chrome-devtools__close_page
 **Use when**: New page, navigation, layout change, structural edits
  
 ```
-Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/{page}")
+Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/ROUTE")   ← use URL route e.g. "settings" not file name
  
 Step 2: mcp__chrome-devtools__evaluate_script:
   return JSON.stringify({{
@@ -981,7 +1055,7 @@ Step 3: mcp__chrome-devtools__close_page
 **Use when**: API integration, data binding, auth flow, form submit, UI↔backend connection
  
 ```
-Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/{page}")
+Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/ROUTE")   ← use URL route e.g. "dashboard" not file name
  
 Step 2: mcp__chrome-devtools__evaluate_script — intercept fetch, trigger action, wait for API + render:
   const captured = [];
@@ -1053,6 +1127,39 @@ Step 3: mcp__chrome-devtools__close_page
    - NEVER ask the user for test credentials — create them automatically
    - NEVER hardcode credentials — always read from `backend/user.json`
    - Add `backend/user.json` to `.gitignore` if not already there
+ 
+---
+ 
+### 🔧 Fallback: curl Verification (if Chrome DevTools fails)
+ 
+**If browser won't open, evaluate_script times out, or Chrome DevTools is unavailable:**
+ 
+Use minimal `curl` commands to verify the site is up and returning valid content.
+ 
+```
+# 1. Check frontend serves HTML (not 5xx)
+curl -s -o /dev/null -w "%{{http_code}}" https://{self.frontend_domain}/
+# Expected: 200
+ 
+# 2. Check page has real content (not blank/error page)
+curl -s https://{self.frontend_domain}/ | head -c 500
+# Expected: HTML with <title> or <div id="root">
+ 
+# 3. Check backend health
+curl -s -o /dev/null -w "%{{http_code}}" https://{self.backend_domain}/health
+# Expected: 200
+ 
+# 4. Check specific page loads
+curl -s -o /dev/null -w "%{{http_code}}" https://{self.frontend_domain}/TARGET_PAGE
+# Expected: 200 (or 301/302 for redirects)
+```
+ 
+**curl is NOT a replacement for evaluate_script tiers.** It only confirms:
+- ✅ Site returns 200 (not crashed)
+- ✅ HTML is served (not blank)
+- ❌ Cannot verify JS rendering, clicks, API binding, or visual correctness
+ 
+Always retry Chrome DevTools tiers if curl passes but the issue is JS-related.
  
 ---
  
@@ -1133,8 +1240,16 @@ list_console_messages(types: ["error"], pageSize: 200)
 list_network_requests(resourceTypes: ["fetch", "xhr"], pageSize: 200)
 close_page(pageId: 0)
 ```
-
-**Common Issues to Check:**
+**Fallback** (if Chrome DevTools won't open or connect): Use `curl`:
+```bash
+# Minimal: site returns 200?
+curl -s -o /dev/null -w "%{{http_code}}" https://{self.frontend_domain}/
+# Content check: has real HTML?
+curl -s https://{self.frontend_domain}/ | head -c 500
+# Backend health?
+curl -s -o /dev/null -w "%{{http_code}}" https://{self.backend_domain}/health
+```
+ **Common Issues to Check:**
 - **CORS errors**: Console shows "Access-Control-Allow-Origin" errors
 - **Authentication failures**: Check localStorage and network tab for 401s
 - **API failures**: Network tab shows failed requests (401/403/500)
@@ -1258,6 +1373,16 @@ Project Root: `{self.project_path}`
 **Project Details:**
 - Frontend URL: `https://{self.frontend_domain}`
 - Backend URL: `https://{self.backend_domain}`
+
+---
+
+{_PROMPT_FRONTEND_STRUCTURE}
+
+{_PROMPT_AVAILABLE_COMPONENTS}
+
+{_PROMPT_BACKEND_STRUCTURE}
+
+{_PROMPT_ACCESSIBILITY}
 
 ---
 
