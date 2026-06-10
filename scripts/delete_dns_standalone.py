@@ -27,7 +27,7 @@ import argparse
 # =============================================================================
 
 # Hostinger API Token (get from: hPanel → Profile → API → Generate new token)
-API_TOKEN = "womcX8Aw9kRVfNkwJ68PUbRgi7Dg9jL3FKAxdoBv7b7c5f07"
+API_TOKEN = "sqS6XPGMnWQXZytrxZGPDSZ2qyBGbrGOaTaf4tbbb621d0df"
 
 # Base domain
 BASE_DOMAIN = "dreambigwithai.com"

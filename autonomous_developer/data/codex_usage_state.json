@@ -1,0 +1,9 @@
+{
+  "total_seconds_used": 0,
+  "limit_seconds": 18000,
+  "limit_hours": 5,
+  "current_run_start": null,
+  "paused": false,
+  "last_reset": "2026-06-01T00:00:00+00:00",
+  "reset_interval_hours": 24
+}
