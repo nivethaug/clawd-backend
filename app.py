@@ -4575,17 +4575,28 @@ async def commit_and_push(project_id: int, req: CommitRequest):
 
         commit_status = "committed"
 
-        # Push if requested
+        # Push if requested (only if remote 'origin' exists)
         if req.auto_push:
-            push_result = subprocess.run(
-                ["git", "-C", project_path, "push", "origin", "main"],
-                capture_output=True, text=True, timeout=60
+            # Check if 'origin' remote is configured
+            remote_result = subprocess.run(
+                ["git", "-C", project_path, "remote"],
+                capture_output=True, text=True, timeout=10
             )
-            if push_result.returncode != 0:
-                logger.error(f"Git push failed for project {project_id}: {push_result.stderr}")
-                commit_status = "committed"  # committed but not pushed
+            has_origin = "origin" in remote_result.stdout.split()
+
+            if has_origin:
+                push_result = subprocess.run(
+                    ["git", "-C", project_path, "push", "origin", "main"],
+                    capture_output=True, text=True, timeout=60
+                )
+                if push_result.returncode != 0:
+                    logger.error(f"Git push failed for project {project_id}: {push_result.stderr}")
+                    commit_status = "committed"  # committed but not pushed
+                else:
+                    commit_status = "pushed"
             else:
-                commit_status = "pushed"
+                logger.info(f"No 'origin' remote for project {project_id}, commit stays local")
+                commit_status = "committed"
 
         # Update the latest assistant message in this session with commit_hash
         # Also INSERT into commit_log for persistent history (survives session deletion)
@@ -4738,13 +4749,23 @@ async def rollback_commit(project_id: int, message_id: int):
         )
         revert_hash = hash_result.stdout.strip()
 
-        push_result = subprocess.run(
-            ["git", "-C", project_path, "push", "origin", "main"],
-            capture_output=True, text=True, timeout=60
+        # Only push if 'origin' remote exists
+        remote_result = subprocess.run(
+            ["git", "-C", project_path, "remote"],
+            capture_output=True, text=True, timeout=10
         )
-        if push_result.returncode != 0:
-            logger.error(f"Git push revert failed: {push_result.stderr}")
-            return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
+        has_origin = "origin" in remote_result.stdout.split()
+
+        if has_origin:
+            push_result = subprocess.run(
+                ["git", "-C", project_path, "push", "origin", "main"],
+                capture_output=True, text=True, timeout=60
+            )
+            if push_result.returncode != 0:
+                logger.error(f"Git push revert failed: {push_result.stderr}")
+                return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
+        else:
+            logger.info(f"No 'origin' remote for project {project_id}, revert stays local")
 
         with get_db() as conn:
             conn.execute(
@@ -4848,13 +4869,23 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
         )
         revert_hash = hash_result.stdout.strip()
 
-        push_result = subprocess.run(
-            ["git", "-C", project_path, "push", "origin", "main"],
-            capture_output=True, text=True, timeout=60
+        # Only push if 'origin' remote exists
+        remote_result = subprocess.run(
+            ["git", "-C", project_path, "remote"],
+            capture_output=True, text=True, timeout=10
         )
-        if push_result.returncode != 0:
-            logger.error(f"Git push revert failed: {push_result.stderr}")
-            return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
+        has_origin = "origin" in remote_result.stdout.split()
+
+        if has_origin:
+            push_result = subprocess.run(
+                ["git", "-C", project_path, "push", "origin", "main"],
+                capture_output=True, text=True, timeout=60
+            )
+            if push_result.returncode != 0:
+                logger.error(f"Git push revert failed: {push_result.stderr}")
+                return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
+        else:
+            logger.info(f"No 'origin' remote for project {project_id}, revert stays local")
 
         with get_db() as conn:
             # Update original commit_log entry
