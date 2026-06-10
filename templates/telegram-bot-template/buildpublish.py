@@ -164,7 +164,7 @@ def restart_pm2():
     print(f"📦 Starting PM2 app: {pm2_process_name}")
     if not run(f"pm2 start {pm2_process_name}"):
         print("⚠️ PM2 start failed, trying restart...")
-        if not run(f"pm2 restart {pm2_process_name}"):
+        if not run(f"sudo pm2 restart {pm2_process_name}"):
             return False
     
     # Verify process is running

@@ -96,7 +96,7 @@ def restart_pm2(domain: str = None):
     # PM2 app name convention: {domain}-backend (matches infrastructure_manager.py)
     app_name = f"{domain}-backend"
     print(f"📦 Restarting PM2 app: {app_name}")
-    return run(f"pm2 restart {app_name}")
+    return run(f"sudo pm2 restart {app_name}")
 
 
 def reload_nginx():

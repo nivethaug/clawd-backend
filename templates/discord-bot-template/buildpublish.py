@@ -81,7 +81,7 @@ def publish(project_path: str, project_id: str) -> bool:
 
     # Start with PM2
     result = subprocess.run(
-        ["pm2", "start", "main.py",
+        ["sudo pm2", "start", "main.py",
          "--name", process_name,
          "--interpreter", sys.executable],
         cwd=project_path,
