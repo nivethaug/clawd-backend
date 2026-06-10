@@ -1206,6 +1206,29 @@ If Chrome DevTools fails 1 time, STOP retrying. Use curl to confirm the site is 
 All verification uses `evaluate_script` — see 3-Tier System above.
 1 call replaces snapshot + console + network (saves ~80% tokens).
 
+### ⛔ INTERACTION RULE — ALWAYS use evaluate_script
+**NEVER use `fill`, `fill_form`, or `click` MCP tools.** They are blocked.
+Use `evaluate_script` with `data-testid` selectors for ALL interaction:
+```javascript
+// Fill a form field:
+document.querySelector('[data-testid="email-input"]').value = "test@test.com";
+document.querySelector('[data-testid="password-input"]').value = "password123";
+// Click a button:
+document.querySelector('[data-testid="login-button"]').click();
+// Combined — fill + click + wait + check result:
+document.querySelector('[data-testid="email-input"]').value = "test@test.com";
+document.querySelector('[data-testid="password-input"]').value = "password123";
+document.querySelector('[data-testid="login-button"]').click();
+await new Promise(r => setTimeout(r, 2000));
+return JSON.stringify({{
+  url: window.location.href,
+  errors: Array.from(document.querySelectorAll('[data-testid*="error"]')).map(e => e.textContent),
+  success: !window.location.href.includes('/login')
+}});
+```
+⚠ **ALWAYS close the page after testing is complete — no exceptions.**
+See CLOSE PAGES (MANDATORY) below.
+
 ### Screenshot Rules (ONLY for visual proof)
 ```javascript
 take_screenshot(format: "webp", quality: 75)  // WebP 75% = ~5KB. NEVER use PNG.
@@ -1219,11 +1242,11 @@ list_console_messages(types: ["error"], pageSize: 200)  // JS errors only
 list_network_requests(resourceTypes: ["fetch", "xhr"], pageSize: 200)  // API failures
 ```
 
-### CLOSE PAGES (MANDATORY)
+### CLOSE PAGES (MANDATORY — EVERY TIME)
 ```javascript
 close_page(pageId: 0)
 ```
-If you open it, you MUST close it. No exceptions.
+⛔ **If you open it, you MUST close it.** Close the page immediately after testing completes — whether verification succeeds OR fails. No exceptions.
 
 ### LIVE SITE ONLY
 ```javascript
