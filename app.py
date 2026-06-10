@@ -4540,6 +4540,13 @@ async def commit_and_push(project_id: int, req: CommitRequest):
         project_path = project["project_path"]
 
     try:
+        # Fix dubious ownership: register project as safe directory for root.
+        # .git may be owned by 'dreampilot' while this API server runs as root.
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", project_path],
+            capture_output=True, text=True, timeout=10
+        )
+
         # Git add all changes
         subprocess.run(
             ["git", "-C", project_path, "add", "-A"],
@@ -4710,6 +4717,12 @@ async def rollback_commit(project_id: int, message_id: int):
         session_id = original["session_id"]
 
     try:
+        # Fix dubious ownership: register project as safe directory for root
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", project_path],
+            capture_output=True, text=True, timeout=10
+        )
+
         revert_result = subprocess.run(
             ["git", "-C", project_path, "revert", original_hash, "--no-edit"],
             capture_output=True, text=True, timeout=60
@@ -4814,6 +4827,12 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
         original_message_id = original["message_id"]
 
     try:
+        # Fix dubious ownership: register project as safe directory for root
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", project_path],
+            capture_output=True, text=True, timeout=10
+        )
+
         revert_result = subprocess.run(
             ["git", "-C", project_path, "revert", original_hash, "--no-edit"],
             capture_output=True, text=True, timeout=60
