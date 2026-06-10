@@ -590,13 +590,13 @@ class ClaudeCodeAgent:
         logger.info("[CLAUDE-AGENT] Cancel called but no running process found")
         return False
 
-    async def query(self, prompt: str, timeout: float = 900.0) -> Optional[str]:
+    async def query(self, prompt: str, timeout: float = 1200.0) -> Optional[str]:
         """
         Send a query to Claude Code and return the final answer.
 
         Args:
             prompt: The text prompt to send to Claude Code
-            timeout: Maximum time to wait for a response in seconds (default: 5 minutes)
+            timeout: Maximum time to wait for a response in seconds (default: 20 minutes)
 
         Returns:
             The final answer from Claude Code (extracted from response using heuristics), or None if no response
