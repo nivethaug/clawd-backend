@@ -11,12 +11,13 @@ IMPORTANT: Call this script AFTER making ANY changes to the frontend code!
 Matches infrastructure_manager.py build_frontend() process:
 1. Clean Vite caches
 2. Remove existing node_modules
-3. npm ci --prefer-offline --no-audit --progress=false
-4. npm run build
-5. Verify dist
-6. Fix permissions
-7. Cleanup node_modules
-8. Restart PM2 + nginx (default, use --no-restart to skip)
+3. npm ci (with NODE_ENV=development for devDependencies)
+4. Remove old dist
+5. npm run build
+6. Verify dist
+7. Fix permissions
+8. Restart PM2 + nginx
+9. Cleanup node_modules
 """
 
 import subprocess
@@ -36,6 +37,18 @@ def run(cmd: str, cwd: str = None) -> bool:
         return False
     print(f"✓ Success: {cmd}")
     return True
+
+
+def get_env_override():
+    """Return environment with NODE_ENV=development to ensure devDependencies are installed.
+
+    Servers may have NODE_ENV=production set globally, which causes npm to skip
+    devDependencies like vite, vitest, @vitejs/plugin-react, @vitejs/plugin-react-swc.
+    Forcing development guarantees a full install and correct build behaviour.
+    """
+    env = os.environ.copy()
+    env["NODE_ENV"] = "development"
+    return env
 
 
 def clean_vite_caches():
@@ -89,19 +102,30 @@ def remove_node_modules():
 
 
 def npm_install(cwd: str = None):
-    """Install npm dependencies using npm ci (matches infrastructure_manager.py)"""
+    """Install npm dependencies via npm ci (matches infrastructure_manager.py)
+
+    Uses NODE_ENV=development via get_env_override() so that devDependencies
+    such as vite, vitest, @vitejs/plugin-react, and @vitejs/plugin-react-swc
+    are always installed regardless of the server's global NODE_ENV.
+    """
     print("\n" + "="*50)
     print("NPM CI")
     print("="*50)
     
-    # Match infrastructure_manager.py approach
-    # Use npm ci for faster, reproducible installs
     result = subprocess.run(
-        ["npm", "install", "--prefer-offline", "--legacy-peer-deps"],
+        [
+            "npm",
+            "ci",
+            "--prefer-offline",
+            "--no-audit",
+            "--progress=false",
+            "--legacy-peer-deps",
+        ],
         capture_output=True,
         text=True,
         timeout=600,
-        cwd=cwd
+        cwd=cwd,
+        env=get_env_override(),
     )
     
     if result.returncode != 0:
@@ -133,11 +157,16 @@ def npm_build(cwd: str = None):
         capture_output=True,
         text=True,
         timeout=600,
-        cwd=cwd
+        cwd=cwd,
+        env=get_env_override(),
     )
     
     if result.returncode != 0:
-        print(f"✗ npm run build failed: {result.stderr}")
+        print("✗ npm run build failed")
+        print("STDOUT:")
+        print(result.stdout[-5000:])
+        print("STDERR:")
+        print(result.stderr[-5000:])
         return False
     
     print("✓ npm run build completed")
@@ -241,16 +270,21 @@ def reload_nginx():
     print("="*50)
     return run("sudo nginx -s reload") or run("nginx -s reload")
 
-def fix_build_ownership():
-    """Fix dist ownership issues from previous root builds"""
+def remove_old_dist():
+    """Remove existing dist directory before a fresh build.
+
+    If dist exists, attempts to chown it to dreampilot:dreampilot first (fixes
+    permission issues from previous root-owned builds) and then deletes it.
+    Does nothing if dist does not exist.
+    """
     print("\n" + "="*50)
-    print("FIX BUILD OWNERSHIP")
+    print("REMOVE OLD DIST")
     print("="*50)
 
     dist_path = Path("dist")
 
     if not dist_path.exists():
-        print("⚠ dist not found, skipping")
+        print("⚠ dist not found, nothing to remove")
         return True
 
     try:
@@ -258,17 +292,20 @@ def fix_build_ownership():
             ["sudo", "chown", "-R", "dreampilot:dreampilot", "dist"],
             check=False,
             capture_output=True,
-            text=True
+            text=True,
         )
-
-        shutil.rmtree(dist_path, ignore_errors=True)
-
-        print("✓ Fixed ownership and removed dist")
-        return True
-
+        print("✓ Fixed dist ownership to dreampilot:dreampilot")
     except Exception as e:
         print(f"⚠ Ownership fix failed: {e}")
+
+    try:
+        shutil.rmtree(dist_path, ignore_errors=True)
+        print("✓ Removed old dist")
+    except Exception as e:
+        print(f"⚠ Could not remove dist: {e}")
         return False
+
+    return True
 
 def main():
     parser = argparse.ArgumentParser(description="Frontend Build & Publish")
@@ -321,35 +358,37 @@ def main():
     if not args.skip_install:
         remove_node_modules()
     
-    # Step 3: npm install
+    # Step 3: npm ci (with NODE_ENV=development for devDependencies)
     if not args.skip_install:
         if not npm_install(cwd=str(frontend_dir)):
             success = False
-    # Step 3.5: Fix ownership before build
-    if success:
-        fix_build_ownership()
-    # Step 4: npm run build
+
+    # Step 4: Remove old dist (ONLY when a new build is about to run)
+    if success and not args.skip_build:
+        remove_old_dist()
+
+    # Step 5: npm run build (with NODE_ENV=development)
     if not args.skip_build and success:
         if not npm_build(cwd=str(frontend_dir)):
             success = False
     
-    # Step 5: Verify build
+    # Step 6: Verify build
     if not args.skip_build and success:
         if not verify_dist():
             success = False
     
-    # Step 6: Fix permissions
+    # Step 7: Fix permissions
     if success:
         fix_permissions()
     
-    # Step 7: Cleanup node_modules
-    if success:
-        cleanup_node_modules()
-    
-    # Step 8: Restart services (MANDATORY by default)
+    # Step 8: Restart PM2 + nginx (MANDATORY by default)
     if not args.no_restart and success:
         restart_pm2()  # Uses {project_name} placeholder
         reload_nginx()
+
+    # Step 9: Cleanup node_modules (after restart so nothing is needed anymore)
+    if success:
+        cleanup_node_modules()
     
     print("\n" + "="*50)
     if success:
