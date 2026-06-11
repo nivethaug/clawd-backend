@@ -5,7 +5,9 @@ Copies the discord-bot-template to project directory.
 import shutil
 from pathlib import Path
 from typing import Tuple
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.discord.template")
 
 
 # Template source path

@@ -7,7 +7,9 @@ import sys
 import os
 from pathlib import Path
 from typing import Tuple
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.telegram.installer")
 
 # Shared virtual environment path (same as backend)
 SHARED_VENV_PATH = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")

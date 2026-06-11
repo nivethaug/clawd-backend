@@ -4,7 +4,9 @@ Validates bot tokens via Telegram API before deployment.
 """
 import requests
 from typing import Tuple, Dict
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.telegram.validator")
 
 
 def validate_telegram_token(token: str) -> Tuple[bool, Dict]:

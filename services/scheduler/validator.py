@@ -12,7 +12,9 @@ from typing import Tuple, Dict, Optional
 import requests
 from dotenv import load_dotenv
 
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.scheduler.validator")
 
 # Load backend .env for SMTP defaults
 load_dotenv()

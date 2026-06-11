@@ -7,7 +7,9 @@ import os
 import shutil
 from pathlib import Path
 from typing import Tuple
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.discord.editor")
 from workflow_prompt_meta import build_workflow_meta_block
 
 # Try to import Claude Code Agent
@@ -353,7 +355,7 @@ If the user request requires fetching website data (scraping):
 
 Add a utility helper for each website-based request:
 - Name it for the intent, e.g., scrape_site_headlines(), scrape_product_prices().
-- Keep it pure: accept url + optional params, return {success, data, errors}.
+- Keep it pure: accept url + optional params, return {{success, data, errors}}.
 
 Example pattern:
 
@@ -363,12 +365,12 @@ def scrape_site_headlines(url: str) -> dict:
     config = ScrapeConfig(
         url=url,
         items_selector="article",
-        fields={"title": "h2, h3", "link": "a"},
+        fields={{"title": "h2, h3", "link": "a"}},
         max_pages=1,
         scroll=True
     )
     result = scrape_url(url, config)
-    return {"success": len(result.errors) == 0, "data": result.data, "errors": result.errors}
+    return {{"success": len(result.errors) == 0, "data": result.data, "errors": result.errors}}
 
 ==================================================
 FEATURE RULES

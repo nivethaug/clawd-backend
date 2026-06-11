@@ -8,7 +8,9 @@ import time
 import threading
 import requests
 from typing import Tuple
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.telegram.webhook")
 
 
 def register_telegram_webhook(

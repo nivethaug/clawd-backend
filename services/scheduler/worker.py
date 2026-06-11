@@ -22,7 +22,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Tuple, Dict
 
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.scheduler.worker")
 
 from services.scheduler.template import copy_scheduler_template
 from services.scheduler.env_injector import inject_scheduler_env

@@ -6,7 +6,9 @@ import os
 import stat
 from pathlib import Path
 from typing import Tuple
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.discord.env_injector")
 
 
 def inject_bot_token(

@@ -12,7 +12,9 @@ import shutil
 from pathlib import Path
 from typing import Tuple
 
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.scheduler.template")
 
 # Template source path (relative to backend root)
 TEMPLATE_SOURCE = Path(__file__).parent.parent.parent / "templates" / "scheduler-template"

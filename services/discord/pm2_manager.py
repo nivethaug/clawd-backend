@@ -7,7 +7,9 @@ import sys
 import os
 import json
 from typing import Tuple, Dict, Optional
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.discord.pm2_manager")
 
 # Shared virtual environment path (same as backend)
 SHARED_VENV_PATH = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")

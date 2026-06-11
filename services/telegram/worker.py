@@ -5,7 +5,9 @@ Main orchestration pipeline for telegram bot deployment.
 import os
 from pathlib import Path
 from typing import Tuple, Dict
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.telegram.worker")
 
 # Import telegram services
 from services.telegram.validator import validate_telegram_token

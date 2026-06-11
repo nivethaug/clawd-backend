@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import Tuple
 from dotenv import load_dotenv
 
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.scheduler.env_injector")
 
 # Load backend .env for default values
 load_dotenv()

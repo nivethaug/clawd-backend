@@ -24,7 +24,9 @@ from typing import Optional
 from pydantic import BaseModel
 from fastapi import APIRouter
 
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("api.validate_router")
 
 router = APIRouter()
 

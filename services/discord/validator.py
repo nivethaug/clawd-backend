@@ -4,7 +4,9 @@ Validates bot tokens via Discord API before deployment.
 """
 import requests
 from typing import Tuple, Dict
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.discord.validator")
 
 
 # Minimal permissions needed for bot commands (Send Messages, Read Message History, Use Application Commands)

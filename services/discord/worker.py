@@ -6,7 +6,9 @@ import os
 import time
 from pathlib import Path
 from typing import Tuple, Dict
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.discord.worker")
 
 # Import discord services
 from services.discord.validator import validate_discord_token

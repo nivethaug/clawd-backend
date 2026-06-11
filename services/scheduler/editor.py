@@ -11,7 +11,9 @@ import shutil
 from pathlib import Path
 from typing import Tuple
 
-from utils.logger import logger
+import logging
+from utils.logger import logger  # noqa: F811 — reassign below
+logger = logging.getLogger("services.scheduler.editor")
 from workflow_prompt_meta import build_workflow_meta_block
 
 try:
