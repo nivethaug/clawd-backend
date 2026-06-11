@@ -98,6 +98,13 @@ class DiscordBotEditor:
                 logger.info(f"Creating backup: {self.backup_ask_cmd}")
                 shutil.copy2(self.ask_cmd_path, self.backup_ask_cmd)
 
+            # Fix file ownership so Claude Code (dreampilot user) can write
+            import subprocess
+            subprocess.run(
+                ["chown", "-R", "dreampilot:dreampilot", str(self.project_path)],
+                capture_output=True
+            )
+
             # Build AI prompt
             prompt = self._build_enhancement_prompt(description, bot_name)
 
