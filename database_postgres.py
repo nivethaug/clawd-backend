@@ -185,6 +185,30 @@ def init_schema():
                 cur.execute("ALTER TABLE users ADD COLUMN password TEXT")
             _run_migration(migrate_password)
 
+            def migrate_role():
+                cur.execute("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user'")
+            _run_migration(migrate_role)
+
+            def migrate_subscription_tier():
+                cur.execute(
+                    "ALTER TABLE users ADD COLUMN subscription_tier VARCHAR(20) NOT NULL DEFAULT 'free'"
+                )
+            _run_migration(migrate_subscription_tier)
+
+            # Ensure existing users have correct defaults
+            try:
+                cur.execute(
+                    "UPDATE users SET role = 'user' WHERE role IS NULL OR role = ''"
+                )
+                cur.execute(
+                    "UPDATE users SET subscription_tier = 'free' WHERE subscription_tier IS NULL OR subscription_tier = ''"
+                )
+                conn.commit()
+                logger.info("✓ Ensured role and subscription_tier defaults on users")
+            except Exception as e:
+                conn.rollback()
+                logger.debug(f"Role/tier default backfill skipped: {e}")
+
             # Project types table
             cur.execute("""CREATE TABLE IF NOT EXISTS project_types (
                 id SERIAL PRIMARY KEY,

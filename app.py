@@ -30,6 +30,18 @@ from completion_service import CompletionService
 from claude_code_worker import run_claude_code_background
 from github_service import get_github_service
 from services.session_lock_service import SessionLockService
+from services.rate_limiter import (
+    rate_limit,
+    RateLimitExceeded,
+    check_project_limit,
+    get_user_limits,
+    reset_user_limits,
+    get_user_tier_and_role,
+    TIERS,
+    VALID_TIERS,
+    VALID_ROLES,
+    DEFAULT_TIER,
+)
 
 # AI Chat System
 from api.ai_chat import router as ai_chat_router
@@ -427,6 +439,16 @@ async def get_projects(authorization: Optional[str] = Header(None)):
 async def create_project(request: CreateProjectRequest, authorization: Optional[str] = Header(None)):
     # Get user_id from auth token (not request body)
     user_id = get_user_id_from_token(authorization)
+
+    # Check project count limit for user's tier
+    proj_limit = check_project_limit(user_id)
+    if not proj_limit.get("allowed"):
+        max_p = proj_limit.get("max", "?")
+        current_p = proj_limit.get("current", "?")
+        raise HTTPException(
+            status_code=403,
+            detail=f"Project limit reached ({current_p}/{max_p}) for {proj_limit.get('tier', 'free')} tier. Upgrade to create more projects."
+        )
 
     # Get GitHub service for repo name sanitization
     github = get_github_service()
@@ -3788,6 +3810,8 @@ class UserResponse(BaseModel):
     id: str
     email: str
     name: Optional[str] = None
+    role: str = "user"
+    subscription_tier: str = "free"
 
 
 class AuthResponse(BaseModel):
@@ -3839,6 +3863,13 @@ def get_user_id_from_token(authorization: Optional[str] = None) -> int:
     return user_id
 
 
+def require_admin(user_id: int) -> None:
+    """Raise 403 if user is not admin. Use in admin-only endpoints."""
+    info = get_user_tier_and_role(user_id)
+    if info["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
 @app.post("/auth/signup", response_model=AuthResponse)
 async def signup(request: SignupRequest):
     """Register a new user and return token."""
@@ -3852,11 +3883,11 @@ async def signup(request: SignupRequest):
         if existing:
             raise HTTPException(status_code=400, detail="Email already exists")
         
-        # Hash password and create user
+        # Hash password and create user (defaults: role='user', tier='free')
         password_hash = hash_password(request.password)
         
         conn.execute(
-            "INSERT INTO users (email, name, password) VALUES (?, ?, ?) RETURNING id",
+            "INSERT INTO users (email, name, password, role, subscription_tier) VALUES (?, ?, ?, 'user', 'free') RETURNING id",
             (request.email, request.name, password_hash)
         )
         result = conn.fetchone()
@@ -3877,7 +3908,9 @@ async def signup(request: SignupRequest):
         user=UserResponse(
             id=str(user_id),
             email=request.email,
-            name=request.name
+            name=request.name,
+            role="user",
+            subscription_tier="free"
         )
     )
 
@@ -3887,7 +3920,7 @@ async def login(request: LoginRequest):
     """Login and return token."""
     with get_db() as conn:
         user = conn.execute(
-            "SELECT id, email, name, password FROM users WHERE email = ?",
+            "SELECT id, email, name, password, role, subscription_tier FROM users WHERE email = ?",
             (request.email,)
         ).fetchone()
         
@@ -3900,11 +3933,15 @@ async def login(request: LoginRequest):
             email = user.get('email')
             name = user.get('name')
             password_hash = user.get('password')
+            role = user.get('role', 'user')
+            tier = user.get('subscription_tier', 'free')
         else:
             user_id = user[0]
             email = user[1]
             name = user[2]
             password_hash = user[3]
+            role = user[4] if len(user) > 4 else 'user'
+            tier = user[5] if len(user) > 5 else 'free'
         
         # Verify password
         if not password_hash or not verify_password(request.password, password_hash):
@@ -3919,7 +3956,9 @@ async def login(request: LoginRequest):
         user=UserResponse(
             id=str(user_id),
             email=email,
-            name=name
+            name=name,
+            role=role,
+            subscription_tier=tier
         )
     )
 
@@ -3962,7 +4001,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
     # Get user from database
     with get_db() as conn:
         user = conn.execute(
-            "SELECT id, email, name FROM users WHERE id = ?",
+            "SELECT id, email, name, role, subscription_tier FROM users WHERE id = ?",
             (user_id,)
         ).fetchone()
         
@@ -3974,13 +4013,17 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
             return UserResponse(
                 id=str(user.get('id')),
                 email=user.get('email'),
-                name=user.get('name')
+                name=user.get('name'),
+                role=user.get('role', 'user'),
+                subscription_tier=user.get('subscription_tier', 'free')
             )
         else:
             return UserResponse(
                 id=str(user[0]),
                 email=user[1],
-                name=user[2]
+                name=user[2],
+                role=user[4] if len(user) > 4 else 'user',
+                subscription_tier=user[5] if len(user) > 5 else 'free'
             )
 
 
@@ -4964,6 +5007,267 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
     except Exception as e:
         logger.error(f"Rollback error for project {project_id}: {e}\n{traceback.format_exc()}")
         return {"success": False, "error": str(e), "status": "failed"}
+
+
+# ============================================================================
+# Rate Limiting Middleware & User Limits Endpoint
+# ============================================================================
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """
+    Global rate-limiting middleware.
+    Applies per-user limits based on subscription tier.
+    Skips non-authenticated endpoints and health checks.
+    """
+    # Skip paths that don't need rate limiting
+    skip_paths = {
+        "/health", "/test", "/docs", "/openapi.json", "/redoc",
+        "/auth/signup", "/auth/login", "/auth/logout",
+    }
+    path = request.url.path
+
+    if path in skip_paths or path.startswith("/docs") or path.startswith("/openapi"):
+        return await call_next(request)
+
+    # Try to extract user_id from token
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header:
+        # No auth — allow through (endpoints themselves enforce auth)
+        return await call_next(request)
+
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return await call_next(request)
+
+    token = parts[1]
+    user_id = AUTH_TOKENS.get(token)
+    if not user_id:
+        return await call_next(request)
+
+    # Determine limit type based on path
+    if path.startswith("/chat") or path.startswith("/ai/"):
+        limit_type = "ai_chat"
+    elif path == "/projects" and request.method == "POST":
+        limit_type = "project_create"
+    else:
+        limit_type = "general_api"
+
+    # Check rate limit
+    try:
+        status = rate_limit(user_id, limit_type)
+        response = await call_next(request)
+
+        # Add rate limit headers
+        if "remaining" in status:
+            response.headers["X-RateLimit-Limit"] = str(status.get("limit", ""))
+            response.headers["X-RateLimit-Remaining"] = str(status.get("remaining", ""))
+            response.headers["X-RateLimit-Tier"] = status.get("tier", "")
+        elif status.get("bypass") or status.get("unlimited"):
+            response.headers["X-RateLimit-Tier"] = status.get("tier", "") + (" (admin)" if status.get("bypass") else " (unlimited)")
+
+        return response
+
+    except RateLimitExceeded as e:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "detail": str(e),
+                "limit_type": e.limit_type,
+                "tier": e.tier,
+                "max_requests": e.max_requests,
+                "retry_after_seconds": e.retry_after_seconds,
+            },
+            headers={"Retry-After": str(e.retry_after_seconds)},
+        )
+
+
+@app.get("/auth/limits")
+async def get_my_limits(authorization: Optional[str] = Header(None)):
+    """
+    Get current user's rate limits and subscription info.
+    Shows tier, role, usage, and remaining limits.
+    """
+    user_id = get_user_id_from_token(authorization)
+    return get_user_limits(user_id)
+
+
+# ============================================================================
+# Admin Endpoints
+# ============================================================================
+
+@app.get("/admin/users")
+async def admin_list_users(
+    limit: int = 50,
+    offset: int = 0,
+    authorization: Optional[str] = Header(None)
+):
+    """List all users with their role and subscription tier. Admin only."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    with get_db() as conn:
+        users = conn.execute(
+            "SELECT id, email, name, role, subscription_tier, created_at FROM users ORDER BY id LIMIT %s OFFSET %s",
+            (limit, offset)
+        ).fetchall()
+
+        total = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()
+        total_count = total["cnt"] if isinstance(total, dict) else total[0]
+
+    return {
+        "users": [
+            {
+                "id": u["id"] if isinstance(u, dict) else u[0],
+                "email": u["email"] if isinstance(u, dict) else u[1],
+                "name": u["name"] if isinstance(u, dict) else u[2],
+                "role": u["role"] if isinstance(u, dict) else u[3],
+                "subscription_tier": u["subscription_tier"] if isinstance(u, dict) else u[4],
+                "created_at": str(u["created_at"]) if isinstance(u, dict) else str(u[5]),
+            }
+            for u in users
+        ],
+        "total": total_count,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+class AdminUpdateUserRequest(BaseModel):
+    role: Optional[str] = None
+    subscription_tier: Optional[str] = None
+
+
+@app.put("/admin/users/{target_user_id}")
+async def admin_update_user(
+    target_user_id: int,
+    request: AdminUpdateUserRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Update a user's role or subscription tier. Admin only."""
+    admin_user_id = get_user_id_from_token(authorization)
+    require_admin(admin_user_id)
+
+    updates = []
+    values = []
+
+    if request.role is not None:
+        if request.role not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {VALID_ROLES}")
+        updates.append("role = %s")
+        values.append(request.role)
+
+    if request.subscription_tier is not None:
+        if request.subscription_tier not in VALID_TIERS:
+            raise HTTPException(status_code=400, detail=f"Invalid tier. Must be one of: {VALID_TIERS}")
+        updates.append("subscription_tier = %s")
+        values.append(request.subscription_tier)
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    values.append(target_user_id)
+
+    with get_db() as conn:
+        conn.execute(
+            f"UPDATE users SET {', '.join(updates)} WHERE id = %s",
+            tuple(values)
+        )
+        conn.commit()
+
+        updated = conn.execute(
+            "SELECT id, email, name, role, subscription_tier FROM users WHERE id = %s",
+            (target_user_id,)
+        ).fetchone()
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "success": True,
+        "user": {
+            "id": updated["id"] if isinstance(updated, dict) else updated[0],
+            "email": updated["email"] if isinstance(updated, dict) else updated[1],
+            "name": updated["name"] if isinstance(updated, dict) else updated[2],
+            "role": updated["role"] if isinstance(updated, dict) else updated[3],
+            "subscription_tier": updated["subscription_tier"] if isinstance(updated, dict) else updated[4],
+        }
+    }
+
+
+@app.post("/admin/users/{target_user_id}/reset-limits")
+async def admin_reset_user_limits(
+    target_user_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    """Reset all rate limit counters for a user. Admin only."""
+    admin_user_id = get_user_id_from_token(authorization)
+    require_admin(admin_user_id)
+
+    reset_user_limits(target_user_id)
+    return {"success": True, "message": f"Rate limits reset for user {target_user_id}"}
+
+
+@app.get("/admin/stats")
+async def admin_stats(authorization: Optional[str] = Header(None)):
+    """Get platform-wide stats. Admin only."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    with get_db() as conn:
+        users_total = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()
+        projects_total = conn.execute("SELECT COUNT(*) as cnt FROM projects").fetchone()
+        sessions_total = conn.execute("SELECT COUNT(*) as cnt FROM sessions").fetchone()
+        messages_total = conn.execute("SELECT COUNT(*) as cnt FROM messages").fetchone()
+
+        # Users by tier
+        tier_counts = conn.execute(
+            "SELECT subscription_tier, COUNT(*) as cnt FROM users GROUP BY subscription_tier"
+        ).fetchall()
+
+        # Users by role
+        role_counts = conn.execute(
+            "SELECT role, COUNT(*) as cnt FROM users GROUP BY role"
+        ).fetchall()
+
+    def val(row):
+        return row["cnt"] if isinstance(row, dict) else row[0]
+
+    return {
+        "total_users": val(users_total),
+        "total_projects": val(projects_total),
+        "total_sessions": val(sessions_total),
+        "total_messages": val(messages_total),
+        "users_by_tier": {
+            (r["subscription_tier"] if isinstance(r, dict) else r[0]): val(r)
+            for r in tier_counts
+        },
+        "users_by_role": {
+            (r["role"] if isinstance(r, dict) else r[0]): val(r)
+            for r in role_counts
+        },
+    }
+
+
+@app.get("/admin/tiers")
+async def admin_get_tiers(authorization: Optional[str] = Header(None)):
+    """Get all available subscription tiers with their limits."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    tiers_info = {}
+    for key, tier in TIERS.items():
+        tiers_info[key] = {
+            "name": tier.name,
+            "limits": {
+                "general_api": {"max": tier.general_api.max_requests or "unlimited", "window_seconds": tier.general_api.window_seconds},
+                "ai_chat": {"max": tier.ai_chat.max_requests or "unlimited", "window_seconds": tier.ai_chat.window_seconds},
+                "project_create": {"max": tier.project_create.max_requests or "unlimited", "window_seconds": tier.project_create.window_seconds},
+                "max_projects": tier.max_projects or "unlimited",
+            }
+        }
+    return {"tiers": tiers_info}
 
 
 if __name__ == "__main__":

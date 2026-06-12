@@ -1,0 +1,339 @@
+"""
+Rate Limiter Service — Subscription-aware per-user rate limiting.
+
+Tiers:  Free → Pro → Dream (+ Admin bypass)
+Storage: In-memory sliding window (collections.defaultdict of timestamps).
+    Resets on server restart — acceptable for MVP.
+    Can be swapped for Redis later without API changes.
+
+Usage in endpoints:
+    from services.rate_limiter import rate_limit, RateLimitError
+
+    # Inside an endpoint:
+    rate_limit(user_id, "ai_chat")      # raises HTTPException 429 if exceeded
+    rate_limit(user_id, "project_create")
+"""
+
+import time
+import logging
+import threading
+from collections import defaultdict
+from typing import Optional, Dict, List
+from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Tier Definitions
+# ============================================================================
+
+@dataclass
+class RateLimit:
+    """Single rate limit: max_requests per window_seconds."""
+    max_requests: int          # 0 = unlimited
+    window_seconds: int = 3600 # default 1 hour
+
+
+@dataclass
+class TierLimits:
+    """All rate limits for a single subscription tier."""
+    name: str
+    general_api: RateLimit      # GET endpoints (projects list, status, etc.)
+    ai_chat: RateLimit          # POST /chat, /chat/stream, /ai/completion
+    project_create: RateLimit   # POST /projects
+    max_projects: int           # 0 = unlimited
+
+
+# Unlimited sentinel
+UNLIMITED = RateLimit(max_requests=0)
+
+TIERS: Dict[str, TierLimits] = {
+    "free": TierLimits(
+        name="Free",
+        general_api=RateLimit(max_requests=60, window_seconds=3600),
+        ai_chat=RateLimit(max_requests=10, window_seconds=3600),
+        project_create=RateLimit(max_requests=3, window_seconds=86400),
+        max_projects=3,
+    ),
+    "pro": TierLimits(
+        name="Pro",
+        general_api=RateLimit(max_requests=300, window_seconds=3600),
+        ai_chat=RateLimit(max_requests=100, window_seconds=3600),
+        project_create=RateLimit(max_requests=25, window_seconds=86400),
+        max_projects=25,
+    ),
+    "dream": TierLimits(
+        name="Dream",
+        general_api=UNLIMITED,
+        ai_chat=UNLIMITED,
+        project_create=UNLIMITED,
+        max_projects=0,  # unlimited
+    ),
+}
+
+DEFAULT_TIER = "free"
+VALID_TIERS = list(TIERS.keys())
+VALID_ROLES = ["user", "admin"]
+
+
+# ============================================================================
+# In-Memory Sliding Window Store
+# ============================================================================
+
+class _WindowStore:
+    """Thread-safe sliding-window counters: key → list of timestamps."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._windows: Dict[str, List[float]] = defaultdict(list)
+
+    def record(self, key: str) -> int:
+        """
+        Record a hit and return the count in the current window.
+        Evicts expired entries on each call.
+        """
+        now = time.time()
+        with self._lock:
+            self._windows[key].append(now)
+            return len(self._windows[key])
+
+    def count(self, key: str, window_seconds: int) -> int:
+        """Count hits in the last `window_seconds` seconds."""
+        cutoff = time.time() - window_seconds
+        with self._lock:
+            # Evict old entries
+            self._windows[key] = [
+                ts for ts in self._windows[key] if ts > cutoff
+            ]
+            return len(self._windows[key])
+
+    def reset(self, key: Optional[str] = None):
+        """Reset a specific key or all counters."""
+        with self._lock:
+            if key:
+                self._windows.pop(key, None)
+            else:
+                self._windows.clear()
+
+
+_store = _WindowStore()
+
+
+# ============================================================================
+# User Tier / Role Lookup (from DB)
+# ============================================================================
+
+def get_user_tier_and_role(user_id: int) -> Dict[str, str]:
+    """
+    Look up subscription_tier and role from the users table.
+    Returns {"tier": "free", "role": "user"} as defaults.
+    """
+    from database_adapter import get_db
+
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT subscription_tier, role FROM users WHERE id = %s",
+                (user_id,)
+            ).fetchone()
+
+        if row:
+            tier = (row.get("subscription_tier") if isinstance(row, dict) else row[0]) or DEFAULT_TIER
+            role = (row.get("role") if isinstance(row, dict) else row[1]) or "user"
+        else:
+            tier = DEFAULT_TIER
+            role = "user"
+
+        return {"tier": tier, "role": role}
+
+    except Exception as e:
+        logger.warning(f"Rate limiter DB lookup failed for user {user_id}: {e}")
+        return {"tier": DEFAULT_TIER, "role": "user"}
+
+
+# ============================================================================
+# Public API
+# ============================================================================
+
+class RateLimitExceeded(Exception):
+    """Raised when a user exceeds their rate limit."""
+    def __init__(self, limit_type: str, tier: str, retry_after_seconds: int, max_requests: int):
+        self.limit_type = limit_type
+        self.tier = tier
+        self.retry_after_seconds = retry_after_seconds
+        self.max_requests = max_requests
+        super().__init__(
+            f"Rate limit exceeded for '{limit_type}' on '{tier}' tier. "
+            f"Max {max_requests} requests. Retry after {retry_after_seconds}s."
+        )
+
+
+def check_rate_limit(user_id: int, limit_type: str = "general_api") -> Dict[str, any]:
+    """
+    Check if a user can make a request. Returns status dict.
+    Does NOT raise — caller decides what to do.
+
+    Returns:
+        {"allowed": True} or
+        {"allowed": False, "retry_after": seconds, "limit": max, "tier": "...", "limit_type": "..."}
+    """
+    info = get_user_tier_and_role(user_id)
+    tier_name = info["tier"]
+    role = info["role"]
+
+    # Admin bypass
+    if role == "admin":
+        return {"allowed": True, "tier": tier_name, "role": role, "bypass": True}
+
+    tier_config = TIERS.get(tier_name, TIERS[DEFAULT_TIER])
+    limit: RateLimit = getattr(tier_config, limit_type, None)
+
+    if limit is None:
+        # Unknown limit_type — allow by default
+        return {"allowed": True, "tier": tier_name, "role": role}
+
+    # Unlimited
+    if limit.max_requests == 0:
+        return {"allowed": True, "tier": tier_name, "role": role, "unlimited": True}
+
+    # Check sliding window
+    key = f"{user_id}:{limit_type}"
+    current_count = _store.count(key, limit.window_seconds)
+
+    if current_count >= limit.max_requests:
+        # Calculate retry_after
+        cutoff = time.time() - limit.window_seconds
+        # Find the oldest entry in window
+        with _store._lock:
+            timestamps = [ts for ts in _store._windows.get(key, []) if ts > cutoff]
+        oldest = min(timestamps) if timestamps else time.time()
+        retry_after = int(oldest + limit.window_seconds - time.time()) + 1
+
+        return {
+            "allowed": False,
+            "retry_after": max(retry_after, 1),
+            "limit": limit.max_requests,
+            "remaining": 0,
+            "window_seconds": limit.window_seconds,
+            "tier": tier_name,
+            "role": role,
+            "limit_type": limit_type,
+        }
+
+    # Record this hit
+    _store.record(key)
+    remaining = limit.max_requests - current_count - 1
+
+    return {
+        "allowed": True,
+        "remaining": remaining,
+        "limit": limit.max_requests,
+        "window_seconds": limit.window_seconds,
+        "tier": tier_name,
+        "role": role,
+        "limit_type": limit_type,
+    }
+
+
+def rate_limit(user_id: int, limit_type: str = "general_api") -> Dict[str, any]:
+    """
+    Convenience wrapper: checks rate limit and raises RateLimitExceeded if blocked.
+    Use this in endpoints to enforce limits.
+
+    Returns the status dict on success (for headers/metadata).
+    Raises RateLimitExceeded on failure.
+    """
+    result = check_rate_limit(user_id, limit_type)
+    if not result.get("allowed"):
+        raise RateLimitExceeded(
+            limit_type=result.get("limit_type", limit_type),
+            tier=result.get("tier", DEFAULT_TIER),
+            retry_after_seconds=result.get("retry_after", 60),
+            max_requests=result.get("limit", 0),
+        )
+    return result
+
+
+def check_project_limit(user_id: int) -> Dict[str, any]:
+    """
+    Check if user can create more projects (max_projects limit per tier).
+    Returns {"allowed": True/False, "current": N, "max": N, "tier": "..."}
+    """
+    info = get_user_tier_and_role(user_id)
+    tier_name = info["tier"]
+    role = info["role"]
+
+    if role == "admin":
+        return {"allowed": True, "current": 0, "max": 0, "tier": tier_name, "role": role, "bypass": True}
+
+    tier_config = TIERS.get(tier_name, TIERS[DEFAULT_TIER])
+    max_projects = tier_config.max_projects
+
+    if max_projects == 0:
+        return {"allowed": True, "current": 0, "max": 0, "tier": tier_name, "role": role, "unlimited": True}
+
+    from database_adapter import get_db
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM projects WHERE user_id = %s",
+                (user_id,)
+            ).fetchone()
+        current = row["cnt"] if isinstance(row, dict) else row[0]
+    except Exception:
+        current = 0
+
+    allowed = current < max_projects
+    return {
+        "allowed": allowed,
+        "current": current,
+        "max": max_projects,
+        "tier": tier_name,
+        "role": role,
+    }
+
+
+def get_user_limits(user_id: int) -> Dict[str, any]:
+    """
+    Get full limit info for a user (for frontend display).
+    Returns tier name, role, all limits with current usage.
+    """
+    info = get_user_tier_and_role(user_id)
+    tier_name = info["tier"]
+    role = info["role"]
+    tier_config = TIERS.get(tier_name, TIERS[DEFAULT_TIER])
+
+    limits = {}
+    for limit_type in ["general_api", "ai_chat", "project_create"]:
+        limit: RateLimit = getattr(tier_config, limit_type)
+        key = f"{user_id}:{limit_type}"
+        current = _store.count(key, limit.window_seconds) if limit.max_requests > 0 else 0
+        limits[limit_type] = {
+            "max": limit.max_requests if limit.max_requests > 0 else "unlimited",
+            "remaining": max(0, limit.max_requests - current) if limit.max_requests > 0 else "unlimited",
+            "window_seconds": limit.window_seconds,
+            "current_usage": current,
+        }
+
+    # Project count
+    proj_info = check_project_limit(user_id)
+    limits["projects"] = {
+        "max": proj_info["max"] if proj_info["max"] > 0 else "unlimited",
+        "current": proj_info["current"],
+    }
+
+    return {
+        "user_id": user_id,
+        "tier": tier_name,
+        "tier_display": tier_config.name,
+        "role": role,
+        "is_admin": role == "admin",
+        "limits": limits,
+    }
+
+
+def reset_user_limits(user_id: int):
+    """Admin: Reset all rate limit counters for a user."""
+    for limit_type in ["general_api", "ai_chat", "project_create"]:
+        _store.reset(f"{user_id}:{limit_type}")
+    logger.info(f"Rate limits reset for user {user_id}")
