@@ -2394,12 +2394,12 @@ Bot Directory: `{self.project_path}`
 Branches, PRs, and merges are FORBIDDEN. All work happens on main directly.
 
 ### Script Location
-- Path: `{self.project_path}/git_workflow.py`
+- Path: `{self.project_path}/discord/git_workflow.py`
 
 ### Initialization (DO THIS FIRST)
 ```python
 import sys
-sys.path.insert(0, '{self.project_path}')
+sys.path.insert(0, '{self.project_path}/discord')
 from git_workflow import GitWorkflowManager
 
 manager = GitWorkflowManager(
