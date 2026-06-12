@@ -142,7 +142,7 @@ If the user request requires fetching website data (scraping):
 
 Add a utility helper for each website-based request:
 - Name it for the intent, e.g., scrape_site_headlines(), scrape_product_prices().
-- Keep it pure: accept url + optional params, return {success, data, errors}.
+- Keep it pure: accept url + optional params, return {{success, data, errors}}.
 
 ==================================================
 INTENT DETECTION & API SELECTION
