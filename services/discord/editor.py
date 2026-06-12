@@ -520,7 +520,7 @@ OPTIONAL:
                 async with ClaudeCodeAgent(repo_path=str(self.project_path)) as agent:
                     result = await agent.query(
                         prompt=prompt,
-                        timeout=600
+                        timeout=900
                     )
                     return result
 
@@ -530,11 +530,11 @@ OPTIONAL:
                     result = asyncio.run(run_claude())
                 else:
                     result = loop.run_until_complete(
-                        asyncio.wait_for(run_claude(), timeout=600)
+                        asyncio.wait_for(run_claude(), timeout=900)
                     )
             except RuntimeError:
                 result = asyncio.run(
-                    asyncio.wait_for(run_claude(), timeout=600)
+                    asyncio.wait_for(run_claude(), timeout=900)
                 )
 
             if isinstance(result, dict):
@@ -549,7 +549,7 @@ OPTIONAL:
                 return {"success": False, "error": "Empty or invalid response"}
 
         except asyncio.TimeoutError:
-            logger.error("Claude modification timeout after 600s")
+            logger.error("Claude modification timeout after 900s")
             return {"success": False, "error": "Modification timeout"}
         except Exception as e:
             logger.error(f"Claude modification error: {e}")
