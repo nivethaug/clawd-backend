@@ -2538,6 +2538,118 @@ def process_user_input(text: str) -> str:
 
 ---
 
+## COMMAND ROUTING + REGISTRATION (CRITICAL)
+
+### Command Routing
+The bot uses Discord.py commands. ALL user input arrives through `commands/ask.py`:
+  User types "!ask price btc" → ask.py strips prefix → `process_user_input()` receives "price btc"
+  User types "!price btc" → Discord.py says "Command not found" (NOT registered)
+THEREFORE: `process_user_input()` receives text WITHOUT any `!` prefix.
+
+### Approach A — Route through !ask (RECOMMENDED, NO main.py changes):
+  - Parse in ai_logic: `text.startswith("price")` (no ! prefix)
+  - User types "!ask price btc" → ai_logic gets "price btc"
+
+### Approach B — Register new Discord commands in main.py (ONLY if user explicitly wants !price directly):
+  - Add command files + `bot.load_extension()` in main.py
+
+### NEW COMMAND CHECKLIST (MANDATORY):
+When adding ANY new command, you MUST:
+1. ✅ Add handler in `services/ai_logic.py`
+2. ✅ Add helper in `services/api_client.py` (if API needed)
+3. ✅ Update `_handle_help()` in `services/ai_logic.py` — add new command description
+4. ✅ Update `_handle_start()` in `services/ai_logic.py` — mention new command in welcome
+5. ✅ Update `commands/help.py` — add new command to help text
+6. ✅ If using Approach B: Register in `main.py` with `bot.load_extension()`
+7. ✅ Update `agent/ai_index/` files (symbols.json, summaries.json, etc.)
+
+NEVER add a command and forget to update help + start text.
+
+---
+
+## COMMAND PARSING RULES (STRICT)
+
+Signature: `def process_user_input(text: str) -> str` — ALWAYS return str, NEVER crash.
+
+- ALWAYS use `text.split()` for parsing — NEVER `.replace()` or partial string manipulation
+- ALWAYS validate argument length before accessing `parts[i]`
+- NEVER use `!` prefix in startswith checks — text arrives without it
+
+CORRECT:
+```python
+if text_lower.startswith("price"):
+    parts = text_lower.split()
+    if len(parts) < 2:
+        return "Usage: !ask price <coin>"
+    return _handle_crypto_query(parts[1])
+```
+
+WRONG (will never match):
+```python
+if text_lower.startswith("!price"):    # WRONG — ! is stripped
+if text_lower.startswith("!top"):      # WRONG — ! is stripped
+```
+
+---
+
+## RUNTIME RULES — ENFORCED (CRITICAL)
+
+### 1. CONCURRENT API CALLS — NEVER fetch URLs in a sequential loop:
+```python
+# WRONG (causes 5s+ timeouts):
+for sid in story_ids:
+    story = get_hackernews_story(sid)  # 50 sequential HTTP calls
+
+# CORRECT:
+from concurrent.futures import ThreadPoolExecutor, as_completed
+def _fetch_stories_concurrent(ids, max_workers=10):
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {{pool.submit(get_hackernews_story, sid): sid for sid in ids}}
+        for future in as_completed(futures):
+            try:
+                r = future.result()
+                if r: results.append(r)
+            except Exception: pass
+    return results
+```
+ALWAYS use `ThreadPoolExecutor` when making multiple HTTP requests.
+
+### 2. DON'T BLOCK THE ASYNC EVENT LOOP:
+`process_user_input()` is SYNCHRONOUS but called from async Discord.py command handlers.
+If you add async helpers, NEVER call them synchronously from `process_user_input()`.
+If you add long-running sync work inside async command handlers, wrap with:
+```python
+result = await asyncio.to_thread(process_user_input, query)
+```
+
+### 3. DISCORD 2000-CHAR MESSAGE LIMIT:
+Discord.py raises `400 Bad Request (50035)` if a single message exceeds 2000 chars.
+When a response might exceed ~1900 chars, YOU MUST split it:
+```python
+def _split_response(text, max_chars=1900):
+    chunks = []
+    for block in text.split("\\n\\n"):
+        if not chunks or len(chunks[-1]) + len(block) + 2 > max_chars:
+            chunks.append(block)
+        else:
+            chunks[-1] += "\\n\\n" + block
+    return chunks
+for chunk in _split_response(result):
+    await ctx.send(chunk)
+```
+ALWAYS handle splitting when returning long responses (news, lists, tables).
+
+### 4. TIMEOUT BUDGET:
+Total handler time MUST stay under ~3 seconds (Discord interaction limit).
+- If fetching >10 items, use concurrent fetching (rule 1)
+- If external API is slow, return a fallback/mock response
+- NEVER chain more than 3 sequential HTTP calls in a single handler
+
+These rules are NON-NEGOTIABLE. Violations cause bot timeouts and error messages.
+
+---
+
 ## WEBSITE DATA (SCRAPING) — REQUIRED FLOW
 
 If the user request requires website data:
