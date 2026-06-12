@@ -328,6 +328,16 @@ def run_discord_bot_pipeline(
                 logger.info(f"AI enhancement: {edit_result}")
                 result_info["ai_enhancement"] = edit_result
                 result_info["steps_completed"].append("ai_enhancement")
+
+                # Restart PM2 so the bot picks up the AI-enhanced code
+                logger.info("Restarting PM2 to load enhanced bot logic...")
+                from services.discord.pm2_manager import restart_bot_pm2
+                restart_ok, restart_msg = restart_bot_pm2(project_id, domain=domain)
+                if restart_ok:
+                    logger.info(f"PM2 restart successful: {restart_msg}")
+                    time.sleep(3)  # Wait for bot to re-initialize
+                else:
+                    logger.warning(f"PM2 restart failed: {restart_msg} - bot may run with old code")
             else:
                 logger.warning(f"AI enhancement failed: {edit_result}")
                 result_info["ai_enhancement"] = f"failed: {edit_result}"
