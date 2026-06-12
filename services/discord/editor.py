@@ -41,15 +41,19 @@ class DiscordBotEditor:
         self.ai_logic_path = self.project_path / "services" / "ai_logic.py"
         self.api_client_path = self.project_path / "services" / "api_client.py"
 
-        # Command files (AI can edit to update welcome messages)
+        # Command files (AI can edit to update welcome/help messages)
         self.start_cmd_path = self.project_path / "commands" / "start.py"
         self.ask_cmd_path = self.project_path / "commands" / "ask.py"
+        self.help_cmd_path = self.project_path / "commands" / "help.py"
+        self.main_path = self.project_path / "main.py"
 
         # Backup paths
         self.backup_ai_logic = self.project_path / "services" / "ai_logic.py.backup"
         self.backup_api_client = self.project_path / "services" / "api_client.py.backup"
         self.backup_start_cmd = self.project_path / "commands" / "start.py.backup"
         self.backup_ask_cmd = self.project_path / "commands" / "ask.py.backup"
+        self.backup_help_cmd = self.project_path / "commands" / "help.py.backup"
+        self.backup_main = self.project_path / "main.py.backup"
 
     def enhance_bot_logic(
         self,
@@ -98,6 +102,14 @@ class DiscordBotEditor:
                 logger.info(f"Creating backup: {self.backup_ask_cmd}")
                 shutil.copy2(self.ask_cmd_path, self.backup_ask_cmd)
 
+            if self.help_cmd_path.exists():
+                logger.info(f"Creating backup: {self.backup_help_cmd}")
+                shutil.copy2(self.help_cmd_path, self.backup_help_cmd)
+
+            if self.main_path.exists():
+                logger.info(f"Creating backup: {self.backup_main}")
+                shutil.copy2(self.main_path, self.backup_main)
+
             # Fix file ownership so Claude Code (dreampilot user) can write
             import subprocess
             subprocess.run(
@@ -118,7 +130,8 @@ class DiscordBotEditor:
                 if is_valid:
                     logger.info(f"AI enhancement successful: {validation_msg}")
                     for backup in [self.backup_ai_logic, self.backup_api_client,
-                                   self.backup_start_cmd, self.backup_ask_cmd]:
+                                   self.backup_start_cmd, self.backup_ask_cmd,
+                                   self.backup_help_cmd, self.backup_main]:
                         if backup.exists():
                             backup.unlink()
                     return True, "Bot logic enhanced successfully"
@@ -154,17 +167,63 @@ Enhance Discord bot for: {description}
 
 Bot: {bot_name}
 
-Allowed files to modify ONLY:
-- services/ai_logic.py
+Allowed files to modify:
+- services/ai_logic.py (PRIMARY — all bot behavior)
 - services/api_client.py (helper functions only)
-- services/web_scraper.py (extend existing scraper only when needed)
 - commands/start.py (ONLY update welcome message text)
 - commands/ask.py (ONLY if absolutely required)
+- commands/help.py (update help text when new commands added)
+- main.py (ONLY to register new command handlers — see COMMAND REGISTRATION below)
 
-DO NOT modify any other files.
+DO NOT modify: config.py, core/, models/, utils/, services/web_scraper.py, services/mock_data.py
 
 ==================================================
-INTENT DETECTION & API SELECTION
+COMMAND ROUTING ARCHITECTURE (CRITICAL — READ FIRST)
+==================================================
+
+The bot uses Discord.py commands (not on_message). This means:
+
+1. main.py registers command handlers via bot.load_extension() or direct @bot.command()
+2. Only registered commands (!start, !help, !ask, !status) reach handlers
+3. ALL user input arrives through commands/ask.py → process_user_input()
+
+THE FLOW:
+  User types "!ask price btc" in Discord
+  → Discord.py routes to commands/ask.py (registered command)
+  → ask.py strips "!ask" prefix
+  → process_user_input() receives: "price btc" (NO ! prefix)
+
+  User types "!price btc" in Discord
+  → Discord.py says "Command not found" (NOT registered in main.py)
+  → NEVER reaches process_user_input()
+
+THEREFORE: process_user_input() receives text WITHOUT any ! prefix.
+All command matching must work on plain text like "price btc", NOT "!price btc".
+
+==================================================
+COMMAND REGISTRATION IN main.py
+==================================================
+
+If you add new command handlers in ai_logic.py that should be callable directly
+(e.g., !price, !top), you MUST also register them in main.py.
+
+Two approaches (pick ONE):
+
+APPROACH A — Route everything through !ask (RECOMMENDED for simple bots):
+  - All input goes through process_user_input() via ask.py
+  - User types: "!ask price btc"
+  - ai_logic parses: "price btc" → calls _handle_crypto_query("btc")
+  - NO changes to main.py needed
+  - Parsing in ai_logic uses: text.startswith("price") (no ! prefix)
+
+APPROACH B — Register new Discord commands:
+  - Add new command files like commands/price.py, commands/top.py
+  - Register in main.py: bot.load_extension("commands.price")
+  - Each command file calls process_user_input() internally
+  - User types: "!price btc" directly
+
+For MOST bots, use Approach A. Only use Approach B if the user explicitly
+requests direct commands like !price, !top as separate Discord commands.
 ==================================================
 
 ANALYZE user description: "{description}"
@@ -214,9 +273,14 @@ CRITICAL RULES (MANDATORY)
 COMMAND PARSING RULES (STRICT)
 ==================================================
 
+IMPORTANT: process_user_input() receives text WITHOUT ! prefix.
+The !ask command handler strips the prefix before calling this function.
+So user types "!ask price btc" → ai_logic receives "price btc".
+
 NEVER use:
 - .replace()
 - partial string manipulation
+- ! prefix in startswith checks (text arrives without it)
 
 ALWAYS use:
 
@@ -236,30 +300,29 @@ RULES:
 
 --------------------------------------------------
 
-STANDARD COMMAND FORMAT (Discord uses ! prefix):
+STANDARD COMMAND FORMAT (no ! prefix — text arrives plain):
 
-!price <coin>
-!top [n]
-!market [n]
-!convert <amount> <from> <to>
+# User types "!ask price btc" → process_user_input receives "price btc"
+# User types "!ask top 5" → process_user_input receives "top 5"
+# User types "!ask market" → process_user_input receives "market"
 
 --------------------------------------------------
 
-EXAMPLES (FOLLOW EXACTLY):
+EXAMPLES (FOLLOW EXACTLY — NOTE: NO ! PREFIX):
 
-# !price
-if text_lower.startswith("!price"):
+# price
+if text_lower.startswith("price"):
     parts = text_lower.split()
 
     if len(parts) < 2:
-        return "Usage: !price <coin>"
+        return "Usage: !ask price <coin>"
 
     coin = parts[1]
     return _handle_crypto_query(coin)
 
 
-# !top
-if text_lower.startswith("!top"):
+# top
+if text_lower.startswith("top"):
     parts = text_lower.split()
 
     limit = 10
@@ -269,34 +332,50 @@ if text_lower.startswith("!top"):
     return _handle_top_coins(limit)
 
 
-# !convert
-if text_lower.startswith("!convert"):
+# market
+if text_lower.startswith("market"):
+    parts = text_lower.split()
+
+    limit = 10
+    if len(parts) >= 2 and parts[1].isdigit():
+        limit = min(int(parts[1]), 50)
+
+    return _handle_market_data(limit)
+
+
+# convert
+if text_lower.startswith("convert"):
     parts = text_lower.split()
 
     if len(parts) < 4:
-        return "Usage: !convert <amount> <from> <to>"
+        return "Usage: !ask convert <amount> <from> <to>"
 
     return _handle_conversion(parts[1], parts[2], parts[3])
 
 ==================================================
-!ask COMMAND RULE (STRICT)
+!ask COMMAND HANDLING (STRICT)
 ==================================================
 
-MUST follow EXACTLY:
+The !ask command is registered in main.py and handled by commands/ask.py.
+ask.py strips "!ask" and sends only the query text to process_user_input().
 
-if text_lower.startswith("!ask"):
-    parts = text.split(maxsplit=1)
+So if user types "!ask price btc", process_user_input() receives "price btc".
+The "ask" prefix is NEVER present in the text passed to process_user_input().
 
+THEREFORE: Do NOT add a handler for "!ask" or "ask" in process_user_input().
+All text arriving there is already the user's query without any command prefix.
+
+Just parse the intent directly:
+
+if text_lower.startswith("price"):
+    parts = text_lower.split()
     if len(parts) < 2:
-        return "Usage: !ask <question>"
+        return "Usage: !ask price <coin>"
+    coin = parts[1]
+    return _handle_crypto_query(coin)
 
-    question = parts[1]
-
-    # OPTIONAL: detect crypto intent
-    if "btc" in question.lower():
-        return _handle_crypto_query("bitcoin")
-
-    return f"{{question}}\\n\\nUse !price btc for crypto queries"
+# Default fallback for unrecognized queries
+return f"I received your query: \"{text}\". Type !help for available commands."
 
 ==================================================
 API USAGE
@@ -487,6 +566,8 @@ OPTIONAL:
             api_client_changed = False
             start_changed = False
             ask_changed = False
+            help_changed = False
+            main_changed = False
 
             if self.backup_ai_logic.exists():
                 with open(self.backup_ai_logic, 'r') as f:
@@ -516,7 +597,22 @@ OPTIONAL:
                     modified_content = f.read()
                 ask_changed = (backup_content != modified_content)
 
-            if not any([ai_logic_changed, api_client_changed, start_changed, ask_changed]):
+            if self.backup_help_cmd.exists() and self.help_cmd_path.exists():
+                with open(self.backup_help_cmd, 'r') as f:
+                    backup_content = f.read()
+                with open(self.help_cmd_path, 'r') as f:
+                    modified_content = f.read()
+                help_changed = (backup_content != modified_content)
+
+            if self.backup_main.exists() and self.main_path.exists():
+                with open(self.backup_main, 'r') as f:
+                    backup_content = f.read()
+                with open(self.main_path, 'r') as f:
+                    modified_content = f.read()
+                main_changed = (backup_content != modified_content)
+
+            if not any([ai_logic_changed, api_client_changed, start_changed, ask_changed,
+                        help_changed, main_changed]):
                 return False, "AI made no changes to allowed files"
 
             # Check Python syntax for ai_logic.py
@@ -547,13 +643,30 @@ OPTIONAL:
                 except SyntaxError as e:
                     return False, f"Syntax error in start.py: {e}"
 
+            # Check help.py if modified
+            if help_changed and self.help_cmd_path.exists():
+                with open(self.help_cmd_path, 'r') as f:
+                    help_content = f.read()
+                try:
+                    compile(help_content, str(self.help_cmd_path), 'exec')
+                except SyntaxError as e:
+                    return False, f"Syntax error in help.py: {e}"
+
+            # Check main.py if modified
+            if main_changed and self.main_path.exists():
+                with open(self.main_path, 'r') as f:
+                    main_content = f.read()
+                try:
+                    compile(main_content, str(self.main_path), 'exec')
+                except SyntaxError as e:
+                    return False, f"Syntax error in main.py: {e}"
+
             # Validate function signature in ai_logic.py
             if "def process_user_input(text: str" not in ai_logic_content:
                 return False, "Function signature changed or missing in ai_logic.py"
 
             # Check protected files were not modified
             protected_files = [
-                "main.py",
                 "config.py",
                 "core/database.py",
                 "models/user.py",
@@ -602,6 +715,16 @@ OPTIONAL:
                 logger.info("Rolling back ask.py...")
                 shutil.copy2(self.backup_ask_cmd, self.ask_cmd_path)
                 self.backup_ask_cmd.unlink()
+
+            if self.backup_help_cmd.exists():
+                logger.info("Rolling back help.py...")
+                shutil.copy2(self.backup_help_cmd, self.help_cmd_path)
+                self.backup_help_cmd.unlink()
+
+            if self.backup_main.exists():
+                logger.info("Rolling back main.py...")
+                shutil.copy2(self.backup_main, self.main_path)
+                self.backup_main.unlink()
 
             logger.info("Rollback complete")
         except Exception as e:
