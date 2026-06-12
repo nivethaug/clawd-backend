@@ -375,7 +375,7 @@ if text_lower.startswith("price"):
     return _handle_crypto_query(coin)
 
 # Default fallback for unrecognized queries
-return f"I received your query: \"{text}\". Type !help for available commands."
+return f"I received your query: \"{{text}}\". Type !help for available commands."
 
 ==================================================
 API USAGE
