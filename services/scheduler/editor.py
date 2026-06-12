@@ -60,6 +60,13 @@ class SchedulerEditor:
             if self.api_client_path.exists():
                 shutil.copy2(self.api_client_path, self.backup_api_client)
 
+            # Fix file ownership so Claude Code (dreampilot user) can write
+            import subprocess
+            subprocess.run(
+                ["chown", "-R", "dreampilot:dreampilot", str(self.project_path)],
+                capture_output=True
+            )
+
             # Build prompt
             prompt = self._build_prompt(description, project_name)
 

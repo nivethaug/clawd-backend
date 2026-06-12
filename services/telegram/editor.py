@@ -101,6 +101,13 @@ class TelegramBotEditor:
                 logger.info(f"Creating backup: {self.backup_message_handler}")
                 shutil.copy2(self.message_handler_path, self.backup_message_handler)
             
+            # Fix file ownership so Claude Code (dreampilot user) can write
+            import subprocess
+            subprocess.run(
+                ["chown", "-R", "dreampilot:dreampilot", str(self.project_path)],
+                capture_output=True
+            )
+
             # Build AI prompt
             prompt = self._build_enhancement_prompt(description, bot_name)
             
@@ -456,7 +463,7 @@ OPTIONAL:
                 async with ClaudeCodeAgent(repo_path=str(self.project_path)) as agent:
                     result = await agent.query(
                         prompt=prompt,
-                        timeout=600  # 10 minutes
+                        timeout=1200  # 20 minutes
                     )
                     return result
             
@@ -470,12 +477,12 @@ OPTIONAL:
                 else:
                     # Use existing loop with timeout
                     result = loop.run_until_complete(
-                        asyncio.wait_for(run_claude(), timeout=600)
+                        asyncio.wait_for(run_claude(), timeout=1200)
                     )
             except RuntimeError:
                 # No event loop, create new one
                 result = asyncio.run(
-                    asyncio.wait_for(run_claude(), timeout=600)
+                    asyncio.wait_for(run_claude(), timeout=1200)
                 )
             
             # Handle result - can be string (success) or dict
