@@ -381,9 +381,10 @@ app.include_router(validate_router, prefix="/api/validate", tags=["validation"])
 
 
 @app.get("/projects", response_model=list[ProjectResponse])
-async def get_projects():
+async def get_projects(authorization: Optional[str] = Header(None)):
+    user_id = get_user_id_from_token(authorization)
     with get_db() as conn:
-        projects = conn.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()
+        projects = conn.execute("SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
 
     # Populate frontend info for projects with template_id
     response_projects = []
@@ -423,7 +424,10 @@ async def get_projects():
     return response_projects
 
 @app.post("/projects", response_model=ProjectResponse, status_code=201)
-async def create_project(request: CreateProjectRequest):
+async def create_project(request: CreateProjectRequest, authorization: Optional[str] = Header(None)):
+    # Get user_id from auth token (not request body)
+    user_id = get_user_id_from_token(authorization)
+
     # Get GitHub service for repo name sanitization
     github = get_github_service()
     
@@ -447,8 +451,7 @@ async def create_project(request: CreateProjectRequest):
                 detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter."
             )
 
-    # Default to user_id=1 if not provided
-    user_id = request.user_id if request.user_id is not None else 1
+    # user_id is now extracted from auth token above (not from request body)
 
     # Check for duplicate domain (only if user provided one, auto-generated ones use random suffix)
     if request.domain and request.domain.strip():
@@ -3816,6 +3819,26 @@ def generate_token() -> str:
     return secrets.token_hex(32)
 
 
+def get_user_id_from_token(authorization: Optional[str] = None) -> int:
+    """
+    Extract and validate user_id from Authorization header.
+    Returns user_id if valid token, raises HTTPException if not.
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing authorization header")
+
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Invalid authorization format")
+
+    token = parts[1]
+    user_id = AUTH_TOKENS.get(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    return user_id
+
+
 @app.post("/auth/signup", response_model=AuthResponse)
 async def signup(request: SignupRequest):
     """Register a new user and return token."""
@@ -4198,7 +4221,6 @@ async def get_recent_activity(
     limit: int = 20,
     offset: int = 0,
     include_preview: bool = True,
-    user_id: int = 1,  # TODO: Get from auth token when auth is implemented
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -4233,6 +4255,9 @@ async def get_recent_activity(
         limit = min(max(limit, 1), 100)  # Clamp to 1-100
         offset = max(offset, 0)
         
+        # Get user_id from auth token
+        user_id = get_user_id_from_token(authorization)
+
         # Fetch activity
         items = get_recent_activity_optimized(
             user_id=user_id,
@@ -4269,7 +4294,6 @@ async def get_recent_activity(
 @app.get("/projects/recent-activity/simple")
 async def get_recent_activity_simple_endpoint(
     limit: int = 20,
-    user_id: int = 1,
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -4278,6 +4302,7 @@ async def get_recent_activity_simple_endpoint(
     """
     try:
         limit = min(max(limit, 1), 100)
+        user_id = get_user_id_from_token(authorization)
         items = get_recent_activity_simple(user_id=user_id, limit=limit)
         return {"items": items, "count": len(items)}
     except Exception as e:
@@ -4336,7 +4361,6 @@ from dashboard_service import (
 @app.get("/dashboard/home", response_model=HomeDashboardResponse)
 async def get_dashboard_home(
     project_limit: int = 50,
-    user_id: int = 1,  # TODO: Get from auth token when auth is implemented
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -4397,6 +4421,8 @@ async def get_dashboard_home(
     }
     """
     try:
+        user_id = get_user_id_from_token(authorization)
+
         # Validate params
         project_limit = min(max(project_limit, 1), 100)
         
@@ -4428,7 +4454,6 @@ from apps_service import (
 
 @app.get("/apps", response_model=AppsListResponse)
 async def get_apps(
-    user_id: int = 1,  # TODO: Get from auth token when auth is implemented
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -4450,8 +4475,11 @@ async def get_apps(
     Performance: PM2 data cached for 2 seconds.
     """
     try:
+        user_id = get_user_id_from_token(authorization)
         apps = get_apps_list(user_id=user_id)
         return apps
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to fetch apps: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch apps: {str(e)}")
@@ -4465,7 +4493,6 @@ class AppActionRequest(BaseModel):
 async def execute_app_action(
     project_id: int,
     request: AppActionRequest,
-    user_id: int = 1,
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -4480,6 +4507,7 @@ async def execute_app_action(
     The action is applied to both {project_name}-frontend and {project_name}-backend.
     """
     try:
+        user_id = get_user_id_from_token(authorization)
         # Get project domain
         with get_db() as cur:
             cur.execute("SELECT name, domain FROM projects WHERE id = %s AND user_id = %s", (project_id, user_id))
