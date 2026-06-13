@@ -20,6 +20,9 @@ import sys
 import re
 import shutil
 import shlex
+import time
+import urllib.request
+import urllib.error
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -614,6 +617,7 @@ class ClaudeCodeAgent:
 
         logger.info(f"Starting query: prompt='{prompt[:100]}{'...' if len(prompt) > 100 else ''}', timeout={timeout}s")
         start_time = datetime.now()
+        _query_start_ts = time.time()  # For wrapper side-channel usage fetch
 
         try:
             result = await asyncio.wait_for(
@@ -622,11 +626,61 @@ class ClaudeCodeAgent:
             )
             elapsed = (datetime.now() - start_time).total_seconds()
             logger.info(f"Query completed in {elapsed:.2f}s: response='{result[:100] if result else None}{'...' if result and len(result) > 100 else ''}'")
+
+            # ── Side-channel token usage from wrapper ──
+            # Claude CLI strips custom usage fields from the proxy response,
+            # so we fetch real usage directly from the wrapper's usage buffer.
+            await self._fetch_usage_since(_query_start_ts)
+
             return result
         except asyncio.TimeoutError:
             elapsed = (datetime.now() - start_time).total_seconds()
             logger.error(f"Query timed out after {elapsed:.2f}s (limit: {timeout}s)")
             raise
+
+    async def _fetch_usage_since(self, ts: float) -> None:
+        """
+        Fetch real token usage from the wrapper's side-channel endpoint.
+
+        The wrapper records every upstream API call in an in-memory ring buffer.
+        We query all records since *ts* (the start of this query) and store the
+        aggregated totals in ``self._last_token_usage``, overriding the zeros
+        that Claude CLI reports.
+        """
+        wrapper_url = os.environ.get("WRAPPER_BASE_URL", "http://127.0.0.1:7861").rstrip("/")
+        endpoint = f"{wrapper_url}/usage/since/{ts}"
+
+        def _do_get() -> dict:
+            try:
+                req = urllib.request.Request(endpoint, method="GET")
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    return json.loads(resp.read().decode())
+            except Exception as e:
+                logger.warning(f"[CLAUDE-AGENT] Could not fetch wrapper usage from {endpoint}: {e}")
+                return {}
+
+        data = await asyncio.get_event_loop().run_in_executor(None, _do_get)
+        totals = data.get("totals") if data else None
+        if totals:
+            self._last_token_usage = {
+                "input_tokens": totals.get("input_tokens", 0),
+                "output_tokens": totals.get("output_tokens", 0),
+                "cache_read_input_tokens": totals.get("cache_read_input_tokens", 0),
+                "cache_creation_input_tokens": 0,
+                "reasoning_tokens": totals.get("reasoning_tokens", 0),
+                "cost_usd": totals.get("cost_usd", 0),
+            }
+            logger.info(
+                f"[CLAUDE-AGENT] Wrapper side-channel usage (since {ts}): "
+                f"input={self._last_token_usage['input_tokens']}, "
+                f"output={self._last_token_usage['output_tokens']}, "
+                f"cache_read={self._last_token_usage['cache_read_input_tokens']}, "
+                f"reasoning={self._last_token_usage['reasoning_tokens']}, "
+                f"cost=${self._last_token_usage['cost_usd']:.6f}, "
+                f"requests={totals.get('request_count', 0)}"
+            )
+        else:
+            logger.warning(f"[CLAUDE-AGENT] Wrapper usage endpoint returned no totals (endpoint={endpoint})")
 
     async def _execute_query(self, prompt: str) -> Optional[str]:
         """
