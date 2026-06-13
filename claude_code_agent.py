@@ -23,6 +23,7 @@ import shlex
 import time
 import urllib.request
 import urllib.error
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -617,11 +618,17 @@ class ClaudeCodeAgent:
 
         logger.info(f"Starting query: prompt='{prompt[:100]}{'...' if len(prompt) > 100 else ''}', timeout={timeout}s")
         start_time = datetime.now()
-        _query_start_ts = time.time()  # For wrapper side-channel usage fetch
+
+        # Generate a per-query session ID for wrapper usage correlation.
+        # Threaded as a LOCAL variable through _execute_query → subprocess env
+        # to avoid race conditions when two query() calls overlap on the same
+        # agent instance. The ID is injected as ANTHROPIC_API_KEY env var →
+        # Claude CLI sends it as x-api-key header → wrapper tags usage records.
+        _session_id = f"qry_{uuid.uuid4().hex[:16]}"
 
         try:
             result = await asyncio.wait_for(
-                self._execute_query(prompt),
+                self._execute_query(prompt, usage_session_id=_session_id),
                 timeout=timeout,
             )
             elapsed = (datetime.now() - start_time).total_seconds()
@@ -630,7 +637,7 @@ class ClaudeCodeAgent:
             # ── Side-channel token usage from wrapper ──
             # Claude CLI strips custom usage fields from the proxy response,
             # so we fetch real usage directly from the wrapper's usage buffer.
-            await self._fetch_usage_since(_query_start_ts)
+            await self._fetch_usage_session(_session_id)
 
             return result
         except asyncio.TimeoutError:
@@ -638,17 +645,17 @@ class ClaudeCodeAgent:
             logger.error(f"Query timed out after {elapsed:.2f}s (limit: {timeout}s)")
             raise
 
-    async def _fetch_usage_since(self, ts: float) -> None:
+    async def _fetch_usage_session(self, session_id: str) -> None:
         """
         Fetch real token usage from the wrapper's side-channel endpoint.
 
-        The wrapper records every upstream API call in an in-memory ring buffer.
-        We query all records since *ts* (the start of this query) and store the
-        aggregated totals in ``self._last_token_usage``, overriding the zeros
-        that Claude CLI reports.
+        Uses session-ID correlation: each query gets a unique ID that's
+        embedded in the ANTHROPIC_API_KEY env var. The wrapper tags every
+        usage record with this ID, so we only get THIS query's usage —
+        even when multiple projects query concurrently.
         """
         wrapper_url = os.environ.get("WRAPPER_BASE_URL", "http://127.0.0.1:7861").rstrip("/")
-        endpoint = f"{wrapper_url}/usage/since/{ts}"
+        endpoint = f"{wrapper_url}/usage/session/{session_id}"
 
         def _do_get() -> dict:
             try:
@@ -671,7 +678,7 @@ class ClaudeCodeAgent:
                 "cost_usd": totals.get("cost_usd", 0),
             }
             logger.info(
-                f"[CLAUDE-AGENT] Wrapper side-channel usage (since {ts}): "
+                f"[CLAUDE-AGENT] Wrapper usage (session={session_id}): "
                 f"input={self._last_token_usage['input_tokens']}, "
                 f"output={self._last_token_usage['output_tokens']}, "
                 f"cache_read={self._last_token_usage['cache_read_input_tokens']}, "
@@ -682,7 +689,7 @@ class ClaudeCodeAgent:
         else:
             logger.warning(f"[CLAUDE-AGENT] Wrapper usage endpoint returned no totals (endpoint={endpoint})")
 
-    async def _execute_query(self, prompt: str) -> Optional[str]:
+    async def _execute_query(self, prompt: str, usage_session_id: str = "") -> Optional[str]:
         """
         Execute a query by calling claude CLI directly.
 
@@ -712,6 +719,13 @@ class ClaudeCodeAgent:
         if "env" in self._settings:
             env.update(self._settings["env"])
             logger.debug(f"Applied custom env vars: {self._settings['env']}")
+
+        # Inject per-query session ID as ANTHROPIC_API_KEY so the wrapper
+        # can correlate usage records to this specific query. The wrapper
+        # doesn't validate this key — it uses its own upstream keys — so
+        # we can safely repurpose it as a correlation tag.
+        if usage_session_id:
+            env["ANTHROPIC_API_KEY"] = usage_session_id
 
         # Build command: claude -p "prompt" --dangerously-skip-permissions
         # Using -p for one-shot prompt mode (non-interactive)
