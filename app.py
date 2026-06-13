@@ -48,6 +48,16 @@ from services.rate_limiter import (
     DEFAULT_TIER,
 )
 
+from services.token_tracker import (
+    record_usage,
+    record_from_token_usage_json,
+    get_user_usage,
+    get_project_usage,
+    get_platform_usage,
+    get_usage_logs,
+    VALID_USAGE_TYPES as VALID_TOKEN_USAGE_TYPES,
+)
+
 # AI Chat System
 from api.ai_chat import router as ai_chat_router
 from api.ai_selection import router as ai_selection_router
@@ -1045,6 +1055,15 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             "SELECT * FROM projects WHERE id = ?",
             (project_id,)
         ).fetchone()
+
+    # Track project creation token usage (counts as 1 usage event)
+    record_usage(
+        user_id=user_id,
+        usage_type="project_create",
+        total_tokens=1,
+        project_id=project_id,
+        description=f"Created project: {request.name} (domain: {domain})",
+    )
 
     # Get template details if template_id is set
     frontend_info = None
@@ -3071,6 +3090,25 @@ async def chat_stream_endpoint(request: ChatRequest):
                             )
                             save_conn.commit()
                         logger.info(f"[ACP-STREAM] Saved assistant message ({len(content)} chars, token_usage={'yes' if token_usage_json else 'no'})")
+
+                        # Track token usage for rate limiting and analytics
+                        try:
+                            usage_data = handler.get_last_token_usage() if hasattr(handler, 'get_last_token_usage') else None
+                            if usage_data:
+                                with get_db() as tconn:
+                                    prow = tconn.execute("SELECT user_id FROM projects WHERE id = %s", (project_id,)).fetchone()
+                                    if prow:
+                                        tuid = prow["user_id"] if isinstance(prow, dict) else prow[0]
+                                        record_from_token_usage_json(
+                                            user_id=tuid,
+                                            token_usage_json=usage_data,
+                                            usage_type="ai_chat",
+                                            project_id=project_id,
+                                            session_id=session_id,
+                                            description="ACP streaming chat",
+                                        )
+                        except Exception as track_err:
+                            logger.debug(f"[TOKEN] Tracking failed: {track_err}")
                     except Exception as save_err:
                         logger.error(f"[ACP-STREAM] Failed to save message: {save_err}")
                 
@@ -3602,6 +3640,25 @@ async def chat_endpoint(request: ChatRequest):
                 )
                 save_conn.commit()
             
+            # Track token usage
+            try:
+                usage_data = handler.get_last_token_usage() if hasattr(handler, 'get_last_token_usage') else None
+                if usage_data:
+                    with get_db() as tconn:
+                        prow = tconn.execute("SELECT user_id FROM projects WHERE id = %s", (project_id,)).fetchone()
+                        if prow:
+                            tuid = prow["user_id"] if isinstance(prow, dict) else prow[0]
+                            record_from_token_usage_json(
+                                user_id=tuid,
+                                token_usage_json=usage_data,
+                                usage_type="ai_chat",
+                                project_id=project_id,
+                                session_id=session_id,
+                                description="ACP non-streaming chat",
+                            )
+            except Exception as track_err:
+                logger.debug(f"[TOKEN] Non-streaming tracking failed: {track_err}")
+
             logger.info(f"[ACP-MODE] === ACP MODE COMPLETED ===")
             
             return ChatResponse(
@@ -4229,6 +4286,22 @@ async def completion(request: CompletionRequest):
         # If validation failed, return 400
         if not result["success"] and "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
+
+        # Track AI completion usage (estimate tokens from response length)
+        try:
+            msg_content = result.get("message", {})
+            content_len = len(msg_content.get("content", "")) if isinstance(msg_content, dict) else 0
+            if content_len > 0:
+                # Rough estimate: ~4 chars per token
+                est_tokens = max(1, content_len // 4)
+                record_usage(
+                    user_id=0,  # Completion endpoint has no auth — anonymous
+                    usage_type="ai_completion",
+                    total_tokens=est_tokens,
+                    description=f"AI completion: {request.projectType} {request.mode}",
+                )
+        except Exception:
+            pass
 
         return CompletionResponse(**result)
 
@@ -5414,6 +5487,82 @@ async def admin_set_user_limits(
         "overrides_applied": result,
         "full_limits": get_user_limits(target_user_id),
     }
+
+
+# ============================================================================
+# Token Usage Endpoints
+# ============================================================================
+
+@app.get("/auth/usage")
+async def get_my_usage(
+    period: str = "month",
+    usage_type: Optional[str] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Get current user's token usage summary.
+    Query params:
+        period: 'day', 'week', 'month', 'all' (default: month)
+        usage_type: filter by 'ai_chat', 'project_create', 'ai_completion'
+    """
+    user_id = get_user_id_from_token(authorization)
+    if usage_type and usage_type not in VALID_TOKEN_USAGE_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid usage_type. Must be one of: {VALID_TOKEN_USAGE_TYPES}")
+    return get_user_usage(user_id=user_id, period=period, usage_type=usage_type)
+
+
+@app.get("/projects/{project_id}/usage")
+async def get_project_token_usage(
+    project_id: int,
+    period: str = "all",
+    authorization: Optional[str] = Header(None)
+):
+    """Get token usage for a specific project."""
+    user_id = get_user_id_from_token(authorization)
+    # Verify project belongs to user
+    with get_db() as conn:
+        proj = conn.execute("SELECT user_id FROM projects WHERE id = %s", (project_id,)).fetchone()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    proj_uid = proj["user_id"] if isinstance(proj, dict) else proj[0]
+    if proj_uid != user_id:
+        # Allow admin to view any project
+        info = get_user_tier_and_role(user_id)
+        if info["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Not your project")
+    return get_project_usage(project_id=project_id, period=period)
+
+
+@app.get("/admin/usage")
+async def admin_get_platform_usage(
+    period: str = "month",
+    authorization: Optional[str] = Header(None)
+):
+    """Get platform-wide token usage (admin only). Includes top users and breakdown by type."""
+    admin_user_id = get_user_id_from_token(authorization)
+    require_admin(admin_user_id)
+    return get_platform_usage(period=period)
+
+
+@app.get("/admin/usage/logs")
+async def admin_get_usage_logs(
+    user_id: Optional[int] = None,
+    project_id: Optional[int] = None,
+    usage_type: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    authorization: Optional[str] = Header(None)
+):
+    """Get raw token usage logs with filters (admin only)."""
+    admin_uid = get_user_id_from_token(authorization)
+    require_admin(admin_uid)
+    return get_usage_logs(
+        user_id=user_id,
+        project_id=project_id,
+        usage_type=usage_type,
+        limit=min(limit, 200),
+        offset=offset,
+    )
 
 
 if __name__ == "__main__":

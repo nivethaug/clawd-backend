@@ -554,6 +554,38 @@ def init_schema():
 
             logger.info("✓ Added scheduler_jobs and scheduler_logs tables")
 
+            # Token Usage table — tracks AI token consumption per user/project
+            cur.execute("""CREATE TABLE IF NOT EXISTS token_usage (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                project_id INTEGER,
+                session_id INTEGER,
+                usage_type VARCHAR(30) NOT NULL,
+                description TEXT,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                model VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.commit()
+
+            # Token usage indexes for fast queries
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_token_usage_user_date
+                ON token_usage (user_id, created_at DESC)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_token_usage_project_date
+                ON token_usage (project_id, created_at DESC)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_token_usage_type
+                ON token_usage (usage_type, created_at DESC)
+            """)
+            conn.commit()
+            logger.info("✓ Added token_usage table with indexes")
+
             logger.info("✓ Database schema initialized")
     finally:
         pool.putconn(conn)
