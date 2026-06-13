@@ -74,6 +74,79 @@ TIERS: Dict[str, TierLimits] = {
 DEFAULT_TIER = "free"
 VALID_TIERS = list(TIERS.keys())
 VALID_ROLES = ["user", "admin"]
+VALID_LIMIT_TYPES = ["general_api", "ai_chat", "project_create", "max_projects"]
+
+
+# ============================================================================
+# Per-User Limit Overrides (in-memory, persists until restart)
+# ============================================================================
+
+_user_overrides: Dict[int, Dict[str, any]] = {}
+"""
+Structure: { user_id: { "general_api": RateLimit, "ai_chat": RateLimit, ... , "max_projects": int } }
+Missing keys fall back to the user's tier config.
+"""
+
+
+def set_user_override(user_id: int, overrides: Dict[str, any]) -> Dict[str, any]:
+    """
+    Set per-user rate limit overrides.
+    overrides can contain any of: general_api, ai_chat, project_create (as {max, window_seconds}),
+    and max_projects (as int).
+    Returns the full override config after applying.
+    """
+    if user_id not in _user_overrides:
+        _user_overrides[user_id] = {}
+
+    for key, value in overrides.items():
+        if key == "max_projects":
+            _user_overrides[user_id][key] = int(value)
+        elif key in ("general_api", "ai_chat", "project_create"):
+            if isinstance(value, dict):
+                _user_overrides[user_id][key] = RateLimit(
+                    max_requests=int(value.get("max", 0)),
+                    window_seconds=int(value.get("window_seconds", 3600)),
+                )
+            else:
+                # Simple int → just set max, keep default window
+                _user_overrides[user_id][key] = RateLimit(max_requests=int(value))
+
+    logger.info(f"Set rate limit overrides for user {user_id}: {overrides}")
+    return get_user_overrides(user_id)
+
+
+def get_user_overrides(user_id: int) -> Dict[str, any]:
+    """Get per-user overrides (serialized for API response)."""
+    overrides = _user_overrides.get(user_id, {})
+    result = {}
+    for key, value in overrides.items():
+        if isinstance(value, RateLimit):
+            result[key] = {"max": value.max_requests, "window_seconds": value.window_seconds}
+        else:
+            result[key] = value
+    return result
+
+
+def clear_user_overrides(user_id: int):
+    """Remove all per-user overrides, reverting to tier defaults."""
+    _user_overrides.pop(user_id, None)
+    logger.info(f"Cleared rate limit overrides for user {user_id}")
+
+
+def _get_effective_limit(user_id: int, limit_type: str, tier_config: TierLimits) -> RateLimit:
+    """Get the effective RateLimit for a user (override > tier)."""
+    override = _user_overrides.get(user_id, {}).get(limit_type)
+    if override and isinstance(override, RateLimit):
+        return override
+    return getattr(tier_config, limit_type, UNLIMITED)
+
+
+def _get_effective_max_projects(user_id: int, tier_config: TierLimits) -> int:
+    """Get effective max_projects (override > tier)."""
+    override = _user_overrides.get(user_id, {}).get("max_projects")
+    if override is not None:
+        return int(override)
+    return tier_config.max_projects
 
 
 # ============================================================================
@@ -186,7 +259,8 @@ def check_rate_limit(user_id: int, limit_type: str = "general_api") -> Dict[str,
         return {"allowed": True, "tier": tier_name, "role": role, "bypass": True}
 
     tier_config = TIERS.get(tier_name, TIERS[DEFAULT_TIER])
-    limit: RateLimit = getattr(tier_config, limit_type, None)
+    # Use per-user override if set, otherwise tier default
+    limit: RateLimit = _get_effective_limit(user_id, limit_type, tier_config)
 
     if limit is None:
         # Unknown limit_type — allow by default
@@ -267,7 +341,7 @@ def check_project_limit(user_id: int) -> Dict[str, any]:
         return {"allowed": True, "current": 0, "max": 0, "tier": tier_name, "role": role, "bypass": True}
 
     tier_config = TIERS.get(tier_name, TIERS[DEFAULT_TIER])
-    max_projects = tier_config.max_projects
+    max_projects = _get_effective_max_projects(user_id, tier_config)
 
     if max_projects == 0:
         return {"allowed": True, "current": 0, "max": 0, "tier": tier_name, "role": role, "unlimited": True}
@@ -305,22 +379,28 @@ def get_user_limits(user_id: int) -> Dict[str, any]:
 
     limits = {}
     for limit_type in ["general_api", "ai_chat", "project_create"]:
-        limit: RateLimit = getattr(tier_config, limit_type)
+        limit: RateLimit = _get_effective_limit(user_id, limit_type, tier_config)
         key = f"{user_id}:{limit_type}"
         current = _store.count(key, limit.window_seconds) if limit.max_requests > 0 else 0
+        is_overridden = user_id in _user_overrides and limit_type in _user_overrides[user_id]
         limits[limit_type] = {
             "max": limit.max_requests if limit.max_requests > 0 else "unlimited",
             "remaining": max(0, limit.max_requests - current) if limit.max_requests > 0 else "unlimited",
             "window_seconds": limit.window_seconds,
             "current_usage": current,
+            "overridden": is_overridden,
         }
 
     # Project count
     proj_info = check_project_limit(user_id)
+    effective_max_projects = _get_effective_max_projects(user_id, tier_config)
     limits["projects"] = {
-        "max": proj_info["max"] if proj_info["max"] > 0 else "unlimited",
+        "max": effective_max_projects if effective_max_projects > 0 else "unlimited",
         "current": proj_info["current"],
+        "overridden": user_id in _user_overrides and "max_projects" in _user_overrides.get(user_id, {}),
     }
+
+    overrides = get_user_overrides(user_id)
 
     return {
         "user_id": user_id,
@@ -329,6 +409,7 @@ def get_user_limits(user_id: int) -> Dict[str, any]:
         "role": role,
         "is_admin": role == "admin",
         "limits": limits,
+        "overrides": overrides,
     }
 
 
@@ -337,3 +418,44 @@ def reset_user_limits(user_id: int):
     for limit_type in ["general_api", "ai_chat", "project_create"]:
         _store.reset(f"{user_id}:{limit_type}")
     logger.info(f"Rate limits reset for user {user_id}")
+
+
+def update_tier(tier_name: str, updates: Dict[str, any]) -> Dict[str, any]:
+    """
+    Admin: Update limits for an existing tier at runtime.
+    updates can contain: general_api, ai_chat, project_create (as {max, window_seconds}),
+    and max_projects (as int).
+    Returns the updated tier config.
+    """
+    if tier_name not in TIERS:
+        return {"error": f"Unknown tier: {tier_name}"}
+
+    tier = TIERS[tier_name]
+
+    for key, value in updates.items():
+        if key == "max_projects":
+            tier.max_projects = int(value)
+        elif key == "name":
+            tier.name = str(value)
+        elif key in ("general_api", "ai_chat", "project_create"):
+            current: RateLimit = getattr(tier, key)
+            if isinstance(value, dict):
+                setattr(tier, key, RateLimit(
+                    max_requests=int(value.get("max", current.max_requests)),
+                    window_seconds=int(value.get("window_seconds", current.window_seconds)),
+                ))
+            else:
+                setattr(tier, key, RateLimit(max_requests=int(value), window_seconds=current.window_seconds))
+
+    logger.info(f"Updated tier '{tier_name}': {updates}")
+
+    # Return updated tier
+    return {
+        tier_name: {
+            "name": tier.name,
+            "general_api": {"max": tier.general_api.max_requests or "unlimited", "window_seconds": tier.general_api.window_seconds},
+            "ai_chat": {"max": tier.ai_chat.max_requests or "unlimited", "window_seconds": tier.ai_chat.window_seconds},
+            "project_create": {"max": tier.project_create.max_requests or "unlimited", "window_seconds": tier.project_create.window_seconds},
+            "max_projects": tier.max_projects or "unlimited",
+        }
+    }

@@ -37,9 +37,14 @@ from services.rate_limiter import (
     get_user_limits,
     reset_user_limits,
     get_user_tier_and_role,
+    set_user_override,
+    get_user_overrides,
+    clear_user_overrides,
+    update_tier,
     TIERS,
     VALID_TIERS,
     VALID_ROLES,
+    VALID_LIMIT_TYPES,
     DEFAULT_TIER,
 )
 
@@ -5268,6 +5273,147 @@ async def admin_get_tiers(authorization: Optional[str] = Header(None)):
             }
         }
     return {"tiers": tiers_info}
+
+
+class UpdateTierRequest(BaseModel):
+    """Request body for updating a tier's limits."""
+    name: Optional[str] = None
+    general_api: Optional[Dict[str, int]] = None        # {"max": 60, "window_seconds": 3600}
+    ai_chat: Optional[Dict[str, int]] = None             # {"max": 10, "window_seconds": 3600}
+    project_create: Optional[Dict[str, int]] = None      # {"max": 3, "window_seconds": 86400}
+    max_projects: Optional[int] = None                    # e.g. 3, 0 = unlimited
+
+
+@app.put("/admin/tiers/{tier_name}")
+async def admin_update_tier(
+    tier_name: str,
+    request: UpdateTierRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Update rate limits for a subscription tier at runtime.
+    Changes take effect immediately for all users on that tier.
+    Note: Changes are in-memory only — reset on server restart.
+
+    Example body:
+        {
+            "general_api": {"max": 120, "window_seconds": 3600},
+            "ai_chat": {"max": 20},
+            "max_projects": 5
+        }
+    """
+    admin_user_id = get_user_id_from_token(authorization)
+    require_admin(admin_user_id)
+
+    if tier_name not in TIERS:
+        raise HTTPException(status_code=400, detail=f"Unknown tier. Must be one of: {VALID_TIERS}")
+
+    updates = {}
+    if request.name:
+        updates["name"] = request.name
+    if request.general_api:
+        updates["general_api"] = request.general_api
+    if request.ai_chat:
+        updates["ai_chat"] = request.ai_chat
+    if request.project_create:
+        updates["project_create"] = request.project_create
+    if request.max_projects is not None:
+        updates["max_projects"] = request.max_projects
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    result = update_tier(tier_name, updates)
+    return {"success": True, "updated": result}
+
+
+class UserLimitOverrideRequest(BaseModel):
+    """Request body for setting per-user rate limit overrides."""
+    general_api: Optional[Dict[str, int]] = None         # {"max": 60, "window_seconds": 3600}
+    ai_chat: Optional[Dict[str, int]] = None              # {"max": 10, "window_seconds": 3600}
+    project_create: Optional[Dict[str, int]] = None       # {"max": 3, "window_seconds": 86400}
+    max_projects: Optional[int] = None                     # e.g. 5, 0 = unlimited
+    clear: bool = False                                    # If true, remove all overrides
+
+
+@app.get("/admin/users/{target_user_id}/limits")
+async def admin_get_user_limits(
+    target_user_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Get a specific user's rate limits, including overrides and current usage.
+    Shows tier defaults, per-user overrides, and real-time usage counts.
+    """
+    admin_user_id = get_user_id_from_token(authorization)
+    require_admin(admin_user_id)
+    return get_user_limits(target_user_id)
+
+
+@app.put("/admin/users/{target_user_id}/limits")
+async def admin_set_user_limits(
+    target_user_id: int,
+    request: UserLimitOverrideRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Set per-user rate limit overrides for a specific user.
+    These override the user's tier limits.
+
+    Set "clear": true to remove all overrides and revert to tier defaults.
+
+    Example body (increase AI chat limit for a specific user):
+        {
+            "ai_chat": {"max": 200, "window_seconds": 3600},
+            "max_projects": 10
+        }
+
+    Example (simple - just max, keeps default window):
+        {
+            "general_api": {"max": 500},
+            "ai_chat": {"max": 50}
+        }
+    """
+    admin_user_id = get_user_id_from_token(authorization)
+    require_admin(admin_user_id)
+
+    # Verify target user exists
+    with get_db() as conn:
+        user = conn.execute("SELECT id, email FROM users WHERE id = %s", (target_user_id,)).fetchone()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User {target_user_id} not found")
+
+    # Clear overrides if requested
+    if request.clear:
+        clear_user_overrides(target_user_id)
+        return {
+            "success": True,
+            "message": f"All overrides cleared for user {target_user_id}",
+            "user_id": target_user_id,
+            "limits": get_user_limits(target_user_id),
+        }
+
+    # Build overrides dict
+    overrides = {}
+    if request.general_api:
+        overrides["general_api"] = request.general_api
+    if request.ai_chat:
+        overrides["ai_chat"] = request.ai_chat
+    if request.project_create:
+        overrides["project_create"] = request.project_create
+    if request.max_projects is not None:
+        overrides["max_projects"] = request.max_projects
+
+    if not overrides:
+        raise HTTPException(status_code=400, detail="No fields to update. Set 'clear': true to remove overrides.")
+
+    result = set_user_override(target_user_id, overrides)
+    return {
+        "success": True,
+        "user_id": target_user_id,
+        "overrides_applied": result,
+        "full_limits": get_user_limits(target_user_id),
+    }
 
 
 if __name__ == "__main__":
