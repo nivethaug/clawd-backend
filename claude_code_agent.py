@@ -464,6 +464,7 @@ class ClaudeCodeAgent:
             "cache_creation_input_tokens": None,
             "cache_read_input_tokens": None,
             "cost_usd": None,
+            "reasoning_tokens": None,
         }
 
         found_any = False
@@ -489,6 +490,7 @@ class ClaudeCodeAgent:
         cache_creation = usage_fields.get("cache_creation_input_tokens") or 0
         cache_read = usage_fields.get("cache_read_input_tokens") or 0
         output_tokens = usage_fields.get("output_tokens") or 0
+        reasoning_tokens = usage_fields.get("reasoning_tokens") or 0
 
         return {
             "input_tokens": input_tokens,
@@ -497,6 +499,7 @@ class ClaudeCodeAgent:
             "cache_read_input_tokens": cache_read,
             "total_tokens": input_tokens + output_tokens + cache_creation + cache_read,
             "cost_usd": usage_fields.get("cost_usd"),
+            "reasoning_tokens": reasoning_tokens,
         }
 
     def _get_progress_message(self, elapsed: float) -> str:
@@ -788,10 +791,22 @@ class ClaudeCodeAgent:
 
                             # Extract token usage from result message
                             token_usage = self._extract_token_usage(data)
+                            logger.info(f"[CLAUDE-AGENT] Raw result message: {json.dumps({k: v for k, v in data.items() if k != 'result'}, ensure_ascii=False)[:500]}")
                             if token_usage:
                                 self._last_token_usage = token_usage
                                 cost = token_usage.get('cost_usd') or 0
-                                logger.info(f"[CLAUDE-AGENT] Token usage: input={token_usage.get('input_tokens')}, output={token_usage.get('output_tokens')}, cost=${cost:.4f}")
+                                logger.info(
+                                    f"[CLAUDE-AGENT] Token usage: "
+                                    f"input={token_usage.get('input_tokens')}, "
+                                    f"output={token_usage.get('output_tokens')}, "
+                                    f"cache_read={token_usage.get('cache_read_input_tokens')}, "
+                                    f"cache_creation={token_usage.get('cache_creation_input_tokens')}, "
+                                    f"reasoning={token_usage.get('reasoning_tokens')}, "
+                                    f"total={token_usage.get('total_tokens')}, "
+                                    f"cost=${cost:.4f}"
+                                )
+                            else:
+                                logger.warning(f"[CLAUDE-AGENT] No token usage found in result message, raw keys: {list(data.keys())}")
 
                             if exit_on_result:
                                 logger.info("[CLAUDE-AGENT] Final stream-json result received; stopping stdout read loop")
