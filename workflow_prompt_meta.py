@@ -60,6 +60,7 @@ def build_workflow_meta(
     prompt_kind: Optional[str] = None,
     pages: Optional[Sequence[str]] = None,
     source: str = "db",
+    usage_session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_type = (project_type or project_type_from_id(project_type_id)).strip().lower()
     resolved_operation = str(operation or "unknown").strip().lower()
@@ -72,6 +73,7 @@ def build_workflow_meta(
         "prompt_kind": prompt_kind,
         "project_name": project_name,
         "project_id": project_id,
+        "usage_session_id": usage_session_id,
         "project_path": _clean_path(project_path),
         "frontend_path": _clean_path(frontend_path),
         "service_path": _clean_path(service_path),

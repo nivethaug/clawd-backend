@@ -620,15 +620,16 @@ class ClaudeCodeAgent:
         start_time = datetime.now()
 
         # Generate a per-query session ID for wrapper usage correlation.
-        # Threaded as a LOCAL variable through _execute_query → subprocess env
-        # to avoid race conditions when two query() calls overlap on the same
-        # agent instance. The ID is injected as ANTHROPIC_API_KEY env var →
-        # Claude CLI sends it as x-api-key header → wrapper tags usage records.
+        # Injected into the prompt's <DREAMPILOT_WORKFLOW_META> block so the
+        # wrapper sees it in every API call Claude CLI makes. The wrapper
+        # tags usage records with this ID, and we fetch them after the query.
+        # This is concurrency-safe: each query gets a unique ID.
         _session_id = f"qry_{uuid.uuid4().hex[:16]}"
+        _injected_prompt = self._inject_usage_session(prompt, _session_id)
 
         try:
             result = await asyncio.wait_for(
-                self._execute_query(prompt, usage_session_id=_session_id),
+                self._execute_query(_injected_prompt),
                 timeout=timeout,
             )
             elapsed = (datetime.now() - start_time).total_seconds()
@@ -644,6 +645,36 @@ class ClaudeCodeAgent:
             elapsed = (datetime.now() - start_time).total_seconds()
             logger.error(f"Query timed out after {elapsed:.2f}s (limit: {timeout}s)")
             raise
+
+    @staticmethod
+    def _inject_usage_session(prompt: str, session_id: str) -> str:
+        """Inject usage_session_id into the prompt's <DREAMPILOT_WORKFLOW_META> block.
+
+        The wrapper extracts metadata from this block on every API call Claude
+        CLI makes. By injecting a unique session ID here, the wrapper can tag
+        usage records for this specific query — even with concurrent queries.
+
+        If no meta block exists (e.g., plain text prompts), the prompt is
+        returned unchanged and usage tracking falls back to global /usage/since.
+        """
+        if not session_id:
+            return prompt
+        tag = "usage_session_id"
+        meta_start = "<DREAMPILOT_WORKFLOW_META>"
+        meta_end = "</DREAMPILOT_WORKFLOW_META>"
+        if meta_start not in prompt:
+            return prompt
+        # Try JSON insertion: find the last closing brace before META_END and
+        # inject our field. This handles both indented and compact JSON.
+        end_idx = prompt.index(meta_end)
+        last_brace = prompt.rfind("}", 0, end_idx)
+        if last_brace == -1:
+            return prompt
+        # Determine indentation from the line containing the closing brace
+        line_start = prompt.rfind("\n", 0, last_brace) + 1
+        indent = prompt[line_start:last_brace]
+        injection = f',\n{indent}"{tag}": "{session_id}"'
+        return prompt[:last_brace] + injection + prompt[last_brace:]
 
     async def _fetch_usage_session(self, session_id: str) -> None:
         """
@@ -689,7 +720,7 @@ class ClaudeCodeAgent:
         else:
             logger.warning(f"[CLAUDE-AGENT] Wrapper usage endpoint returned no totals (endpoint={endpoint})")
 
-    async def _execute_query(self, prompt: str, usage_session_id: str = "") -> Optional[str]:
+    async def _execute_query(self, prompt: str) -> Optional[str]:
         """
         Execute a query by calling claude CLI directly.
 
@@ -719,13 +750,6 @@ class ClaudeCodeAgent:
         if "env" in self._settings:
             env.update(self._settings["env"])
             logger.debug(f"Applied custom env vars: {self._settings['env']}")
-
-        # Inject per-query session ID as ANTHROPIC_API_KEY so the wrapper
-        # can correlate usage records to this specific query. The wrapper
-        # doesn't validate this key — it uses its own upstream keys — so
-        # we can safely repurpose it as a correlation tag.
-        if usage_session_id:
-            env["ANTHROPIC_API_KEY"] = usage_session_id
 
         # Build command: claude -p "prompt" --dangerously-skip-permissions
         # Using -p for one-shot prompt mode (non-interactive)
