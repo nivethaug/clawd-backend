@@ -5032,7 +5032,7 @@ def _rebuild_after_rollback(project_id: int, project_path: str, project_name: st
     # --- Frontend rebuild ---
     frontend_path = base / "frontend"
     if frontend_path.exists() and (frontend_path / "package.json").exists():
-        cmd_args = ["python3", "buildpublish.py", "--project-name", project_name]
+        cmd_args = ["python3", "buildpublish.py"]
         logger.info(f"🔄 [ROLLBACK] Rebuilding frontend for project {project_id}")
         try:
             result = subprocess.run(
@@ -5063,21 +5063,7 @@ def _rebuild_after_rollback(project_id: int, project_path: str, project_name: st
     # --- Backend rebuild ---
     backend_path = base / "backend"
     if backend_path.exists() and (backend_path / "main.py").exists():
-        # Get domain from DB for backend buildpublish
-        domain = None
-        try:
-            with get_db() as conn:
-                proj = conn.execute(
-                    "SELECT domain FROM projects WHERE id = ?", (project_id,)
-                ).fetchone()
-            if proj:
-                domain = proj["domain"] if isinstance(proj, dict) else proj[0]
-        except Exception:
-            pass
-
-        cmd_args = ["python3", "buildpublish.py", "--project-name", project_name]
-        if domain:
-            cmd_args.extend(["--domain", domain])
+        cmd_args = ["python3", "buildpublish.py"]
         logger.info(f"🔧 [ROLLBACK] Rebuilding backend for project {project_id}")
         try:
             result = subprocess.run(
