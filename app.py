@@ -4813,7 +4813,23 @@ async def get_commit_history(project_id: int, limit: int = 20, offset: int = 0):
             (project_id,)
         ).fetchone()["cnt"]
 
-        commits = [dict(row) for row in rows]
+        # Map DB columns to frontend-expected field names
+        commits = []
+        for row in rows:
+            r = dict(row)
+            commits.append({
+                "id": r["id"],
+                "project_id": r["project_id"],
+                "session_id": r.get("session_id"),
+                "message_id": r.get("message_id"),
+                "commit_hash": r["commit_hash"],
+                "commit_message": r["commit_message"],
+                "commit_status": r["status"],
+                "reverted_by": r.get("reverted_by"),
+                "created_at": str(r["created_at"]) if r.get("created_at") else "",
+                "files_changed": 0,
+            })
+
         return {"commits": commits, "total": total, "repo_url": repo_url}
 
 
@@ -4844,7 +4860,92 @@ async def get_commit_log_detail(project_id: int, log_id: int):
         if not row:
             raise HTTPException(status_code=404, detail=f"Commit log entry {log_id} not found")
 
-        return dict(row)
+        r = dict(row)
+        return {
+            "id": r["id"],
+            "project_id": r["project_id"],
+            "session_id": r.get("session_id"),
+            "message_id": r.get("message_id"),
+            "commit_hash": r["commit_hash"],
+            "commit_message": r["commit_message"],
+            "commit_status": r["status"],
+            "reverted_by": r.get("reverted_by"),
+            "created_at": str(r["created_at"]) if r.get("created_at") else "",
+            "files_changed": 0,
+        }
+
+
+@app.get("/projects/{project_id}/commits/log/{log_id}/diff")
+async def get_commit_log_diff(project_id: int, log_id: int):
+    """Get diff details for a specific commit log entry."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM commit_log WHERE id = ? AND project_id = ?",
+            (log_id, project_id)
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Commit log entry {log_id} not found")
+
+        r = dict(row)
+        commit_hash = r.get("commit_hash", "")
+
+        # Try to get the actual git diff if we have a commit hash and project path
+        files_list = []
+        total_additions = 0
+        total_deletions = 0
+
+        proj_row = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+        project_path = dict(proj_row)["project_path"] if proj_row else None
+
+        if commit_hash and project_path and Path(project_path).exists():
+            try:
+                # Get list of changed files
+                result = subprocess.run(
+                    ["git", "diff", f"{commit_hash}~1", commit_hash, "--stat", "--numstat"],
+                    capture_output=True, text=True, timeout=10,
+                    cwd=project_path
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.strip().split("\n"):
+                        if line and not line.startswith("-") and not line.startswith("Total"):
+                            parts = line.split("\t")
+                            if len(parts) >= 3:
+                                adds = int(parts[0]) if parts[0].isdigit() else 0
+                                dels = int(parts[1]) if parts[1].isdigit() else 0
+                                filename = parts[2]
+                                total_additions += adds
+                                total_deletions += dels
+
+                                # Get patch for this file
+                                patch_result = subprocess.run(
+                                    ["git", "diff", f"{commit_hash}~1", commit_hash, "--", filename],
+                                    capture_output=True, text=True, timeout=10,
+                                    cwd=project_path
+                                )
+                                patch = patch_result.stdout if patch_result.returncode == 0 else ""
+
+                                files_list.append({
+                                    "filename": filename,
+                                    "status": "modified",
+                                    "additions": adds,
+                                    "deletions": dels,
+                                    "patch": patch,
+                                })
+            except Exception as e:
+                logger.warning(f"git diff failed for commit {commit_hash}: {e}")
+
+        return {
+            "commit_hash": commit_hash,
+            "commit_message": r.get("commit_message", ""),
+            "files": files_list,
+            "total_additions": total_additions,
+            "total_deletions": total_deletions,
+            "total_files": len(files_list),
+        }
 
 
 def _rebuild_after_rollback(project_id: int, project_path: str, project_name: str) -> dict:
