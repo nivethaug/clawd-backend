@@ -55,6 +55,7 @@ from services.token_tracker import (
     get_project_usage,
     get_platform_usage,
     get_usage_logs,
+    get_user_usage_logs_with_project,
     VALID_USAGE_TYPES as VALID_TOKEN_USAGE_TYPES,
 )
 
@@ -5509,6 +5510,63 @@ async def get_my_usage(
     if usage_type and usage_type not in VALID_TOKEN_USAGE_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid usage_type. Must be one of: {VALID_TOKEN_USAGE_TYPES}")
     return get_user_usage(user_id=user_id, period=period, usage_type=usage_type)
+
+
+@app.get("/auth/usage/logs")
+async def get_my_usage_logs(
+    usage_type: Optional[str] = None,
+    project_id: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Get current user's token usage logs with project name.
+
+    Query params:
+        usage_type: filter by 'ai_chat', 'project_create', 'ai_completion'
+        project_id: filter by specific project
+        limit: max results (default 50, max 200)
+        offset: pagination offset
+
+    Returns:
+        {
+            "logs": [
+                {
+                    "id": 1,
+                    "project_id": 5,
+                    "project_name": "my-website",
+                    "project_type_id": 1,
+                    "usage_type": "project_create",
+                    "description": "Website create: my-website",
+                    "input_tokens": 152689,
+                    "output_tokens": 26038,
+                    "total_tokens": 178727,
+                    "model": "glm-5.1",
+                    "cost_usd": 0.3495,
+                    "created_at": "2026-06-14T12:00:00",
+                    ...
+                },
+            ],
+            "total": 42,
+            "totals": {
+                "total_tokens": 500000,
+                "input_tokens": 350000,
+                "output_tokens": 150000,
+                "cost_usd": 1.2345
+            }
+        }
+    """
+    user_id = get_user_id_from_token(authorization)
+    if usage_type and usage_type not in VALID_TOKEN_USAGE_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid usage_type. Must be one of: {VALID_TOKEN_USAGE_TYPES}")
+    return get_user_usage_logs_with_project(
+        user_id=user_id,
+        usage_type=usage_type,
+        project_id=project_id,
+        limit=min(limit, 200),
+        offset=offset,
+    )
 
 
 @app.get("/projects/{project_id}/usage")
