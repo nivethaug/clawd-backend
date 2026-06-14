@@ -4849,12 +4849,84 @@ async def get_commit_log_detail(project_id: int, log_id: int):
 
 def _rebuild_after_rollback(project_id: int, project_path: str, project_name: str) -> dict:
     """
-    Rebuild and redeploy frontend + backend after a rollback.
-    Runs buildpublish.py in the appropriate directory(s).
+    Rebuild and redeploy after a rollback, handling all project types:
+      - Website (type_id=1): buildpublish.py in frontend/ + backend/
+      - Telegram bot (type_id=2): pm2 restart tg-bot-{project_id}
+      - Discord bot (type_id=3): pm2 restart dc-bot-{project_id}
+      - Scheduler (type_id=5): pm2 restart (worker runs in main backend)
+
     Non-fatal: returns status dict but never raises.
     """
-    rebuild_status = {"frontend": None, "backend": None}
     base = Path(project_path)
+
+    # --- Determine project type from DB ---
+    project_type_id = None
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT type_id FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+        if row:
+            project_type_id = row["type_id"] if isinstance(row, dict) else row[0]
+    except Exception:
+        pass
+
+    # Also detect from path as fallback
+    path_str = str(base).replace("\\", "/")
+    if project_type_id is None:
+        if "/telegram/" in path_str:
+            project_type_id = 2
+        elif "/discord/" in path_str:
+            project_type_id = 3
+        elif "/scheduler/" in path_str:
+            project_type_id = 5
+        else:
+            project_type_id = 1  # Default: website
+
+    logger.info(f"🔄 [ROLLBACK] Rebuilding project {project_id} (type_id={project_type_id})")
+
+    # ========================================================================
+    # Bot/Scheduler projects (type_id 2, 3, 5) — just restart PM2 process
+    # ========================================================================
+    if project_type_id in (2, 3, 5):
+        if project_type_id == 2:
+            pm2_name = f"tg-bot-{project_id}"
+        elif project_type_id == 3:
+            pm2_name = f"dc-bot-{project_id}"
+        else:
+            # Scheduler — no dedicated PM2 process per project, jobs run in main scheduler
+            logger.info(f"🔄 [ROLLBACK] Scheduler project {project_id} — no PM2 restart needed (jobs managed via DB)")
+            return {
+                "type": "scheduler",
+                "restarted": False,
+                "reason": "Scheduler jobs are DB-driven, no rebuild needed",
+            }
+
+        logger.info(f"🔄 [ROLLBACK] Restarting PM2 process: {pm2_name}")
+        try:
+            result = subprocess.run(
+                ["pm2", "restart", pm2_name],
+                capture_output=True, text=True, timeout=30,
+            )
+            success = result.returncode == 0
+            return {
+                "type": "bot" if project_type_id in (2, 3) else "scheduler",
+                "pm2_process": pm2_name,
+                "restarted": success,
+                "output": result.stdout[-500:] if result.stdout else "",
+                "error": result.stderr[-300:] if result.stderr and not success else None,
+            }
+        except subprocess.TimeoutExpired:
+            logger.error(f"⏱️ [ROLLBACK] PM2 restart timeout for {pm2_name}")
+            return {"type": "bot", "pm2_process": pm2_name, "restarted": False, "error": "PM2 restart timed out"}
+        except Exception as e:
+            logger.error(f"❌ [ROLLBACK] PM2 restart error for {pm2_name}: {e}")
+            return {"type": "bot", "pm2_process": pm2_name, "restarted": False, "error": str(e)}
+
+    # ========================================================================
+    # Website projects (type_id=1) — buildpublish.py for frontend + backend
+    # ========================================================================
+    rebuild_status = {"type": "website", "frontend": None, "backend": None}
 
     # --- Frontend rebuild ---
     frontend_path = base / "frontend"
