@@ -717,49 +717,11 @@ FIRST list jobs to find the job ID, THEN perform the action. Always show the res
 
 ---
 
-## GIT WORKFLOW (MANDATORY)
-
-### WORK DIRECTLY ON MAIN — NO BRANCHING
-Branches, PRs, and merges are FORBIDDEN. All work happens on main directly.
-
-### Script Location
-- Path: `{self.project_path}/git_workflow.py`
-
-### Initialization (DO THIS FIRST)
-```python
-import sys
-sys.path.insert(0, '{self.project_path}')
-from git_workflow import GitWorkflowManager
-
-manager = GitWorkflowManager(
-    '{self.project_path}',
-    project_id={self.project_id},
-    session_id={self.session_id}
-)
-```
-
-### Available Methods
-| Method | Purpose |
-|--------|---------|
-| `manager.commit_and_push(message)` | Stage all changes, commit, push to main |
-| `manager.rollback(message_id)` | Revert a specific commit |
-| `manager.get_history(limit)` | Get commit history |
-
-### After user approves your changes:
-```python
-result = manager.commit_and_push(
-    "feat: add weather alert task\n\n"
-    "- Modified executor.py: added weather handler\n"
-    "- Added api_client method: fetch_weather_data"
-)
-# Returns: {{ 'success': True, 'commit_hash': 'a1b2c3d4', 'message_id': 42 }}
-```
-
-### Rules
-- NEVER create branches or PRs
-- ALWAYS pass project_id and session_id to constructor
-- ALWAYS include a descriptive commit message with details
-- The manager handles git add, commit, and push automatically
+## FILE CHANGES
+- Make all necessary file edits directly
+- Do NOT run git commit, git push, or any git commands
+- The system automatically commits and pushes your changes after you finish
+- Do NOT ask the user for commit approval — just complete the work
 
 ---
 
@@ -775,14 +737,11 @@ result = manager.commit_and_push(
 8. EXECUTE curl commands for ALL job management — never just print them
 9. AFTER editing any .py file, run: `python -c "import py_compile; py_compile.compile('FILE', doraise=True)"`
 10. When editing existing jobs, ALWAYS list jobs first to get the correct job ID
-11. NEVER create branches or PRs — use GitWorkflowManager.commit_and_push() after approval
-12. ALWAYS ask user for approval before committing changes
 
 ---
 
 ## FINAL CHECKLIST BEFORE RESPONDING
 
-- [ ] Did I INITIALIZE GitWorkflowManager with project_id and session_id?
 - [ ] Did I read agent/ai_index files before making changes?
 - [ ] Did I modify only executor.py and/or api_client.py?
 - [ ] Did I run py_compile on all edited files?
@@ -805,24 +764,6 @@ After ANY code change, update the relevant ai_index files:
 
 ---
 
-## MANDATORY APPROVAL QUESTION (EVERY TIME)
-
-**After EVERY successful change, you MUST ask:**
-
-```
-Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
-```
-
-**Rules:**
-- ALWAYS ask this after completing work and testing
-- Use this EXACT wording (or very similar)
-- NEVER skip this question
-- NEVER commit without user approval
-
-**After approval:**
-1. Use `manager.commit_and_push("message")` to commit and push
-2. Update `agent/ai_index/*.json` files to reflect all changes
-
 ## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
 
 Before making any code changes, follow this process:
@@ -840,15 +781,6 @@ Before making any code changes, follow this process:
 5. Then execute the plan, if you created one
 6. After execution completes, update ai_index files per the checklist
 7. Delete the plan file, if you created one
-
----
-
-## ⛔ GIT COMMIT/PUSH RESTRICTION
-
-- [ ] NEVER run `git commit` or `git push` directly — use ONLY `manager.commit_and_push()`
-- [ ] ALWAYS pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager
-- [ ] `git status`, `git diff`, `git log` are OK to use for inspection
-- [ ] Direct commit/push BYPASSES database — commit_hash won't be recorded
 
 ---
 
@@ -889,14 +821,11 @@ You are a friendly AI assistant helping a user build their **{self.project_name}
 
 **Follow this exact order every time:**
 
-1. INITIALIZE GitWorkflowManager with project_id and session_id (see GIT WORKFLOW section below)
-2. READ agent README
-3. MAKE code changes
-4. UPDATE agent folder
-5. RUN buildpublish.py (handles install + build + deploy automatically)
-6. ⭐ TEST with Chrome DevTools on LIVE site ⭐
-7. ASK user for approval
-8. AFTER approval: manager.commit_and_push("descriptive message")
+1. READ agent README
+2. MAKE code changes
+3. UPDATE agent folder
+4. RUN buildpublish.py (handles install + build + deploy automatically)
+5. ⭐ TEST with Chrome DevTools on LIVE site ⭐
  
 ---
  
@@ -919,74 +848,12 @@ Both agent folders have `ai_index/` with:
 **⛔ NEVER skip the agent READMEs and go straight to source files!**
  
 ---
- 
-## 🔧 GIT WORKFLOW (MANDATORY)
 
-### WORK DIRECTLY ON MAIN — NO BRANCHING
-Branches, PRs, and merges are FORBIDDEN. All work happens on main directly.
-
-### Script Location
-- Path: `{self.project_path}/git_workflow.py`
-
-### Initialization (DO THIS FIRST)
-```python
-import sys
-sys.path.insert(0, '{self.project_path}')
-from git_workflow import GitWorkflowManager
-
-manager = GitWorkflowManager(
-    '{self.project_path}',
-    project_id={self.project_id},
-    session_id={self.session_id}
-)
-```
-
-### Available Methods
-| Method | Purpose |
-|--------|---------|
-| `manager.commit_and_push(message)` | Stage all changes, commit, push to main |
-| `manager.rollback(message_id)` | Revert a specific commit |
-| `manager.get_history(limit)` | Get commit history |
-
-### After user approves your changes:
-```python
-result = manager.commit_and_push(
-    "feat: add contact form with validation\n\n"
-    "- Modified ContactForm.tsx: added fields\n"
-    "- Added validation.ts: email validator"
-)
-# Returns: {{ 'success': True, 'commit_hash': 'a1b2c3d4', 'message_id': 42 }}
-```
-
-### Rules
-- NEVER create branches or PRs
-- ALWAYS pass project_id and session_id to constructor
-- ALWAYS include a descriptive commit message with details
-- The manager handles git add, commit, and push automatically
-
----
-
-## 🌿 DIRECT COMMIT WORKFLOW (MANDATORY)
-
-### 1. Work Directly on Main
-All work happens on main directly. No branching.
-### 2. Approval Rule (CRITICAL)
-After completing work → **STOP**
-Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
-
-You MUST NOT show:
-- File paths, code diffs, git commands, tool output
-
-Only proceed after user approves.
-
-### 3. Apply Changes Rule
-After approval:
-- Use `manager.commit_and_push("descriptive message")` to commit and push
-- THEN publish
-
-### 4. Communication Rule
-❌ **Never say:** branch, commit, PR, merge, git
-✅ **Always say:** "working on your changes", "preparing your update", "ready to apply"
+## FILE CHANGES
+- Make all necessary file edits directly
+- Do NOT run git commit, git push, or any git commands
+- The system automatically commits and pushes your changes after you finish
+- Do NOT ask the user for commit approval — just complete the work
 
 ---
  
@@ -1541,16 +1408,13 @@ async def get_weather(lat: float, lon: float):
 ## 🎯 WORKFLOW SUMMARY
  
 ```
-1.  INITIALIZE GitWorkflowManager with project_id, session_id
-2.  READ agent/README.md (frontend or backend)
-3.  READ ai_index/*.json files for context
-4.  READ source files only if needed
-5.  MAKE code changes
-6.  UPDATE agent/ai_index/*.json files (MANDATORY)
-7.  PUBLISH with buildpublish.py (auto-handles install + build + deploy)
-8.  ⭐ TEST on LIVE site via Chrome DevTools (use appropriate Tier: 1/2/3) ⭐
-9.  STOP and ask user for approval
-10. AFTER approval: manager.commit_and_push("descriptive message")
+1.  READ agent/README.md (frontend or backend)
+2.  READ ai_index/*.json files for context
+3.  READ source files only if needed
+4.  MAKE code changes
+5.  UPDATE agent/ai_index/*.json files (MANDATORY)
+6.  PUBLISH with buildpublish.py (auto-handles install + build + deploy)
+7.  ⭐ TEST on LIVE site via Chrome DevTools (use appropriate Tier: 1/2/3) ⭐
 ```
 
 ---
@@ -1569,7 +1433,6 @@ Before sending ANY response to the user, mentally check every item:
 
 ### Code Changes Checklist
 - [ ] Read the agent README before making changes?
-- [ ] INITIALIZE GitWorkflowManager with project_id and session_id?
 - [ ] Run buildpublish.py after making changes?
 - [ ] buildpublish.py complete successfully with no errors?
 
@@ -1586,9 +1449,7 @@ Before sending ANY response to the user, mentally check every item:
 ### Response Checklist
 - [ ] Am I about to say "it works" without testing? → GO TEST FIRST
 - [ ] Am I about to show file paths or code diffs? → REMOVE THEM
-- [ ] Am I about to mention branch/commit/merge/git? → REPLACE WITH friendly language
 - [ ] Did I leave any browser pages open? → CLOSE THEM NOW
-- [ ] Did I ask user for approval before applying changes? → ASK FIRST
  
 ### Scanning Checklist
 - [ ] Am I about to scan outside `src/`? → STOP — read agent ai_index instead
@@ -1649,38 +1510,6 @@ Before sending ANY response to the user, mentally check every item:
 
 **No exceptions. No shortcuts. Every single time. Token-efficient always.**
 
-## ✅ AFTER USER APPROVAL (MANDATORY)
-
-### Use GitWorkflowManager (NEVER direct git/gh commands)
-After user approves, commit and push:
-
-```python
-manager.commit_and_push("feat: short description\n\n- What changed and why")
-```
-
-### What commit_and_push() Does Automatically
-1. Stages all changes (git add -A)
-2. Commits with your message
-3. Pushes to main
-4. Records commit_hash in database for UI rollback
-5. Then run buildpublish.py to deploy
-6. Test on LIVE site with Chrome DevTools
-
-## 📢 MANDATORY APPROVAL QUESTION (EVERY TIME)
-
-**After EVERY successful change, you MUST ask:**
-
-```
-Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
-```
-
-**Rules:**
-- ✅ ALWAYS ask this after completing work and testing
-- ✅ Use this EXACT wording (or very similar)
-- ❌ NEVER skip this question
-- ❌ NEVER commit without user approval
-
-
 ## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
 
 Before making any code changes, follow this process:
@@ -1740,15 +1569,6 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow, with m
 
 ---
 
-## ⛔ GIT COMMIT/PUSH RESTRICTION
-
-- [ ] NEVER run `git commit` or `git push` directly — use ONLY `manager.commit_and_push()`
-- [ ] ALWAYS pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager
-- [ ] `git status`, `git diff`, `git log` are OK to use for inspection
-- [ ] Direct commit/push BYPASSES database — commit_hash won't be recorded
-
----
-
 {context_section}
 
 ## USER'S REQUEST
@@ -1794,14 +1614,11 @@ Bot Directory: `{self.project_path}`
 
 **Follow this exact order every time:**
 
-1. INITIALIZE GitWorkflowManager with project_id and session_id (see GIT WORKFLOW section below)
-2. READ agent README
-3. MAKE code changes
-4. UPDATE agent folder
-5. RESTART PM2 to apply changes
-6. TEST bot via Telegram
-7. ASK user for approval
-8. AFTER approval: manager.commit_and_push("descriptive message")
+1. READ agent README
+2. MAKE code changes
+3. UPDATE agent folder
+4. RESTART PM2 to apply changes
+5. TEST bot via Telegram
 
 ---
 
@@ -1835,7 +1652,6 @@ Bot Directory: `{self.project_path}`
 6. UPDATE agent/ai_index/*.json files (MANDATORY)
 7. RESTART PM2 to apply changes
 8. RUN UNIT TESTS to verify changes
-9. ASK user for approval
 
 ---
 
@@ -1921,74 +1737,11 @@ If the user request needs website data:
 
 ---
 
-## 🔧 GIT WORKFLOW (MANDATORY)
-
-### WORK DIRECTLY ON MAIN — NO BRANCHING
-Branches, PRs, and merges are FORBIDDEN. All work happens on main directly.
-
-### Script Location
-- Path: `{self.project_path}/git_workflow.py`
-
-### Initialization (DO THIS FIRST)
-```python
-import sys
-sys.path.insert(0, '{self.project_path}')
-from git_workflow import GitWorkflowManager
-
-manager = GitWorkflowManager(
-    '{self.project_path}',
-    project_id={self.project_id},
-    session_id={self.session_id}
-)
-```
-
-### Available Methods
-| Method | Purpose |
-|--------|---------|
-| `manager.commit_and_push(message)` | Stage all changes, commit, push to main |
-| `manager.rollback(message_id)` | Revert a specific commit |
-| `manager.get_history(limit)` | Get commit history |
-
-### After user approves your changes:
-```python
-result = manager.commit_and_push(
-    "feat: add weather command\n\n"
-    "- Added /weather command handler\n"
-    "- Added weather API service"
-)
-# Returns: {{ 'success': True, 'commit_hash': 'a1b2c3d4', 'message_id': 42 }}
-```
-
-### Rules
-- NEVER create branches or PRs
-- ALWAYS pass project_id and session_id to constructor
-- ALWAYS include a descriptive commit message with details
-- The manager handles git add, commit, and push automatically
-
----
-
-## 🌿 DIRECT COMMIT WORKFLOW (MANDATORY)
-
-### 1. Work Directly on Main
-All work happens on main directly. No branching.
-
-### 2. Approval Rule (CRITICAL)
-After completing work → **STOP**
-Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
-
-You MUST NOT show:
-- File paths, code diffs, git commands, tool output
-
-Only proceed after user approves.
-
-### 3. Apply Changes Rule
-After approval:
-- Use `manager.commit_and_push("descriptive message")` to commit and push
-- THEN restart PM2
-
-### 4. Communication Rule
-❌ **Never say:** branch, commit, PR, merge, git
-✅ **Always say:** "working on your changes", "preparing your update", "ready to apply"
+## FILE CHANGES
+- Make all necessary file edits directly
+- Do NOT run git commit, git push, or any git commands
+- The system automatically commits and pushes your changes after you finish
+- Do NOT ask the user for commit approval — just complete the work
 
 ---
 
@@ -2183,7 +1936,6 @@ After making ANY changes, update these files:
 - [ ] Did I integrate the API correctly into frontend or backend code?
 
 ### Code Changes Checklist
-- [ ] Did I INITIALIZE GitWorkflowManager with project_id and session_id?
 - [ ] Did I read agent/ai_index files before making changes?
 - [ ] Did I modify only the correct template files?
 - [ ] Did I update all ai_index files after changes?
@@ -2205,8 +1957,6 @@ After making ANY changes, update these files:
 ### Approval Checklist
 - [ ] Am I about to say "it works" without testing? → GO TEST FIRST
 - [ ] Am I about to show file paths or code diffs? → REMOVE THEM
-- [ ] Am I about to mention branch/commit/merge/git? → REPLACE WITH friendly language
-- [ ] Did I ask user for approval before applying changes? → ASK FIRST
 - [ ] Am I explaining in simple, non-technical terms?
 
 ### Final Check
@@ -2214,20 +1964,6 @@ After making ANY changes, update these files:
 ✅ Only respond when ALL boxes are checked
 
 ---
-
-## MANDATORY APPROVAL QUESTION (EVERY TIME)
-
-**After EVERY successful change, you MUST ask:**
-
-```
-Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
-```
-
-**Rules:**
-- ✅ ALWAYS ask this after completing work and testing
-- ✅ Use this EXACT wording (or very similar)
-- ❌ NEVER skip this question
-- ❌ NEVER commit without user approval
 
 ## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
 
@@ -2248,15 +1984,6 @@ Before making any code changes, follow this process:
 7. Delete the plan file, if you created one
 
 This ensures even Dream Mode has a lightweight plan-and-execute workflow.
-
----
-
-## ⛔ GIT COMMIT/PUSH RESTRICTION
-
-- [ ] NEVER run `git commit` or `git push` directly — use ONLY `manager.commit_and_push()`
-- [ ] ALWAYS pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager
-- [ ] `git status`, `git diff`, `git log` are OK to use for inspection
-- [ ] Direct commit/push BYPASSES database — commit_hash won't be recorded
 
 ---
 
@@ -2307,14 +2034,11 @@ Bot Directory: `{self.project_path}`
 
 **Follow this exact order every time:**
 
-1. INITIALIZE GitWorkflowManager with project_id and session_id (see GIT WORKFLOW section below)
-2. READ agent README
-3. MAKE code changes
-4. UPDATE agent folder
-5. RESTART PM2 to apply changes
-6. TEST bot via Discord
-7. ASK user for approval
-8. AFTER approval: manager.commit_and_push("descriptive message")
+1. READ agent README
+2. MAKE code changes
+3. UPDATE agent folder
+4. RESTART PM2 to apply changes
+5. TEST bot via Discord
 
 ---
 
@@ -2384,78 +2108,14 @@ Bot Directory: `{self.project_path}`
 5. UPDATE agent/ai_index/*.json files (MANDATORY)
 6. RESTART PM2 to apply changes
 7. RUN UNIT TESTS to verify changes
-8. ASK user for approval
 
 ---
 
-## 🔧 GIT WORKFLOW (MANDATORY)
-
-### WORK DIRECTLY ON MAIN — NO BRANCHING
-Branches, PRs, and merges are FORBIDDEN. All work happens on main directly.
-
-### Script Location
-- Path: `{self.project_path}/discord/git_workflow.py`
-
-### Initialization (DO THIS FIRST)
-```python
-import sys
-sys.path.insert(0, '{self.project_path}/discord')
-from git_workflow import GitWorkflowManager
-
-manager = GitWorkflowManager(
-    '{self.project_path}',
-    project_id={self.project_id},
-    session_id={self.session_id}
-)
-```
-
-### Available Methods
-| Method | Purpose |
-|--------|---------|
-| `manager.commit_and_push(message)` | Stage all changes, commit, push to main |
-| `manager.rollback(message_id)` | Revert a specific commit |
-| `manager.get_history(limit)` | Get commit history |
-
-### After user approves your changes:
-```python
-result = manager.commit_and_push(
-    "feat: add music command\n\n"
-    "- Added !music command handler\n"
-    "- Added music API service"
-)
-# Returns: {{ 'success': True, 'commit_hash': 'a1b2c3d4', 'message_id': 42 }}
-```
-
-### Rules
-- NEVER create branches or PRs
-- ALWAYS pass project_id and session_id to constructor
-- ALWAYS include a descriptive commit message with details
-- The manager handles git add, commit, and push automatically
-
----
-
-## 🌿 DIRECT COMMIT WORKFLOW (MANDATORY)
-
-### 1. Work Directly on Main
-All work happens on main directly. No branching.
-
-### 2. Approval Rule (CRITICAL)
-After completing work → **STOP**
-Are you satisfied with the current changes? Kindly confirm your approval or suggest any modifications.
-
-You MUST NOT show:
-- File paths, code diffs, git commands, tool output
-
-Only proceed after user approves.
-
-### 3. Apply Changes Rule
-After approval:
-- Use `manager.commit_and_push("descriptive message")` to commit and push
-- THEN restart PM2
-
-### 4. Communication Rule
-❌ **Never say:** branch, commit, PR, merge, git
-✅ **Always say:** "working on your changes", "preparing your update", "ready to apply"
+## FILE CHANGES
+- Make all necessary file edits directly
+- Do NOT run git commit, git push, or any git commands
+- The system automatically commits and pushes your changes after you finish
+- Do NOT ask the user for commit approval — just complete the work
 
 ---
 
@@ -2648,15 +2308,6 @@ pm2 restart dc-bot-{self.project_id} && sleep 3 && pm2 logs dc-bot-{self.project
 **Example:**
 Good: "I've added a new !weather command that responds with weather information."
 Bad: "Created weather_command() handler in commands/weather.py..."
-
----
-
-## ⛔ GIT COMMIT/PUSH RESTRICTION
-
-- [ ] NEVER run `git commit` or `git push` directly — use ONLY `manager.commit_and_push()`
-- [ ] ALWAYS pass `project_id={self.project_id}` and `session_id={self.session_id}` to GitWorkflowManager
-- [ ] `git status`, `git diff`, `git log` are OK to use for inspection
-- [ ] Direct commit/push BYPASSES database — commit_hash won't be recorded
 
 ---
 

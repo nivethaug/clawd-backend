@@ -3061,7 +3061,26 @@ async def chat_stream_endpoint(request: ChatRequest):
             
             # Run streaming with unified backend (ClaudeCodeAgent or ACPX fallback)
             logger.info(f"[ACP-STREAM] Starting unified streaming (timeout: 900s)...")
-            
+
+            async def _maybe_auto_commit(handler, proj_id: int, sess_id: int, content: str):
+                """Hybrid auto-commit: check wrapper has_writes, then git status."""
+                try:
+                    usage_data = handler.get_last_token_usage() if hasattr(handler, 'get_last_token_usage') else None
+                    has_writes = False
+                    if usage_data and isinstance(usage_data, dict):
+                        has_writes = usage_data.get("has_writes", False)
+                    if has_writes:
+                        logger.info(f"[AUTO-COMMIT] has_writes=True, committing...")
+                        commit_msg = f"feat(ai): {content[:80].strip().splitlines()[0] if content else 'edit'}"
+                        result = await _do_git_commit(proj_id, sess_id, commit_msg, auto_push=True)
+                        logger.info(f"[AUTO-COMMIT] Result: success={result.get('success')}, status={result.get('status')}")
+                        return result
+                    else:
+                        logger.info(f"[AUTO-COMMIT] has_writes=False, skipping (read-only chat)")
+                except Exception as ce:
+                    logger.error(f"[AUTO-COMMIT] Failed: {ce}")
+                return None
+
             async def acp_streaming_response():
                 """Stream output in real-time via SSE using best available backend."""
                 full_response = []
@@ -3128,6 +3147,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                     if hasattr(handler, '_last_query_response') and handler._last_query_response:
                         logger.info(f"[ACP-STREAM] Background save (full response): {len(handler._last_query_response)} chars")
                         await save_response_to_db(handler._last_query_response)
+                        await _maybe_auto_commit(handler, project_id, session_id, handler._last_query_response)
                         return
 
                     # Fallback to chunks
@@ -3140,6 +3160,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                             if content:
                                 logger.info(f"[ACP-STREAM] Background save (chunks fallback): {len(content)} chars")
                                 await save_response_to_db(content)
+                                await _maybe_auto_commit(handler, project_id, session_id, content)
                                 return
 
                     logger.warning(f"[ACP-STREAM] Background save: no content found to save")
@@ -3163,7 +3184,21 @@ async def chat_stream_endpoint(request: ChatRequest):
                     
                     if assistant_content:
                         await save_response_to_db(assistant_content)
-                    
+
+                    # ── AUTO-COMMIT: Hybrid detection ────────────────────────
+                    commit_result = await _maybe_auto_commit(handler, project_id, session_id, assistant_content)
+
+                    # Yield commit SSE event so frontend can show badge
+                    if commit_result and commit_result.get("success") and commit_result.get("commit_hash"):
+                        commit_event = json.dumps({
+                            "type": "commit",
+                            "commit_hash": commit_result["commit_hash"],
+                            "status": commit_result["status"],
+                            "files_changed": commit_result.get("files_changed", 0),
+                            "log_id": commit_result.get("log_id"),
+                        })
+                        yield f"data: {commit_event}\n\n"
+
                     # Cleanup temp image file
                     if image_path_for_context and os.path.exists(image_path_for_context):
                         try:
@@ -3202,6 +3237,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 if content:
                                     logger.info(f"[ACP-STREAM] Background saved (full response): {len(content)} chars")
                                     await save_response_to_db(content)
+                                    await _maybe_auto_commit(handler, project_id, session_id, content)
                                     return
 
                             # Fallback to chunks if _last_query_response not set
@@ -3214,6 +3250,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                                     if content and len(content) > 50:
                                         logger.info(f"[ACP-STREAM] Background saved (chunks fallback): {len(content)} chars")
                                         await save_response_to_db(content)
+                                        await _maybe_auto_commit(handler, project_id, session_id, content)
                                         return
                             
                             # Fall back to what we collected before disconnect
@@ -3221,6 +3258,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 content = '\n'.join(real_chunks).strip()
                                 logger.info(f"[ACP-STREAM] Background saved (partial, timeout): {len(content)} chars")
                                 await save_response_to_db(content)
+                                await _maybe_auto_commit(handler, project_id, session_id, content)
                             else:
                                 logger.warning(f"[ACP-STREAM] Background save: no content found after 600s wait")
                         except Exception as e:
@@ -4670,123 +4708,160 @@ class CommitRequest(BaseModel):
     message: str
     auto_push: bool = True
 
-@app.post("/projects/{project_id}/commits")
-async def commit_and_push(project_id: int, req: CommitRequest):
-    """
-    Commit and push changes via backend API.
-    Finds the latest assistant message in the session and updates it with commit_hash.
+
+# Per-project locks to prevent concurrent git operations on the same repo
+_git_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_git_lock(project_id: int) -> asyncio.Lock:
+    """Get or create an asyncio.Lock for a project to serialize git operations."""
+    if project_id not in _git_locks:
+        _git_locks[project_id] = asyncio.Lock()
+    return _git_locks[project_id]
+
+
+async def _do_git_commit(
+    project_id: int,
+    session_id: int,
+    message: str,
+    auto_push: bool = True,
+) -> dict:
+    """Run git add/commit/push and update DB records.
+
+    This is the single source of truth for committing. Called both by the
+    ``/commits`` endpoint (manual) and by the auto-commit hook after chat.
+
+    Returns dict with keys: success, commit_hash, status, message_id,
+    files_changed, log_id.
     """
     import traceback
 
-    with get_db() as conn:
-        # Get project path
-        project = conn.execute(
-            "SELECT project_path FROM projects WHERE id = ?",
-            (project_id,)
-        ).fetchone()
-        if not project:
-            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    lock = _get_git_lock(project_id)
+    async with lock:
+        with get_db() as conn:
+            project = conn.execute(
+                "SELECT project_path FROM projects WHERE id = ?",
+                (project_id,)
+            ).fetchone()
+            if not project:
+                return {"success": False, "error": f"Project {project_id} not found", "status": "failed"}
+            project_path = project["project_path"]
 
-        project_path = project["project_path"]
-
-    try:
-        # Fix dubious ownership: register project as safe directory for root.
-        # .git may be owned by 'dreampilot' while this API server runs as root.
-        subprocess.run(
-            ["git", "config", "--global", "--add", "safe.directory", project_path],
-            capture_output=True, text=True, timeout=10
-        )
-
-        # Git add all changes
-        subprocess.run(
-            ["git", "-C", project_path, "add", "-A"],
-            capture_output=True, text=True, timeout=30
-        )
-
-        # Git commit
-        commit_result = subprocess.run(
-            ["git", "-C", project_path, "commit", "-m", req.message],
-            capture_output=True, text=True, timeout=30
-        )
-        if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stderr:
-            logger.error(f"Git commit failed for project {project_id}: {commit_result.stderr}")
-            return {"success": False, "error": commit_result.stderr, "status": "failed"}
-
-        # Get commit hash
-        hash_result = subprocess.run(
-            ["git", "-C", project_path, "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=10
-        )
-        commit_hash = hash_result.stdout.strip()
-
-        # If nothing was committed, still return the current HEAD
-        if "nothing to commit" in commit_result.stderr:
-            logger.info(f"No changes to commit for project {project_id}, returning current HEAD")
-
-        commit_status = "committed"
-
-        # Push if requested (only if remote 'origin' exists)
-        if req.auto_push:
-            # Check if 'origin' remote is configured
-            remote_result = subprocess.run(
-                ["git", "-C", project_path, "remote"],
+        try:
+            # Fix dubious ownership: register project as safe directory for root
+            subprocess.run(
+                ["git", "config", "--global", "--add", "safe.directory", project_path],
                 capture_output=True, text=True, timeout=10
             )
-            has_origin = "origin" in remote_result.stdout.split()
 
-            if has_origin:
-                push_result = subprocess.run(
-                    ["git", "-C", project_path, "push", "origin", "main"],
-                    capture_output=True, text=True, timeout=60
-                )
-                if push_result.returncode != 0:
-                    logger.error(f"Git push failed for project {project_id}: {push_result.stderr}")
-                    commit_status = "committed"  # committed but not pushed
-                else:
-                    commit_status = "pushed"
-            else:
-                logger.info(f"No 'origin' remote for project {project_id}, commit stays local")
-                commit_status = "committed"
-
-        # Update the latest assistant message in this session with commit_hash
-        # Also INSERT into commit_log for persistent history (survives session deletion)
-        with get_db() as conn:
-            message_row = conn.execute(
-                "SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
-                (req.session_id,)
-            ).fetchone()
-
-            message_id = None
-            if message_row:
-                message_id = message_row["id"]
-                conn.execute(
-                    "UPDATE messages SET commit_hash = ?, commit_status = ? WHERE id = ?",
-                    (commit_hash, commit_status, message_id)
-                )
-
-            # Dual-write: also persist in commit_log (independent of messages table)
-            conn.execute(
-                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, ?)",
-                (project_id, req.session_id, message_id, commit_hash, req.message, commit_status)
+            # Count files changed (before staging)
+            status_result = subprocess.run(
+                ["git", "-C", project_path, "status", "--porcelain"],
+                capture_output=True, text=True, timeout=10
             )
-            conn.commit()
-            if message_id:
-                logger.info(f"✓ Updated message {message_id} with commit_hash={commit_hash[:8]}, status={commit_status}")
-            logger.info(f"✓ Inserted commit_log entry for project {project_id}, hash={commit_hash[:8]}")
+            files_changed = len([l for l in status_result.stdout.strip().split("\n") if l.strip()]) if status_result.stdout.strip() else 0
 
-        return {
-            "success": True,
-            "commit_hash": commit_hash,
-            "status": commit_status,
-            "message_id": message_id
-        }
+            if files_changed == 0:
+                logger.info(f"[AUTO-COMMIT] No changes detected for project {project_id}, skipping")
+                return {"success": True, "status": "no_changes", "files_changed": 0, "commit_hash": None, "message_id": None, "log_id": None}
 
-    except subprocess.TimeoutExpired:
-        logger.error(f"Git operation timeout for project {project_id}")
-        return {"success": False, "error": "Git operation timed out", "status": "failed"}
-    except Exception as e:
-        logger.error(f"Commit error for project {project_id}: {e}\n{traceback.format_exc()}")
-        return {"success": False, "error": str(e), "status": "failed"}
+            # Git add all changes
+            subprocess.run(
+                ["git", "-C", project_path, "add", "-A"],
+                capture_output=True, text=True, timeout=30
+            )
+
+            # Git commit
+            commit_result = subprocess.run(
+                ["git", "-C", project_path, "commit", "-m", message],
+                capture_output=True, text=True, timeout=30
+            )
+            if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stderr:
+                logger.error(f"Git commit failed for project {project_id}: {commit_result.stderr}")
+                return {"success": False, "error": commit_result.stderr, "status": "failed", "files_changed": files_changed}
+
+            # Get commit hash
+            hash_result = subprocess.run(
+                ["git", "-C", project_path, "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=10
+            )
+            commit_hash = hash_result.stdout.strip()
+
+            commit_status = "committed"
+
+            # Push if requested (only if remote 'origin' exists)
+            if auto_push:
+                remote_result = subprocess.run(
+                    ["git", "-C", project_path, "remote"],
+                    capture_output=True, text=True, timeout=10
+                )
+                has_origin = "origin" in remote_result.stdout.split()
+
+                if has_origin:
+                    push_result = subprocess.run(
+                        ["git", "-C", project_path, "push", "origin", "main"],
+                        capture_output=True, text=True, timeout=60
+                    )
+                    if push_result.returncode != 0:
+                        logger.error(f"Git push failed for project {project_id}: {push_result.stderr}")
+                        commit_status = "committed"
+                    else:
+                        commit_status = "pushed"
+                else:
+                    logger.info(f"No 'origin' remote for project {project_id}, commit stays local")
+                    commit_status = "committed"
+
+            # Update latest assistant message + insert commit_log
+            with get_db() as conn:
+                message_row = conn.execute(
+                    "SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+                    (session_id,)
+                ).fetchone()
+
+                message_id = None
+                if message_row:
+                    message_id = message_row["id"]
+                    conn.execute(
+                        "UPDATE messages SET commit_hash = ?, commit_status = ? WHERE id = ?",
+                        (commit_hash, commit_status, message_id)
+                    )
+
+                cursor = conn.execute(
+                    "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, ?)",
+                    (project_id, session_id, message_id, commit_hash, message, commit_status)
+                )
+                log_id = cursor.lastrowid
+                conn.commit()
+
+                if message_id:
+                    logger.info(f"[AUTO-COMMIT] ✓ message {message_id} commit_hash={commit_hash[:8]}, status={commit_status}, {files_changed} files")
+                logger.info(f"[AUTO-COMMIT] ✓ commit_log log_id={log_id}, project={project_id}, hash={commit_hash[:8]}")
+
+            return {
+                "success": True,
+                "commit_hash": commit_hash,
+                "status": commit_status,
+                "message_id": message_id,
+                "files_changed": files_changed,
+                "log_id": log_id,
+            }
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Git operation timeout for project {project_id}")
+            return {"success": False, "error": "Git operation timed out", "status": "failed"}
+        except Exception as e:
+            logger.error(f"Commit error for project {project_id}: {e}\n{traceback.format_exc()}")
+            return {"success": False, "error": str(e), "status": "failed"}
+
+
+@app.post("/projects/{project_id}/commits")
+async def commit_and_push(project_id: int, req: CommitRequest):
+    """Commit and push changes via backend API (manual or called by auto-commit)."""
+    result = await _do_git_commit(project_id, req.session_id, req.message, req.auto_push)
+    if not result.get("success"):
+        if result.get("status") == "failed":
+            raise HTTPException(status_code=500, detail=result.get("error", "Commit failed"))
+    return result
 
 
 @app.get("/projects/{project_id}/commits")
@@ -4846,6 +4921,121 @@ async def get_commit_log_detail(project_id: int, log_id: int):
             raise HTTPException(status_code=404, detail=f"Commit log entry {log_id} not found")
 
         return dict(row)
+
+
+@app.get("/projects/{project_id}/commits/log/{log_id}/diff")
+async def get_commit_diff(project_id: int, log_id: int):
+    """
+    Get structured diff for a specific commit.
+    Returns files changed, additions, deletions, and per-file patches.
+    """
+    import re as _re
+
+    # 1. Look up commit_hash from commit_log
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT commit_hash, commit_message FROM commit_log WHERE id = ? AND project_id = ?",
+            (log_id, project_id)
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Commit log entry {log_id} not found")
+
+    commit_hash = dict(row)["commit_hash"]
+    if not commit_hash:
+        raise HTTPException(status_code=400, detail="No commit hash associated with this log entry")
+
+    # 2. Get project path
+    with get_db() as conn:
+        proj = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project_path = dict(proj)["project_path"]
+
+    # 3. Run git show to get diff
+    proc = await asyncio.create_subprocess_exec(
+        "git", "-C", project_path, "show", commit_hash, "--format=", "--no-color",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"git show failed: {stderr.decode()}")
+
+    diff_text = stdout.decode(errors="replace")
+
+    # 4. Parse diff into structured format
+    files = []
+    total_additions = 0
+    total_deletions = 0
+
+    # Split by "diff --git" to get per-file sections
+    file_sections = diff_text.split("diff --git a/")
+    for section in file_sections[1:]:  # Skip first empty section
+        lines = section.split("\n")
+        if not lines:
+            continue
+
+        # Parse filename from first line: "path/to/file b/path/to/file"
+        first_line = lines[0]
+        # Format: "filename b/filename" (for modified) or "filename b/filename" (for added/deleted)
+        parts = first_line.split(" b/")
+        filename = parts[0].strip() if parts else first_line.strip()
+
+        # Determine status from diff headers
+        status = "modified"
+        additions = 0
+        deletions = 0
+        patch_lines = []
+
+        in_hunk = False
+        for line in lines[1:]:
+            if line.startswith("new file mode"):
+                status = "added"
+            elif line.startswith("deleted file mode"):
+                status = "deleted"
+            elif line.startswith("rename from") or line.startswith("rename to"):
+                status = "renamed"
+            elif line.startswith("@@"):
+                in_hunk = True
+                patch_lines.append(line)
+            elif in_hunk:
+                if line.startswith("+") and not line.startswith("+++"):
+                    additions += 1
+                    patch_lines.append(line)
+                elif line.startswith("-") and not line.startswith("---"):
+                    deletions += 1
+                    patch_lines.append(line)
+                elif line.startswith("\\"):
+                    pass  # "\ No newline at end of file"
+                else:
+                    patch_lines.append(line)
+
+        total_additions += additions
+        total_deletions += deletions
+
+        files.append({
+            "filename": filename,
+            "status": status,
+            "additions": additions,
+            "deletions": deletions,
+            "patch": "\n".join(patch_lines),
+        })
+
+    return {
+        "commit_hash": commit_hash,
+        "commit_message": dict(row).get("commit_message", ""),
+        "files": files,
+        "total_additions": total_additions,
+        "total_deletions": total_deletions,
+        "total_files": len(files),
+    }
 
 
 @app.post("/projects/{project_id}/commits/{message_id}/rollback")
