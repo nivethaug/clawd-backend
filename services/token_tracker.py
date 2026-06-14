@@ -343,7 +343,8 @@ def get_platform_usage(period: str = "month") -> Dict[str, Any]:
                     COALESCE(SUM(input_tokens), 0) as input_tokens,
                     COALESCE(SUM(output_tokens), 0) as output_tokens,
                     COUNT(*) as count,
-                    COUNT(DISTINCT user_id) as unique_users
+                    COUNT(DISTINCT user_id) as unique_users,
+                    COALESCE(SUM(cost_usd), 0) as total_cost
                 FROM token_usage
                 WHERE 1=1 {where_date}""",
                 (),
@@ -353,7 +354,8 @@ def get_platform_usage(period: str = "month") -> Dict[str, Any]:
                 f"""SELECT
                     usage_type,
                     COALESCE(SUM(total_tokens), 0) as total_tokens,
-                    COUNT(*) as count
+                    COUNT(*) as count,
+                    COALESCE(SUM(cost_usd), 0) as total_cost
                 FROM token_usage
                 WHERE 1=1 {where_date}
                 GROUP BY usage_type
@@ -367,7 +369,8 @@ def get_platform_usage(period: str = "month") -> Dict[str, Any]:
                     u.email,
                     u.name,
                     COALESCE(SUM(tu.total_tokens), 0) as total_tokens,
-                    COUNT(*) as count
+                    COUNT(*) as count,
+                    COALESCE(SUM(tu.cost_usd), 0) as total_cost
                 FROM token_usage tu
                 JOIN users u ON u.id = tu.user_id
                 WHERE 1=1 {where_date_tu}
@@ -387,10 +390,12 @@ def get_platform_usage(period: str = "month") -> Dict[str, Any]:
             "output_tokens": v(row, "output_tokens", 2),
             "count": v(row, "count", 3),
             "unique_users": v(row, "unique_users", 4),
+            "total_cost_usd": v(row, "total_cost", 5),
             "by_type": {
                 v(r, "usage_type", 0): {
                     "total_tokens": v(r, "total_tokens", 1),
                     "count": v(r, "count", 2),
+                    "total_cost_usd": v(r, "total_cost", 3),
                 }
                 for r in by_type_rows
             },
@@ -401,6 +406,7 @@ def get_platform_usage(period: str = "month") -> Dict[str, Any]:
                     "name": v(r, "name", 2),
                     "total_tokens": v(r, "total_tokens", 3),
                     "count": v(r, "count", 4),
+                    "total_cost_usd": v(r, "total_cost", 5),
                 }
                 for r in by_user_rows
             ],
@@ -445,7 +451,7 @@ def get_usage_logs(
                     id, user_id, project_id, session_id,
                     usage_type, description,
                     input_tokens, output_tokens, total_tokens,
-                    model, created_at
+                    model, cost_usd, created_at
                 FROM token_usage
                 WHERE {where}
                 ORDER BY created_at DESC
@@ -466,7 +472,8 @@ def get_usage_logs(
                 "id": r[0], "user_id": r[1], "project_id": r[2],
                 "session_id": r[3], "usage_type": r[4], "description": r[5],
                 "input_tokens": r[6], "output_tokens": r[7], "total_tokens": r[8],
-                "model": r[9], "created_at": str(r[10]),
+                "model": r[9], "cost_usd": float(r[10]) if r[10] is not None else 0.0,
+                "created_at": str(r[11]),
             }
 
         return {
