@@ -331,6 +331,7 @@ def get_project_usage(
 def get_platform_usage(period: str = "month") -> Dict[str, Any]:
     """Get platform-wide aggregated usage (admin only)."""
     where_date = _period_to_where(period)
+    where_date_tu = _period_to_where(period, table="tu")
 
     from database_adapter import get_db
 
@@ -369,7 +370,7 @@ def get_platform_usage(period: str = "month") -> Dict[str, Any]:
                     COUNT(*) as count
                 FROM token_usage tu
                 JOIN users u ON u.id = tu.user_id
-                WHERE 1=1 {where_date}
+                WHERE 1=1 {where_date_tu}
                 GROUP BY tu.user_id, u.email, u.name
                 ORDER BY total_tokens DESC
                 LIMIT 20""",
@@ -485,14 +486,21 @@ def get_usage_logs(
 # ============================================================================
 
 
-def _period_to_where(period: str) -> str:
-    """Convert a period string to a SQL WHERE clause for created_at."""
+def _period_to_where(period: str, table: str = "") -> str:
+    """Convert a period string to a SQL WHERE clause for created_at.
+    
+    Args:
+        period: 'day', 'week', 'month', 'all'
+        table: Optional table alias prefix (e.g. 'tu') to avoid ambiguous column
+               references in JOINs.
+    """
+    prefix = f"{table}." if table else ""
     if period == "day":
-        return "AND created_at >= CURRENT_DATE"
+        return f"AND {prefix}created_at >= CURRENT_DATE"
     elif period == "week":
-        return "AND created_at >= CURRENT_DATE - INTERVAL '7 days'"
+        return f"AND {prefix}created_at >= CURRENT_DATE - INTERVAL '7 days'"
     elif period == "month":
-        return "AND created_at >= CURRENT_DATE - INTERVAL '30 days'"
+        return f"AND {prefix}created_at >= CURRENT_DATE - INTERVAL '30 days'"
     elif period == "all":
         return ""
     else:
