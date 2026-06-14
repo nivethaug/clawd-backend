@@ -400,6 +400,29 @@ def run_telegram_bot_pipeline(
                 logger.info(f"✅ AI enhancement: {edit_result}")
                 result_info["ai_enhancement"] = edit_result
                 result_info["steps_completed"].append("ai_enhancement")
+
+                # Record token usage
+                try:
+                    from services.token_tracker import record_from_token_usage_json
+                    from database_adapter import get_db
+                    usage = getattr(editor, '_last_token_usage', None)
+                    if usage:
+                        with get_db() as conn:
+                            row = conn.execute(
+                                "SELECT user_id FROM projects WHERE id = %s", (project_id,)
+                            ).fetchone()
+                        _uid = row["user_id"] if row else None
+                        if _uid:
+                            record_from_token_usage_json(
+                                user_id=_uid,
+                                token_usage_json=usage,
+                                usage_type="project_create",
+                                project_id=project_id,
+                                description=f"Telegram bot create: {project_name}",
+                            )
+                            logger.info(f"✅ Token usage recorded for telegram create")
+                except Exception as track_err:
+                    logger.warning(f"Token tracking failed: {track_err}")
             else:
                 logger.warning(f"⚠️ AI enhancement failed: {edit_result}")
                 result_info["ai_enhancement"] = f"failed: {edit_result}"

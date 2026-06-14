@@ -586,6 +586,14 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added token_usage table with indexes")
 
+            # Migration: add cost_usd column to token_usage (non-destructive)
+            def migrate_token_usage_cost():
+                cur.execute(
+                    "ALTER TABLE token_usage ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12,6) DEFAULT 0"
+                )
+                logger.info("✓ Added cost_usd column to token_usage table")
+            _run_migration(migrate_token_usage_cost)
+
             logger.info("✓ Database schema initialized")
     finally:
         pool.putconn(conn)

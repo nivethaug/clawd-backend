@@ -42,6 +42,7 @@ def record_usage(
     total_tokens: int = 0,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    cost_usd: float = 0.0,
     project_id: Optional[int] = None,
     session_id: Optional[int] = None,
     description: Optional[str] = None,
@@ -84,8 +85,8 @@ def record_usage(
             conn.execute(
                 """INSERT INTO token_usage
                    (user_id, project_id, session_id, usage_type, description,
-                    input_tokens, output_tokens, total_tokens, model)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    input_tokens, output_tokens, total_tokens, model, cost_usd)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     user_id,
                     project_id,
@@ -96,6 +97,7 @@ def record_usage(
                     output_tokens,
                     total_tokens,
                     model,
+                    cost_usd,
                 ),
             )
             conn.commit()
@@ -149,6 +151,11 @@ def record_from_token_usage_json(
             or (input_t + output_t)
         )
         model_name = token_usage_json.get("model")
+        cost = (
+            token_usage_json.get("cost_usd")
+            or token_usage_json.get("costUsd")
+            or 0.0
+        )
 
         return record_usage(
             user_id=user_id,
@@ -156,6 +163,7 @@ def record_from_token_usage_json(
             total_tokens=int(total_t),
             input_tokens=int(input_t),
             output_tokens=int(output_t),
+            cost_usd=float(cost),
             project_id=project_id,
             session_id=session_id,
             description=description,
@@ -218,6 +226,7 @@ def get_user_usage(
                     COALESCE(SUM(total_tokens), 0) as total_tokens,
                     COALESCE(SUM(input_tokens), 0) as input_tokens,
                     COALESCE(SUM(output_tokens), 0) as output_tokens,
+                    COALESCE(SUM(cost_usd), 0) as cost_usd,
                     COUNT(*) as count
                 FROM token_usage
                 WHERE user_id = %s {where_date} {type_filter}""",
@@ -228,7 +237,8 @@ def get_user_usage(
                 "total_tokens": row["total_tokens"] if isinstance(row, dict) else row[0],
                 "input_tokens": row["input_tokens"] if isinstance(row, dict) else row[1],
                 "output_tokens": row["output_tokens"] if isinstance(row, dict) else row[2],
-                "count": row["count"] if isinstance(row, dict) else row[3],
+                "cost_usd": float(row["cost_usd"]) if isinstance(row, dict) else float(row[3]),
+                "count": row["count"] if isinstance(row, dict) else row[4],
             }
 
             # Breakdown by usage_type

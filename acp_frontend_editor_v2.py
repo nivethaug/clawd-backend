@@ -1356,6 +1356,28 @@ class ACPFrontendEditorV2:
                     cost = self._last_token_usage.get('cost_usd') or 0
                     logger.info(f"[ACPX-V2] Token usage: input={self._last_token_usage.get('input_tokens')}, output={self._last_token_usage.get('output_tokens')}, cost=${cost:.4f}")
 
+                    # Record to token_usage table
+                    try:
+                        from services.token_tracker import record_from_token_usage_json
+                        from database_adapter import get_db
+                        if self.project_id:
+                            with get_db() as conn:
+                                row = conn.execute(
+                                    "SELECT user_id FROM projects WHERE id = %s",
+                                    (self.project_id,),
+                                ).fetchone()
+                            _uid = row["user_id"] if row else None
+                            if _uid:
+                                record_from_token_usage_json(
+                                    user_id=_uid,
+                                    token_usage_json=self._last_token_usage,
+                                    usage_type="project_create",
+                                    project_id=self.project_id,
+                                    description=f"Website create: {self.project_name}",
+                                )
+                    except Exception as track_err:
+                        logger.warning(f"[ACPX-V2] Token tracking failed: {track_err}")
+
                 return_code = 0 if result is not None else 1
                 elapsed = (datetime.now() - query_start_time).total_seconds()
 
