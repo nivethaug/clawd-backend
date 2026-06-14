@@ -506,7 +506,8 @@ class ClaudeCodeAgent:
             "output_tokens": output_tokens,
             "cache_creation_input_tokens": cache_creation,
             "cache_read_input_tokens": cache_read,
-            "total_tokens": input_tokens + output_tokens + cache_creation + cache_read,
+            # input_tokens already includes cache_read/cache_creation — do NOT add them again
+            "total_tokens": input_tokens + output_tokens,
             "cost_usd": usage_fields.get("cost_usd"),
             "reasoning_tokens": reasoning_tokens,
             "model": usage_fields.get("model", ""),
