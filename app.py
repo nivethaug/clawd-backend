@@ -5119,7 +5119,7 @@ async def rollback_commit(project_id: int, message_id: int):
 
     with get_db() as conn:
         original = conn.execute(
-            "SELECT commit_hash, session_id FROM messages WHERE id = ? AND commit_hash IS NOT NULL AND commit_status = 'pushed'",
+            "SELECT commit_hash, session_id FROM messages WHERE id = ? AND commit_hash IS NOT NULL AND commit_status IN ('pushed', 'committed')",
             (message_id,)
         ).fetchone()
 
@@ -5186,10 +5186,11 @@ async def rollback_commit(project_id: int, message_id: int):
 
             cursor = conn.execute(
                 """INSERT INTO messages (session_id, role, content, commit_hash, commit_status, reverted_message_id)
-                   VALUES (?, 'assistant', ?, ?, 'pushed', ?)""",
+                   VALUES (?, 'assistant', ?, ?, 'pushed', ?)
+                   RETURNING id""",
                 (session_id, f"Reverted commit {original_hash[:8]}", revert_hash, message_id)
             )
-            revert_message_id = cursor.lastrowid
+            revert_message_id = cursor.fetchone()["id"]
 
             # Dual-write: also persist in commit_log
             original_log = conn.execute(
@@ -5197,11 +5198,11 @@ async def rollback_commit(project_id: int, message_id: int):
                 (original_hash, project_id)
             ).fetchone()
 
-            conn.execute(
-                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed')",
+            cursor3 = conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
                 (project_id, session_id, revert_message_id, revert_hash, f"Revert {original_hash[:8]}")
             )
-            revert_log_id = cursor.lastrowid
+            revert_log_id = cursor3.fetchone()["id"]
 
             if original_log:
                 conn.execute(
@@ -5243,12 +5244,12 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
 
     with get_db() as conn:
         original = conn.execute(
-            "SELECT commit_hash, session_id, message_id FROM commit_log WHERE id = ? AND project_id = ? AND status = 'pushed'",
+            "SELECT commit_hash, session_id, message_id FROM commit_log WHERE id = ? AND project_id = ? AND status IN ('pushed', 'committed')",
             (log_id, project_id)
         ).fetchone()
 
         if not original:
-            raise HTTPException(status_code=404, detail=f"No pushed commit found for log_id {log_id}")
+            raise HTTPException(status_code=404, detail=f"No revertable commit found for log_id {log_id} (it may already be reverted or not yet committed)")
 
         project = conn.execute(
             "SELECT name, project_path FROM projects WHERE id = ?",
@@ -5310,12 +5311,12 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
                 (log_id,)
             )
 
-            # Insert revert entry into commit_log
+            # Insert revert entry into commit_log (RETURNING id for PostgreSQL compatibility)
             cursor = conn.execute(
-                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed')",
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
                 (project_id, session_id, original_message_id, revert_hash, f"Revert {original_hash[:8]}")
             )
-            revert_log_id = cursor.lastrowid
+            revert_log_id = cursor.fetchone()["id"]
 
             # Set reverted_by on original
             conn.execute(
