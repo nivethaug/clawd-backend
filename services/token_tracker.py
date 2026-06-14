@@ -42,7 +42,6 @@ def record_usage(
     total_tokens: int = 0,
     input_tokens: int = 0,
     output_tokens: int = 0,
-    cost_usd: float = 0.0,
     project_id: Optional[int] = None,
     session_id: Optional[int] = None,
     description: Optional[str] = None,
@@ -85,8 +84,8 @@ def record_usage(
             conn.execute(
                 """INSERT INTO token_usage
                    (user_id, project_id, session_id, usage_type, description,
-                    input_tokens, output_tokens, total_tokens, model, cost_usd)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    input_tokens, output_tokens, total_tokens, model)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     user_id,
                     project_id,
@@ -97,7 +96,6 @@ def record_usage(
                     output_tokens,
                     total_tokens,
                     model,
-                    cost_usd,
                 ),
             )
             conn.commit()
@@ -151,11 +149,6 @@ def record_from_token_usage_json(
             or (input_t + output_t)
         )
         model_name = token_usage_json.get("model")
-        cost = (
-            token_usage_json.get("cost_usd")
-            or token_usage_json.get("costUsd")
-            or 0.0
-        )
 
         return record_usage(
             user_id=user_id,
@@ -163,7 +156,6 @@ def record_from_token_usage_json(
             total_tokens=int(total_t),
             input_tokens=int(input_t),
             output_tokens=int(output_t),
-            cost_usd=float(cost),
             project_id=project_id,
             session_id=session_id,
             description=description,
@@ -226,7 +218,6 @@ def get_user_usage(
                     COALESCE(SUM(total_tokens), 0) as total_tokens,
                     COALESCE(SUM(input_tokens), 0) as input_tokens,
                     COALESCE(SUM(output_tokens), 0) as output_tokens,
-                    COALESCE(SUM(cost_usd), 0) as cost_usd,
                     COUNT(*) as count
                 FROM token_usage
                 WHERE user_id = %s {where_date} {type_filter}""",
@@ -237,8 +228,7 @@ def get_user_usage(
                 "total_tokens": row["total_tokens"] if isinstance(row, dict) else row[0],
                 "input_tokens": row["input_tokens"] if isinstance(row, dict) else row[1],
                 "output_tokens": row["output_tokens"] if isinstance(row, dict) else row[2],
-                "cost_usd": float(row["cost_usd"]) if isinstance(row, dict) else float(row[3]),
-                "count": row["count"] if isinstance(row, dict) else row[4],
+                "count": row["count"] if isinstance(row, dict) else row[3],
             }
 
             # Breakdown by usage_type
@@ -454,7 +444,7 @@ def get_usage_logs(
                     id, user_id, project_id, session_id,
                     usage_type, description,
                     input_tokens, output_tokens, total_tokens,
-                    model, cost_usd, created_at
+                    model, created_at
                 FROM token_usage
                 WHERE {where}
                 ORDER BY created_at DESC
@@ -470,15 +460,12 @@ def get_usage_logs(
 
         def row_to_dict(r):
             if isinstance(r, dict):
-                d = dict(r)
-                d["created_at"] = str(d.get("created_at", ""))
-                d["cost_usd"] = float(d.get("cost_usd", 0) or 0)
-                return d
+                return {**r, "created_at": str(r["created_at"])}
             return {
                 "id": r[0], "user_id": r[1], "project_id": r[2],
                 "session_id": r[3], "usage_type": r[4], "description": r[5],
                 "input_tokens": r[6], "output_tokens": r[7], "total_tokens": r[8],
-                "model": r[9], "cost_usd": float(r[10] or 0), "created_at": str(r[11]),
+                "model": r[9], "created_at": str(r[10]),
             }
 
         return {
@@ -490,115 +477,6 @@ def get_usage_logs(
 
     except Exception as e:
         logger.error(f"[TOKEN] Failed to query usage logs: {e}")
-        return {"logs": [], "total": 0, "error": str(e)}
-
-
-def get_user_usage_logs_with_project(
-    user_id: int,
-    usage_type: Optional[str] = None,
-    project_id: Optional[int] = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> Dict[str, Any]:
-    """
-    Get raw token usage logs for a user, JOINed with projects table to include
-    project name, type, and other project metadata.
-
-    Returns each log entry with:
-        id, user_id, project_id, session_id, usage_type, description,
-        input_tokens, output_tokens, total_tokens, model, cost_usd,
-        created_at, project_name, project_type_id
-    """
-    conditions = ["tu.user_id = %s"]
-    params: list = [user_id]
-
-    if project_id:
-        conditions.append("tu.project_id = %s")
-        params.append(project_id)
-    if usage_type:
-        conditions.append("tu.usage_type = %s")
-        params.append(usage_type)
-
-    where = " AND ".join(conditions)
-
-    from database_adapter import get_db
-
-    try:
-        with get_db() as conn:
-            rows = conn.execute(
-                f"""SELECT
-                    tu.id, tu.user_id, tu.project_id, tu.session_id,
-                    tu.usage_type, tu.description,
-                    tu.input_tokens, tu.output_tokens, tu.total_tokens,
-                    tu.model, tu.cost_usd, tu.created_at,
-                    p.name AS project_name,
-                    p.type_id AS project_type_id
-                FROM token_usage tu
-                LEFT JOIN projects p ON p.id = tu.project_id
-                WHERE {where}
-                ORDER BY tu.created_at DESC
-                LIMIT %s OFFSET %s""",
-                tuple(params + [limit, offset]),
-            ).fetchall()
-
-            total_row = conn.execute(
-                f"""SELECT COUNT(*) as cnt
-                FROM token_usage tu
-                WHERE {where}""",
-                tuple(params),
-            ).fetchone()
-            total = total_row["cnt"] if isinstance(total_row, dict) else total_row[0]
-
-            # Aggregate totals for this result set
-            agg_row = conn.execute(
-                f"""SELECT
-                    COALESCE(SUM(tu.total_tokens), 0) as total_tokens,
-                    COALESCE(SUM(tu.input_tokens), 0) as input_tokens,
-                    COALESCE(SUM(tu.output_tokens), 0) as output_tokens,
-                    COALESCE(SUM(tu.cost_usd), 0) as cost_usd
-                FROM token_usage tu
-                WHERE {where}""",
-                tuple(params),
-            ).fetchone()
-
-        def v(r, k, i):
-            val = r[k] if isinstance(r, dict) else r[i]
-            return val
-
-        logs = []
-        for r in rows:
-            logs.append({
-                "id": v(r, "id", 0),
-                "user_id": v(r, "user_id", 1),
-                "project_id": v(r, "project_id", 2),
-                "session_id": v(r, "session_id", 3),
-                "usage_type": v(r, "usage_type", 4),
-                "description": v(r, "description", 5),
-                "input_tokens": v(r, "input_tokens", 6),
-                "output_tokens": v(r, "output_tokens", 7),
-                "total_tokens": v(r, "total_tokens", 8),
-                "model": v(r, "model", 9),
-                "cost_usd": float(v(r, "cost_usd", 10) or 0),
-                "created_at": str(v(r, "created_at", 11)),
-                "project_name": v(r, "project_name", 12),
-                "project_type_id": v(r, "project_type_id", 13),
-            })
-
-        return {
-            "logs": logs,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "totals": {
-                "total_tokens": v(agg_row, "total_tokens", 0),
-                "input_tokens": v(agg_row, "input_tokens", 1),
-                "output_tokens": v(agg_row, "output_tokens", 2),
-                "cost_usd": float(v(agg_row, "cost_usd", 3) or 0),
-            },
-        }
-
-    except Exception as e:
-        logger.error(f"[TOKEN] Failed to query usage logs with project: {e}")
         return {"logs": [], "total": 0, "error": str(e)}
 
 
