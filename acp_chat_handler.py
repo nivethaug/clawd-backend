@@ -717,14 +717,6 @@ FIRST list jobs to find the job ID, THEN perform the action. Always show the res
 
 ---
 
-## FILE CHANGES
-- Make all necessary file edits directly
-- Do NOT run git commit, git push, or any git commands
-- The system automatically commits and pushes your changes after you finish
-- Do NOT ask the user for commit approval — just complete the work
-
----
-
 ## RULES
 
 1. KEEP execute_task function signature: `def execute_task(job: dict) -> dict`
@@ -847,14 +839,6 @@ Both agent folders have `ai_index/` with:
 **USE THESE before diving into raw source code!**
 **⛔ NEVER skip the agent READMEs and go straight to source files!**
  
----
-
-## FILE CHANGES
-- Make all necessary file edits directly
-- Do NOT run git commit, git push, or any git commands
-- The system automatically commits and pushes your changes after you finish
-- Do NOT ask the user for commit approval — just complete the work
-
 ---
  
 ## 🧪 3-TIER VERIFICATION SYSTEM (MANDATORY)
@@ -1737,14 +1721,6 @@ If the user request needs website data:
 
 ---
 
-## FILE CHANGES
-- Make all necessary file edits directly
-- Do NOT run git commit, git push, or any git commands
-- The system automatically commits and pushes your changes after you finish
-- Do NOT ask the user for commit approval — just complete the work
-
----
-
 ## TEMPLATE FOLDER STRUCTURE (FILES YOU CAN EDIT)
 
 **Safe to modify:**
@@ -2108,14 +2084,6 @@ Bot Directory: `{self.project_path}`
 5. UPDATE agent/ai_index/*.json files (MANDATORY)
 6. RESTART PM2 to apply changes
 7. RUN UNIT TESTS to verify changes
-
----
-
-## FILE CHANGES
-- Make all necessary file edits directly
-- Do NOT run git commit, git push, or any git commands
-- The system automatically commits and pushes your changes after you finish
-- Do NOT ask the user for commit approval — just complete the work
 
 ---
 
