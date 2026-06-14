@@ -469,6 +469,7 @@ class ClaudeCodeAgent:
             "cache_read_input_tokens": None,
             "cost_usd": None,
             "reasoning_tokens": None,
+            "model": None,
         }
 
         found_any = False
@@ -485,6 +486,10 @@ class ClaudeCodeAgent:
                     if field in usage_obj:
                         usage_fields[field] = usage_obj[field]
                         found_any = True
+
+        # Model may also be at top-level of result message, not inside usage
+        if not usage_fields.get("model"):
+            usage_fields["model"] = result_data.get("model", "")
 
         if not found_any:
             return None
@@ -504,6 +509,7 @@ class ClaudeCodeAgent:
             "total_tokens": input_tokens + output_tokens + cache_creation + cache_read,
             "cost_usd": usage_fields.get("cost_usd"),
             "reasoning_tokens": reasoning_tokens,
+            "model": usage_fields.get("model", ""),
         }
 
     def _get_progress_message(self, elapsed: float) -> str:
@@ -699,6 +705,14 @@ class ClaudeCodeAgent:
 
         data = await asyncio.get_event_loop().run_in_executor(None, _do_get)
         totals = data.get("totals") if data else None
+        # Extract model name from totals first, then fall back to records
+        model_name = ""
+        if totals and totals.get("model"):
+            model_name = totals["model"]
+        else:
+            records = data.get("records") if data else None
+            if records:
+                model_name = records[-1].get("model", "")
         if totals:
             self._last_token_usage = {
                 "input_tokens": totals.get("input_tokens", 0),
@@ -707,6 +721,7 @@ class ClaudeCodeAgent:
                 "cache_creation_input_tokens": 0,
                 "reasoning_tokens": totals.get("reasoning_tokens", 0),
                 "cost_usd": totals.get("cost_usd", 0),
+                "model": model_name,
             }
             logger.info(
                 f"[CLAUDE-AGENT] Wrapper usage (session={session_id}): "
