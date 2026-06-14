@@ -4042,6 +4042,99 @@ async def logout(authorization: Optional[str] = Header(None)):
     return {"message": "Logged out"}
 
 
+class GoogleAuthRequest(BaseModel):
+    credential: str  # Google ID token from Google Identity Services
+
+
+async def verify_google_token(credential: str) -> dict:
+    """Verify a Google ID token and return user info."""
+    # Verify the token using Google's tokeninfo endpoint
+    async with AsyncClient() as client:
+        resp = await client.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": credential},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    data = resp.json()
+
+    # Verify audience matches our client ID (if configured)
+    expected_aud = os.getenv("GOOGLE_CLIENT_ID")
+    if expected_aud and data.get("aud") != expected_aud:
+        raise HTTPException(status_code=401, detail="Google token audience mismatch")
+
+    if not data.get("email_verified"):
+        raise HTTPException(status_code=401, detail="Google email not verified")
+
+    return {
+        "email": data["email"],
+        "name": data.get("name", data["email"].split("@")[0]),
+        "picture": data.get("picture"),
+    }
+
+
+@app.post("/auth/google", response_model=AuthResponse)
+async def google_login(request: GoogleAuthRequest):
+    """Login or sign up via Google OAuth."""
+    google_user = await verify_google_token(request.credential)
+
+    with get_db() as conn:
+        # Check if user already exists
+        row = conn.execute(
+            "SELECT id, email, name, role, subscription_tier FROM users WHERE email = ?",
+            (google_user["email"],),
+        ).fetchone()
+
+        if row:
+            if isinstance(row, dict):
+                user_id = row["id"]
+                email = row["email"]
+                name = row["name"]
+                role = row.get("role", "user")
+                tier = row.get("subscription_tier", "free")
+            else:
+                user_id = row[0]
+                email = row[1]
+                name = row[2]
+                role = row[4] if len(row) > 4 else "user"
+                tier = row[5] if len(row) > 5 else "free"
+        else:
+            # Create new user with no password (OAuth-only account)
+            result = conn.execute(
+                "INSERT INTO users (email, name, password, role, subscription_tier) "
+                "VALUES (?, ?, NULL, 'user', 'free') RETURNING id",
+                (google_user["email"], google_user["name"]),
+            ).fetchone()
+
+            if isinstance(result, dict):
+                user_id = result["id"]
+            else:
+                user_id = result[0]
+
+            conn.commit()
+
+            email = google_user["email"]
+            name = google_user["name"]
+            role = "user"
+            tier = "free"
+
+    token = generate_token()
+    AUTH_TOKENS[token] = user_id
+
+    return AuthResponse(
+        token=token,
+        user=UserResponse(
+            id=str(user_id),
+            email=email,
+            name=name,
+            role=role,
+            subscription_tier=tier,
+        ),
+    )
+
+
 @app.get("/auth/me", response_model=UserResponse)
 async def get_current_user(authorization: Optional[str] = Header(None)):
     """Get current user from token."""
@@ -5359,7 +5452,7 @@ async def rate_limit_middleware(request: Request, call_next):
     # Skip paths that don't need rate limiting
     skip_paths = {
         "/health", "/test", "/docs", "/openapi.json", "/redoc",
-        "/auth/signup", "/auth/login", "/auth/logout",
+        "/auth/signup", "/auth/login", "/auth/logout", "/auth/google",
     }
     path = request.url.path
 
