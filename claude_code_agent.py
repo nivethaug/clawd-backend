@@ -723,6 +723,7 @@ class ClaudeCodeAgent:
                 "reasoning_tokens": totals.get("reasoning_tokens", 0),
                 "cost_usd": totals.get("cost_usd", 0),
                 "model": model_name,
+                "has_writes": totals.get("has_writes", False),
             }
             logger.info(
                 f"[CLAUDE-AGENT] Wrapper usage (session={session_id}): "
@@ -731,7 +732,8 @@ class ClaudeCodeAgent:
                 f"cache_read={self._last_token_usage['cache_read_input_tokens']}, "
                 f"reasoning={self._last_token_usage['reasoning_tokens']}, "
                 f"cost=${self._last_token_usage['cost_usd']:.6f}, "
-                f"requests={totals.get('request_count', 0)}"
+                f"requests={totals.get('request_count', 0)}, "
+                f"has_writes={self._last_token_usage['has_writes']}"
             )
         else:
             logger.warning(f"[CLAUDE-AGENT] Wrapper usage endpoint returned no totals (endpoint={endpoint})")
