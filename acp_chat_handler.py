@@ -2878,16 +2878,22 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 on_text=on_text_callback
             ) as agent:
                 response = await agent.query(full_prompt)
-                
+
+                # Capture token usage from the agent
+                self._last_token_usage = agent.last_token_usage
+                if self._last_token_usage:
+                    logger.info(f"[CLAUDE-AGENT] Token usage captured: {self._last_token_usage}")
+
                 logger.info(f"[CLAUDE-AGENT] Response received ({len(response)} chars)")
                 logger.info(f"[CLAUDE-AGENT] Response preview: {response[:200]}...")
-                
+
                 return {
                     "status": "success",
                     "success": True,
                     "response": response,
                     "error": None,
-                    "backend": "claude-agent"
+                    "backend": "claude-agent",
+                    "token_usage": self._last_token_usage,
                 }
         
         except Exception as e:

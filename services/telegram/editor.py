@@ -50,7 +50,10 @@ class TelegramBotEditor:
         self.backup_api_client = self.project_path / "services" / "api_client.py.backup"
         self.backup_start_handler = self.project_path / "handlers" / "start.py.backup"
         self.backup_message_handler = self.project_path / "handlers" / "message.py.backup"
-    
+
+        # Token usage from last query
+        self._last_token_usage = None
+
     def enhance_bot_logic(
         self,
         description: str,
@@ -465,6 +468,10 @@ OPTIONAL:
                         prompt=prompt,
                         timeout=1200  # 20 minutes
                     )
+                    # Capture token usage
+                    self._last_token_usage = agent.last_token_usage
+                    if self._last_token_usage:
+                        logger.info(f"[TELEGRAM-EDITOR] Token usage: {self._last_token_usage}")
                     return result
             
             # Safe async execution (FIX 1 & 2)

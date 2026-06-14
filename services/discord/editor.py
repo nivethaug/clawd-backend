@@ -55,6 +55,9 @@ class DiscordBotEditor:
         self.backup_help_cmd = self.project_path / "commands" / "help.py.backup"
         self.backup_main = self.project_path / "main.py.backup"
 
+        # Token usage from last query
+        self._last_token_usage = None
+
     def enhance_bot_logic(
         self,
         description: str,
@@ -524,6 +527,10 @@ OPTIONAL:
                         prompt=prompt,
                         timeout=900
                     )
+                    # Capture token usage
+                    self._last_token_usage = agent.last_token_usage
+                    if self._last_token_usage:
+                        logger.info(f"[DISCORD-EDITOR] Token usage: {self._last_token_usage}")
                     return result
 
             try:

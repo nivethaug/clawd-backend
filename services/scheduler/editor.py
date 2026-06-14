@@ -36,6 +36,9 @@ class SchedulerEditor:
         self.backup_executor = self.project_path / "scheduler" / "executor.py.backup"
         self.backup_api_client = self.project_path / "services" / "api_client.py.backup"
 
+        # Token usage from last query
+        self._last_token_usage = None
+
     def enhance_executor(self, description: str, project_name: str) -> Tuple[bool, str]:
         """
         Enhance executor.py using Claude AI.
@@ -316,6 +319,10 @@ CRITICAL RULES
         """Async wrapper for ClaudeCodeAgent."""
         async with ClaudeCodeAgent(str(self.project_path)) as agent:
             result = await agent.query(prompt, timeout=600)
+            # Capture token usage
+            self._last_token_usage = agent.last_token_usage
+            if self._last_token_usage:
+                logger.info(f"[SCHEDULER-EDITOR] Token usage: {self._last_token_usage}")
             if result:
                 return {"success": True, "result": result}
             return {"success": False, "error": "No response from Claude"}
