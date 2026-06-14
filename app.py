@@ -4827,11 +4827,11 @@ async def _do_git_commit(
                         (commit_hash, commit_status, message_id)
                     )
 
-                cursor = conn.execute(
-                    "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, ?)",
+                log_row = conn.execute(
+                    "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
                     (project_id, session_id, message_id, commit_hash, message, commit_status)
-                )
-                log_id = cursor.lastrowid
+                ).fetchone()
+                log_id = log_row["id"] if log_row else None
                 conn.commit()
 
                 if message_id:
@@ -5114,12 +5114,12 @@ async def rollback_commit(project_id: int, message_id: int):
                 (message_id,)
             )
 
-            cursor = conn.execute(
+            revert_msg_row = conn.execute(
                 """INSERT INTO messages (session_id, role, content, commit_hash, commit_status, reverted_message_id)
-                   VALUES (?, 'assistant', ?, ?, 'pushed', ?)""",
+                   VALUES (?, 'assistant', ?, ?, 'pushed', ?) RETURNING id""",
                 (session_id, f"Reverted commit {original_hash[:8]}", revert_hash, message_id)
-            )
-            revert_message_id = cursor.lastrowid
+            ).fetchone()
+            revert_message_id = revert_msg_row["id"] if revert_msg_row else None
 
             # Dual-write: also persist in commit_log
             original_log = conn.execute(
@@ -5127,11 +5127,11 @@ async def rollback_commit(project_id: int, message_id: int):
                 (original_hash, project_id)
             ).fetchone()
 
-            conn.execute(
-                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed')",
+            revert_log_row = conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
                 (project_id, session_id, revert_message_id, revert_hash, f"Revert {original_hash[:8]}")
-            )
-            revert_log_id = cursor.lastrowid
+            ).fetchone()
+            revert_log_id = revert_log_row["id"] if revert_log_row else None
 
             if original_log:
                 conn.execute(
@@ -5236,11 +5236,11 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
             )
 
             # Insert revert entry into commit_log
-            cursor = conn.execute(
-                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed')",
+            revert_log_row = conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
                 (project_id, session_id, original_message_id, revert_hash, f"Revert {original_hash[:8]}")
-            )
-            revert_log_id = cursor.lastrowid
+            ).fetchone()
+            revert_log_id = revert_log_row["id"] if revert_log_row else None
 
             # Set reverted_by on original
             conn.execute(
