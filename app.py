@@ -2188,7 +2188,7 @@ async def publish_frontend(project_id: int, request: BuildPublishRequest):
         raise HTTPException(status_code=400, detail=f"package.json not found in {frontend_path}")
     
     # Build command args
-    cmd_args = ["python", "buildpublish.py"]
+    cmd_args = ["python3", "buildpublish.py"]
     if request.skip_install:
         cmd_args.append("--skip-install")
     if request.skip_build:
@@ -2283,7 +2283,7 @@ async def publish_backend(project_id: int, request: BuildPublishRequest):
         raise HTTPException(status_code=400, detail=f"main.py not found in {backend_path}")
     
     # Build command args
-    cmd_args = ["python", "buildpublish.py"]
+    cmd_args = ["python3", "buildpublish.py"]
     if request.skip_install:
         cmd_args.append("--skip-deps")
     if request.restart:
@@ -5032,7 +5032,7 @@ def _rebuild_after_rollback(project_id: int, project_path: str, project_name: st
     # --- Frontend rebuild ---
     frontend_path = base / "frontend"
     if frontend_path.exists() and (frontend_path / "package.json").exists():
-        cmd_args = ["python", "buildpublish.py", "--project-name", project_name]
+        cmd_args = ["python3", "buildpublish.py", "--project-name", project_name]
         logger.info(f"🔄 [ROLLBACK] Rebuilding frontend for project {project_id}")
         try:
             result = subprocess.run(
@@ -5075,7 +5075,7 @@ def _rebuild_after_rollback(project_id: int, project_path: str, project_name: st
         except Exception:
             pass
 
-        cmd_args = ["python", "buildpublish.py", "--project-name", project_name]
+        cmd_args = ["python3", "buildpublish.py", "--project-name", project_name]
         if domain:
             cmd_args.extend(["--domain", domain])
         logger.info(f"🔧 [ROLLBACK] Rebuilding backend for project {project_id}")
