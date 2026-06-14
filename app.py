@@ -5450,30 +5450,59 @@ async def get_my_limits(authorization: Optional[str] = Header(None)):
 async def admin_list_users(
     limit: int = 50,
     offset: int = 0,
+    sort: str = "cost",
     authorization: Optional[str] = Header(None)
 ):
-    """List all users with their role and subscription tier. Admin only."""
+    """List all users with their role, subscription tier, and token cost. Admin only.
+
+    sort: 'cost' (default, descending) or 'id' (ascending)
+    """
     user_id = get_user_id_from_token(authorization)
     require_admin(user_id)
 
     with get_db() as conn:
-        users = conn.execute(
-            "SELECT id, email, name, role, subscription_tier, created_at FROM users ORDER BY id LIMIT %s OFFSET %s",
-            (limit, offset)
-        ).fetchall()
+        if sort == "cost":
+            users = conn.execute(
+                """SELECT u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at,
+                       COALESCE(SUM(t.total_tokens), 0) as total_tokens,
+                       COALESCE(SUM(t.cost_usd), 0) as total_cost_usd
+                   FROM users u
+                   LEFT JOIN token_usage t ON t.user_id = u.id
+                   GROUP BY u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at
+                   ORDER BY total_cost_usd DESC NULLS LAST, u.id ASC
+                   LIMIT %s OFFSET %s""",
+                (limit, offset)
+            ).fetchall()
+        else:
+            users = conn.execute(
+                """SELECT u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at,
+                       COALESCE(SUM(t.total_tokens), 0) as total_tokens,
+                       COALESCE(SUM(t.cost_usd), 0) as total_cost_usd
+                   FROM users u
+                   LEFT JOIN token_usage t ON t.user_id = u.id
+                   GROUP BY u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at
+                   ORDER BY u.id ASC
+                   LIMIT %s OFFSET %s""",
+                (limit, offset)
+            ).fetchall()
 
         total = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()
         total_count = total["cnt"] if isinstance(total, dict) else total[0]
 
+    def gv(row, key, idx):
+        return row[key] if isinstance(row, dict) else row[idx]
+
     return {
         "users": [
             {
-                "id": u["id"] if isinstance(u, dict) else u[0],
-                "email": u["email"] if isinstance(u, dict) else u[1],
-                "name": u["name"] if isinstance(u, dict) else u[2],
-                "role": u["role"] if isinstance(u, dict) else u[3],
-                "subscription_tier": u["subscription_tier"] if isinstance(u, dict) else u[4],
-                "created_at": str(u["created_at"]) if isinstance(u, dict) else str(u[5]),
+                "id": gv(u, "id", 0),
+                "email": gv(u, "email", 1),
+                "name": gv(u, "name", 2),
+                "role": gv(u, "role", 3),
+                "subscription_tier": gv(u, "subscription_tier", 4),
+                "created_at": str(gv(u, "created_at", 5)),
+                "total_tokens": gv(u, "total_tokens", 6),
+                "total_cost_usd": float(gv(u, "total_cost_usd", 7) or 0),
             }
             for u in users
         ],
