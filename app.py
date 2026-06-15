@@ -1157,9 +1157,41 @@ def _update_env_file(env_path: str, updates: dict):
         f.writelines(new_lines)
 
 
+def _replace_domain_in_configs(clone_path: str, source_domain: str, clone_domain: str):
+    """Replace source domain with clone domain in config files that already had placeholders filled."""
+    # Key files where domain appears after initial provisioning
+    target_files = [
+        os.path.join(clone_path, "backend", "agent", "README.md"),
+        os.path.join(clone_path, "frontend", "buildpublish.py"),
+        os.path.join(clone_path, "backend", "buildpublish.py"),
+        os.path.join(clone_path, "frontend", "src", "lib", "api-config.ts"),
+        os.path.join(clone_path, "project.json"),
+    ]
+
+    replaced_count = 0
+    for fpath in target_files:
+        try:
+            if not os.path.isfile(fpath):
+                continue
+            with open(fpath, "r", encoding="utf-8") as f:
+                content = f.read()
+            if source_domain in content:
+                content = content.replace(source_domain, clone_domain)
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(content)
+                replaced_count += 1
+                logger.info(f"[CLONE] Replaced domain in {os.path.relpath(fpath, clone_path)}")
+        except Exception as e:
+            logger.warning(f"[CLONE] Failed to replace domain in {fpath}: {e}")
+
+    if replaced_count:
+        logger.info(f"[CLONE] Domain replacement complete: {replaced_count} files updated ({source_domain} -> {clone_domain})")
+    return replaced_count
+
+
 def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
                   source_path: str, clone_path: str, template_id: Optional[str],
-                  description: Optional[str]):
+                  description: Optional[str], source_domain: str = ""):
     """Background worker that copies files and provisions infrastructure for a cloned project."""
 
     try:
@@ -1198,6 +1230,10 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 logger.info(f"[CLONE] GitHub repo created: {repo_url}")
         except Exception as gh_err:
             logger.warning(f"[CLONE] GitHub repo creation failed (non-fatal): {gh_err}")
+
+        # --- Replace source domain with clone domain in config files ---
+        if source_domain and source_domain != clone_domain:
+            _replace_domain_in_configs(clone_path, source_domain, clone_domain)
 
         # --- Type-specific deployment ---
         if source_type_id == 1:
@@ -1358,6 +1394,7 @@ async def clone_project(
     source_path = source.get("project_path") or ""
     source_description = source.get("description")
     source_template_id = source.get("template_id")
+    source_domain = source.get("domain") or ""
 
     if not source_path or not os.path.exists(source_path):
         raise HTTPException(status_code=400, detail=f"Source project path not found on disk: {source_path}")
@@ -1443,7 +1480,7 @@ async def clone_project(
     # Launch background worker
     worker_thread = threading.Thread(
         target=_clone_worker,
-        args=(clone_project_id, request.name, clone_domain, source_type_id, source_path, clone_folder_path, source_template_id, source_description),
+        args=(clone_project_id, request.name, clone_domain, source_type_id, source_path, clone_folder_path, source_template_id, source_description, source_domain),
         daemon=True,
     )
     worker_thread.start()
