@@ -4080,6 +4080,8 @@ class GoogleAuthRequest(BaseModel):
 
 async def verify_google_token(credential: str) -> dict:
     """Verify a Google ID token and return user info."""
+    logger.info("Google OAuth: verifying token (first 30 chars): %s...", credential[:30])
+    
     # Verify the token using Google's tokeninfo endpoint
     async with AsyncClient() as client:
         resp = await client.get(
@@ -4087,6 +4089,9 @@ async def verify_google_token(credential: str) -> dict:
             params={"id_token": credential},
             timeout=10.0,
         )
+    
+    logger.info("Google OAuth: tokeninfo response status=%s body=%s", resp.status_code, resp.text[:500])
+    
     if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid Google token")
 
@@ -4094,12 +4099,14 @@ async def verify_google_token(credential: str) -> dict:
 
     # Verify audience matches our client ID (if configured)
     expected_aud = os.getenv("GOOGLE_CLIENT_ID")
+    logger.info("Google OAuth: token aud=%s expected=%s", data.get("aud"), expected_aud)
     if expected_aud and data.get("aud") != expected_aud:
         raise HTTPException(status_code=401, detail="Google token audience mismatch")
 
     if not data.get("email_verified"):
         raise HTTPException(status_code=401, detail="Google email not verified")
 
+    logger.info("Google OAuth: success email=%s", data.get("email"))
     return {
         "email": data["email"],
         "name": data.get("name", data["email"].split("@")[0]),

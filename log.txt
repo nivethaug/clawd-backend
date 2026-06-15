@@ -1,111 +1,30 @@
+  GNU nano 7.2                                                           astral-lnp38l.conf                                                                     
+# HTTPS with wildcard SSL
+server {
+    listen 443 ssl;
+    server_name dreamagent.dreambigwithai.com;
 
-1|clawd-ba | 2026-06-11 15:56:51 +00:00: INFO:app:Auto-generated domain for project 'crypto': crypto-k3v8uq
-1|clawd-ba | 2026-06-11 15:56:51 +00:00: INFO:app:[PROJECT] inserting project into database
-1|clawd-ba | 2026-06-11 15:56:51 +00:00: INFO:app:[PROJECT] database insert successful, project_id: 1514
-1|clawd-ba | 2026-06-11 15:56:51 +00:00: INFO:app:[PROJECT] database commit successful
-1|clawd-ba | 2026-06-11 15:56:51 +00:00: INFO:app:[GITHUB] Creating repository for project: crypto-k3v8uq
-1|clawd-ba | 2026-06-11 15:56:51 +00:00: INFO:github_service:[GITHUB] Running: gh repo create crypto-k3v8uq --public --description Project: crypto
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:github_service:[GITHUB] Success: https://github.com/nivethaug/crypto-k3v8uq
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:[GITHUB] Repository created: https://github.com/nivethaug/crypto-k3v8uq
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:github_service:[GITHUB] Adding remote origin: https://github.com/nivethaug/crypto-k3v8uq
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: WARNING:app:[GITHUB] Failed to add remote, continuing anyway
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:[PROJECT_TYPE] project_id=1514, type_id=3, type(type_id)=<class 'int'>
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:[PROJECT_TYPE] Checking routing: type_id == 1? False, type_id == 2? False
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:[PROJECT_TYPE] Entering DISCORD BOT branch (type_id=3)
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:Starting Discord bot creation for project 1514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:[DISCORD] Importing discord worker modules...
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:[DISCORD] Import successful!
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:[DISCORD] Bot configuration:
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:   - bot_domain: 'crypto-k3v8uq' (type: str)
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:   - bot_port: 8514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Starting Discord bot pipeline for project 1514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:Discord bot worker started for project 1514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:app:[PROJECT_TYPE] Finished type routing for project 1514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Bot name: crypto
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Step 1/12: Validating bot token...
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Token valid for bot: cryptotd
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:============================================================
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:DISCORD BOT SETUP REQUIRED:
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:1. ENABLE PRIVILEGED INTENTS:
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   https://discord.com/developers/applications/
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   Bot -> Privileged Gateway Intents -> Enable 'Message Content Intent'
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:2. INVITE BOT TO YOUR SERVER:
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   https://discord.com/api/oauth2/authorize?client_id=1491830137035948256&permissions=277025770560&scope=bot
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:============================================================
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Step 2/12: Copying discord template...
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Copying discord template from /root/clawd-backend/templates/discord-bot-template to /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Discord template copied successfully to /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Template copied to /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Step 3/12: Injecting environment variables...
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Using .env.example as base
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:inject_bot_token called with:
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   - project_path: /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   - domain: crypto-k3v8uq
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   - port: 8514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   - project_id: 1514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   Set DISCORD_TOKEN
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   Set PORT=8514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   Set PROJECT_ID=1514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   Added DATABASE_URL=***
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   Added WEBHOOK_DOMAIN=crypto-k3v8uq
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:   Added WEBHOOK_URL
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:.env file created with secure permissions at /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord/.env
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:DISCORD_TOKEN injected (token not logged for security)
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Config injected: domain=crypto-k3v8uq, port=8514
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Environment configured
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Step 4/12: Installing dependencies...
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Installing dependencies from /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord/requirements.txt
-1|clawd-ba | 2026-06-11 15:56:54 +00:00: INFO:telegram_bot:Using shared venv: /root/dreampilot/dreampilotvenv
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:Dependencies installed successfully
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:Installation output: ['      Successfully uninstalled requests-2.32.5', '', 'Successfully installed requests-2.31.0 sqlalchemy-2.0.25']
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:Dependencies installed
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:Step 5/12: Starting bot via PM2...
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:Starting PM2 process: dc-bot-1514
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:  DISCORD_TOKEN: ***3H0A_U
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:  DATABASE_URL: ***host:5432/dreampilot
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:Using shared venv: /root/dreampilot/dreampilotvenv
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:Loaded existing .env: /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord/.env
-1|clawd-ba | 2026-06-11 15:56:57 +00:00: INFO:telegram_bot:Updated .env file with 12 variables
-1|clawd-ba | 2026-06-11 15:57:07 +00:00: INFO:telegram_bot:PM2 process started: dc-bot-1514
-1|clawd-ba | 2026-06-11 15:57:07 +00:00: INFO:telegram_bot:PM2 output: [PM2] Starting /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord/main.py in fork_mode (1 instance)
-1|clawd-ba | 2026-06-11 15:57:07 +00:00: [PM2] Done.
-1|clawd-ba | 2026-06-11 15:57:07 +00:00: ┌────┬────────────────────────────────────┬──────
-1|clawd-ba | 2026-06-11 15:57:07 +00:00: INFO:telegram_bot:Bot started: Bot started as dc-bot-1514 (PM2 name: dc-bot-1514)
-1|clawd-ba | 2026-06-11 15:57:07 +00:00: INFO:telegram_bot:Waiting 5s for bot to initialize...
-1|clawd-ba | 2026-06-11 15:57:12 +00:00: INFO:telegram_bot:Step 6/12: Configuring nginx...
-1|clawd-ba | 2026-06-11 15:57:12 +00:00: INFO:infrastructure_manager:✓ Telegram bot nginx config generated for crypto-k3v8uq.dreambigwithai.com:8514
-1|clawd-ba | 2026-06-11 15:57:12 +00:00: INFO:infrastructure_manager:✓ Config written: /etc/nginx/sites-available/crypto-k3v8uq.conf
-1|clawd-ba | 2026-06-11 15:57:12 +00:00: INFO:infrastructure_manager:✓ Symlink created: /etc/nginx/sites-enabled/crypto-k3v8uq.conf
-1|clawd-ba | 2026-06-11 15:57:12 +00:00: INFO:telegram_bot:Nginx config installed for crypto-k3v8uq.dreambigwithai.com
-1|clawd-ba | 2026-06-11 15:57:12 +00:00: INFO:infrastructure_manager:Reloading nginx...
-1|clawd-ba | 2026-06-11 15:57:13 +00:00: INFO:infrastructure_manager:✓ Nginx reloaded successfully
-1|clawd-ba | 2026-06-11 15:57:13 +00:00: INFO:telegram_bot:Nginx reloaded successfully
-1|clawd-ba | 2026-06-11 15:57:13 +00:00: INFO:telegram_bot:Step 7/12: Provisioning DNS (optional)...
-1|clawd-ba | 2026-06-11 15:57:13 +00:00: INFO:infrastructure_manager:Creating A record: crypto-k3v8uq.dreambigwithai.com → 195.200.14.37
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:infrastructure_manager:✓ A record created: crypto-k3v8uq.dreambigwithai.com → 195.200.14.37
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:infrastructure_manager:  Note: DNS propagation takes 5-60 minutes
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:DNS A record created for crypto-k3v8uq.dreambigwithai.com
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Step 8/12: HTTP verification (base template)...
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: WARNING:telegram_bot:HTTP verification error: Expecting value: line 1 column 1 (char 0) - continuing
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Step 9/12: Webhook registration (skipped - Discord uses gateway)...
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:services.discord.webhook:Discord bot project 1514: Skipping webhook registration (uses WebSocket gateway)
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Step 10/12: AI enhancement of bot logic...
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Creating backup: /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord/services/ai_logic.py.backup
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Creating backup: /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord/services/api_client.py.backup
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Creating backup: /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord/commands/start.py.backup
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Creating backup: /root/dreampilot/projects/discord/1514_crypto_20260611_155651/discord/commands/ask.py.backup
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: ERROR:telegram_bot:Enhancement error: name 'success' is not defined
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Rolling back ai_logic.py...
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Rolling back api_client.py...
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Rolling back start.py...
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Rolling back ask.py...
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Rollback complete
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: WARNING:telegram_bot:AI enhancement failed: Enhancement error: name 'success' is not defined
-1|clawd-ba | 2026-06-11 15:57:14 +00:00: INFO:telegram_bot:Step 12/12: Final HTTP verification...
-1|clawd-ba | 2026-06-11 15:57:17 +00:00: INFO:telegram_bot:Enhanced bot verified - deployment complete!
-1|clawd-ba | 2026-06-11 15:57:17 +00:00: INFO:telegram_bot:Saving project metadata...
-1|clawd-ba | 2026-06-11 15:57:17 +00:00: INFO:telegram_bot:Project metadata saved: /root/dreampilot/projects/discord/1514_crypto_20260611_155651/project.json
-1|clawd-ba | 2026-06-11 15:57:17 +00:00: INFO:telegram_bot:Discord bot pipeline completed!
-1|clawd-ba | 2026-06-11 15:57:17 +00:00: INFO:app:Discord bot pipeline completed for project 1514
+    # Wildcard SSL certificate for *.dreambigwithai.com
+    ssl_certificate /etc/letsencrypt/live/dreambigwithai.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/dreambigwithai.com/privkey.pem;
+
+    # SSL optimization
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+    }
+}
