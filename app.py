@@ -1206,7 +1206,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             from infrastructure_manager import InfrastructureManager
             infra = InfrastructureManager(
                 project_name=clone_name,
-                project_path=clone_path,
+                project_path=Path(clone_path),
                 domain=clone_domain,
                 description=description,
                 template_id=template_id,
