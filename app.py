@@ -272,6 +272,12 @@ class CreateProjectRequest(BaseModel):
     email_to: Optional[str] = None  # Default email recipient (SMTP is shared)
     api_endpoint: Optional[str] = None  # Default API endpoint URL
 
+
+class CloneProjectRequest(BaseModel):
+    name: str
+    domain: Optional[str] = None
+
+
 class CreateSessionRequest(BaseModel):
     label: str
     project_id: int = 1
@@ -1097,6 +1103,360 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         frontend=frontend_info,
         created_at=str(final_project["created_at"]) if isinstance(final_project.get("created_at"), (datetime,)) else final_project.get("created_at")
     )
+
+
+# ---------------------------------------------------------------------------
+# Clone Project Endpoint
+# ---------------------------------------------------------------------------
+
+def _copy_project_files(src_path: str, dst_path: str, skip_dirs: set = None):
+    """Recursively copy project files, skipping build artifacts and VCS dirs."""
+    if skip_dirs is None:
+        skip_dirs = {".git", "node_modules", "dist", ".next", "__pycache__", "logs", ".cache", "build"}
+
+    if not os.path.exists(src_path):
+        raise FileNotFoundError(f"Source project path does not exist: {src_path}")
+
+    for item in os.listdir(src_path):
+        src_item = os.path.join(src_path, item)
+        dst_item = os.path.join(dst_path, item)
+
+        if os.path.isdir(src_item):
+            if item in skip_dirs:
+                continue
+            shutil.copytree(src_item, dst_item, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*skip_dirs))
+        else:
+            shutil.copy2(src_item, dst_item)
+
+
+def _update_env_file(env_path: str, updates: dict):
+    """Update key=value pairs in a .env file, preserving other lines."""
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+
+    updated_keys = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if "=" in stripped and not stripped.startswith("#"):
+            key = stripped.split("=", 1)[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}\n")
+                updated_keys.add(key)
+                continue
+        new_lines.append(line)
+
+    # Add any keys that weren't already in the file
+    for key, val in updates.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={val}\n")
+
+    with open(env_path, "w") as f:
+        f.writelines(new_lines)
+
+
+def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
+                  source_path: str, clone_path: str, template_id: Optional[str],
+                  description: Optional[str]):
+    """Background worker that copies files and provisions infrastructure for a cloned project."""
+
+    try:
+        # --- Copy files from source project ---
+        logger.info(f"[CLONE] Copying files from {source_path} -> {clone_path}")
+        _copy_project_files(source_path, clone_path)
+        logger.info(f"[CLONE] File copy complete for project {project_id}")
+
+        # Re-initialise git (remove copied .git if any, re-init fresh)
+        git_dir = os.path.join(clone_path, ".git")
+        if os.path.exists(git_dir):
+            shutil.rmtree(git_dir, ignore_errors=True)
+        subprocess.run(["git", "init"], cwd=clone_path, capture_output=True, timeout=30)
+        subprocess.run(["git", "add", "-A"], cwd=clone_path, capture_output=True, timeout=60)
+        subprocess.run(
+            ["git", "commit", "-m", "Initial commit (cloned from source)"],
+            cwd=clone_path, capture_output=True, timeout=60,
+            env={**os.environ, "GIT_AUTHOR_NAME": "DreamPilot", "GIT_AUTHOR_EMAIL": "bot@dreambigwithai.com",
+                 "GIT_COMMITTER_NAME": "DreamPilot", "GIT_COMMITTER_EMAIL": "bot@dreambigwithai.com"}
+        )
+        logger.info(f"[CLONE] Git re-initialised for project {project_id}")
+
+        # --- GitHub repo creation ---
+        try:
+            github = get_github_service()
+            repo_url = github.create_repository(
+                name=clone_domain,
+                public=True,
+                description=f"Cloned project: {clone_name}"
+            )
+            if repo_url:
+                github.add_remote(clone_path, repo_url)
+                with get_db() as conn:
+                    conn.execute("UPDATE projects SET repo_url = ? WHERE id = ?", (repo_url, project_id))
+                    conn.commit()
+                logger.info(f"[CLONE] GitHub repo created: {repo_url}")
+        except Exception as gh_err:
+            logger.warning(f"[CLONE] GitHub repo creation failed (non-fatal): {gh_err}")
+
+        # --- Type-specific deployment ---
+        if source_type_id == 1:
+            # Website clone -- full infrastructure provisioning
+            logger.info(f"[CLONE] Provisioning website infrastructure for project {project_id}")
+            from infrastructure_manager import InfrastructureManager
+            infra = InfrastructureManager(
+                project_name=clone_name,
+                project_path=clone_path,
+                domain=clone_domain,
+                description=description,
+                template_id=template_id,
+            )
+            success = infra.provision_all()
+            new_status = "ready" if success else "failed"
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET status = ? WHERE id = ?", (new_status, project_id))
+                conn.commit()
+            logger.info(f"[CLONE] Website clone {'succeeded' if success else 'FAILED'} for project {project_id}")
+
+        elif source_type_id in (2, 3):
+            # Telegram (2) / Discord (3) clone
+            bot_type_label = "telegram" if source_type_id == 2 else "discord"
+            logger.info(f"[CLONE] Provisioning {bot_type_label} bot for project {project_id}")
+
+            # Copy bot-specific subdirectory from source if it exists
+            bot_subdir = os.path.join(source_path, bot_type_label)
+            if os.path.isdir(bot_subdir):
+                dst_bot_dir = os.path.join(clone_path, bot_type_label)
+                if os.path.exists(dst_bot_dir):
+                    shutil.rmtree(dst_bot_dir, ignore_errors=True)
+                shutil.copytree(bot_subdir, dst_bot_dir, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("__pycache__", ".git", "logs", "node_modules"))
+                logger.info(f"[CLONE] Copied {bot_type_label}/ directory")
+
+            # Update .env with new project metadata
+            env_path = os.path.join(clone_path, ".env")
+            if os.path.exists(env_path):
+                _update_env_file(env_path, {
+                    "PROJECT_ID": str(project_id),
+                    "PROJECT_NAME": clone_name,
+                    "DOMAIN": clone_domain,
+                    "PORT": str(8000 + (project_id % 1000)),
+                })
+                logger.info(f"[CLONE] Updated .env for project {project_id}")
+
+            # Start bot via PM2
+            try:
+                if source_type_id == 2:
+                    from services.telegram.pm2_manager import start_bot_pm2
+                    pm2_name = f"tg-bot-{project_id}"
+                else:
+                    from services.discord.pm2_manager import start_bot_pm2
+                    pm2_name = f"dc-bot-{project_id}"
+
+                start_bot_pm2(
+                    project_id=project_id,
+                    project_path=clone_path,
+                    bot_name=clone_name,
+                    port=8000 + (project_id % 1000),
+                    domain=clone_domain,
+                )
+                logger.info(f"[CLONE] PM2 started: {pm2_name}")
+            except Exception as pm2_err:
+                logger.warning(f"[CLONE] PM2 start failed (non-fatal): {pm2_err}")
+
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
+                conn.commit()
+            logger.info(f"[CLONE] {bot_type_label} bot clone ready for project {project_id}")
+
+        elif source_type_id == 5:
+            # Scheduler clone
+            logger.info(f"[CLONE] Provisioning scheduler for project {project_id}")
+
+            # Copy scheduler-specific subdirectory from source if it exists
+            sched_subdir = os.path.join(source_path, "scheduler")
+            if os.path.isdir(sched_subdir):
+                dst_sched_dir = os.path.join(clone_path, "scheduler")
+                if os.path.exists(dst_sched_dir):
+                    shutil.rmtree(dst_sched_dir, ignore_errors=True)
+                shutil.copytree(sched_subdir, dst_sched_dir, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("__pycache__", ".git", "logs", "node_modules"))
+                logger.info(f"[CLONE] Copied scheduler/ directory")
+
+            # Update .env
+            env_path = os.path.join(clone_path, ".env")
+            if os.path.exists(env_path):
+                _update_env_file(env_path, {
+                    "PROJECT_ID": str(project_id),
+                    "PROJECT_NAME": clone_name,
+                    "DOMAIN": clone_domain,
+                })
+                logger.info(f"[CLONE] Updated .env for scheduler project {project_id}")
+
+            # Start scheduler via PM2
+            try:
+                from services.scheduler.worker import _start_scheduler_pm2
+                _start_scheduler_pm2(project_id=project_id, project_path=clone_path, project_name=clone_name)
+                logger.info(f"[CLONE] PM2 started: sched-{project_id}")
+            except Exception as sched_pm2_err:
+                logger.warning(f"[CLONE] Scheduler PM2 start failed (non-fatal): {sched_pm2_err}")
+
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
+                conn.commit()
+            logger.info(f"[CLONE] Scheduler clone ready for project {project_id}")
+
+        else:
+            logger.warning(f"[CLONE] Unknown type_id={source_type_id}, marking as ready without provisioning")
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
+                conn.commit()
+
+    except Exception as e:
+        logger.error(f"[CLONE] Worker failed for project {project_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        with get_db() as conn:
+            conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("failed", project_id))
+            conn.commit()
+
+
+@app.post("/projects/{project_id}/clone", status_code=201)
+async def clone_project(
+    project_id: int,
+    request: CloneProjectRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Clone an existing project: copy files, provision infrastructure, create GitHub repo."""
+    import threading
+
+    # Auth
+    user_id = get_user_id_from_token(authorization)
+
+    # Check project limit
+    proj_limit = check_project_limit(user_id)
+    if not proj_limit.get("allowed"):
+        max_p = proj_limit.get("max", "?")
+        current_p = proj_limit.get("current", "?")
+        raise HTTPException(
+            status_code=403,
+            detail=f"Project limit reached ({current_p}/{max_p}) for {proj_limit.get('tier', 'free')} tier. Upgrade to create more projects."
+        )
+
+    # Fetch source project
+    with get_db() as conn:
+        source = conn.execute(
+            "SELECT * FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Source project {project_id} not found")
+
+    source = dict(source)
+    source_type_id = source.get("type_id") or 1
+    source_path = source.get("project_path") or ""
+    source_description = source.get("description")
+    source_template_id = source.get("template_id")
+
+    if not source_path or not os.path.exists(source_path):
+        raise HTTPException(status_code=400, detail=f"Source project path not found on disk: {source_path}")
+
+    # Validate / generate domain
+    github = get_github_service()
+    clone_domain = request.domain
+    if not clone_domain or not clone_domain.strip():
+        clone_domain = github.sanitize_repo_name(request.name)
+        random_suffix = ''.join(__import__('random').choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
+        clone_domain = f"{clone_domain}-{random_suffix}"
+    else:
+        clone_domain = github.sanitize_repo_name(clone_domain.strip())
+        if not validate_subdomain(clone_domain):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter."
+            )
+
+    # Check domain uniqueness
+    with get_db() as conn:
+        existing_domain = conn.execute(
+            "SELECT id FROM projects WHERE domain = ?",
+            (clone_domain,)
+        ).fetchone()
+    if existing_domain:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Domain '{clone_domain}' is already in use. Please choose a different subdomain."
+        )
+
+    # Insert clone record into DB
+    logger.info(f"[CLONE] Creating database record for clone of project {project_id}")
+    with get_db() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, template_id, claude_code_session_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (user_id, request.name, clone_domain, source_description, '', source_type_id, 'cloning', source_template_id, None)
+            )
+            result = conn.fetchone()
+            if isinstance(result, dict):
+                clone_project_id = result.get('id')
+            else:
+                clone_project_id = result[0] if result else None
+
+            if not clone_project_id:
+                raise RuntimeError("Failed to get clone_project_id from INSERT RETURNING")
+            conn.commit()
+            logger.info(f"[CLONE] Clone project_id: {clone_project_id}")
+        except Exception as e:
+            logger.error(f"[CLONE] Database insert failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to create clone record: {str(e)}")
+
+    # Create project folder
+    project_manager = ProjectFileManager()
+    clone_folder_path, folder_success = project_manager.create_project_with_git(clone_project_id, request.name, source_type_id)
+
+    if not folder_success:
+        with get_db() as conn:
+            conn.execute("DELETE FROM projects WHERE id = ?", (clone_project_id,))
+            conn.commit()
+        raise HTTPException(status_code=500, detail="Failed to create clone project folder")
+
+    # Set ownership / permissions
+    subprocess.run(["chattr", "-R", "-i", clone_folder_path], check=False)
+    subprocess.run(["chown", "-R", "dreampilot:dreampilot", clone_folder_path], check=False)
+    subprocess.run(["chmod", "-R", "755", clone_folder_path], check=False)
+
+    # Update DB with clone path
+    with get_db() as conn:
+        conn.execute("UPDATE projects SET project_path = ? WHERE id = ?", (clone_folder_path, clone_project_id))
+        conn.commit()
+
+    # Track usage
+    record_usage(
+        user_id=user_id,
+        usage_type="project_clone",
+        total_tokens=1,
+        project_id=clone_project_id,
+        description=f"Cloned project: {request.name} (from project {project_id}, domain: {clone_domain})",
+    )
+
+    # Launch background worker
+    worker_thread = threading.Thread(
+        target=_clone_worker,
+        args=(clone_project_id, request.name, clone_domain, source_type_id, source_path, clone_folder_path, source_template_id, source_description),
+        daemon=True,
+    )
+    worker_thread.start()
+
+    logger.info(f"[CLONE] Background worker started for clone project {clone_project_id} (source: {project_id})")
+
+    return {
+        "success": True,
+        "project_id": clone_project_id,
+        "status": "cloning",
+        "message": f"Cloning project '{source.get('name')}' as '{request.name}'. Infrastructure provisioning in background."
+    }
+
 
 @app.get("/project-types", response_model=list[ProjectTypeResponse])
 async def get_project_types():
