@@ -1189,6 +1189,21 @@ def _replace_domain_in_configs(clone_path: str, source_domain: str, clone_domain
     return replaced_count
 
 
+def _cleanup_clone_build_artifacts(clone_path: str):
+    """Remove node_modules and dist after successful build to save disk space."""
+    cleanup_dirs = [
+        os.path.join(clone_path, "frontend", "node_modules"),
+        os.path.join(clone_path, "frontend", "dist"),
+    ]
+    for dir_path in cleanup_dirs:
+        if os.path.isdir(dir_path):
+            try:
+                shutil.rmtree(dir_path, ignore_errors=True)
+                logger.info(f"[CLONE] Cleaned up {os.path.relpath(dir_path, clone_path)}")
+            except Exception as e:
+                logger.warning(f"[CLONE] Failed to clean {dir_path}: {e}")
+
+
 def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
                   source_path: str, clone_path: str, template_id: Optional[str],
                   description: Optional[str], source_domain: str = ""):
@@ -1239,6 +1254,23 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         if source_type_id == 1:
             # Website clone -- full infrastructure provisioning
             logger.info(f"[CLONE] Provisioning website infrastructure for project {project_id}")
+
+            # Run npm install in frontend dir (node_modules was excluded during copy)
+            frontend_dir = os.path.join(clone_path, "frontend")
+            if os.path.isdir(frontend_dir) and os.path.isfile(os.path.join(frontend_dir, "package.json")):
+                logger.info(f"[CLONE] Running npm install in {frontend_dir}")
+                npm_env = os.environ.copy()
+                npm_env.pop("NODE_ENV", None)  # Ensure devDependencies are installed
+                npm_install_result = subprocess.run(
+                    ["npm", "install", "--no-audit", "--progress=false"],
+                    capture_output=True, text=True, timeout=600,
+                    cwd=frontend_dir, env=npm_env,
+                )
+                if npm_install_result.returncode != 0:
+                    logger.warning(f"[CLONE] npm install failed (non-fatal, provision_all will retry): {npm_install_result.stderr[:500]}")
+                else:
+                    logger.info(f"[CLONE] npm install completed for frontend")
+
             from infrastructure_manager import InfrastructureManager
             infra = InfrastructureManager(
                 project_name=clone_name,
@@ -1248,6 +1280,10 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 template_id=template_id,
             )
             success = infra.provision_all()
+
+            # Clean up build artifacts after provisioning (same as create flow)
+            _cleanup_clone_build_artifacts(clone_path)
+
             new_status = "ready" if success else "failed"
             with get_db() as conn:
                 conn.execute("UPDATE projects SET status = ? WHERE id = ?", (new_status, project_id))
