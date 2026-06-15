@@ -676,15 +676,23 @@ def delete_project_database(project_name: str, force: bool = False) -> Dict[str,
         conn.autocommit = True
         
         with conn.cursor() as cur:
-            # Drop user (if exists) - use sql.SQL().format() for proper identifier handling
+            # CRITICAL: Drop DATABASE first, then USER.
+            # If we drop user first, it fails because the user owns objects in the database.
+            # Dropping the database first removes all objects, then the user can be dropped cleanly.
+
+            # Step 1: Terminate active connections to the database (required before DROP DATABASE)
             try:
-                drop_user_sql = sql.SQL("DROP USER IF EXISTS {}").format(sql.Identifier(db_user))
-                cur.execute(drop_user_sql)
-                logger.info(f"✓ Dropped user: {db_user}")
+                cur.execute(
+                    sql.SQL("SELECT pg_terminate_backend(pg_stat_activity.pid) "
+                            "FROM pg_stat_activity "
+                            "WHERE pg_stat_activity.datname = {} "
+                            "AND pid <> pg_backend_pid()").format(sql.Literal(db_name))
+                )
+                logger.info(f"✓ Terminated active connections to: {db_name}")
             except Exception as e:
-                logger.warning(f"User drop warning: {e}")
-            
-            # Drop database (if exists)
+                logger.warning(f"Connection termination warning: {e}")
+
+            # Step 2: Drop database (if exists)
             try:
                 drop_db_sql = sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name))
                 cur.execute(drop_db_sql)
@@ -692,6 +700,14 @@ def delete_project_database(project_name: str, force: bool = False) -> Dict[str,
             except Exception as e:
                 logger.error(f"Database drop error: {e}")
                 raise
+            
+            # Step 3: Drop user (now safe - database and all objects are gone)
+            try:
+                drop_user_sql = sql.SQL("DROP USER IF EXISTS {}").format(sql.Identifier(db_user))
+                cur.execute(drop_user_sql)
+                logger.info(f"✓ Dropped user: {db_user}")
+            except Exception as e:
+                logger.warning(f"User drop warning: {e}")
             
             # Log pool status after operation
             logger.debug(f"Pool status after DROP: used={len(pool._used)}, idle={len(pool._pool)}")
