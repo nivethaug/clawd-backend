@@ -4102,9 +4102,9 @@ async def verify_google_token(credential: str) -> dict:
         logger.info("Google OAuth v2: keys=%s", list(data.keys()))
 
         # Check audience
-        expected_aud = os.getenv("GOOGLE_CLIENT_ID")
-        token_aud = data.get("aud")
-        logger.info("Google OAuth v2: CHECK aud token=%s expected=%s match=%s", token_aud, expected_aud, token_aud == expected_aud)
+        expected_aud = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+        token_aud = data.get("aud", "")
+        logger.info("Google OAuth v2: CHECK aud token=%r expected=%r match=%s", token_aud, expected_aud, token_aud == expected_aud)
         if expected_aud and token_aud != expected_aud:
             logger.error("Google OAuth v2: AUD MISMATCH")
             raise HTTPException(status_code=401, detail="Google token audience mismatch")
