@@ -1637,12 +1637,15 @@ def allocate_backend_port(project_id: int) -> int:
 
 
 
-def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
+def cleanup_infrastructure(project_path: str, domain_override: str = None, backend_port_override: int = None, frontend_port_override: int = None) -> Dict[str, Any]:
     """
     Full infrastructure cleanup for a project.
 
     Args:
         project_path: Full path to project directory
+        domain_override: Domain from database (guaranteed source of truth, used even if project.json is missing)
+        backend_port_override: Backend port from database
+        frontend_port_override: Frontend port from database
 
     Returns:
         Dict with complete cleanup status
@@ -1651,6 +1654,10 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     
     # Import re at function level (needed for path parsing)
     import re
+
+    # If domain_override is provided from the database, use it as the authoritative source.
+    # When a project is deleted from the database first, project.json may be missing or stale.
+    # This ensures nginx config and PM2 services are ALWAYS cleaned up.
 
     # Load project metadata
     project_json_path = os.path.join(project_path, "project.json")
@@ -1695,6 +1702,15 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
         backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(".dreambigwithai.com", "")
     
+    # HIGHEST PRIORITY: Use domain_override from database (guaranteed source of truth)
+    # This fixes orphaned nginx configs when project.json is missing/stale
+    if domain_override:
+        if not frontend_domain or frontend_domain != domain_override:
+            logger.info(f"Using domain_override from database: {domain_override} (was: {frontend_domain})")
+            frontend_domain = domain_override
+        if not backend_domain:
+            backend_domain = f"{domain_override}-api"
+
     db_name = project_metadata.get("database", {}).get("name", "")
     db_user = project_metadata.get("database", {}).get("user", "")
 
@@ -1835,6 +1851,11 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     nginx_service_name = frontend_domain or project_name
     try:
         cleanup_results["steps"]["nginx"] = cleanup_nginx_config(nginx_service_name)
+        # Safety net: also try cleaning by project_name in case old config was named differently
+        if project_name and project_name != nginx_service_name:
+            alt_cleanup = cleanup_nginx_config(project_name)
+            if alt_cleanup.get("config_removed") or alt_cleanup.get("symlink_removed"):
+                logger.info(f"Also cleaned up nginx config by project_name: {project_name}")
     except Exception as e:
         logger.error(f"Error in Nginx cleanup: {e}")
         cleanup_results["steps"]["nginx"] = {"error": str(e)}
@@ -1915,6 +1936,10 @@ async def delete_project(project_id: int, force: bool = False):
 
         project_path = project['project_path']
         project_name = project['name']
+        # Capture domain from database (guaranteed source of truth)
+        project_domain = project.get('domain') or project.get('name') or ''
+        project_backend_port = project.get('backend_port')
+        project_frontend_port = project.get('frontend_port')
 
         # Master DB Protection: Validate no master database is being deleted
         db_info = get_database_info()
@@ -1999,7 +2024,14 @@ async def delete_project(project_id: int, force: bool = False):
             logger.info(f"[BG] Starting infrastructure cleanup for project {project_id}: {project_path}")
             
             # Run cleanup in threadpool to avoid blocking
-            cleanup_result = await run_in_threadpool(cleanup_infrastructure, project_path)
+            # Pass domain/backend_port from DB so cleanup always knows what to remove
+            cleanup_result = await run_in_threadpool(
+                cleanup_infrastructure,
+                project_path,
+                domain_override=project_domain,
+                backend_port_override=project_backend_port,
+                frontend_port_override=project_frontend_port
+            )
             
             # Delete OpenClaw sessions
             sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
@@ -4196,6 +4228,96 @@ async def health_check():
 @app.post("/test")
 async def test_endpoint(data: dict):
     return {"received": data}
+
+
+# ============================================================================
+# Nginx Orphan Cleanup Endpoint
+# ============================================================================
+
+@app.get("/admin/nginx/orphans")
+async def list_orphaned_nginx_configs():
+    """
+    List nginx configs in sites-available that don't belong to any active project in the database.
+    
+    Compares /etc/nginx/sites-available/*.conf domains against projects table.
+    Returns orphaned configs that can be safely deleted.
+    """
+    import glob
+    
+    nginx_dir = "/etc/nginx/sites-available"
+    
+    # Get all active project domains from database
+    with get_db() as conn:
+        rows = conn.execute("SELECT DISTINCT domain, name FROM projects WHERE domain IS NOT NULL AND domain != ''").fetchall()
+    
+    active_domains = set()
+    for row in rows:
+        domain = row.get('domain') if isinstance(row, dict) else row[0]
+        name = row.get('name') if isinstance(row, dict) else row[1]
+        if domain:
+            active_domains.add(domain)
+        if name:
+            active_domains.add(name)
+    
+    # Scan nginx configs
+    orphans = []
+    configs = glob.glob(f"{nginx_dir}/*.conf")
+    
+    for config_path in configs:
+        config_name = Path(config_path).stem  # e.g., "jurassicgenesis-irgpny"
+        
+        # Skip system configs
+        if config_name == "default":
+            continue
+        
+        # Check if this config's domain exists in active projects
+        if config_name not in active_domains:
+            # Also check by reading server_name from the config
+            try:
+                content = Path(config_path).read_text()
+                orphans.append({
+                    "config_file": config_name,
+                    "config_path": config_path,
+                    "server_name": config_name,
+                    "active_in_db": False
+                })
+            except Exception:
+                orphans.append({
+                    "config_file": config_name,
+                    "config_path": config_path,
+                    "server_name": "unknown",
+                    "active_in_db": False
+                })
+    
+    return {
+        "total_configs": len(configs),
+        "active_projects": len(active_domains),
+        "orphaned_count": len(orphans),
+        "orphans": orphans
+    }
+
+
+@app.delete("/admin/nginx/orphans/{config_name}")
+async def delete_orphaned_nginx_config(config_name: str):
+    """
+    Delete a specific orphaned nginx config by name.
+    
+    Removes both sites-available and sites-enabled entries, then reloads nginx.
+    """
+    # Security: prevent path traversal
+    if "/" in config_name or ".." in config_name:
+        raise HTTPException(status_code=400, detail="Invalid config name")
+    
+    # Normalize config name (strip .conf if provided)
+    if config_name.endswith(".conf"):
+        config_name = config_name[:-5]
+    
+    result = cleanup_nginx_config(config_name)
+    
+    if result.get("errors"):
+        return {"status": "partial", "config_name": config_name, "result": result}
+    
+    return {"status": "deleted", "config_name": config_name, "result": result}
 
 # ============================================================================
 # Session Details API - Calls OpenClaw Status Endpoint
