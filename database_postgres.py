@@ -195,6 +195,18 @@ def init_schema():
                 )
             _run_migration(migrate_subscription_tier)
 
+            def migrate_email_verified():
+                cur.execute(
+                    "ALTER TABLE users ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT true"
+                )
+            _run_migration(migrate_email_verified)
+
+            def migrate_verification_token():
+                cur.execute(
+                    "ALTER TABLE users ADD COLUMN verification_token TEXT"
+                )
+            _run_migration(migrate_verification_token)
+
             # Ensure existing users have correct defaults
             try:
                 cur.execute(

@@ -58,6 +58,8 @@ from services.token_tracker import (
     VALID_USAGE_TYPES as VALID_TOKEN_USAGE_TYPES,
 )
 
+from services.email_service import send_verification_email
+
 # AI Chat System
 from api.ai_chat import router as ai_chat_router
 from api.ai_selection import router as ai_selection_router
@@ -3900,6 +3902,14 @@ class SignupRequest(BaseModel):
     name: Optional[str] = None
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
+
 class UserResponse(BaseModel):
     id: str
     email: str
@@ -3964,9 +3974,9 @@ def require_admin(user_id: int) -> None:
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
-@app.post("/auth/signup", response_model=AuthResponse)
+@app.post("/auth/signup", response_model=MessageResponseModel)
 async def signup(request: SignupRequest):
-    """Register a new user and return token."""
+    """Register a new user and send verification email."""
     # Check if user already exists
     with get_db() as conn:
         existing = conn.execute(
@@ -3977,12 +3987,17 @@ async def signup(request: SignupRequest):
         if existing:
             raise HTTPException(status_code=400, detail="Email already exists")
         
-        # Hash password and create user (defaults: role='user', tier='free')
+        # Hash password
         password_hash = hash_password(request.password)
         
+        # Generate verification token
+        verification_token = secrets.token_hex(32)
+        
+        # Create user with email_verified=false
         conn.execute(
-            "INSERT INTO users (email, name, password, role, subscription_tier) VALUES (?, ?, ?, 'user', 'free') RETURNING id",
-            (request.email, request.name, password_hash)
+            "INSERT INTO users (email, name, password, role, subscription_tier, email_verified, verification_token) "
+            "VALUES (?, ?, ?, 'user', 'free', false, ?) RETURNING id",
+            (request.email, request.name, password_hash, verification_token)
         )
         result = conn.fetchone()
         
@@ -3993,19 +4008,13 @@ async def signup(request: SignupRequest):
         
         conn.commit()
     
-    # Generate token
-    token = generate_token()
-    AUTH_TOKENS[token] = user_id
+    # Send verification email (non-blocking failure)
+    email_sent = send_verification_email(request.email, verification_token, request.name)
+    if not email_sent:
+        logger.warning(f"Failed to send verification email to {request.email}, but account created")
     
-    return AuthResponse(
-        token=token,
-        user=UserResponse(
-            id=str(user_id),
-            email=request.email,
-            name=request.name,
-            role="user",
-            subscription_tier="free"
-        )
+    return MessageResponseModel(
+        message="Account created! Please check your email to verify your account."
     )
 
 
@@ -4014,7 +4023,7 @@ async def login(request: LoginRequest):
     """Login and return token."""
     with get_db() as conn:
         user = conn.execute(
-            "SELECT id, email, name, password, role, subscription_tier FROM users WHERE email = ?",
+            "SELECT id, email, name, password, role, subscription_tier, email_verified FROM users WHERE email = ?",
             (request.email,)
         ).fetchone()
         
@@ -4029,6 +4038,7 @@ async def login(request: LoginRequest):
             password_hash = user.get('password')
             role = user.get('role', 'user')
             tier = user.get('subscription_tier', 'free')
+            email_verified = user.get('email_verified', True)
         else:
             user_id = user[0]
             email = user[1]
@@ -4036,10 +4046,18 @@ async def login(request: LoginRequest):
             password_hash = user[3]
             role = user[4] if len(user) > 4 else 'user'
             tier = user[5] if len(user) > 5 else 'free'
+            email_verified = user[6] if len(user) > 6 else True
         
         # Verify password
         if not password_hash or not verify_password(request.password, password_hash):
             raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Block login if email not verified
+        if not email_verified:
+            raise HTTPException(
+                status_code=403,
+                detail="Please verify your email before logging in. Check your inbox for the verification link."
+            )
     
     # Generate token
     token = generate_token()
@@ -4179,6 +4197,75 @@ async def google_login(request: GoogleAuthRequest):
             subscription_tier=tier,
         ),
     )
+
+
+@app.post("/auth/verify-email", response_model=MessageResponseModel)
+async def verify_email(request: VerifyEmailRequest):
+    """Verify email using the verification token."""
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT id, email_verified FROM users WHERE verification_token = ?",
+            (request.token,)
+        ).fetchone()
+
+        if not user:
+            raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+        if isinstance(user, dict):
+            if user.get('email_verified'):
+                return MessageResponseModel(message="Email already verified. You can log in now.")
+        else:
+            if user[1]:
+                return MessageResponseModel(message="Email already verified. You can log in now.")
+
+        # Mark as verified and clear the token
+        conn.execute(
+            "UPDATE users SET email_verified = true, verification_token = NULL WHERE verification_token = ?",
+            (request.token,)
+        )
+        conn.commit()
+
+    return MessageResponseModel(
+        message="Email verified successfully! You can now log in."
+    )
+
+
+@app.post("/auth/resend-verification", response_model=MessageResponseModel)
+async def resend_verification(request: ResendVerificationRequest):
+    """Resend verification email to user."""
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT id, name, email_verified, password FROM users WHERE email = ?",
+            (request.email,)
+        ).fetchone()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="No account found with that email")
+
+        if isinstance(user, dict):
+            email_verified = user.get('email_verified', True)
+            user_name = user.get('name')
+        else:
+            email_verified = user[2] if len(user) > 2 else True
+            user_name = user[1] if len(user) > 1 else None
+
+        if email_verified:
+            return MessageResponseModel(message="Email already verified. You can log in now.")
+
+        # Generate new token and save
+        new_token = secrets.token_hex(32)
+        conn.execute(
+            "UPDATE users SET verification_token = ? WHERE email = ?",
+            (new_token, request.email)
+        )
+        conn.commit()
+
+    # Send new verification email
+    email_sent = send_verification_email(request.email, new_token, user_name)
+    if not email_sent:
+        raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again.")
+
+    return MessageResponseModel(message="Verification email sent. Please check your inbox.")
 
 
 @app.get("/auth/me", response_model=UserResponse)
@@ -5589,6 +5676,7 @@ async def rate_limit_middleware(request: Request, call_next):
     skip_paths = {
         "/health", "/test", "/docs", "/openapi.json", "/redoc",
         "/auth/signup", "/auth/login", "/auth/logout", "/auth/google",
+        "/auth/verify-email", "/auth/resend-verification",
     }
     path = request.url.path
 
