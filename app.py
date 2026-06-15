@@ -4080,43 +4080,65 @@ class GoogleAuthRequest(BaseModel):
 
 async def verify_google_token(credential: str) -> dict:
     """Verify a Google ID token and return user info."""
-    logger.info("Google OAuth: verifying token (first 30 chars): %s...", credential[:30])
+    logger.info("=== Google OAuth v2: START verify ===")
     
-    # Verify the token using Google's tokeninfo endpoint
-    async with AsyncClient() as client:
-        resp = await client.get(
-            "https://oauth2.googleapis.com/tokeninfo",
-            params={"id_token": credential},
-            timeout=10.0,
-        )
-    
-    logger.info("Google OAuth: tokeninfo response status=%s", resp.status_code)
-    
-    if resp.status_code != 200:
-        logger.error("Google OAuth: tokeninfo failed body=%s", resp.text[:500])
-        raise HTTPException(status_code=401, detail="Invalid Google token")
+    try:
+        logger.info("Google OAuth v2: calling tokeninfo...")
+        async with AsyncClient() as client:
+            resp = await client.get(
+                "https://oauth2.googleapis.com/tokeninfo",
+                params={"id_token": credential},
+                timeout=10.0,
+            )
+        
+        logger.info("Google OAuth v2: tokeninfo status=%s", resp.status_code)
+        
+        if resp.status_code != 200:
+            logger.error("Google OAuth v2: tokeninfo FAILED body=%s", resp.text[:500])
+            raise HTTPException(status_code=401, detail="Invalid Google token")
 
-    data = resp.json()
+        logger.info("Google OAuth v2: parsing JSON...")
+        data = resp.json()
+        logger.info("Google OAuth v2: keys=%s", list(data.keys()))
 
-    # Verify audience matches our client ID (if configured)
-    expected_aud = os.getenv("GOOGLE_CLIENT_ID")
-    logger.info("Google OAuth: token aud=%s expected=%s", data.get("aud"), expected_aud)
-    if expected_aud and data.get("aud") != expected_aud:
-        raise HTTPException(status_code=401, detail="Google token audience mismatch")
+        # Check audience
+        expected_aud = os.getenv("GOOGLE_CLIENT_ID")
+        token_aud = data.get("aud")
+        logger.info("Google OAuth v2: CHECK aud token=%s expected=%s match=%s", token_aud, expected_aud, token_aud == expected_aud)
+        if expected_aud and token_aud != expected_aud:
+            logger.error("Google OAuth v2: AUD MISMATCH")
+            raise HTTPException(status_code=401, detail="Google token audience mismatch")
 
-    # Google returns email_verified as string "true"/"false"
-    email_verified = data.get("email_verified")
-    is_verified = str(email_verified).lower() == "true"
-    logger.info("Google OAuth: email_verified raw=%s parsed=%s", email_verified, is_verified)
-    if not is_verified:
-        raise HTTPException(status_code=401, detail="Google email not verified")
+        # Check email_verified — Google returns this as string "true"
+        email_verified_raw = data.get("email_verified")
+        logger.info("Google OAuth v2: CHECK email_verified type=%s value=%s", type(email_verified_raw).__name__, repr(email_verified_raw))
+        
+        if isinstance(email_verified_raw, bool):
+            is_verified = email_verified_raw
+        elif isinstance(email_verified_raw, str):
+            is_verified = email_verified_raw.lower() == "true"
+        else:
+            is_verified = False
+        
+        logger.info("Google OAuth v2: email_verified parsed=%s", is_verified)
+        if not is_verified:
+            logger.error("Google OAuth v2: EMAIL NOT VERIFIED")
+            raise HTTPException(status_code=401, detail="Google email not verified")
 
-    logger.info("Google OAuth: verified OK, email=%s", data.get("email"))
-    return {
-        "email": data["email"],
-        "name": data.get("name", data["email"].split("@")[0]),
-        "picture": data.get("picture"),
-    }
+        email = data.get("email")
+        name = data.get("name", email.split("@")[0] if email else "User")
+        logger.info("Google OAuth v2: PASS email=%s name=%s", email, name)
+        
+        return {
+            "email": email,
+            "name": name,
+            "picture": data.get("picture"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Google OAuth v2: UNEXPECTED ERROR: %s", e)
+        raise HTTPException(status_code=401, detail="Google token verification failed: {}".format(str(e)))
 
 
 @app.post("/auth/google", response_model=AuthResponse)
@@ -4130,15 +4152,18 @@ async def google_login(request: GoogleAuthRequest):
         logger.exception("Google OAuth: verify_google_token unexpected error: %s", e)
         raise HTTPException(status_code=401, detail="Google token verification failed")
 
-    logger.info("Google OAuth: proceeding with DB lookup for %s", google_user["email"])
+    logger.info("Google OAuth v2: proceeding with DB lookup for %s", google_user["email"])
 
     try:
         with get_db() as conn:
             # Check if user already exists
+            logger.info("Google OAuth v2: querying users table...")
             row = conn.execute(
                 "SELECT id, email, name, role, subscription_tier FROM users WHERE email = ?",
                 (google_user["email"],),
             ).fetchone()
+
+            logger.info("Google OAuth v2: user exists=%s row=%s", row is not None, row)
 
             if row:
                 if isinstance(row, dict):
@@ -4155,11 +4180,14 @@ async def google_login(request: GoogleAuthRequest):
                     tier = row[5] if len(row) > 5 else "free"
             else:
                 # Create new user with no password (OAuth-only account)
+                logger.info("Google OAuth v2: creating new user...")
                 result = conn.execute(
                     "INSERT INTO users (email, name, password, role, subscription_tier) "
                     "VALUES (?, ?, NULL, 'user', 'free') RETURNING id",
                     (google_user["email"], google_user["name"]),
                 ).fetchone()
+
+                logger.info("Google OAuth v2: insert result=%s", result)
 
                 if isinstance(result, dict):
                     user_id = result["id"]
