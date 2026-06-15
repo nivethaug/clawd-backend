@@ -4080,130 +4080,91 @@ class GoogleAuthRequest(BaseModel):
 
 async def verify_google_token(credential: str) -> dict:
     """Verify a Google ID token and return user info."""
-    logger.info("=== Google OAuth v2: START verify ===")
-    
-    try:
-        logger.info("Google OAuth v2: calling tokeninfo...")
-        async with AsyncClient() as client:
-            resp = await client.get(
-                "https://oauth2.googleapis.com/tokeninfo",
-                params={"id_token": credential},
-                timeout=10.0,
-            )
-        
-        logger.info("Google OAuth v2: tokeninfo status=%s", resp.status_code)
-        
-        if resp.status_code != 200:
-            logger.error("Google OAuth v2: tokeninfo FAILED body=%s", resp.text[:500])
-            raise HTTPException(status_code=401, detail="Invalid Google token")
+    async with AsyncClient() as client:
+        resp = await client.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": credential},
+            timeout=10.0,
+        )
 
-        logger.info("Google OAuth v2: parsing JSON...")
-        data = resp.json()
-        logger.info("Google OAuth v2: keys=%s", list(data.keys()))
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
 
-        # Check audience
-        expected_aud = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
-        token_aud = data.get("aud", "")
-        logger.info("Google OAuth v2: CHECK aud token=%r expected=%r match=%s", token_aud, expected_aud, token_aud == expected_aud)
-        if expected_aud and token_aud != expected_aud:
-            logger.error("Google OAuth v2: AUD MISMATCH")
-            raise HTTPException(status_code=401, detail="Google token audience mismatch")
+    data = resp.json()
 
-        # Check email_verified — Google returns this as string "true"
-        email_verified_raw = data.get("email_verified")
-        logger.info("Google OAuth v2: CHECK email_verified type=%s value=%s", type(email_verified_raw).__name__, repr(email_verified_raw))
-        
-        if isinstance(email_verified_raw, bool):
-            is_verified = email_verified_raw
-        elif isinstance(email_verified_raw, str):
-            is_verified = email_verified_raw.lower() == "true"
-        else:
-            is_verified = False
-        
-        logger.info("Google OAuth v2: email_verified parsed=%s", is_verified)
-        if not is_verified:
-            logger.error("Google OAuth v2: EMAIL NOT VERIFIED")
-            raise HTTPException(status_code=401, detail="Google email not verified")
+    # Verify audience matches our client ID (if configured)
+    expected_aud = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+    token_aud = data.get("aud", "")
+    if expected_aud and token_aud != expected_aud:
+        raise HTTPException(status_code=401, detail="Google token audience mismatch")
 
-        email = data.get("email")
-        name = data.get("name", email.split("@")[0] if email else "User")
-        logger.info("Google OAuth v2: PASS email=%s name=%s", email, name)
-        
-        return {
-            "email": email,
-            "name": name,
-            "picture": data.get("picture"),
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Google OAuth v2: UNEXPECTED ERROR: %s", e)
-        raise HTTPException(status_code=401, detail="Google token verification failed: {}".format(str(e)))
+    # Google returns email_verified as string "true"/"false"
+    email_verified_raw = data.get("email_verified")
+    if isinstance(email_verified_raw, bool):
+        is_verified = email_verified_raw
+    elif isinstance(email_verified_raw, str):
+        is_verified = email_verified_raw.lower() == "true"
+    else:
+        is_verified = False
+
+    if not is_verified:
+        raise HTTPException(status_code=401, detail="Google email not verified")
+
+    email = data.get("email")
+    if not email:
+        raise HTTPException(status_code=401, detail="No email in Google token")
+
+    return {
+        "email": email,
+        "name": data.get("name", email.split("@")[0]),
+        "picture": data.get("picture"),
+    }
 
 
 @app.post("/auth/google", response_model=AuthResponse)
 async def google_login(request: GoogleAuthRequest):
     """Login or sign up via Google OAuth."""
-    try:
-        google_user = await verify_google_token(request.credential)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Google OAuth: verify_google_token unexpected error: %s", e)
-        raise HTTPException(status_code=401, detail="Google token verification failed")
+    google_user = await verify_google_token(request.credential)
 
-    logger.info("Google OAuth v2: proceeding with DB lookup for %s", google_user["email"])
+    with get_db() as conn:
+        # Check if user already exists (works for both email/password and Google users)
+        row = conn.execute(
+            "SELECT id, email, name, password, role, subscription_tier FROM users WHERE email = ?",
+            (google_user["email"],),
+        ).fetchone()
 
-    try:
-        with get_db() as conn:
-            # Check if user already exists
-            logger.info("Google OAuth v2: querying users table...")
-            row = conn.execute(
-                "SELECT id, email, name, role, subscription_tier FROM users WHERE email = ?",
-                (google_user["email"],),
+        if row:
+            if isinstance(row, dict):
+                user_id = row["id"]
+                email = row["email"]
+                name = row["name"]
+                role = row.get("role", "user")
+                tier = row.get("subscription_tier", "free")
+            else:
+                user_id = row[0]
+                email = row[1]
+                name = row[2]
+                role = row[4] if len(row) > 4 else "user"
+                tier = row[5] if len(row) > 5 else "free"
+        else:
+            # Create new user with no password (OAuth-only account)
+            result = conn.execute(
+                "INSERT INTO users (email, name, password, role, subscription_tier) "
+                "VALUES (?, ?, NULL, 'user', 'free') RETURNING id",
+                (google_user["email"], google_user["name"]),
             ).fetchone()
 
-            logger.info("Google OAuth v2: user exists=%s row=%s", row is not None, row)
-
-            if row:
-                if isinstance(row, dict):
-                    user_id = row["id"]
-                    email = row["email"]
-                    name = row["name"]
-                    role = row.get("role", "user")
-                    tier = row.get("subscription_tier", "free")
-                else:
-                    user_id = row[0]
-                    email = row[1]
-                    name = row[2]
-                    role = row[4] if len(row) > 4 else "user"
-                    tier = row[5] if len(row) > 5 else "free"
+            if isinstance(result, dict):
+                user_id = result["id"]
             else:
-                # Create new user with no password (OAuth-only account)
-                logger.info("Google OAuth v2: creating new user...")
-                result = conn.execute(
-                    "INSERT INTO users (email, name, password, role, subscription_tier) "
-                    "VALUES (?, ?, NULL, 'user', 'free') RETURNING id",
-                    (google_user["email"], google_user["name"]),
-                ).fetchone()
+                user_id = result[0]
 
-                logger.info("Google OAuth v2: insert result=%s", result)
+            conn.commit()
 
-                if isinstance(result, dict):
-                    user_id = result["id"]
-                else:
-                    user_id = result[0]
-
-                conn.commit()
-
-                email = google_user["email"]
-                name = google_user["name"]
-                role = "user"
-                tier = "free"
-
-    except Exception as e:
-        logger.exception("Google OAuth: DB operation failed: %s", e)
-        raise HTTPException(status_code=500, detail="Database error during Google login")
+            email = google_user["email"]
+            name = google_user["name"]
+            role = "user"
+            tier = "free"
 
     token = generate_token()
     AUTH_TOKENS[token] = user_id

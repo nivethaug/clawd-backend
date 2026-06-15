@@ -1,11 +1,26 @@
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: INFO:app:=== Google OAuth v2: START verify ===
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: INFO:app:Google OAuth v2: calling tokeninfo...
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: INFO:httpx:HTTP Request: GET https://oauth2.googleapis.com/tokeninfo?id_token=eyJhbGciOiJSUzI1NiIsImtpZCI6IjMwMzViYjg2ZDk5ZjIyZTYxMzQ2N2E2NjgwODI1ZWViMGQ4MTM5YTIiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1MDI0NTM2NTc5Ny03dGFyZjgxazlkbWh2cjE0cmN0bzZocDB2M2lqcWh2MC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsImF1ZCI6IjUwMjQ1MzY1Nzk3LTd0YXJmODFrOWRtaHZyMTRyY3RvNmhwMHYzaWpxaHYwLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwic3ViIjoiMTAyNzI4MTY2MTg3ODgxMzk0NDczIiwiZW1haWwiOiJ2aXZlazY0NTQ5NkBnbWFpbC5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwibmJmIjoxNzgxNTM0NjMyLCJuYW1lIjoidml2ZWsiLCJwaWN0dXJlIjoiaHR0cHM6Ly9saDMuZ29vZ2xldXNlcmNvbnRlbnQuY29tL2EvQUNnOG9jS3lJWWNaZnVmLWhKNmpkT25fRnJRd2Zvbmx3VUhEdkcwSjFtcHlERXk4VjQ1aGtBPXM5Ni1jIiwiZ2l2ZW5fbmFtZSI6InZpdmVrIiwiaWF0IjoxNzgxNTM0OTMyLCJleHAiOjE3ODE1Mzg1MzIsImp0aSI6IjI0YzEzYWI3MWRmMTQzMWJhYjdhNGM2ZTIyYTA3OTEyNGFlMTUyMTIifQ.9f6f0TweJcKesmWqE4-k78ZoeripoMYpneV13vTeAlkxdrqqGUqhKfKqMqAe6E1axmoB-xJS3lt2ojpaycXBv0OmWPAyrk0L0DqLUqOM8LouwWDh3YjibEaMMcMRHKmbACTPmxOjz5oVSrJKN4ptBiRDrB-Fjh9G2o_Rkg6JeHS50KKHQjef2AyBf-OU2bjm2En7Mucinc_MVfLOzzG2j1KvpkwVKmgbxR5_yBzBCSfMLOCjqzvBkKZXhfICDo8S4fDmNPTO3uOm046rTfMOKJ__hvDaWa4Kjat9I6KLpw2fvG-NvYFpz22eFGxYM0bLSvqB6MBkQ55NgNCaKJEGww "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: INFO:app:Google OAuth v2: tokeninfo status=200
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: INFO:app:Google OAuth v2: parsing JSON...
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: INFO:app:Google OAuth v2: keys=['iss', 'azp', 'aud', 'sub', 'email', 'email_verified', 'nbf', 'name', 'picture', 'given_name', 'iat', 'exp', 'jti', 'alg', 'kid', 'typ']
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: INFO:app:Google OAuth v2: CHECK aud token=50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com expected=50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: 
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00:  match=False
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: ERROR:app:Google OAuth v2: AUD MISMATCH
-1|clawd-backend  | 2026-06-15 14:48:54 +00:00: INFO:     27.60.166.184:0 - "POST /auth/google HTTP/1.1" 401 Unauthorized
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: tokeninfo status=200
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: parsing JSON...
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: keys=['iss', 'azp', 'aud', 'sub', 'email', 'email_verified', 'nbf', 'name', 'picture', 'given_name', 'iat', 'exp', 'jti', 'alg', 'kid', 'typ']
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: CHECK aud token='50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com' expected='50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com' match=True
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: CHECK email_verified type=str value='true'
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: email_verified parsed=True
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: PASS email=vivek645496@gmail.com name=vivek
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: proceeding with DB lookup for vivek645496@gmail.com
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: querying users table...
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: user exists=False row=None
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: creating new user...
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: insert result=RealDictRow({'id': 26})
+1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:     27.60.166.184:0 - "POST /auth/google HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-15 14:50:55 +00:00: INFO:     27.60.166.184:0 - "OPTIONS /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-15 14:50:55 +00:00: INFO:dashboard_service:Dashboard assembled in 332.5ms for user 26
+1|clawd-backend  | 2026-06-15 14:50:55 +00:00: INFO:     27.60.166.184:0 - "GET /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-15 14:50:59 +00:00: INFO:dashboard_service:Dashboard assembled in 303.0ms for user 26
+1|clawd-backend  | 2026-06-15 14:50:59 +00:00: INFO:     27.60.166.184:0 - "GET /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-15 14:51:03 +00:00: INFO:dashboard_service:Dashboard assembled in 305.3ms for user 26
+1|clawd-backend  | 2026-06-15 14:51:03 +00:00: INFO:     27.60.166.184:0 - "GET /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:     27.60.166.184:0 - "OPTIONS /projects HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:     27.60.166.184:0 - "OPTIONS /project-types HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:     27.60.166.184:0 - "GET /project-types HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:template_selector:Template selector: Groq service initialized
+1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:template_selector:Template selector: Loaded 8 templates
+1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:     27.60.166.184:0 - "GET /projects HTTP/1.1" 200 OK
