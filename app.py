@@ -4090,9 +4090,10 @@ async def verify_google_token(credential: str) -> dict:
             timeout=10.0,
         )
     
-    logger.info("Google OAuth: tokeninfo response status=%s body=%s", resp.status_code, resp.text[:500])
+    logger.info("Google OAuth: tokeninfo response status=%s", resp.status_code)
     
     if resp.status_code != 200:
+        logger.error("Google OAuth: tokeninfo failed body=%s", resp.text[:500])
         raise HTTPException(status_code=401, detail="Invalid Google token")
 
     data = resp.json()
@@ -4103,10 +4104,14 @@ async def verify_google_token(credential: str) -> dict:
     if expected_aud and data.get("aud") != expected_aud:
         raise HTTPException(status_code=401, detail="Google token audience mismatch")
 
-    if not data.get("email_verified"):
+    # Google returns email_verified as string "true"/"false"
+    email_verified = data.get("email_verified")
+    is_verified = str(email_verified).lower() == "true"
+    logger.info("Google OAuth: email_verified raw=%s parsed=%s", email_verified, is_verified)
+    if not is_verified:
         raise HTTPException(status_code=401, detail="Google email not verified")
 
-    logger.info("Google OAuth: success email=%s", data.get("email"))
+    logger.info("Google OAuth: verified OK, email=%s", data.get("email"))
     return {
         "email": data["email"],
         "name": data.get("name", data["email"].split("@")[0]),
@@ -4117,47 +4122,60 @@ async def verify_google_token(credential: str) -> dict:
 @app.post("/auth/google", response_model=AuthResponse)
 async def google_login(request: GoogleAuthRequest):
     """Login or sign up via Google OAuth."""
-    google_user = await verify_google_token(request.credential)
+    try:
+        google_user = await verify_google_token(request.credential)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Google OAuth: verify_google_token unexpected error: %s", e)
+        raise HTTPException(status_code=401, detail="Google token verification failed")
 
-    with get_db() as conn:
-        # Check if user already exists
-        row = conn.execute(
-            "SELECT id, email, name, role, subscription_tier FROM users WHERE email = ?",
-            (google_user["email"],),
-        ).fetchone()
+    logger.info("Google OAuth: proceeding with DB lookup for %s", google_user["email"])
 
-        if row:
-            if isinstance(row, dict):
-                user_id = row["id"]
-                email = row["email"]
-                name = row["name"]
-                role = row.get("role", "user")
-                tier = row.get("subscription_tier", "free")
-            else:
-                user_id = row[0]
-                email = row[1]
-                name = row[2]
-                role = row[4] if len(row) > 4 else "user"
-                tier = row[5] if len(row) > 5 else "free"
-        else:
-            # Create new user with no password (OAuth-only account)
-            result = conn.execute(
-                "INSERT INTO users (email, name, password, role, subscription_tier) "
-                "VALUES (?, ?, NULL, 'user', 'free') RETURNING id",
-                (google_user["email"], google_user["name"]),
+    try:
+        with get_db() as conn:
+            # Check if user already exists
+            row = conn.execute(
+                "SELECT id, email, name, role, subscription_tier FROM users WHERE email = ?",
+                (google_user["email"],),
             ).fetchone()
 
-            if isinstance(result, dict):
-                user_id = result["id"]
+            if row:
+                if isinstance(row, dict):
+                    user_id = row["id"]
+                    email = row["email"]
+                    name = row["name"]
+                    role = row.get("role", "user")
+                    tier = row.get("subscription_tier", "free")
+                else:
+                    user_id = row[0]
+                    email = row[1]
+                    name = row[2]
+                    role = row[4] if len(row) > 4 else "user"
+                    tier = row[5] if len(row) > 5 else "free"
             else:
-                user_id = result[0]
+                # Create new user with no password (OAuth-only account)
+                result = conn.execute(
+                    "INSERT INTO users (email, name, password, role, subscription_tier) "
+                    "VALUES (?, ?, NULL, 'user', 'free') RETURNING id",
+                    (google_user["email"], google_user["name"]),
+                ).fetchone()
 
-            conn.commit()
+                if isinstance(result, dict):
+                    user_id = result["id"]
+                else:
+                    user_id = result[0]
 
-            email = google_user["email"]
-            name = google_user["name"]
-            role = "user"
-            tier = "free"
+                conn.commit()
+
+                email = google_user["email"]
+                name = google_user["name"]
+                role = "user"
+                tier = "free"
+
+    except Exception as e:
+        logger.exception("Google OAuth: DB operation failed: %s", e)
+        raise HTTPException(status_code=500, detail="Database error during Google login")
 
     token = generate_token()
     AUTH_TOKENS[token] = user_id

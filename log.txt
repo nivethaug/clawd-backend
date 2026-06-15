@@ -1,30 +1,18 @@
-  GNU nano 7.2                                                           astral-lnp38l.conf                                                                     
-# HTTPS with wildcard SSL
-server {
-    listen 443 ssl;
-    server_name dreamagent.dreambigwithai.com;
-
-    # Wildcard SSL certificate for *.dreambigwithai.com
-    ssl_certificate /etc/letsencrypt/live/dreambigwithai.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/dreambigwithai.com/privkey.pem;
-
-    # SSL optimization
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-
-    location / {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-    }
-}
+|clawd-backend  | 2026-06-15 14:28:05 +00:00: INFO:     27.60.166.184:0 - "OPTIONS /auth/google HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-15 14:28:05 +00:00: INFO:app:Google OAuth: verifying token (first 30 chars): eyJhbGciOiJSUzI1NiIsImtpZCI6Ij...
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00: INFO:httpx:HTTP Request: GET https://oauth2.googleapis.com/tokeninfo?id_token=eyJhbGciOiJSUzI1NiIsImtpZCI6IjMwMzViYjg2ZDk5ZjIyZTYxMzQ2N2E2NjgwODI1ZWViMGQ4MTM5YTIiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1MDI0NTM2NTc5Ny03dGFyZjgxazlkbWh2cjE0cmN0bzZocDB2M2lqcWh2MC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsImF1ZCI6IjUwMjQ1MzY1Nzk3LTd0YXJmODFrOWRtaHZyMTRyY3RvNmhwMHYzaWpxaHYwLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwic3ViIjoiMTE0NTAxOTI4ODY5Njk3OTM1MjE4IiwiZW1haWwiOiJ2aXZla3Byb2ZmZXNpb25hbDRAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5iZiI6MTc4MTUzMzM4MiwibmFtZSI6InZpdmVrIHByb2ZmZXNpb25hbCIsInBpY3R1cmUiOiJodHRwczovL2xoMy5nb29nbGV1c2VyY29udGVudC5jb20vYS9BQ2c4b2NJdW5EMDZyUmxYcDNiMzFvWUVMUFIycV9nVjhhelN6SnJCU2pRQmRsdGhIdDZReVE9czk2LWMiLCJnaXZlbl9uYW1lIjoidml2ZWsiLCJmYW1pbHlfbmFtZSI6InByb2ZmZXNpb25hbCIsImlhdCI6MTc4MTUzMzY4MiwiZXhwIjoxNzgxNTM3MjgyLCJqdGkiOiIwMTU3YWQ3MGMzMDgyOGUzYWM4ODgzYzI3ZmUzOGYzNGRiMzViMTBiIn0.M8ZU9YtN8d16wJDXTa0iJdDq9LmyLUHkZEoWGrN_1AHEOfilvq-VnwY0UAagpR49bBCnzrtDhuEIMR8m_CCxftyOlJ0MaYzn88jP_rlh862qLWX6qjEHgkcfP-kBPebcwO3LlzhrdKc4hAe5lwL-KAdx77pxUNGQ0_xJvLlhl_rPX1XdFuDe9-HqkKOfx6JL_aXO5WsGpA77-u7e_ak2XTvulifmF9F95LgOKm6CEAZ7p3TAdEpMwy8gttE0sheLgWARfZwmzgkXxMX3-2oxY_6o_pSmXQjdMmfYINt9Sjt0hv-K6k0PJgO9kyDFabrwlcj2LpfIr5hYCSum7qT7-Q "HTTP/1.1 200 OK"
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00: INFO:app:Google OAuth: tokeninfo response status=200 body={
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "iss": "https://accounts.google.com",
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "azp": "50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com",
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "aud": "50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com",
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "sub": "114501928869697935218",
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "email": "vivekproffesional4@gmail.com",
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "email_verified": "true",
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "nbf": "1781533382",
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "name": "vivek proffesional",
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "picture": "https://lh3.googleusercontent.com/a/ACg8ocIunD06rRlXp3b31oYELPR2q_gV8azSzJrBSjQBdlthHt6QyQ=s96-c",
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00:   "given_name": "
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00: INFO:app:Google OAuth: token aud=50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com expected=50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00: 
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00: 
+1|clawd-backend  | 2026-06-15 14:28:06 +00:00: INFO:     27.60.166.184:0 - "POST /auth/google HTTP/1.1" 401 Unauthorized
