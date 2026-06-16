@@ -1211,6 +1211,140 @@ def _cleanup_clone_build_artifacts(clone_path: str):
                 logger.warning(f"[CLONE] Failed to clean {dir_path}: {e}")
 
 
+def _update_payload_credentials(payload: dict, new_creds: dict, source_env: dict):
+    """Replace old source credentials in a job payload with new clone values.
+
+    Checks all common key names for email, telegram, discord, and API credentials.
+    Also does string replacement for values that match the source .env.
+    """
+    # Map credential types to all possible payload key names
+    EMAIL_KEYS = ('to', 'email', 'email_to', 'recipient', 'recipients', 'address')
+    CHAT_KEYS = ('chat_id', 'chatid', 'telegram_chat_id', 'channel')
+    TOKEN_KEYS = ('bot_token', 'token', 'telegram_bot_token')
+    WEBHOOK_KEYS = ('webhook_url', 'webhook', 'discord_webhook_url')
+    API_KEYS = ('url', 'endpoint', 'api_endpoint', 'api_url')
+
+    replacements = [
+        (EMAIL_KEYS, new_creds.get('email_to'), source_env.get('EMAIL_TO')),
+        (CHAT_KEYS, new_creds.get('telegram_chat_id'), source_env.get('TELEGRAM_CHAT_ID')),
+        (TOKEN_KEYS, new_creds.get('telegram_bot_token'), source_env.get('TELEGRAM_BOT_TOKEN')),
+        (WEBHOOK_KEYS, new_creds.get('discord_webhook_url'), source_env.get('DISCORD_WEBHOOK_URL')),
+        (API_KEYS, new_creds.get('api_endpoint'), source_env.get('API_ENDPOINT')),
+    ]
+
+    for keys, new_val, old_val in replacements:
+        if not new_val:
+            continue
+        for key in keys:
+            if key in payload:
+                payload[key] = new_val
+
+    # Deep string replacement: if old email/token appears in any string value, replace it
+    for old_credential, new_credential in [
+        (source_env.get('EMAIL_TO'), new_creds.get('email_to')),
+        (source_env.get('TELEGRAM_CHAT_ID'), new_creds.get('telegram_chat_id')),
+        (source_env.get('TELEGRAM_BOT_TOKEN'), new_creds.get('telegram_bot_token')),
+        (source_env.get('DISCORD_WEBHOOK_URL'), new_creds.get('discord_webhook_url')),
+        (source_env.get('API_ENDPOINT'), new_creds.get('api_endpoint')),
+    ]:
+        if old_credential and new_credential and old_credential != new_credential:
+            _deep_str_replace_in_dict(payload, old_credential, new_credential)
+
+
+def _deep_str_replace_in_dict(obj, old_val: str, new_val: str):
+    """Recursively replace old_val with new_val in all string values within a dict/list."""
+    if isinstance(obj, str):
+        return obj.replace(old_val, new_val) if old_val else obj
+    elif isinstance(obj, dict):
+        return {k: _deep_str_replace_in_dict(v, old_val, new_val) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_deep_str_replace_in_dict(v, old_val, new_val) for v in obj]
+    return obj
+
+
+def _replace_scheduler_credentials_in_code(clone_path: str, source_project_id: int, new_creds: dict):
+    """Replace hardcoded source credentials in cloned scheduler Python files.
+
+    The AI may have written the source project's email/chat_id/token directly
+    into executor.py custom handlers instead of using config variables.
+    This scans .py files in the clone and replaces old values with new ones.
+    """
+    import glob
+
+    # Read source project's .env to get the old credential values
+    source_env_path = os.path.join(clone_path, ".env")  # already updated, so read from DB or source
+    # Actually we need the OLD values — read them from source project via DB
+    old_creds = {}
+    try:
+        from database_postgres import get_db as _get_pg_db
+        with _get_pg_db() as cur:
+            cur.execute("SELECT project_path FROM projects WHERE id = %s", (source_project_id,))
+            row = cur.fetchone()
+            if row:
+                src_path = row.get('project_path') if isinstance(row, dict) else row[0]
+                if src_path and os.path.exists(src_path):
+                    src_env = os.path.join(src_path, ".env")
+                    if os.path.exists(src_env):
+                        with open(src_env, "r") as f:
+                            for line in f:
+                                line = line.strip()
+                                if "=" in line and not line.startswith("#"):
+                                    k, v = line.split("=", 1)
+                                    old_creds[k.strip()] = v.strip()
+    except Exception as e:
+        logger.warning(f"[CLONE] Could not read source project .env for credential replacement: {e}")
+
+    # Build replacement pairs: (old_value, new_value)
+    replacements = []
+    cred_map = [
+        (old_creds.get('EMAIL_TO'), new_creds.get('email_to')),
+        (old_creds.get('TELEGRAM_CHAT_ID'), new_creds.get('telegram_chat_id')),
+        (old_creds.get('TELEGRAM_BOT_TOKEN'), new_creds.get('telegram_bot_token')),
+        (old_creds.get('DISCORD_WEBHOOK_URL'), new_creds.get('discord_webhook_url')),
+        (old_creds.get('API_ENDPOINT'), new_creds.get('api_endpoint')),
+    ]
+    for old_val, new_val in cred_map:
+        if old_val and new_val and old_val != new_val:
+            replacements.append((old_val, new_val))
+
+    if not replacements:
+        logger.info("[CLONE] No credential value differences found — skipping code replacement")
+        return
+
+    # Scan all .py files in scheduler/ and root of the clone
+    scan_dirs = [
+        os.path.join(clone_path, "scheduler"),
+        clone_path,
+    ]
+    py_files = set()
+    for scan_dir in scan_dirs:
+        if os.path.isdir(scan_dir):
+            for f in glob.glob(os.path.join(scan_dir, "*.py")):
+                py_files.add(f)
+
+    replaced_count = 0
+    for py_file in py_files:
+        try:
+            with open(py_file, "r") as f:
+                content = f.read()
+
+            original = content
+            for old_val, new_val in replacements:
+                if old_val in content:
+                    content = content.replace(old_val, new_val)
+                    logger.info(f"[CLONE] Replaced credential in {os.path.basename(py_file)}")
+
+            if content != original:
+                with open(py_file, "w") as f:
+                    f.write(content)
+                replaced_count += 1
+        except Exception as e:
+            logger.warning(f"[CLONE] Failed to scan {py_file}: {e}")
+
+    if replaced_count:
+        logger.info(f"[CLONE] Credential replacement: {replaced_count} files updated")
+
+
 def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
                   source_path: str, clone_path: str, template_id: Optional[str],
                   description: Optional[str], source_domain: str = "",
@@ -1404,11 +1538,37 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 _update_env_file(env_path, env_updates)
                 logger.info(f"[CLONE] Updated .env for scheduler project {project_id}")
 
+            # Replace hardcoded source credentials in cloned Python files (executor.py, etc.)
+            # The AI may have hardcoded the source project's email/chat_id/token directly
+            # in custom handlers instead of using config variables.
+            try:
+                _replace_scheduler_credentials_in_code(clone_path, source_project_id, {
+                    'email_to': email_to,
+                    'telegram_chat_id': telegram_chat_id,
+                    'telegram_bot_token': telegram_bot_token,
+                    'discord_webhook_url': discord_webhook_url,
+                    'api_endpoint': api_endpoint,
+                })
+            except Exception as cred_err:
+                logger.warning(f"[CLONE] Credential replacement in code failed (non-fatal): {cred_err}")
+
             # Duplicate scheduler jobs from source project (no AI needed)
             if source_project_id:
                 try:
                     from services.scheduler.jobs import list_jobs, create_job
                     source_jobs = list_jobs(source_project_id)
+
+                    # Read source project's old credentials from its .env for replacement
+                    source_env_path = os.path.join(source_path, ".env")
+                    source_env = {}
+                    if os.path.exists(source_env_path):
+                        with open(source_env_path, "r") as f:
+                            for line in f:
+                                line = line.strip()
+                                if "=" in line and not line.startswith("#"):
+                                    k, v = line.split("=", 1)
+                                    source_env[k.strip()] = v.strip()
+
                     copied = 0
                     for job in source_jobs:
                         try:
@@ -1418,11 +1578,15 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                                 import json as _json
                                 payload = _json.loads(payload)
 
-                            # Update payload with new channel credentials if provided
-                            if telegram_chat_id and isinstance(payload, dict):
-                                payload['chat_id'] = telegram_chat_id
-                            if email_to and isinstance(payload, dict):
-                                payload['to'] = email_to
+                            # Update ALL credential keys in payload with new values
+                            if isinstance(payload, dict):
+                                _update_payload_credentials(payload, {
+                                    'email_to': email_to,
+                                    'telegram_chat_id': telegram_chat_id,
+                                    'telegram_bot_token': telegram_bot_token,
+                                    'discord_webhook_url': discord_webhook_url,
+                                    'api_endpoint': api_endpoint,
+                                }, source_env)
 
                             create_job(project_id, {
                                 'job_type': job['job_type'],
