@@ -1219,7 +1219,8 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                   telegram_chat_id: Optional[str] = None,
                   discord_webhook_url: Optional[str] = None,
                   email_to: Optional[str] = None,
-                  api_endpoint: Optional[str] = None):
+                  api_endpoint: Optional[str] = None,
+                  source_project_id: Optional[int] = None):
     """Background worker that copies files and provisions infrastructure for a cloned project."""
 
     try:
@@ -1403,6 +1404,41 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 _update_env_file(env_path, env_updates)
                 logger.info(f"[CLONE] Updated .env for scheduler project {project_id}")
 
+            # Duplicate scheduler jobs from source project (no AI needed)
+            if source_project_id:
+                try:
+                    from services.scheduler.jobs import list_jobs, create_job
+                    source_jobs = list_jobs(source_project_id)
+                    copied = 0
+                    for job in source_jobs:
+                        try:
+                            # Parse payload (stored as JSON string in DB)
+                            payload = job.get('payload', {})
+                            if isinstance(payload, str):
+                                import json as _json
+                                payload = _json.loads(payload)
+
+                            # Update payload with new channel credentials if provided
+                            if telegram_chat_id and isinstance(payload, dict):
+                                payload['chat_id'] = telegram_chat_id
+                            if email_to and isinstance(payload, dict):
+                                payload['to'] = email_to
+
+                            create_job(project_id, {
+                                'job_type': job['job_type'],
+                                'schedule_value': job['schedule_value'],
+                                'task_type': job['task_type'],
+                                'payload': payload,
+                            })
+                            copied += 1
+                        except Exception as job_err:
+                            logger.warning(f"[CLONE] Failed to copy scheduler job {job.get('id')}: {job_err}")
+                    logger.info(f"[CLONE] Copied {copied}/{len(source_jobs)} scheduler jobs from source {source_project_id} to clone {project_id}")
+                except Exception as jobs_err:
+                    logger.warning(f"[CLONE] Scheduler job duplication failed (non-fatal): {jobs_err}")
+            else:
+                logger.warning(f"[CLONE] No source_project_id — cannot duplicate scheduler jobs")
+
             # Scheduler runs centrally — no per-project PM2 process needed.
             # Jobs are managed via the database by the centralized clawd-scheduler.
             logger.info(f"[CLONE] Scheduler clone ready (centralized scheduler manages jobs) for project {project_id}")
@@ -1558,6 +1594,7 @@ async def clone_project(
             "discord_webhook_url": request.discord_webhook_url,
             "email_to": request.email_to,
             "api_endpoint": request.api_endpoint,
+            "source_project_id": project_id,
         },
         daemon=True,
     )
