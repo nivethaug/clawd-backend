@@ -1538,6 +1538,50 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 _update_env_file(env_path, env_updates)
                 logger.info(f"[CLONE] Updated .env for scheduler project {project_id}")
 
+            # Patch config.py to use load_dotenv(override=True) so centralized
+            # scheduler picks up each project's own .env values
+            try:
+                config_py_path = os.path.join(clone_path, "config.py")
+                if os.path.exists(config_py_path):
+                    with open(config_py_path, "r") as f:
+                        config_content = f.read()
+                    if "load_dotenv(" in config_content and "override=True" not in config_content:
+                        config_content = config_content.replace(
+                            'load_dotenv(_project_dir / ".env")',
+                            'load_dotenv(_project_dir / ".env", override=True)'
+                        )
+                        # Also handle variants without the _project_dir variable
+                        config_content = config_content.replace(
+                            'load_dotenv('.replace('(', ''),
+                            'load_dotenv_override_placeholder('
+                        ) if False else config_content  # no-op, just in case
+                        with open(config_py_path, "w") as f:
+                            f.write(config_content)
+                        logger.info(f"[CLONE] Patched config.py with override=True for project {project_id}")
+            except Exception as cfg_err:
+                logger.warning(f"[CLONE] Failed to patch config.py (non-fatal): {cfg_err}")
+
+            # Rewrite project.json with clone's metadata (not source's)
+            try:
+                import json as _json
+                from datetime import datetime as _dt
+                project_json_path = os.path.join(clone_path, "project.json")
+                clone_metadata = {
+                    "project_id": project_id,
+                    "project_name": clone_name,
+                    "type_id": source_type_id,
+                    "description": description or "",
+                    "scheduler_path": os.path.join(clone_path, "scheduler"),
+                    "status": "ready",
+                    "created_at": _dt.utcnow().isoformat(),
+                    "cloned_from": source_project_id,
+                }
+                with open(project_json_path, "w") as f:
+                    _json.dump(clone_metadata, f, indent=2)
+                logger.info(f"[CLONE] Rewrote project.json for clone project {project_id}")
+            except Exception as pj_err:
+                logger.warning(f"[CLONE] Failed to rewrite project.json (non-fatal): {pj_err}")
+
             # Replace hardcoded source credentials in cloned Python files (executor.py, etc.)
             # The AI may have hardcoded the source project's email/chat_id/token directly
             # in custom handlers instead of using config variables.

@@ -9,9 +9,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load .env from the directory where config.py lives (project root),
-# not from cwd (which may be the backend directory for daemon processes)
+# not from cwd (which may be the backend directory for daemon processes).
+# override=True is CRITICAL: the centralized scheduler loads multiple
+# projects in the same process. Without override=True, the first project's
+# env vars win and subsequent projects inherit stale values (wrong email, etc.)
 _project_dir = Path(__file__).resolve().parent
-load_dotenv(_project_dir / ".env")
+load_dotenv(_project_dir / ".env", override=True)
 
 # Project Identity
 PROJECT_ID = os.getenv("PROJECT_ID", "1")

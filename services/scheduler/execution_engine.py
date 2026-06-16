@@ -21,6 +21,40 @@ logger = logging.getLogger('scheduler.execution_engine')
 # In-memory cache: project_id -> loaded executor module
 _executor_cache: Dict[int, Any] = {}
 
+# Scheduler env var keys that must be isolated per-project
+_SCHEDULER_ENV_KEYS = [
+    'PROJECT_ID', 'PROJECT_PATH', 'BACKEND_URL',
+    'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID',
+    'DISCORD_WEBHOOK_URL',
+    'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'EMAIL_TO',
+    'API_ENDPOINT',
+]
+
+
+def _load_project_env(project_path: str):
+    """Force-load the project's .env into os.environ with override=True.
+
+    The centralized scheduler is ONE process serving ALL projects.
+    When project A's executor loads, its config.py sets os.environ via load_dotenv().
+    When project B (clone) loads, load_dotenv() with default override=False
+    does NOT update os.environ — so B reads A's stale EMAIL_TO, tokens, etc.
+
+    This function explicitly overrides os.environ with THIS project's .env values
+    before every job execution, ensuring each project uses its own credentials.
+    """
+    from dotenv import load_dotenv
+
+    # The .env file lives at the project root
+    env_path = os.path.join(project_path, ".env")
+    if not os.path.exists(env_path):
+        # Try scheduler subfolder
+        env_path = os.path.join(project_path, "scheduler", ".env")
+        if not os.path.exists(env_path):
+            return
+
+    load_dotenv(env_path, override=True)
+
+
 
 def execute_job(project: dict, job: dict) -> dict:
     """
@@ -108,6 +142,17 @@ def _load_executor(project_id: int, project_path: str) -> Optional[Any]:
                 or key.startswith("services.") or key.startswith("scheduler."):
             saved_modules[key] = sys.modules.pop(key)
             evicted_keys.append(key)
+
+    # Force-load this project's .env into os.environ before importing.
+    # The centralized scheduler is a single process — without this, env vars
+    # from a previously loaded project (e.g. EMAIL_TO) leak into the new one.
+    from dotenv import load_dotenv as _ld
+    _project_env = os.path.join(project_path, ".env")
+    if not os.path.exists(_project_env):
+        _project_env = os.path.join(os.path.dirname(project_path), ".env")
+    if os.path.exists(_project_env):
+        _ld(_project_env, override=True)
+        logger.debug(f"Force-loaded .env for project {project_id}: {_project_env}")
 
     # Insert project path at position 0 (highest priority)
     path_was_present = project_path in sys.path
