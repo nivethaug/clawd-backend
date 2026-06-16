@@ -244,6 +244,7 @@ def get_projects_with_activity(user_id: int, limit: int = 50) -> List[Dict[str, 
         p.status,
         p.domain,
         p.project_path,
+        p.type_id,
         MAX(m.created_at) AS last_active
     FROM projects p
     LEFT JOIN sessions s ON s.project_id = p.id
@@ -266,9 +267,9 @@ def get_projects_with_activity(user_id: int, limit: int = 50) -> List[Dict[str, 
                     last_active = row.get("last_active")
                     domain = row.get("domain")
                 else:
-                    raw_status = row[4]
-                    last_active = row[6]
-                    domain = row[5]
+                    raw_status = row[3]
+                    domain = row[4]
+                    last_active = row[7]  # MAX(m.created_at) is last column
                 
                 # Map status to UI values
                 ui_status, status_label = map_status(raw_status)
@@ -294,6 +295,7 @@ def get_projects_with_activity(user_id: int, limit: int = 50) -> List[Dict[str, 
                     "id": row["id"] if isinstance(row, dict) else row[0],
                     "name": row["name"] if isinstance(row, dict) else row[1],
                     "description": row["description"] if isinstance(row, dict) else row[2],
+                    "type_id": row["type_id"] if isinstance(row, dict) else row[6],
                     "status": ui_status,
                     "status_label": status_label,
                     "domain": domain_url,
