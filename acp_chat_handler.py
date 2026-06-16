@@ -573,9 +573,18 @@ curl -s -X POST {backend_url}/api/scheduler/jobs/JOB_ID/resume
 
 ### Run a job immediately (test)
 
+The /run endpoint is ASYNC. It triggers execution but does NOT return the result.
+Trigger ONCE, then check logs for the outcome:
+
 ```bash
+# Step 1: Trigger (do this only ONCE)
 curl -s -X POST {backend_url}/api/scheduler/jobs/JOB_ID/run
+
+# Step 2: Wait 3 seconds, then check the execution result
+sleep 3 && curl -s {backend_url}/api/scheduler/jobs/JOB_ID/logs | python3 -m json.tool
 ```
+
+⚠️ NEVER call /run more than once for the same job. The result appears in logs, not in the /run response.
 
 ### Delete a job
 
@@ -707,7 +716,7 @@ Use the `direct_url` field to call the real API from api_client.py.
 | "Pause the weather job" | List jobs → find ID → `curl -s -X POST .../jobs/ID/pause` |
 | "Resume the weather job" | List jobs → find ID → `curl -s -X POST .../jobs/ID/resume` |
 | "Delete the news job" | List jobs → find ID → `curl -s -X DELETE .../jobs/ID` |
-| "Test the BTC alert" | List jobs → find ID → `curl -s -X POST .../jobs/ID/run` |
+| "Test the BTC alert" | List jobs → find ID → trigger ONCE: `curl -s -X POST .../jobs/ID/run` → wait 3s → check: `curl -s .../jobs/ID/logs` |
 | "Change message template" | `curl -s -X PUT .../jobs/ID -d '{{"payload": {{...}}}}'` |
 | "Send to discord too" | Edit handler to add discord → update job if needed |
 | "What's failing?" | `curl -s .../projects/{self.project_id}/logs` |
@@ -738,7 +747,7 @@ FIRST list jobs to find the job ID, THEN perform the action. Always show the res
 - [ ] Did I modify only executor.py and/or api_client.py?
 - [ ] Did I run py_compile on all edited files?
 - [ ] Did I create/update the job via REST API?
-- [ ] Did I test the job (run now) if possible?
+- [ ] Did I test the job? (trigger run ONCE, then check logs — do NOT re-trigger)
 - [ ] Did I update ai_index files after changes?
 
 ### Agent ai_index Files to Update After Changes
