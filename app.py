@@ -1219,6 +1219,8 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         git_dir = os.path.join(clone_path, ".git")
         if os.path.exists(git_dir):
             shutil.rmtree(git_dir, ignore_errors=True)
+        # Fix dubious ownership error when git runs as root on dreampilot-owned dirs
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", clone_path], capture_output=True, timeout=10)
         subprocess.run(["git", "init"], cwd=clone_path, capture_output=True, timeout=30)
         subprocess.run(["git", "add", "-A"], cwd=clone_path, capture_output=True, timeout=60)
         subprocess.run(
@@ -1507,7 +1509,7 @@ async def clone_project(
     # Track usage
     record_usage(
         user_id=user_id,
-        usage_type="project_clone",
+        usage_type="project_create",
         total_tokens=1,
         project_id=clone_project_id,
         description=f"Cloned project: {request.name} (from project {project_id}, domain: {clone_domain})",
