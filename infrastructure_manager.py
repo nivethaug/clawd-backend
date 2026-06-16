@@ -113,10 +113,51 @@ class PortAllocator:
         except Exception as e:
             logger.warning(f"Could not load used ports from database: {e}")
 
-        # Also scan for ports that are actually in use
+        # Scan PM2 processes for ports in use (most reliable method)
+        try:
+            pm2_result = subprocess.run(
+                ["pm2", "jlist"],
+                capture_output=True, text=True, timeout=10
+            )
+            if pm2_result.returncode == 0 and pm2_result.stdout.strip():
+                import json as _json
+                pm2_processes = _json.loads(pm2_result.stdout)
+                for proc in pm2_processes:
+                    name = proc.get("name", "?")
+                    # Check args array (e.g., serve -s dist -l 3011)
+                    args = proc.get("pm2_env", {}).get("args", [])
+                    if isinstance(args, list):
+                        for i, arg in enumerate(args):
+                            if arg == "-l" and i + 1 < len(args):
+                                try:
+                                    port = int(args[i + 1])
+                                    self.used_ports.add(port)
+                                except (ValueError, TypeError):
+                                    pass
+                    # Check env PORT or BACKEND_PORT
+                    env = proc.get("pm2_env", {}).get("env", {})
+                    for env_key in ("PORT", "BACKEND_PORT", "FRONTEND_PORT"):
+                        val = env.get(env_key)
+                        if val:
+                            try:
+                                self.used_ports.add(int(val))
+                            except (ValueError, TypeError):
+                                pass
+                    # Also check pm2_env directly for PORT
+                    for env_key in ("PORT", "BACKEND_PORT"):
+                        val = proc.get("pm2_env", {}).get(env_key)
+                        if val:
+                            try:
+                                self.used_ports.add(int(val))
+                            except (ValueError, TypeError):
+                                pass
+                logger.info(f"PM2 scan found {len(self.used_ports)} ports in use by running processes")
+        except Exception as e:
+            logger.warning(f"Could not scan PM2 ports: {e}")
+
+        # Also scan for ports that are actually in use (socket-level fallback)
         try:
             import socket
-            logger.info("Scanning for ports in use...")
             # Check frontend ports
             for port in range(FRONTEND_PORT_MIN, FRONTEND_PORT_MAX):
                 try:
