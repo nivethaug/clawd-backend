@@ -276,6 +276,13 @@ class CreateProjectRequest(BaseModel):
 class CloneProjectRequest(BaseModel):
     name: str
     domain: Optional[str] = None
+    # Bot / scheduler inputs (required for non-website clones)
+    bot_token: Optional[str] = None  # Telegram (type 2) or Discord (type 3) bot token
+    telegram_bot_token: Optional[str] = None  # Telegram bot token for scheduler
+    telegram_chat_id: Optional[str] = None  # Default Telegram chat_id for scheduler
+    discord_webhook_url: Optional[str] = None  # Discord webhook URL for scheduler
+    email_to: Optional[str] = None  # Default email recipient for scheduler
+    api_endpoint: Optional[str] = None  # Default API endpoint URL for scheduler
 
 
 class CreateSessionRequest(BaseModel):
@@ -1206,7 +1213,13 @@ def _cleanup_clone_build_artifacts(clone_path: str):
 
 def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
                   source_path: str, clone_path: str, template_id: Optional[str],
-                  description: Optional[str], source_domain: str = ""):
+                  description: Optional[str], source_domain: str = "",
+                  bot_token: Optional[str] = None,
+                  telegram_bot_token: Optional[str] = None,
+                  telegram_chat_id: Optional[str] = None,
+                  discord_webhook_url: Optional[str] = None,
+                  email_to: Optional[str] = None,
+                  api_endpoint: Optional[str] = None):
     """Background worker that copies files and provisions infrastructure for a cloned project."""
 
     try:
@@ -1309,16 +1322,25 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                                 ignore=shutil.ignore_patterns("__pycache__", ".git", "logs", "node_modules"))
                 logger.info(f"[CLONE] Copied {bot_type_label}/ directory")
 
-            # Update .env with new project metadata
+            # Update .env with new project metadata + bot-specific credentials
             env_path = os.path.join(clone_path, ".env")
             if os.path.exists(env_path):
-                _update_env_file(env_path, {
+                env_updates = {
                     "PROJECT_ID": str(project_id),
                     "PROJECT_NAME": clone_name,
                     "DOMAIN": clone_domain,
                     "PORT": str(8000 + (project_id % 1000)),
-                })
-                logger.info(f"[CLONE] Updated .env for project {project_id}")
+                }
+                # Overwrite source bot token with the new one (if provided)
+                if bot_token:
+                    if source_type_id == 2:
+                        env_updates["TELEGRAM_BOT_TOKEN"] = bot_token
+                        env_updates["BOT_TOKEN"] = bot_token
+                    elif source_type_id == 3:
+                        env_updates["DISCORD_BOT_TOKEN"] = bot_token
+                        env_updates["BOT_TOKEN"] = bot_token
+                _update_env_file(env_path, env_updates)
+                logger.info(f"[CLONE] Updated .env for {bot_type_label} project {project_id} (token {'provided' if bot_token else 'inherited from source'})")
 
             # Start bot via PM2
             try:
@@ -1359,14 +1381,26 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                                 ignore=shutil.ignore_patterns("__pycache__", ".git", "logs", "node_modules"))
                 logger.info(f"[CLONE] Copied scheduler/ directory")
 
-            # Update .env
+            # Update .env with new project metadata + scheduler-specific inputs
             env_path = os.path.join(clone_path, ".env")
             if os.path.exists(env_path):
-                _update_env_file(env_path, {
+                env_updates = {
                     "PROJECT_ID": str(project_id),
                     "PROJECT_NAME": clone_name,
                     "DOMAIN": clone_domain,
-                })
+                }
+                # Overwrite scheduler sender channels with new values (if provided)
+                if telegram_bot_token:
+                    env_updates["TELEGRAM_BOT_TOKEN"] = telegram_bot_token
+                if telegram_chat_id:
+                    env_updates["TELEGRAM_CHAT_ID"] = telegram_chat_id
+                if discord_webhook_url:
+                    env_updates["DISCORD_WEBHOOK_URL"] = discord_webhook_url
+                if email_to:
+                    env_updates["EMAIL_TO"] = email_to
+                if api_endpoint:
+                    env_updates["API_ENDPOINT"] = api_endpoint
+                _update_env_file(env_path, env_updates)
                 logger.info(f"[CLONE] Updated .env for scheduler project {project_id}")
 
             # Start scheduler via PM2
@@ -1521,6 +1555,14 @@ async def clone_project(
     worker_thread = threading.Thread(
         target=_clone_worker,
         args=(clone_project_id, request.name, clone_domain, source_type_id, source_path, clone_folder_path, source_template_id, source_description, source_domain),
+        kwargs={
+            "bot_token": request.bot_token,
+            "telegram_bot_token": request.telegram_bot_token,
+            "telegram_chat_id": request.telegram_chat_id,
+            "discord_webhook_url": request.discord_webhook_url,
+            "email_to": request.email_to,
+            "api_endpoint": request.api_endpoint,
+        },
         daemon=True,
     )
     worker_thread.start()
