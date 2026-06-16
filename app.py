@@ -1190,10 +1190,10 @@ def _replace_domain_in_configs(clone_path: str, source_domain: str, clone_domain
 
 
 def _cleanup_clone_build_artifacts(clone_path: str):
-    """Remove node_modules and dist after successful build to save disk space."""
+    """Remove node_modules after successful build to save disk space.
+    NOTE: dist is NOT removed — nginx serves from frontend/dist."""
     cleanup_dirs = [
         os.path.join(clone_path, "frontend", "node_modules"),
-        os.path.join(clone_path, "frontend", "dist"),
     ]
     for dir_path in cleanup_dirs:
         if os.path.isdir(dir_path):
