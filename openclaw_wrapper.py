@@ -522,8 +522,8 @@ That's all. Execute Phase {phase} now.
             domain = self.get_project_domain()
             logger.info(f"Using domain: {domain}")
 
-            # Create infrastructure manager with domain parameter
-            infra = InfrastructureManager(self.project_name, self.project_path, domain=domain)
+            # Create infrastructure manager with domain and project_id
+            infra = InfrastructureManager(self.project_name, self.project_path, domain=domain, project_id=self.project_id)
 
             # Provision all infrastructure (DB, ports, service, nginx)
             success = infra.provision_all()

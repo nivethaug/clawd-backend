@@ -1536,12 +1536,13 @@ class DNSProvisioner:
 class InfrastructureManager:
     """Main infrastructure manager orchestrating all components."""
 
-    def __init__(self, project_name: str, project_path: Path, domain: str = None, description: str = None, template_id: str = None):
+    def __init__(self, project_name: str, project_path: Path, domain: str = None, description: str = None, template_id: str = None, project_id: int = None):
         self.project_name = project_name
         self.project_path = project_path
         self.domain = domain or project_name  # Use domain if provided, otherwise fall back to project_name
         self.description = description  # Store project description for Phase 9
         self.template_id = template_id  # Store template for metadata
+        self.project_id = project_id  # Database project ID for port persistence
         self.repo_url = None  # Will be loaded from database for GitHub push
         self.port_allocator = PortAllocator()
         self.db_provisioner = DatabaseProvisioner()
@@ -1567,6 +1568,33 @@ class InfrastructureManager:
         # Domain IS the repo name (e.g., designcanvas-wsb1fr -> https://github.com/nivethaug/designcanvas-wsb1fr)
         self.repo_url = f"https://github.com/{github_org}/{self.domain}"
         logger.info(f"[GITHUB] ✓ Constructed repo_url: {self.repo_url}")
+
+    def _save_ports_to_db(self):
+        """Save allocated ports to the projects table so future allocations don't reuse them."""
+        if not self.ports:
+            return
+        try:
+            pool = get_connection_pool()
+            conn = pool.getconn()
+            try:
+                cursor = conn.cursor()
+                # If we have project_id, use it; otherwise look up by domain
+                if self.project_id:
+                    cursor.execute(
+                        "UPDATE projects SET frontend_port = %s, backend_port = %s WHERE id = %s",
+                        (self.ports["frontend"], self.ports["backend"], self.project_id)
+                    )
+                else:
+                    cursor.execute(
+                        "UPDATE projects SET frontend_port = %s, backend_port = %s WHERE domain = %s",
+                        (self.ports["frontend"], self.ports["backend"], self.domain)
+                    )
+                conn.commit()
+                logger.info(f"✓ Saved ports to DB: frontend={self.ports['frontend']}, backend={self.ports['backend']} for domain={self.domain}")
+            finally:
+                pool.putconn(conn)
+        except Exception as e:
+            logger.warning(f"⚠️ Could not save ports to database: {e}")
 
     def provision_all(self) -> bool:
         """
@@ -1598,6 +1626,9 @@ class InfrastructureManager:
                 "backend": self.port_allocator.allocate_backend_port()
             }
             # logger.info(f"✓ Ports allocated: {self.ports}")  # Commented for cleaner logs
+
+            # Save allocated ports to database so future allocations don't reuse them
+            self._save_ports_to_db()
 
             # Log API URL creation
             api_url = f"http://{self.domain}.dreambigwithai.com/api"
