@@ -1,26 +1,125 @@
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: tokeninfo status=200
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: parsing JSON...
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: keys=['iss', 'azp', 'aud', 'sub', 'email', 'email_verified', 'nbf', 'name', 'picture', 'given_name', 'iat', 'exp', 'jti', 'alg', 'kid', 'typ']
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: CHECK aud token='50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com' expected='50245365797-7tarf81k9dmhvr14rcto6hp0v3ijqhv0.apps.googleusercontent.com' match=True
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: CHECK email_verified type=str value='true'
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: email_verified parsed=True
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: PASS email=vivek645496@gmail.com name=vivek
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: proceeding with DB lookup for vivek645496@gmail.com
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: querying users table...
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: user exists=False row=None
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: creating new user...
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:app:Google OAuth v2: insert result=RealDictRow({'id': 26})
-1|clawd-backend  | 2026-06-15 14:50:54 +00:00: INFO:     27.60.166.184:0 - "POST /auth/google HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-15 14:50:55 +00:00: INFO:     27.60.166.184:0 - "OPTIONS /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-15 14:50:55 +00:00: INFO:dashboard_service:Dashboard assembled in 332.5ms for user 26
-1|clawd-backend  | 2026-06-15 14:50:55 +00:00: INFO:     27.60.166.184:0 - "GET /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-15 14:50:59 +00:00: INFO:dashboard_service:Dashboard assembled in 303.0ms for user 26
-1|clawd-backend  | 2026-06-15 14:50:59 +00:00: INFO:     27.60.166.184:0 - "GET /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-15 14:51:03 +00:00: INFO:dashboard_service:Dashboard assembled in 305.3ms for user 26
-1|clawd-backend  | 2026-06-15 14:51:03 +00:00: INFO:     27.60.166.184:0 - "GET /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:     27.60.166.184:0 - "OPTIONS /projects HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:     27.60.166.184:0 - "OPTIONS /project-types HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:     27.60.166.184:0 - "GET /project-types HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:template_selector:Template selector: Groq service initialized
-1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:template_selector:Template selector: Loaded 8 templates
-1|clawd-backend  | 2026-06-15 14:51:06 +00:00: INFO:     27.60.166.184:0 - "GET /projects HTTP/1.1" 200 OK
+|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:github_service:[GITHUB] gh CLI authenticated
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:app:[CLONE] Creating database record for clone of project 1561
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:app:[CLONE] Clone project_id: 1567
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:services.token_tracker:[TOKEN] Recorded project_create: 1 tokens for user 24 project=1567
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:app:[CLONE] Copying files from /root/dreampilot/projects/website/1561_astral_20260615_092113 -> /root/dreampilot/projects/website/1567_astral-copy_20260616_085109
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:app:[CLONE] Background worker started for clone project 1567 (source: 1561)
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:     171.79.60.5:0 - "POST /projects/1561/clone HTTP/1.1" 201 Created
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:app:[CLONE] File copy complete for project 1567
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:app:[CLONE] Git re-initialised for project 1567
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:github_service:[GITHUB] Running: gh repo create astral-watgu5 --public --description Cloned project: astral Copy
+1|clawd-backend  | 2026-06-16 08:51:09 +00:00: INFO:     171.79.60.5:0 - "GET /projects HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:github_service:[GITHUB] Success: https://github.com/nivethaug/astral-watgu5
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:github_service:[GITHUB] Adding remote origin: https://github.com/nivethaug/astral-watgu5
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:app:[CLONE] GitHub repo created: https://github.com/nivethaug/astral-watgu5
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:app:[CLONE] Replaced domain in backend/agent/README.md
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:app:[CLONE] Replaced domain in frontend/buildpublish.py
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:app:[CLONE] Replaced domain in backend/buildpublish.py
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:app:[CLONE] Replaced domain in frontend/src/lib/api-config.ts
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:app:[CLONE] Replaced domain in project.json
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:app:[CLONE] Domain replacement complete: 5 files updated (astral-lnp38l -> astral-watgu5)
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:app:[CLONE] Provisioning website infrastructure for project 1567
+1|clawd-backend  | 2026-06-16 08:51:11 +00:00: INFO:app:[CLONE] Running npm install in /root/dreampilot/projects/website/1567_astral-copy_20260616_085109/frontend
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:app:[CLONE] npm install completed for frontend
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:Loaded 0 used ports from database
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:Scanning for ports in use...
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:Total ports marked as used: 0
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:[GITHUB] ✓ Constructed repo_url: https://github.com/nivethaug/astral-watgu5
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:🚀 Starting infrastructure provisioning for astral Copy
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:Phase 1/8: Port allocation
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:Allocated frontend port: 3010
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:Allocated backend port: 8010
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:Phase 2/8: Database provisioning
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:Creating database: astral_watgu5_db
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:Creating user: astral_watgu5_user
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:✓ Database created: astral_watgu5_db
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:✓ User created: astral_watgu5_user
+1|clawd-backend  | 2026-06-16 08:51:17 +00:00: INFO:infrastructure_manager:✓ Privileges granted to astral_watgu5_user
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:✓ Schema privileges granted to astral_watgu5_user on astral_watgu5_db
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:Phase 3/8: Backend environment configuration
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:✓ Backend .env configured for FastAPI (PORT=8010)
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:agent/README.md has no {domain} placeholder (already updated)
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:buildpublish.py has no placeholders (already updated)
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:buildpublish.py has no placeholders (already updated)
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:api-config.ts has no {domain} placeholder (already updated)
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:Phase 4/8: Service configuration
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:Phase 5/8: Building frontend
+1|clawd-backend  | 2026-06-16 08:51:18 +00:00: INFO:infrastructure_manager:🔨 Starting build phase...
+1|clawd-backend  | 2026-06-16 08:51:22 +00:00: INFO:infrastructure_manager:PHASE_5_BUILD_COMPLETE: success
+1|clawd-backend  | 2026-06-16 08:51:22 +00:00: INFO:infrastructure_manager:PHASE_5_BUILD_COMPLETE: success
+1|clawd-backend  | 2026-06-16 08:51:23 +00:00: INFO:infrastructure_manager:Phase 6/8: Nginx configuration
+1|clawd-backend  | 2026-06-16 08:51:23 +00:00: INFO:infrastructure_manager:✓ Nginx config generated for astral-watgu5 (SSL: wildcard *.dreambigwithai.com)
+1|clawd-backend  | 2026-06-16 08:51:23 +00:00: INFO:infrastructure_manager:✓ Config written: /etc/nginx/sites-available/astral-watgu5.conf
+1|clawd-backend  | 2026-06-16 08:51:23 +00:00: INFO:infrastructure_manager:✓ Symlink created: /etc/nginx/sites-enabled/astral-watgu5.conf
+1|clawd-backend  | 2026-06-16 08:51:23 +00:00: INFO:infrastructure_manager:Reloading nginx...
+1|clawd-backend  | 2026-06-16 08:51:23 +00:00: INFO:infrastructure_manager:✓ Nginx reloaded successfully
+1|clawd-backend  | 2026-06-16 08:51:23 +00:00: INFO:infrastructure_manager:Phase 7/8: Service startup
+1|clawd-backend  | 2026-06-16 08:51:23 +00:00: INFO:infrastructure_manager:🚀 Starting service phase...
+1|clawd-backend  | 2026-06-16 08:51:23 +00:00: INFO:infrastructure_manager:[SERVICE] Starting backend service: astral-watgu5-backend
+1|clawd-backend  | 2026-06-16 08:51:24 +00:00: INFO:infrastructure_manager:[SERVICE] ✓ Python dependencies installed successfully
+1|clawd-backend  | 2026-06-16 08:51:25 +00:00: INFO:infrastructure_manager:[SERVICE] ✓ main.py app validation passed: app found: FastAPI
+1|clawd-backend  | 2026-06-16 08:51:25 +00:00: INFO:infrastructure_manager:[SERVICE] Ecosystem config written to /root/dreampilot/projects/website/1567_astral-copy_20260616_085109/backend/ecosystem.config.json
+1|clawd-backend  | 2026-06-16 08:51:25 +00:00: INFO:infrastructure_manager:[SERVICE] Environment variables: {'PORT': '8010', 'BACKEND_HOST': '0.0.0.0', 'BACKEND_PORT': '8010', 'PROJECT_NAME': 'astral-watgu5', 'DATABASE_URL': 'postgresql://astral_watgu5_user:kJIFdMrLSpYtQldOvD2BoDAj3qV49E9M@localhost:5432/astral_watgu5_db'}
+1|clawd-backend  | 2026-06-16 08:51:35 +00:00: INFO:infrastructure_manager:[SERVICE] Backend stdout: [PM2][WARN] Applications astral-watgu5-backend not running, starting...
+1|clawd-backend  | 2026-06-16 08:51:35 +00:00: [PM2] App [astral-watgu5-backend] launched (1 instances)
+1|clawd-backend  | 2026-06-16 08:51:35 +00:00: ┌────┬───────────────────────────┬─────────────┬───
+1|clawd-backend  | 2026-06-16 08:51:35 +00:00: INFO:infrastructure_manager:[SERVICE] Waiting for backend to start (5s)...
+1|clawd-backend  | 2026-06-16 08:51:40 +00:00: INFO:infrastructure_manager:[SERVICE] ✓ No startup errors in PM2 logs
+1|clawd-backend  | 2026-06-16 08:51:40 +00:00: INFO:infrastructure_manager:[SERVICE] ✓ PM2 process astral-watgu5-backend status: online
+1|clawd-backend  | 2026-06-16 08:51:40 +00:00: INFO:infrastructure_manager:[SERVICE] Starting frontend service: astral-watgu5-frontend
+1|clawd-backend  | 2026-06-16 08:51:51 +00:00: INFO:infrastructure_manager:⚙️ PM2 frontend service: astral-watgu5-frontend
+1|clawd-backend  | 2026-06-16 08:51:51 +00:00: INFO:infrastructure_manager:⚙️ PM2 backend service: astral-watgu5-backend
+1|clawd-backend  | 2026-06-16 08:51:51 +00:00: INFO:infrastructure_manager:[SERVICE] Waiting for PM2 services to stabilize...
+1|clawd-backend  | 2026-06-16 08:51:56 +00:00: INFO:infrastructure_manager:[SERVICE] ✓ PM2 services running
+1|clawd-backend  | 2026-06-16 08:51:56 +00:00: INFO:infrastructure_manager:PHASE_8_DNS_START
+1|clawd-backend  | 2026-06-16 08:51:56 +00:00: INFO:infrastructure_manager:PHASE_8_DNS_START
+1|clawd-backend  | 2026-06-16 08:51:56 +00:00: INFO:infrastructure_manager:[DNS] Creating DNS record for domain: astral-watgu5.dreambigwithai.com
+1|clawd-backend  | 2026-06-16 08:51:56 +00:00: INFO:infrastructure_manager:[DNS] Server IPv4 detected: 195.200.14.37
+1|clawd-backend  | 2026-06-16 08:51:56 +00:00: INFO:infrastructure_manager:[DNS] Server IP: 195.200.14.37
+1|clawd-backend  | 2026-06-16 08:51:56 +00:00: INFO:infrastructure_manager:[DNS] Creating frontend A record: astral-watgu5.dreambigwithai.com → 195.200.14.37
+1|clawd-backend  | 2026-06-16 08:51:56 +00:00: INFO:infrastructure_manager:[DNS] ✓ Frontend A record created: astral-watgu5.dreambigwithai.com → 195.200.14.37
+1|clawd-backend  | 2026-06-16 08:51:56 +00:00: INFO:infrastructure_manager:[DNS] Creating backend A record: astral-watgu5-api.dreambigwithai.com → 195.200.14.37
+1|clawd-backend  | 2026-06-16 08:51:57 +00:00: INFO:infrastructure_manager:[DNS] ✓ Backend A record created: astral-watgu5-api.dreambigwithai.com → 195.200.14.37
+1|clawd-backend  | 2026-06-16 08:51:57 +00:00: INFO:infrastructure_manager:[DNS] ✓ Both DNS records created successfully
+1|clawd-backend  | 2026-06-16 08:51:57 +00:00: INFO:infrastructure_manager:PHASE_8_DNS_COMPLETE
+1|clawd-backend  | 2026-06-16 08:51:57 +00:00: INFO:infrastructure_manager:PHASE_8_DNS_COMPLETE: success
+1|clawd-backend  | 2026-06-16 08:51:57 +00:00: INFO:infrastructure_manager:✅ DNS record created successfully
+1|clawd-backend  | 2026-06-16 08:51:57 +00:00: INFO:infrastructure_manager:[DNS] Waiting for DNS propagation (20s)...
+1|clawd-backend  | 2026-06-16 08:52:10 +00:00: ⚡ Skipping npm install (node_modules copied from template)
+1|clawd-backend  | 2026-06-16 08:52:10 +00:00: ================================================================================
+1|clawd-backend  | 2026-06-16 08:52:10 +00:00: 🔧 AUTONOMOUS FIX LOOP: Starting build with AI auto-fix capability
+1|clawd-backend  | 2026-06-16 08:52:10 +00:00:    Max AI fix attempts: 3
+1|clawd-backend  | 2026-06-16 08:52:10 +00:00: ================================================================================
+1|clawd-backend  | 2026-06-16 08:52:10 +00:00: 🔴 BUILD-ATTEMPT: 1/3
+1|clawd-backend  | 2026-06-16 08:52:10 +00:00: 🔴 BUILD-SUCCESS: Build succeeded on attempt 1/3
+1|clawd-backend  | 2026-06-16 08:52:10 +00:00: INFO:     171.79.60.5:0 - "GET /projects HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-16 08:52:10 +00:00: INFO:     171.79.60.5:0 - "GET /project-types HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: [PM2] Saving current process list...
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: [PM2] Successfully saved in /root/.pm2/dump.pm2
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:PHASE_6_SERVICE_COMPLETE: success
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:✅ Service phase completed successfully
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:PHASE_6_SERVICE_COMPLETE: success
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:[DNS] Checking if domain resolves: astral-watgu5.dreambigwithai.com
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:[DNS] ✓ Domain astral-watgu5.dreambigwithai.com resolves successfully
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:[VERIFY] Checking frontend availability
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:[VERIFY] ✓ Backend health check passed: {"status":"ok"}
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:[VERIFY] ✓ Deployment verified successfully
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:PHASE_9_VERIFY_COMPLETE: success
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:Phase 8/8: Final cleanup
+1|clawd-backend  | 2026-06-16 08:52:17 +00:00: INFO:infrastructure_manager:🧹 Cleaning up node_modules to save disk space...
+1|clawd-backend  | 2026-06-16 08:52:19 +00:00: INFO:infrastructure_manager:✓ Removed node_modules (freed 253.3 MB)
+1|clawd-backend  | 2026-06-16 08:52:19 +00:00: INFO:infrastructure_manager:Phase 11: Push to GitHub
+1|clawd-backend  | 2026-06-16 08:52:19 +00:00: INFO:infrastructure_manager:📤 Pushing all project code to GitHub: https://github.com/nivethaug/astral-watgu5
+1|clawd-backend  | 2026-06-16 08:52:19 +00:00: INFO:github_service:[GITHUB] Configuring git to use gh CLI for authentication
+1|clawd-backend  | 2026-06-16 08:52:19 +00:00: INFO:github_service:[GITHUB] Using branch: master
+1|clawd-backend  | 2026-06-16 08:52:19 +00:00: INFO:github_service:[GITHUB] Pushing master to origin
+1|clawd-backend  | 2026-06-16 08:52:20 +00:00: INFO:github_service:[GITHUB] Successfully pushed to origin/master
+1|clawd-backend  | 2026-06-16 08:52:20 +00:00: INFO:infrastructure_manager:✓ All project code pushed to GitHub
+1|clawd-backend  | 2026-06-16 08:52:20 +00:00: INFO:infrastructure_manager:DEPLOY: Project READY
+1|clawd-backend  | 2026-06-16 08:52:20 +00:00: INFO:infrastructure_manager:✅ All infrastructure provisioned and verified successfully!
+1|clawd-backend  | 2026-06-16 08:52:20 +00:00: INFO:infrastructure_manager:✓ Metadata saved: /root/dreampilot/projects/website/1567_astral-copy_20260616_085109/project.json
+1|clawd-backend  | 2026-06-16 08:52:20 +00:00: INFO:app:[CLONE] Website clone succeeded for project 1567
+1|clawd-backend  | 2026-06-16 08:52:23 +00:00: INFO:     171.79.60.5:0 - "GET /projects HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-16 08:52:23 +00:00: INFO:     171.79.60.5:0 - "GET /project-types HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-16 08:52:39 +00:00: INFO:     171.79.60.5:0 - "GET /projects HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-16 08:52:39 +00:00: INFO:     171.79.60.5:0 - "GET /project-types HTTP/1.1" 200 OK

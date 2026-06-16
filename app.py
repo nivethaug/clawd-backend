@@ -1281,6 +1281,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 description=description,
                 template_id=template_id,
                 project_id=project_id,
+                is_clone=True,
             )
             success = infra.provision_all()
 

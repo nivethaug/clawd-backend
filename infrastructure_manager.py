@@ -96,10 +96,17 @@ class PortAllocator:
                 cursor = conn.cursor()
                 cursor.execute("SELECT frontend_port, backend_port FROM projects WHERE frontend_port IS NOT NULL OR backend_port IS NOT NULL")
                 for row in cursor:
-                    if row['frontend_port']:
-                        self.used_ports.add(row['frontend_port'])
-                    if row['backend_port']:
-                        self.used_ports.add(row['backend_port'])
+                    # Support both RealDictCursor (dict) and standard tuple cursor
+                    if isinstance(row, dict):
+                        fp = row.get('frontend_port')
+                        bp = row.get('backend_port')
+                    else:
+                        fp = row[0] if len(row) > 0 else None
+                        bp = row[1] if len(row) > 1 else None
+                    if fp:
+                        self.used_ports.add(fp)
+                    if bp:
+                        self.used_ports.add(bp)
                 logger.info(f"Loaded {len(self.used_ports)} used ports from database")
             finally:
                 pool.putconn(conn)
@@ -1536,13 +1543,14 @@ class DNSProvisioner:
 class InfrastructureManager:
     """Main infrastructure manager orchestrating all components."""
 
-    def __init__(self, project_name: str, project_path: Path, domain: str = None, description: str = None, template_id: str = None, project_id: int = None):
+    def __init__(self, project_name: str, project_path: Path, domain: str = None, description: str = None, template_id: str = None, project_id: int = None, is_clone: bool = False):
         self.project_name = project_name
         self.project_path = project_path
         self.domain = domain or project_name  # Use domain if provided, otherwise fall back to project_name
         self.description = description  # Store project description for Phase 9
         self.template_id = template_id  # Store template for metadata
         self.project_id = project_id  # Database project ID for port persistence
+        self.is_clone = is_clone  # When True, no AI agents (Claude/ACPX) should be involved
         self.repo_url = None  # Will be loaded from database for GitHub push
         self.port_allocator = PortAllocator()
         self.db_provisioner = DatabaseProvisioner()
@@ -1590,11 +1598,11 @@ class InfrastructureManager:
                         (self.ports["frontend"], self.ports["backend"], self.domain)
                     )
                 conn.commit()
-                logger.info(f"✓ Saved ports to DB: frontend={self.ports['frontend']}, backend={self.ports['backend']} for domain={self.domain}")
+                logger.info(f"✓ Saved ports to DB: frontend={self.ports['frontend']}, backend={self.ports['backend']} for domain={self.domain} (rows affected: {cursor.rowcount})")
             finally:
                 pool.putconn(conn)
         except Exception as e:
-            logger.warning(f"⚠️ Could not save ports to database: {e}")
+            logger.error(f"❌ Failed to save ports to database: {type(e).__name__}: {e}")
 
     def provision_all(self) -> bool:
         """
@@ -2120,21 +2128,11 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                     logger.info("✓ npm run build completed (skipped - dist exists)")
                     return True
             
-            # Step 3: npm run build with retry logic (max 3 Claude auto-fix attempts)
-            MAX_CLAUDE_RETRIES = 3
-            build_attempt = 0
-            
-            # logger.info("🔧 Starting autonomous fix loop (max 3 AI fix attempts)")  # Commented for cleaner logs
-            print("=" * 80)
-            print("🔧 AUTONOMOUS FIX LOOP: Starting build with AI auto-fix capability")
-            print(f"   Max AI fix attempts: {MAX_CLAUDE_RETRIES}")
-            print("=" * 80)
-            
-            while build_attempt < MAX_CLAUDE_RETRIES:
-                build_attempt += 1
-                
-                # logger.info(f"[BUILD] Running npm build (attempt {build_attempt}/{MAX_CLAUDE_RETRIES}) in {frontend_path}")  # Commented for cleaner logs
-                print(f"🔴 BUILD-ATTEMPT: {build_attempt}/{MAX_CLAUDE_RETRIES}")
+            # Step 3: npm run build
+            if self.is_clone:
+                # ── CLONE PATH: plain build, no AI involvement ──
+                logger.info("📦 Running npm run build (clone mode — no AI fix)")
+                print("🔴 BUILD-CLONE: Running npm run build (no AI fix)")
                 build_result = subprocess.run(
                     ["npm", "run", "build"],
                     cwd=str(frontend_path),
@@ -2143,40 +2141,70 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                     text=True,
                     timeout=600  # 10 minutes
                 )
-                
                 if build_result.returncode == 0:
-                    # logger.info(f"✓ npm run build succeeded on attempt {build_attempt}")  # Commented for cleaner logs
-                    print(f"🔴 BUILD-SUCCESS: Build succeeded on attempt {build_attempt}/{MAX_CLAUDE_RETRIES}")
-                    if build_attempt > 1:
-                        print(f"🔴 AUTONOMOUS-FIX-LOOP: AI successfully fixed build errors after {build_attempt - 1} attempt(s)")
-                    break
-                
-                # Build failed - check if we can retry with Claude
-                if build_attempt < MAX_CLAUDE_RETRIES:
-                    logger.warning(f"⚠️ Build failed (attempt {build_attempt}): {build_result.stderr[:300]}")
-                    # logger.info(f"🔧 Calling Claude to auto-fix build error (attempt {build_attempt}/{MAX_CLAUDE_RETRIES})")  # Commented for cleaner logs
-                    print(f"🔴 BUILD-FAILED: Attempt {build_attempt} failed, calling AI to fix...")
-                    
-                    # Call Claude Code Agent to fix the build error
-                    fix_success = asyncio.run(self._claude_fix_build_error(build_result.stderr, build_attempt, MAX_CLAUDE_RETRIES))
-                    
-                    if fix_success:
-                        # logger.info(f"✓ Claude auto-fix applied successfully, retrying build...")  # Commented for cleaner logs
-                        print(f"🔴 AUTONOMOUS-FIX-LOOP: AI fix applied, retrying build...")
-                        # Loop will retry build
-                    else:
-                        logger.error(f"❌ Claude auto-fix failed, cannot continue")
-                        print(f"🔴 AUTONOMOUS-FIX-ERROR: AI fix attempt {build_attempt} failed")
-                        logger.info("PHASE_5_BUILD_FAILED: Claude auto-fix failed")
-                        return False
+                    print("🔴 BUILD-SUCCESS: Build succeeded (clone mode)")
                 else:
-                    # Final attempt failed
-                    logger.error(f"❌ Build failed after {MAX_CLAUDE_RETRIES} Claude auto-fix attempts")
-                    logger.error(f"Build error: {build_result.stderr[:500]}")
-                    print(f"🔴 AUTONOMOUS-FIX-FAILED: Build failed after {MAX_CLAUDE_RETRIES} AI fix attempts")
-                    print("=" * 80)
-                    logger.info("PHASE_5_BUILD_FAILED: max retries exceeded")
+                    logger.error(f"❌ Build failed in clone mode: {build_result.stderr[:500]}")
+                    logger.info("PHASE_5_BUILD_FAILED: clone build failed")
                     return False
+            else:
+                # ── CREATE PATH: autonomous fix loop with Claude Code Agent ──
+                MAX_CLAUDE_RETRIES = 3
+                build_attempt = 0
+
+                # logger.info("🔧 Starting autonomous fix loop (max 3 AI fix attempts)")  # Commented for cleaner logs
+                print("=" * 80)
+                print("🔧 AUTONOMOUS FIX LOOP: Starting build with AI auto-fix capability")
+                print(f"   Max AI fix attempts: {MAX_CLAUDE_RETRIES}")
+                print("=" * 80)
+
+                while build_attempt < MAX_CLAUDE_RETRIES:
+                    build_attempt += 1
+
+                    # logger.info(f"[BUILD] Running npm build (attempt {build_attempt}/{MAX_CLAUDE_RETRIES}) in {frontend_path}")  # Commented for cleaner logs
+                    print(f"🔴 BUILD-ATTEMPT: {build_attempt}/{MAX_CLAUDE_RETRIES}")
+                    build_result = subprocess.run(
+                        ["npm", "run", "build"],
+                        cwd=str(frontend_path),
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=600  # 10 minutes
+                    )
+
+                    if build_result.returncode == 0:
+                        # logger.info(f"✓ npm run build succeeded on attempt {build_attempt}")  # Commented for cleaner logs
+                        print(f"🔴 BUILD-SUCCESS: Build succeeded on attempt {build_attempt}/{MAX_CLAUDE_RETRIES}")
+                        if build_attempt > 1:
+                            print(f"🔴 AUTONOMOUS-FIX-LOOP: AI successfully fixed build errors after {build_attempt - 1} attempt(s)")
+                        break
+
+                    # Build failed - check if we can retry with Claude
+                    if build_attempt < MAX_CLAUDE_RETRIES:
+                        logger.warning(f"⚠️ Build failed (attempt {build_attempt}): {build_result.stderr[:300]}")
+                        # logger.info(f"🔧 Calling Claude to auto-fix build error (attempt {build_attempt}/{MAX_CLAUDE_RETRIES})")  # Commented for cleaner logs
+                        print(f"🔴 BUILD-FAILED: Attempt {build_attempt} failed, calling AI to fix...")
+
+                        # Call Claude Code Agent to fix the build error
+                        fix_success = asyncio.run(self._claude_fix_build_error(build_result.stderr, build_attempt, MAX_CLAUDE_RETRIES))
+
+                        if fix_success:
+                            # logger.info(f"✓ Claude auto-fix applied successfully, retrying build...")  # Commented for cleaner logs
+                            print(f"🔴 AUTONOMOUS-FIX-LOOP: AI fix applied, retrying build...")
+                            # Loop will retry build
+                        else:
+                            logger.error(f"❌ Claude auto-fix failed, cannot continue")
+                            print(f"🔴 AUTONOMOUS-FIX-ERROR: AI fix attempt {build_attempt} failed")
+                            logger.info("PHASE_5_BUILD_FAILED: Claude auto-fix failed")
+                            return False
+                    else:
+                        # Final attempt failed
+                        logger.error(f"❌ Build failed after {MAX_CLAUDE_RETRIES} Claude auto-fix attempts")
+                        logger.error(f"Build error: {build_result.stderr[:500]}")
+                        print(f"🔴 AUTONOMOUS-FIX-FAILED: Build failed after {MAX_CLAUDE_RETRIES} AI fix attempts")
+                        print("=" * 80)
+                        logger.info("PHASE_5_BUILD_FAILED: max retries exceeded")
+                        return False
             
             # logger.info("✓ npm run build completed successfully")  # Commented for cleaner logs
             

@@ -301,6 +301,11 @@ def init_schema():
                 logger.info("✓ Added backend_port column for dynamic port allocation")
             _run_migration(migrate_backend_port)
 
+            def migrate_frontend_port():
+                cur.execute("ALTER TABLE projects ADD COLUMN frontend_port INTEGER")
+                logger.info("✓ Added frontend_port column for dynamic port allocation")
+            _run_migration(migrate_frontend_port)
+
             def migrate_pipeline_status():
                 cur.execute("ALTER TABLE projects ADD COLUMN pipeline_status JSONB DEFAULT '{}'::jsonb")
                 logger.info("✓ Added pipeline_status column for structured progress tracking")
