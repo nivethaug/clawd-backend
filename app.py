@@ -1403,13 +1403,9 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 _update_env_file(env_path, env_updates)
                 logger.info(f"[CLONE] Updated .env for scheduler project {project_id}")
 
-            # Start scheduler via PM2
-            try:
-                from services.scheduler.worker import _start_scheduler_pm2
-                _start_scheduler_pm2(project_id=project_id, project_path=clone_path, project_name=clone_name)
-                logger.info(f"[CLONE] PM2 started: sched-{project_id}")
-            except Exception as sched_pm2_err:
-                logger.warning(f"[CLONE] Scheduler PM2 start failed (non-fatal): {sched_pm2_err}")
+            # Scheduler runs centrally — no per-project PM2 process needed.
+            # Jobs are managed via the database by the centralized clawd-scheduler.
+            logger.info(f"[CLONE] Scheduler clone ready (centralized scheduler manages jobs) for project {project_id}")
 
             with get_db() as conn:
                 conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
