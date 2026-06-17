@@ -1656,6 +1656,16 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 conn.commit()
             logger.info(f"[CLONE] Scheduler clone ready for project {project_id}")
 
+            # Restart centralized scheduler so it picks up the new clone's jobs
+            try:
+                subprocess.run(
+                    ["pm2", "restart", "clawd-scheduler"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                logger.info(f"[CLONE] Restarted clawd-scheduler to pick up jobs for project {project_id}")
+            except Exception as pm2_err:
+                logger.warning(f"[CLONE] Failed to restart clawd-scheduler (non-fatal): {pm2_err}")
+
         else:
             logger.warning(f"[CLONE] Unknown type_id={source_type_id}, marking as ready without provisioning")
             with get_db() as conn:
