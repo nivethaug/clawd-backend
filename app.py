@@ -1423,6 +1423,12 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         except Exception as pj_err:
             logger.warning(f"[CLONE] Failed to rewrite project.json (non-fatal): {pj_err}")
 
+        # --- Fix file ownership (files copied as root, need dreampilot ownership) ---
+        subprocess.run(["chattr", "-R", "-i", clone_path], check=False, timeout=60)
+        subprocess.run(["chown", "-R", "dreampilot:dreampilot", clone_path], check=False, timeout=120)
+        subprocess.run(["chmod", "-R", "755", clone_path], check=False, timeout=60)
+        logger.info(f"[CLONE] Fixed file ownership/permissions for {clone_path}")
+
         # --- Type-specific deployment ---
         if source_type_id == 1:
             # Website clone -- full infrastructure provisioning
