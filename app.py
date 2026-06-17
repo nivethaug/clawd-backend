@@ -1489,9 +1489,9 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 start_bot_pm2(
                     project_id=project_id,
                     project_path=clone_path,
-                    bot_name=clone_name,
                     port=8000 + (project_id % 1000),
                     domain=clone_domain,
+                    bot_token=bot_token,
                 )
                 logger.info(f"[CLONE] PM2 started: {pm2_name}")
             except Exception as pm2_err:
