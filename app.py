@@ -1500,8 +1500,13 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 _update_env_file(env_path, env_updates)
                 logger.info(f"[CLONE] Updated .env for {bot_type_label} project {project_id} (token {'provided' if bot_token else 'inherited from source'})")
 
-            # Start bot via PM2
+            # Start bot via PM2 — point to the bot subdirectory (where main.py lives)
             try:
+                bot_run_path = os.path.join(clone_path, bot_type_label)
+                if not os.path.isfile(os.path.join(bot_run_path, "main.py")):
+                    # Fallback to clone root if main.py is at project root
+                    bot_run_path = clone_path
+
                 if source_type_id == 2:
                     from services.telegram.pm2_manager import start_bot_pm2
                     pm2_name = f"tg-bot-{project_id}"
@@ -1511,7 +1516,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
 
                 start_bot_pm2(
                     project_id=project_id,
-                    project_path=clone_path,
+                    project_path=bot_run_path,
                     port=8000 + (project_id % 1000),
                     domain=clone_domain,
                     bot_token=bot_token,
