@@ -1706,6 +1706,11 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
                 conn.commit()
 
+        # --- Final ownership fix (type-specific ops may have created root-owned files) ---
+        subprocess.run(["chown", "-R", "dreampilot:dreampilot", clone_path], check=False, timeout=120)
+        subprocess.run(["chmod", "-R", "755", clone_path], check=False, timeout=60)
+        logger.info(f"[CLONE] Final ownership/permissions fix applied for {clone_path}")
+
     except Exception as e:
         logger.error(f"[CLONE] Worker failed for project {project_id}: {e}")
         import traceback
