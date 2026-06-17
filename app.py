@@ -3,7 +3,6 @@ import uuid
 import json
 import shutil
 import re
-import asyncio
 import logging
 import subprocess
 from datetime import datetime
@@ -56,9 +55,10 @@ from services.token_tracker import (
     get_project_usage,
     get_platform_usage,
     get_usage_logs,
-    get_user_usage_logs_with_project,
     VALID_USAGE_TYPES as VALID_TOKEN_USAGE_TYPES,
 )
+
+from services.email_service import send_verification_email
 
 # AI Chat System
 from api.ai_chat import router as ai_chat_router
@@ -271,6 +271,19 @@ class CreateProjectRequest(BaseModel):
     discord_webhook_url: Optional[str] = None  # Discord webhook URL
     email_to: Optional[str] = None  # Default email recipient (SMTP is shared)
     api_endpoint: Optional[str] = None  # Default API endpoint URL
+
+
+class CloneProjectRequest(BaseModel):
+    name: str
+    domain: Optional[str] = None
+    # Bot / scheduler inputs (required for non-website clones)
+    bot_token: Optional[str] = None  # Telegram (type 2) or Discord (type 3) bot token
+    telegram_bot_token: Optional[str] = None  # Telegram bot token for scheduler
+    telegram_chat_id: Optional[str] = None  # Default Telegram chat_id for scheduler
+    discord_webhook_url: Optional[str] = None  # Discord webhook URL for scheduler
+    email_to: Optional[str] = None  # Default email recipient for scheduler
+    api_endpoint: Optional[str] = None  # Default API endpoint URL for scheduler
+
 
 class CreateSessionRequest(BaseModel):
     label: str
@@ -1098,6 +1111,713 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         created_at=str(final_project["created_at"]) if isinstance(final_project.get("created_at"), (datetime,)) else final_project.get("created_at")
     )
 
+
+# ---------------------------------------------------------------------------
+# Clone Project Endpoint
+# ---------------------------------------------------------------------------
+
+def _copy_project_files(src_path: str, dst_path: str, skip_dirs: set = None):
+    """Recursively copy project files, skipping build artifacts and VCS dirs."""
+    if skip_dirs is None:
+        skip_dirs = {".git", "node_modules", "dist", ".next", "__pycache__", "logs", ".cache", "build"}
+
+    if not os.path.exists(src_path):
+        raise FileNotFoundError(f"Source project path does not exist: {src_path}")
+
+    for item in os.listdir(src_path):
+        src_item = os.path.join(src_path, item)
+        dst_item = os.path.join(dst_path, item)
+
+        if os.path.isdir(src_item):
+            if item in skip_dirs:
+                continue
+            shutil.copytree(src_item, dst_item, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*skip_dirs))
+        else:
+            shutil.copy2(src_item, dst_item)
+
+
+def _update_env_file(env_path: str, updates: dict):
+    """Update key=value pairs in a .env file, preserving other lines."""
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+
+    updated_keys = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if "=" in stripped and not stripped.startswith("#"):
+            key = stripped.split("=", 1)[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}\n")
+                updated_keys.add(key)
+                continue
+        new_lines.append(line)
+
+    # Add any keys that weren't already in the file
+    for key, val in updates.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={val}\n")
+
+    with open(env_path, "w") as f:
+        f.writelines(new_lines)
+
+
+def _replace_domain_in_configs(clone_path: str, source_domain: str, clone_domain: str):
+    """Replace source domain with clone domain in config files that already had placeholders filled."""
+    # Key files where domain appears after initial provisioning
+    target_files = [
+        os.path.join(clone_path, "backend", "agent", "README.md"),
+        os.path.join(clone_path, "frontend", "buildpublish.py"),
+        os.path.join(clone_path, "backend", "buildpublish.py"),
+        os.path.join(clone_path, "frontend", "src", "lib", "api-config.ts"),
+        os.path.join(clone_path, "project.json"),
+    ]
+
+    replaced_count = 0
+    for fpath in target_files:
+        try:
+            if not os.path.isfile(fpath):
+                continue
+            with open(fpath, "r", encoding="utf-8") as f:
+                content = f.read()
+            if source_domain in content:
+                content = content.replace(source_domain, clone_domain)
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(content)
+                replaced_count += 1
+                logger.info(f"[CLONE] Replaced domain in {os.path.relpath(fpath, clone_path)}")
+        except Exception as e:
+            logger.warning(f"[CLONE] Failed to replace domain in {fpath}: {e}")
+
+    if replaced_count:
+        logger.info(f"[CLONE] Domain replacement complete: {replaced_count} files updated ({source_domain} -> {clone_domain})")
+    return replaced_count
+
+
+def _cleanup_clone_build_artifacts(clone_path: str):
+    """Remove node_modules after successful build to save disk space.
+    NOTE: dist is NOT removed — nginx serves from frontend/dist."""
+    cleanup_dirs = [
+        os.path.join(clone_path, "frontend", "node_modules"),
+    ]
+    for dir_path in cleanup_dirs:
+        if os.path.isdir(dir_path):
+            try:
+                shutil.rmtree(dir_path, ignore_errors=True)
+                logger.info(f"[CLONE] Cleaned up {os.path.relpath(dir_path, clone_path)}")
+            except Exception as e:
+                logger.warning(f"[CLONE] Failed to clean {dir_path}: {e}")
+
+
+def _update_payload_credentials(payload: dict, new_creds: dict, source_env: dict):
+    """Replace old source credentials in a job payload with new clone values.
+
+    Checks all common key names for email, telegram, discord, and API credentials.
+    Also does string replacement for values that match the source .env.
+    """
+    # Map credential types to all possible payload key names
+    EMAIL_KEYS = ('to', 'email', 'email_to', 'recipient', 'recipients', 'address')
+    CHAT_KEYS = ('chat_id', 'chatid', 'telegram_chat_id', 'channel')
+    TOKEN_KEYS = ('bot_token', 'token', 'telegram_bot_token')
+    WEBHOOK_KEYS = ('webhook_url', 'webhook', 'discord_webhook_url')
+    API_KEYS = ('url', 'endpoint', 'api_endpoint', 'api_url')
+
+    replacements = [
+        (EMAIL_KEYS, new_creds.get('email_to'), source_env.get('EMAIL_TO')),
+        (CHAT_KEYS, new_creds.get('telegram_chat_id'), source_env.get('TELEGRAM_CHAT_ID')),
+        (TOKEN_KEYS, new_creds.get('telegram_bot_token'), source_env.get('TELEGRAM_BOT_TOKEN')),
+        (WEBHOOK_KEYS, new_creds.get('discord_webhook_url'), source_env.get('DISCORD_WEBHOOK_URL')),
+        (API_KEYS, new_creds.get('api_endpoint'), source_env.get('API_ENDPOINT')),
+    ]
+
+    for keys, new_val, old_val in replacements:
+        if not new_val:
+            continue
+        for key in keys:
+            if key in payload:
+                payload[key] = new_val
+
+    # Deep string replacement: if old email/token appears in any string value, replace it
+    for old_credential, new_credential in [
+        (source_env.get('EMAIL_TO'), new_creds.get('email_to')),
+        (source_env.get('TELEGRAM_CHAT_ID'), new_creds.get('telegram_chat_id')),
+        (source_env.get('TELEGRAM_BOT_TOKEN'), new_creds.get('telegram_bot_token')),
+        (source_env.get('DISCORD_WEBHOOK_URL'), new_creds.get('discord_webhook_url')),
+        (source_env.get('API_ENDPOINT'), new_creds.get('api_endpoint')),
+    ]:
+        if old_credential and new_credential and old_credential != new_credential:
+            _deep_str_replace_in_dict(payload, old_credential, new_credential)
+
+
+def _deep_str_replace_in_dict(obj, old_val: str, new_val: str):
+    """Recursively replace old_val with new_val in all string values within a dict/list."""
+    if isinstance(obj, str):
+        return obj.replace(old_val, new_val) if old_val else obj
+    elif isinstance(obj, dict):
+        return {k: _deep_str_replace_in_dict(v, old_val, new_val) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_deep_str_replace_in_dict(v, old_val, new_val) for v in obj]
+    return obj
+
+
+def _replace_scheduler_credentials_in_code(clone_path: str, source_project_id: int, new_creds: dict):
+    """Replace hardcoded source credentials in cloned scheduler Python files.
+
+    The AI may have written the source project's email/chat_id/token directly
+    into executor.py custom handlers instead of using config variables.
+    This scans .py files in the clone and replaces old values with new ones.
+    """
+    import glob
+
+    # Read source project's .env to get the old credential values
+    source_env_path = os.path.join(clone_path, ".env")  # already updated, so read from DB or source
+    # Actually we need the OLD values — read them from source project via DB
+    old_creds = {}
+    try:
+        from database_postgres import get_db as _get_pg_db
+        with _get_pg_db() as cur:
+            cur.execute("SELECT project_path FROM projects WHERE id = %s", (source_project_id,))
+            row = cur.fetchone()
+            if row:
+                src_path = row.get('project_path') if isinstance(row, dict) else row[0]
+                if src_path and os.path.exists(src_path):
+                    src_env = os.path.join(src_path, ".env")
+                    if os.path.exists(src_env):
+                        with open(src_env, "r") as f:
+                            for line in f:
+                                line = line.strip()
+                                if "=" in line and not line.startswith("#"):
+                                    k, v = line.split("=", 1)
+                                    old_creds[k.strip()] = v.strip()
+    except Exception as e:
+        logger.warning(f"[CLONE] Could not read source project .env for credential replacement: {e}")
+
+    # Build replacement pairs: (old_value, new_value)
+    replacements = []
+    cred_map = [
+        (old_creds.get('EMAIL_TO'), new_creds.get('email_to')),
+        (old_creds.get('TELEGRAM_CHAT_ID'), new_creds.get('telegram_chat_id')),
+        (old_creds.get('TELEGRAM_BOT_TOKEN'), new_creds.get('telegram_bot_token')),
+        (old_creds.get('DISCORD_WEBHOOK_URL'), new_creds.get('discord_webhook_url')),
+        (old_creds.get('API_ENDPOINT'), new_creds.get('api_endpoint')),
+    ]
+    for old_val, new_val in cred_map:
+        if old_val and new_val and old_val != new_val:
+            replacements.append((old_val, new_val))
+
+    if not replacements:
+        logger.info("[CLONE] No credential value differences found — skipping code replacement")
+        return
+
+    # Scan all .py files in scheduler/ and root of the clone
+    scan_dirs = [
+        os.path.join(clone_path, "scheduler"),
+        clone_path,
+    ]
+    py_files = set()
+    for scan_dir in scan_dirs:
+        if os.path.isdir(scan_dir):
+            for f in glob.glob(os.path.join(scan_dir, "*.py")):
+                py_files.add(f)
+
+    replaced_count = 0
+    for py_file in py_files:
+        try:
+            with open(py_file, "r") as f:
+                content = f.read()
+
+            original = content
+            for old_val, new_val in replacements:
+                if old_val in content:
+                    content = content.replace(old_val, new_val)
+                    logger.info(f"[CLONE] Replaced credential in {os.path.basename(py_file)}")
+
+            if content != original:
+                with open(py_file, "w") as f:
+                    f.write(content)
+                replaced_count += 1
+        except Exception as e:
+            logger.warning(f"[CLONE] Failed to scan {py_file}: {e}")
+
+    if replaced_count:
+        logger.info(f"[CLONE] Credential replacement: {replaced_count} files updated")
+
+
+def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
+                  source_path: str, clone_path: str, template_id: Optional[str],
+                  description: Optional[str], source_domain: str = "",
+                  bot_token: Optional[str] = None,
+                  telegram_bot_token: Optional[str] = None,
+                  telegram_chat_id: Optional[str] = None,
+                  discord_webhook_url: Optional[str] = None,
+                  email_to: Optional[str] = None,
+                  api_endpoint: Optional[str] = None,
+                  source_project_id: Optional[int] = None):
+    """Background worker that copies files and provisions infrastructure for a cloned project."""
+
+    try:
+        # --- Copy files from source project ---
+        logger.info(f"[CLONE] Copying files from {source_path} -> {clone_path}")
+        _copy_project_files(source_path, clone_path)
+        logger.info(f"[CLONE] File copy complete for project {project_id}")
+
+        # Re-initialise git (remove copied .git if any, re-init fresh)
+        git_dir = os.path.join(clone_path, ".git")
+        if os.path.exists(git_dir):
+            shutil.rmtree(git_dir, ignore_errors=True)
+        # Fix dubious ownership error when git runs as root on dreampilot-owned dirs
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", clone_path], capture_output=True, timeout=10)
+        subprocess.run(["git", "init"], cwd=clone_path, capture_output=True, timeout=30)
+        subprocess.run(["git", "add", "-A"], cwd=clone_path, capture_output=True, timeout=60)
+        subprocess.run(
+            ["git", "commit", "-m", "Initial commit (cloned from source)"],
+            cwd=clone_path, capture_output=True, timeout=60,
+            env={**os.environ, "GIT_AUTHOR_NAME": "DreamPilot", "GIT_AUTHOR_EMAIL": "bot@dreambigwithai.com",
+                 "GIT_COMMITTER_NAME": "DreamPilot", "GIT_COMMITTER_EMAIL": "bot@dreambigwithai.com"}
+        )
+        logger.info(f"[CLONE] Git re-initialised for project {project_id}")
+
+        # --- GitHub repo creation ---
+        try:
+            github = get_github_service()
+            repo_url = github.create_repository(
+                name=clone_domain,
+                public=True,
+                description=f"Cloned project: {clone_name}"
+            )
+            if repo_url:
+                github.add_remote(clone_path, repo_url)
+                with get_db() as conn:
+                    conn.execute("UPDATE projects SET repo_url = ? WHERE id = ?", (repo_url, project_id))
+                    conn.commit()
+                logger.info(f"[CLONE] GitHub repo created: {repo_url}")
+        except Exception as gh_err:
+            logger.warning(f"[CLONE] GitHub repo creation failed (non-fatal): {gh_err}")
+
+        # --- Replace source domain with clone domain in config files ---
+        if source_domain and source_domain != clone_domain:
+            _replace_domain_in_configs(clone_path, source_domain, clone_domain)
+
+        # --- Type-specific deployment ---
+        if source_type_id == 1:
+            # Website clone -- full infrastructure provisioning
+            logger.info(f"[CLONE] Provisioning website infrastructure for project {project_id}")
+
+            # Run npm install in frontend dir (node_modules was excluded during copy)
+            frontend_dir = os.path.join(clone_path, "frontend")
+            if os.path.isdir(frontend_dir) and os.path.isfile(os.path.join(frontend_dir, "package.json")):
+                logger.info(f"[CLONE] Running npm install in {frontend_dir}")
+                npm_env = os.environ.copy()
+                npm_env.pop("NODE_ENV", None)  # Ensure devDependencies are installed
+                npm_install_result = subprocess.run(
+                    ["npm", "install", "--no-audit", "--progress=false"],
+                    capture_output=True, text=True, timeout=600,
+                    cwd=frontend_dir, env=npm_env,
+                )
+                if npm_install_result.returncode != 0:
+                    logger.warning(f"[CLONE] npm install failed (non-fatal, provision_all will retry): {npm_install_result.stderr[:500]}")
+                else:
+                    logger.info(f"[CLONE] npm install completed for frontend")
+
+            from infrastructure_manager import InfrastructureManager
+            infra = InfrastructureManager(
+                project_name=clone_name,
+                project_path=Path(clone_path),
+                domain=clone_domain,
+                description=description,
+                template_id=template_id,
+                project_id=project_id,
+                is_clone=True,
+            )
+            success = infra.provision_all()
+
+            # Clean up build artifacts after provisioning (same as create flow)
+            _cleanup_clone_build_artifacts(clone_path)
+
+            new_status = "ready" if success else "failed"
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET status = ? WHERE id = ?", (new_status, project_id))
+                conn.commit()
+            logger.info(f"[CLONE] Website clone {'succeeded' if success else 'FAILED'} for project {project_id}")
+
+        elif source_type_id in (2, 3):
+            # Telegram (2) / Discord (3) clone
+            bot_type_label = "telegram" if source_type_id == 2 else "discord"
+            logger.info(f"[CLONE] Provisioning {bot_type_label} bot for project {project_id}")
+
+            # Copy bot-specific subdirectory from source if it exists
+            bot_subdir = os.path.join(source_path, bot_type_label)
+            if os.path.isdir(bot_subdir):
+                dst_bot_dir = os.path.join(clone_path, bot_type_label)
+                if os.path.exists(dst_bot_dir):
+                    shutil.rmtree(dst_bot_dir, ignore_errors=True)
+                shutil.copytree(bot_subdir, dst_bot_dir, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("__pycache__", ".git", "logs", "node_modules"))
+                logger.info(f"[CLONE] Copied {bot_type_label}/ directory")
+
+            # Update .env with new project metadata + bot-specific credentials
+            env_path = os.path.join(clone_path, ".env")
+            if os.path.exists(env_path):
+                env_updates = {
+                    "PROJECT_ID": str(project_id),
+                    "PROJECT_NAME": clone_name,
+                    "DOMAIN": clone_domain,
+                    "PORT": str(8000 + (project_id % 1000)),
+                }
+                # Overwrite source bot token with the new one (if provided)
+                if bot_token:
+                    if source_type_id == 2:
+                        env_updates["TELEGRAM_BOT_TOKEN"] = bot_token
+                        env_updates["BOT_TOKEN"] = bot_token
+                    elif source_type_id == 3:
+                        env_updates["DISCORD_BOT_TOKEN"] = bot_token
+                        env_updates["BOT_TOKEN"] = bot_token
+                _update_env_file(env_path, env_updates)
+                logger.info(f"[CLONE] Updated .env for {bot_type_label} project {project_id} (token {'provided' if bot_token else 'inherited from source'})")
+
+            # Start bot via PM2
+            try:
+                if source_type_id == 2:
+                    from services.telegram.pm2_manager import start_bot_pm2
+                    pm2_name = f"tg-bot-{project_id}"
+                else:
+                    from services.discord.pm2_manager import start_bot_pm2
+                    pm2_name = f"dc-bot-{project_id}"
+
+                start_bot_pm2(
+                    project_id=project_id,
+                    project_path=clone_path,
+                    bot_name=clone_name,
+                    port=8000 + (project_id % 1000),
+                    domain=clone_domain,
+                )
+                logger.info(f"[CLONE] PM2 started: {pm2_name}")
+            except Exception as pm2_err:
+                logger.warning(f"[CLONE] PM2 start failed (non-fatal): {pm2_err}")
+
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
+                conn.commit()
+            logger.info(f"[CLONE] {bot_type_label} bot clone ready for project {project_id}")
+
+        elif source_type_id == 5:
+            # Scheduler clone
+            logger.info(f"[CLONE] Provisioning scheduler for project {project_id}")
+
+            # Copy scheduler-specific subdirectory from source if it exists
+            sched_subdir = os.path.join(source_path, "scheduler")
+            if os.path.isdir(sched_subdir):
+                dst_sched_dir = os.path.join(clone_path, "scheduler")
+                if os.path.exists(dst_sched_dir):
+                    shutil.rmtree(dst_sched_dir, ignore_errors=True)
+                shutil.copytree(sched_subdir, dst_sched_dir, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("__pycache__", ".git", "logs", "node_modules"))
+                logger.info(f"[CLONE] Copied scheduler/ directory")
+
+            # Update .env with new project metadata + scheduler-specific inputs
+            env_path = os.path.join(clone_path, ".env")
+            if os.path.exists(env_path):
+                env_updates = {
+                    "PROJECT_ID": str(project_id),
+                    "PROJECT_NAME": clone_name,
+                    "DOMAIN": clone_domain,
+                }
+                # Overwrite scheduler sender channels with new values (if provided)
+                if telegram_bot_token:
+                    env_updates["TELEGRAM_BOT_TOKEN"] = telegram_bot_token
+                if telegram_chat_id:
+                    env_updates["TELEGRAM_CHAT_ID"] = telegram_chat_id
+                if discord_webhook_url:
+                    env_updates["DISCORD_WEBHOOK_URL"] = discord_webhook_url
+                if email_to:
+                    env_updates["EMAIL_TO"] = email_to
+                if api_endpoint:
+                    env_updates["API_ENDPOINT"] = api_endpoint
+                _update_env_file(env_path, env_updates)
+                logger.info(f"[CLONE] Updated .env for scheduler project {project_id}")
+
+            # Patch config.py to use load_dotenv(override=True) so centralized
+            # scheduler picks up each project's own .env values
+            try:
+                config_py_path = os.path.join(clone_path, "config.py")
+                if os.path.exists(config_py_path):
+                    with open(config_py_path, "r") as f:
+                        config_content = f.read()
+                    if "load_dotenv(" in config_content and "override=True" not in config_content:
+                        config_content = config_content.replace(
+                            'load_dotenv(_project_dir / ".env")',
+                            'load_dotenv(_project_dir / ".env", override=True)'
+                        )
+                        # Also handle variants without the _project_dir variable
+                        config_content = config_content.replace(
+                            'load_dotenv('.replace('(', ''),
+                            'load_dotenv_override_placeholder('
+                        ) if False else config_content  # no-op, just in case
+                        with open(config_py_path, "w") as f:
+                            f.write(config_content)
+                        logger.info(f"[CLONE] Patched config.py with override=True for project {project_id}")
+            except Exception as cfg_err:
+                logger.warning(f"[CLONE] Failed to patch config.py (non-fatal): {cfg_err}")
+
+            # Rewrite project.json with clone's metadata (not source's)
+            try:
+                import json as _json
+                from datetime import datetime as _dt
+                project_json_path = os.path.join(clone_path, "project.json")
+                clone_metadata = {
+                    "project_id": project_id,
+                    "project_name": clone_name,
+                    "type_id": source_type_id,
+                    "description": description or "",
+                    "scheduler_path": os.path.join(clone_path, "scheduler"),
+                    "status": "ready",
+                    "created_at": _dt.utcnow().isoformat(),
+                    "cloned_from": source_project_id,
+                }
+                with open(project_json_path, "w") as f:
+                    _json.dump(clone_metadata, f, indent=2)
+                logger.info(f"[CLONE] Rewrote project.json for clone project {project_id}")
+            except Exception as pj_err:
+                logger.warning(f"[CLONE] Failed to rewrite project.json (non-fatal): {pj_err}")
+
+            # Replace hardcoded source credentials in cloned Python files (executor.py, etc.)
+            # The AI may have hardcoded the source project's email/chat_id/token directly
+            # in custom handlers instead of using config variables.
+            try:
+                _replace_scheduler_credentials_in_code(clone_path, source_project_id, {
+                    'email_to': email_to,
+                    'telegram_chat_id': telegram_chat_id,
+                    'telegram_bot_token': telegram_bot_token,
+                    'discord_webhook_url': discord_webhook_url,
+                    'api_endpoint': api_endpoint,
+                })
+            except Exception as cred_err:
+                logger.warning(f"[CLONE] Credential replacement in code failed (non-fatal): {cred_err}")
+
+            # Duplicate scheduler jobs from source project (no AI needed)
+            if source_project_id:
+                try:
+                    from services.scheduler.jobs import list_jobs, create_job
+                    source_jobs = list_jobs(source_project_id)
+
+                    # Read source project's old credentials from its .env for replacement
+                    source_env_path = os.path.join(source_path, ".env")
+                    source_env = {}
+                    if os.path.exists(source_env_path):
+                        with open(source_env_path, "r") as f:
+                            for line in f:
+                                line = line.strip()
+                                if "=" in line and not line.startswith("#"):
+                                    k, v = line.split("=", 1)
+                                    source_env[k.strip()] = v.strip()
+
+                    copied = 0
+                    for job in source_jobs:
+                        try:
+                            # Parse payload (stored as JSON string in DB)
+                            payload = job.get('payload', {})
+                            if isinstance(payload, str):
+                                import json as _json
+                                payload = _json.loads(payload)
+
+                            # Update ALL credential keys in payload with new values
+                            if isinstance(payload, dict):
+                                _update_payload_credentials(payload, {
+                                    'email_to': email_to,
+                                    'telegram_chat_id': telegram_chat_id,
+                                    'telegram_bot_token': telegram_bot_token,
+                                    'discord_webhook_url': discord_webhook_url,
+                                    'api_endpoint': api_endpoint,
+                                }, source_env)
+
+                            create_job(project_id, {
+                                'job_type': job['job_type'],
+                                'schedule_value': job['schedule_value'],
+                                'task_type': job['task_type'],
+                                'payload': payload,
+                            })
+                            copied += 1
+                        except Exception as job_err:
+                            logger.warning(f"[CLONE] Failed to copy scheduler job {job.get('id')}: {job_err}")
+                    logger.info(f"[CLONE] Copied {copied}/{len(source_jobs)} scheduler jobs from source {source_project_id} to clone {project_id}")
+                except Exception as jobs_err:
+                    logger.warning(f"[CLONE] Scheduler job duplication failed (non-fatal): {jobs_err}")
+            else:
+                logger.warning(f"[CLONE] No source_project_id — cannot duplicate scheduler jobs")
+
+            # Scheduler runs centrally — no per-project PM2 process needed.
+            # Jobs are managed via the database by the centralized clawd-scheduler.
+            logger.info(f"[CLONE] Scheduler clone ready (centralized scheduler manages jobs) for project {project_id}")
+
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
+                conn.commit()
+            logger.info(f"[CLONE] Scheduler clone ready for project {project_id}")
+
+        else:
+            logger.warning(f"[CLONE] Unknown type_id={source_type_id}, marking as ready without provisioning")
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
+                conn.commit()
+
+    except Exception as e:
+        logger.error(f"[CLONE] Worker failed for project {project_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        with get_db() as conn:
+            conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("failed", project_id))
+            conn.commit()
+
+
+@app.post("/projects/{project_id}/clone", status_code=201)
+async def clone_project(
+    project_id: int,
+    request: CloneProjectRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Clone an existing project: copy files, provision infrastructure, create GitHub repo."""
+    import threading
+
+    # Auth
+    user_id = get_user_id_from_token(authorization)
+
+    # Check project limit
+    proj_limit = check_project_limit(user_id)
+    if not proj_limit.get("allowed"):
+        max_p = proj_limit.get("max", "?")
+        current_p = proj_limit.get("current", "?")
+        raise HTTPException(
+            status_code=403,
+            detail=f"Project limit reached ({current_p}/{max_p}) for {proj_limit.get('tier', 'free')} tier. Upgrade to create more projects."
+        )
+
+    # Fetch source project
+    with get_db() as conn:
+        source = conn.execute(
+            "SELECT * FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Source project {project_id} not found")
+
+    source = dict(source)
+    source_type_id = source.get("type_id") or 1
+    source_path = source.get("project_path") or ""
+    source_description = source.get("description")
+    source_template_id = source.get("template_id")
+    source_domain = source.get("domain") or ""
+
+    if not source_path or not os.path.exists(source_path):
+        raise HTTPException(status_code=400, detail=f"Source project path not found on disk: {source_path}")
+
+    # Validate / generate domain
+    github = get_github_service()
+    clone_domain = request.domain
+    if not clone_domain or not clone_domain.strip():
+        clone_domain = github.sanitize_repo_name(request.name)
+        random_suffix = ''.join(__import__('random').choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
+        clone_domain = f"{clone_domain}-{random_suffix}"
+    else:
+        clone_domain = github.sanitize_repo_name(clone_domain.strip())
+        if not validate_subdomain(clone_domain):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter."
+            )
+
+    # Check domain uniqueness
+    with get_db() as conn:
+        existing_domain = conn.execute(
+            "SELECT id FROM projects WHERE domain = ?",
+            (clone_domain,)
+        ).fetchone()
+    if existing_domain:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Domain '{clone_domain}' is already in use. Please choose a different subdomain."
+        )
+
+    # Insert clone record into DB
+    logger.info(f"[CLONE] Creating database record for clone of project {project_id}")
+    with get_db() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, template_id, claude_code_session_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (user_id, request.name, clone_domain, source_description, '', source_type_id, 'cloning', source_template_id, None)
+            )
+            result = conn.fetchone()
+            if isinstance(result, dict):
+                clone_project_id = result.get('id')
+            else:
+                clone_project_id = result[0] if result else None
+
+            if not clone_project_id:
+                raise RuntimeError("Failed to get clone_project_id from INSERT RETURNING")
+            conn.commit()
+            logger.info(f"[CLONE] Clone project_id: {clone_project_id}")
+        except Exception as e:
+            logger.error(f"[CLONE] Database insert failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to create clone record: {str(e)}")
+
+    # Create project folder
+    project_manager = ProjectFileManager()
+    clone_folder_path, folder_success = project_manager.create_project_with_git(clone_project_id, request.name, source_type_id)
+
+    if not folder_success:
+        with get_db() as conn:
+            conn.execute("DELETE FROM projects WHERE id = ?", (clone_project_id,))
+            conn.commit()
+        raise HTTPException(status_code=500, detail="Failed to create clone project folder")
+
+    # Set ownership / permissions
+    subprocess.run(["chattr", "-R", "-i", clone_folder_path], check=False)
+    subprocess.run(["chown", "-R", "dreampilot:dreampilot", clone_folder_path], check=False)
+    subprocess.run(["chmod", "-R", "755", clone_folder_path], check=False)
+
+    # Update DB with clone path
+    with get_db() as conn:
+        conn.execute("UPDATE projects SET project_path = ? WHERE id = ?", (clone_folder_path, clone_project_id))
+        conn.commit()
+
+    # Track usage
+    record_usage(
+        user_id=user_id,
+        usage_type="project_create",
+        total_tokens=1,
+        project_id=clone_project_id,
+        description=f"Cloned project: {request.name} (from project {project_id}, domain: {clone_domain})",
+    )
+
+    # Launch background worker
+    worker_thread = threading.Thread(
+        target=_clone_worker,
+        args=(clone_project_id, request.name, clone_domain, source_type_id, source_path, clone_folder_path, source_template_id, source_description, source_domain),
+        kwargs={
+            "bot_token": request.bot_token,
+            "telegram_bot_token": request.telegram_bot_token,
+            "telegram_chat_id": request.telegram_chat_id,
+            "discord_webhook_url": request.discord_webhook_url,
+            "email_to": request.email_to,
+            "api_endpoint": request.api_endpoint,
+            "source_project_id": project_id,
+        },
+        daemon=True,
+    )
+    worker_thread.start()
+
+    logger.info(f"[CLONE] Background worker started for clone project {clone_project_id} (source: {project_id})")
+
+    return {
+        "success": True,
+        "project_id": clone_project_id,
+        "status": "cloning",
+        "message": f"Cloning project '{source.get('name')}' as '{request.name}'. Infrastructure provisioning in background."
+    }
+
+
 @app.get("/project-types", response_model=list[ProjectTypeResponse])
 async def get_project_types():
     """Get all available project types."""
@@ -1639,12 +2359,15 @@ def allocate_backend_port(project_id: int) -> int:
 
 
 
-def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
+def cleanup_infrastructure(project_path: str, domain_override: str = None, backend_port_override: int = None, frontend_port_override: int = None) -> Dict[str, Any]:
     """
     Full infrastructure cleanup for a project.
 
     Args:
         project_path: Full path to project directory
+        domain_override: Domain from database (guaranteed source of truth, used even if project.json is missing)
+        backend_port_override: Backend port from database
+        frontend_port_override: Frontend port from database
 
     Returns:
         Dict with complete cleanup status
@@ -1653,6 +2376,10 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     
     # Import re at function level (needed for path parsing)
     import re
+
+    # If domain_override is provided from the database, use it as the authoritative source.
+    # When a project is deleted from the database first, project.json may be missing or stale.
+    # This ensures nginx config and PM2 services are ALWAYS cleaned up.
 
     # Load project metadata
     project_json_path = os.path.join(project_path, "project.json")
@@ -1697,6 +2424,15 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
         frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
         backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(".dreambigwithai.com", "")
     
+    # HIGHEST PRIORITY: Use domain_override from database (guaranteed source of truth)
+    # This fixes orphaned nginx configs when project.json is missing/stale
+    if domain_override:
+        if not frontend_domain or frontend_domain != domain_override:
+            logger.info(f"Using domain_override from database: {domain_override} (was: {frontend_domain})")
+            frontend_domain = domain_override
+        if not backend_domain:
+            backend_domain = f"{domain_override}-api"
+
     db_name = project_metadata.get("database", {}).get("name", "")
     db_user = project_metadata.get("database", {}).get("user", "")
 
@@ -1837,6 +2573,11 @@ def cleanup_infrastructure(project_path: str) -> Dict[str, Any]:
     nginx_service_name = frontend_domain or project_name
     try:
         cleanup_results["steps"]["nginx"] = cleanup_nginx_config(nginx_service_name)
+        # Safety net: also try cleaning by project_name in case old config was named differently
+        if project_name and project_name != nginx_service_name:
+            alt_cleanup = cleanup_nginx_config(project_name)
+            if alt_cleanup.get("config_removed") or alt_cleanup.get("symlink_removed"):
+                logger.info(f"Also cleaned up nginx config by project_name: {project_name}")
     except Exception as e:
         logger.error(f"Error in Nginx cleanup: {e}")
         cleanup_results["steps"]["nginx"] = {"error": str(e)}
@@ -1917,6 +2658,10 @@ async def delete_project(project_id: int, force: bool = False):
 
         project_path = project['project_path']
         project_name = project['name']
+        # Capture domain from database (guaranteed source of truth)
+        project_domain = project.get('domain') or project.get('name') or ''
+        project_backend_port = project.get('backend_port')
+        project_frontend_port = project.get('frontend_port')
 
         # Master DB Protection: Validate no master database is being deleted
         db_info = get_database_info()
@@ -2001,7 +2746,14 @@ async def delete_project(project_id: int, force: bool = False):
             logger.info(f"[BG] Starting infrastructure cleanup for project {project_id}: {project_path}")
             
             # Run cleanup in threadpool to avoid blocking
-            cleanup_result = await run_in_threadpool(cleanup_infrastructure, project_path)
+            # Pass domain/backend_port from DB so cleanup always knows what to remove
+            cleanup_result = await run_in_threadpool(
+                cleanup_infrastructure,
+                project_path,
+                domain_override=project_domain,
+                backend_port_override=project_backend_port,
+                frontend_port_override=project_frontend_port
+            )
             
             # Delete OpenClaw sessions
             sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
@@ -2190,7 +2942,7 @@ async def publish_frontend(project_id: int, request: BuildPublishRequest):
         raise HTTPException(status_code=400, detail=f"package.json not found in {frontend_path}")
     
     # Build command args
-    cmd_args = ["python", "buildpublish.py"]
+    cmd_args = ["python3", "buildpublish.py"]
     if request.skip_install:
         cmd_args.append("--skip-install")
     if request.skip_build:
@@ -2285,7 +3037,7 @@ async def publish_backend(project_id: int, request: BuildPublishRequest):
         raise HTTPException(status_code=400, detail=f"main.py not found in {backend_path}")
     
     # Build command args
-    cmd_args = ["python", "buildpublish.py"]
+    cmd_args = ["python3", "buildpublish.py"]
     if request.skip_install:
         cmd_args.append("--skip-deps")
     if request.restart:
@@ -3062,26 +3814,7 @@ async def chat_stream_endpoint(request: ChatRequest):
             
             # Run streaming with unified backend (ClaudeCodeAgent or ACPX fallback)
             logger.info(f"[ACP-STREAM] Starting unified streaming (timeout: 900s)...")
-
-            async def _maybe_auto_commit(handler, proj_id: int, sess_id: int, content: str):
-                """Hybrid auto-commit: check wrapper has_writes, then git status."""
-                try:
-                    usage_data = handler.get_last_token_usage() if hasattr(handler, 'get_last_token_usage') else None
-                    has_writes = False
-                    if usage_data and isinstance(usage_data, dict):
-                        has_writes = usage_data.get("has_writes", False)
-                    if has_writes:
-                        logger.info(f"[AUTO-COMMIT] has_writes=True, committing...")
-                        commit_msg = f"feat(ai): {content[:80].strip().splitlines()[0] if content else 'edit'}"
-                        result = await _do_git_commit(proj_id, sess_id, commit_msg, auto_push=True)
-                        logger.info(f"[AUTO-COMMIT] Result: success={result.get('success')}, status={result.get('status')}")
-                        return result
-                    else:
-                        logger.info(f"[AUTO-COMMIT] has_writes=False, skipping (read-only chat)")
-                except Exception as ce:
-                    logger.error(f"[AUTO-COMMIT] Failed: {ce}")
-                return None
-
+            
             async def acp_streaming_response():
                 """Stream output in real-time via SSE using best available backend."""
                 full_response = []
@@ -3148,7 +3881,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                     if hasattr(handler, '_last_query_response') and handler._last_query_response:
                         logger.info(f"[ACP-STREAM] Background save (full response): {len(handler._last_query_response)} chars")
                         await save_response_to_db(handler._last_query_response)
-                        await _maybe_auto_commit(handler, project_id, session_id, handler._last_query_response)
                         return
 
                     # Fallback to chunks
@@ -3161,7 +3893,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                             if content:
                                 logger.info(f"[ACP-STREAM] Background save (chunks fallback): {len(content)} chars")
                                 await save_response_to_db(content)
-                                await _maybe_auto_commit(handler, project_id, session_id, content)
                                 return
 
                     logger.warning(f"[ACP-STREAM] Background save: no content found to save")
@@ -3185,21 +3916,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                     
                     if assistant_content:
                         await save_response_to_db(assistant_content)
-
-                    # ── AUTO-COMMIT: Hybrid detection ────────────────────────
-                    commit_result = await _maybe_auto_commit(handler, project_id, session_id, assistant_content)
-
-                    # Yield commit SSE event so frontend can show badge
-                    if commit_result and commit_result.get("success") and commit_result.get("commit_hash"):
-                        commit_event = json.dumps({
-                            "type": "commit",
-                            "commit_hash": commit_result["commit_hash"],
-                            "status": commit_result["status"],
-                            "files_changed": commit_result.get("files_changed", 0),
-                            "log_id": commit_result.get("log_id"),
-                        })
-                        yield f"data: {commit_event}\n\n"
-
+                    
                     # Cleanup temp image file
                     if image_path_for_context and os.path.exists(image_path_for_context):
                         try:
@@ -3238,7 +3955,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 if content:
                                     logger.info(f"[ACP-STREAM] Background saved (full response): {len(content)} chars")
                                     await save_response_to_db(content)
-                                    await _maybe_auto_commit(handler, project_id, session_id, content)
                                     return
 
                             # Fallback to chunks if _last_query_response not set
@@ -3251,7 +3967,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                                     if content and len(content) > 50:
                                         logger.info(f"[ACP-STREAM] Background saved (chunks fallback): {len(content)} chars")
                                         await save_response_to_db(content)
-                                        await _maybe_auto_commit(handler, project_id, session_id, content)
                                         return
                             
                             # Fall back to what we collected before disconnect
@@ -3259,7 +3974,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 content = '\n'.join(real_chunks).strip()
                                 logger.info(f"[ACP-STREAM] Background saved (partial, timeout): {len(content)} chars")
                                 await save_response_to_db(content)
-                                await _maybe_auto_commit(handler, project_id, session_id, content)
                             else:
                                 logger.warning(f"[ACP-STREAM] Background save: no content found after 600s wait")
                         except Exception as e:
@@ -3908,6 +4622,14 @@ class SignupRequest(BaseModel):
     name: Optional[str] = None
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
+
 class UserResponse(BaseModel):
     id: str
     email: str
@@ -3972,9 +4694,9 @@ def require_admin(user_id: int) -> None:
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
-@app.post("/auth/signup", response_model=AuthResponse)
+@app.post("/auth/signup", response_model=MessageResponseModel)
 async def signup(request: SignupRequest):
-    """Register a new user and return token."""
+    """Register a new user and send verification email."""
     # Check if user already exists
     with get_db() as conn:
         existing = conn.execute(
@@ -3985,12 +4707,17 @@ async def signup(request: SignupRequest):
         if existing:
             raise HTTPException(status_code=400, detail="Email already exists")
         
-        # Hash password and create user (defaults: role='user', tier='free')
+        # Hash password
         password_hash = hash_password(request.password)
         
+        # Generate verification token
+        verification_token = secrets.token_hex(32)
+        
+        # Create user with email_verified=false
         conn.execute(
-            "INSERT INTO users (email, name, password, role, subscription_tier) VALUES (?, ?, ?, 'user', 'free') RETURNING id",
-            (request.email, request.name, password_hash)
+            "INSERT INTO users (email, name, password, role, subscription_tier, email_verified, verification_token) "
+            "VALUES (?, ?, ?, 'user', 'free', false, ?) RETURNING id",
+            (request.email, request.name, password_hash, verification_token)
         )
         result = conn.fetchone()
         
@@ -4001,19 +4728,13 @@ async def signup(request: SignupRequest):
         
         conn.commit()
     
-    # Generate token
-    token = generate_token()
-    AUTH_TOKENS[token] = user_id
+    # Send verification email (non-blocking failure)
+    email_sent = send_verification_email(request.email, verification_token, request.name)
+    if not email_sent:
+        logger.warning(f"Failed to send verification email to {request.email}, but account created")
     
-    return AuthResponse(
-        token=token,
-        user=UserResponse(
-            id=str(user_id),
-            email=request.email,
-            name=request.name,
-            role="user",
-            subscription_tier="free"
-        )
+    return MessageResponseModel(
+        message="Account created! Please check your email to verify your account."
     )
 
 
@@ -4022,7 +4743,7 @@ async def login(request: LoginRequest):
     """Login and return token."""
     with get_db() as conn:
         user = conn.execute(
-            "SELECT id, email, name, password, role, subscription_tier FROM users WHERE email = ?",
+            "SELECT id, email, name, password, role, subscription_tier, email_verified FROM users WHERE email = ?",
             (request.email,)
         ).fetchone()
         
@@ -4037,6 +4758,7 @@ async def login(request: LoginRequest):
             password_hash = user.get('password')
             role = user.get('role', 'user')
             tier = user.get('subscription_tier', 'free')
+            email_verified = user.get('email_verified', True)
         else:
             user_id = user[0]
             email = user[1]
@@ -4044,10 +4766,18 @@ async def login(request: LoginRequest):
             password_hash = user[3]
             role = user[4] if len(user) > 4 else 'user'
             tier = user[5] if len(user) > 5 else 'free'
+            email_verified = user[6] if len(user) > 6 else True
         
         # Verify password
         if not password_hash or not verify_password(request.password, password_hash):
             raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Block login if email not verified
+        if not email_verified:
+            raise HTTPException(
+                status_code=403,
+                detail="Please verify your email before logging in. Check your inbox for the verification link."
+            )
     
     # Generate token
     token = generate_token()
@@ -4080,6 +4810,182 @@ async def logout(authorization: Optional[str] = Header(None)):
             del AUTH_TOKENS[token]
     
     return {"message": "Logged out"}
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str  # Google ID token from Google Identity Services
+
+
+async def verify_google_token(credential: str) -> dict:
+    """Verify a Google ID token and return user info."""
+    async with AsyncClient() as client:
+        resp = await client.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": credential},
+            timeout=10.0,
+        )
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    data = resp.json()
+
+    # Verify audience matches our client ID (if configured)
+    expected_aud = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+    token_aud = data.get("aud", "")
+    if expected_aud and token_aud != expected_aud:
+        raise HTTPException(status_code=401, detail="Google token audience mismatch")
+
+    # Google returns email_verified as string "true"/"false"
+    email_verified_raw = data.get("email_verified")
+    if isinstance(email_verified_raw, bool):
+        is_verified = email_verified_raw
+    elif isinstance(email_verified_raw, str):
+        is_verified = email_verified_raw.lower() == "true"
+    else:
+        is_verified = False
+
+    if not is_verified:
+        raise HTTPException(status_code=401, detail="Google email not verified")
+
+    email = data.get("email")
+    if not email:
+        raise HTTPException(status_code=401, detail="No email in Google token")
+
+    return {
+        "email": email,
+        "name": data.get("name", email.split("@")[0]),
+        "picture": data.get("picture"),
+    }
+
+
+@app.post("/auth/google", response_model=AuthResponse)
+async def google_login(request: GoogleAuthRequest):
+    """Login or sign up via Google OAuth."""
+    google_user = await verify_google_token(request.credential)
+
+    with get_db() as conn:
+        # Check if user already exists (works for both email/password and Google users)
+        row = conn.execute(
+            "SELECT id, email, name, password, role, subscription_tier FROM users WHERE email = ?",
+            (google_user["email"],),
+        ).fetchone()
+
+        if row:
+            if isinstance(row, dict):
+                user_id = row["id"]
+                email = row["email"]
+                name = row["name"]
+                role = row.get("role", "user")
+                tier = row.get("subscription_tier", "free")
+            else:
+                user_id = row[0]
+                email = row[1]
+                name = row[2]
+                role = row[4] if len(row) > 4 else "user"
+                tier = row[5] if len(row) > 5 else "free"
+        else:
+            # Create new user with no password (OAuth-only account)
+            result = conn.execute(
+                "INSERT INTO users (email, name, password, role, subscription_tier) "
+                "VALUES (?, ?, NULL, 'user', 'free') RETURNING id",
+                (google_user["email"], google_user["name"]),
+            ).fetchone()
+
+            if isinstance(result, dict):
+                user_id = result["id"]
+            else:
+                user_id = result[0]
+
+            conn.commit()
+
+            email = google_user["email"]
+            name = google_user["name"]
+            role = "user"
+            tier = "free"
+
+    token = generate_token()
+    AUTH_TOKENS[token] = user_id
+
+    return AuthResponse(
+        token=token,
+        user=UserResponse(
+            id=str(user_id),
+            email=email,
+            name=name,
+            role=role,
+            subscription_tier=tier,
+        ),
+    )
+
+
+@app.post("/auth/verify-email", response_model=MessageResponseModel)
+async def verify_email(request: VerifyEmailRequest):
+    """Verify email using the verification token."""
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT id, email_verified FROM users WHERE verification_token = ?",
+            (request.token,)
+        ).fetchone()
+
+        if not user:
+            raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+        if isinstance(user, dict):
+            if user.get('email_verified'):
+                return MessageResponseModel(message="Email already verified. You can log in now.")
+        else:
+            if user[1]:
+                return MessageResponseModel(message="Email already verified. You can log in now.")
+
+        # Mark as verified and clear the token
+        conn.execute(
+            "UPDATE users SET email_verified = true, verification_token = NULL WHERE verification_token = ?",
+            (request.token,)
+        )
+        conn.commit()
+
+    return MessageResponseModel(
+        message="Email verified successfully! You can now log in."
+    )
+
+
+@app.post("/auth/resend-verification", response_model=MessageResponseModel)
+async def resend_verification(request: ResendVerificationRequest):
+    """Resend verification email to user."""
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT id, name, email_verified, password FROM users WHERE email = ?",
+            (request.email,)
+        ).fetchone()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="No account found with that email")
+
+        if isinstance(user, dict):
+            email_verified = user.get('email_verified', True)
+            user_name = user.get('name')
+        else:
+            email_verified = user[2] if len(user) > 2 else True
+            user_name = user[1] if len(user) > 1 else None
+
+        if email_verified:
+            return MessageResponseModel(message="Email already verified. You can log in now.")
+
+        # Generate new token and save
+        new_token = secrets.token_hex(32)
+        conn.execute(
+            "UPDATE users SET verification_token = ? WHERE email = ?",
+            (new_token, request.email)
+        )
+        conn.commit()
+
+    # Send new verification email
+    email_sent = send_verification_email(request.email, new_token, user_name)
+    if not email_sent:
+        raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again.")
+
+    return MessageResponseModel(message="Verification email sent. Please check your inbox.")
 
 
 @app.get("/auth/me", response_model=UserResponse)
@@ -4143,6 +5049,96 @@ async def health_check():
 @app.post("/test")
 async def test_endpoint(data: dict):
     return {"received": data}
+
+
+# ============================================================================
+# Nginx Orphan Cleanup Endpoint
+# ============================================================================
+
+@app.get("/admin/nginx/orphans")
+async def list_orphaned_nginx_configs():
+    """
+    List nginx configs in sites-available that don't belong to any active project in the database.
+    
+    Compares /etc/nginx/sites-available/*.conf domains against projects table.
+    Returns orphaned configs that can be safely deleted.
+    """
+    import glob
+    
+    nginx_dir = "/etc/nginx/sites-available"
+    
+    # Get all active project domains from database
+    with get_db() as conn:
+        rows = conn.execute("SELECT DISTINCT domain, name FROM projects WHERE domain IS NOT NULL AND domain != ''").fetchall()
+    
+    active_domains = set()
+    for row in rows:
+        domain = row.get('domain') if isinstance(row, dict) else row[0]
+        name = row.get('name') if isinstance(row, dict) else row[1]
+        if domain:
+            active_domains.add(domain)
+        if name:
+            active_domains.add(name)
+    
+    # Scan nginx configs
+    orphans = []
+    configs = glob.glob(f"{nginx_dir}/*.conf")
+    
+    for config_path in configs:
+        config_name = Path(config_path).stem  # e.g., "jurassicgenesis-irgpny"
+        
+        # Skip system configs
+        if config_name == "default":
+            continue
+        
+        # Check if this config's domain exists in active projects
+        if config_name not in active_domains:
+            # Also check by reading server_name from the config
+            try:
+                content = Path(config_path).read_text()
+                orphans.append({
+                    "config_file": config_name,
+                    "config_path": config_path,
+                    "server_name": config_name,
+                    "active_in_db": False
+                })
+            except Exception:
+                orphans.append({
+                    "config_file": config_name,
+                    "config_path": config_path,
+                    "server_name": "unknown",
+                    "active_in_db": False
+                })
+    
+    return {
+        "total_configs": len(configs),
+        "active_projects": len(active_domains),
+        "orphaned_count": len(orphans),
+        "orphans": orphans
+    }
+
+
+@app.delete("/admin/nginx/orphans/{config_name}")
+async def delete_orphaned_nginx_config(config_name: str):
+    """
+    Delete a specific orphaned nginx config by name.
+    
+    Removes both sites-available and sites-enabled entries, then reloads nginx.
+    """
+    # Security: prevent path traversal
+    if "/" in config_name or ".." in config_name:
+        raise HTTPException(status_code=400, detail="Invalid config name")
+    
+    # Normalize config name (strip .conf if provided)
+    if config_name.endswith(".conf"):
+        config_name = config_name[:-5]
+    
+    result = cleanup_nginx_config(config_name)
+    
+    if result.get("errors"):
+        return {"status": "partial", "config_name": config_name, "result": result}
+    
+    return {"status": "deleted", "config_name": config_name, "result": result}
 
 # ============================================================================
 # Session Details API - Calls OpenClaw Status Endpoint
@@ -4709,160 +5705,123 @@ class CommitRequest(BaseModel):
     message: str
     auto_push: bool = True
 
-
-# Per-project locks to prevent concurrent git operations on the same repo
-_git_locks: dict[int, asyncio.Lock] = {}
-
-
-def _get_git_lock(project_id: int) -> asyncio.Lock:
-    """Get or create an asyncio.Lock for a project to serialize git operations."""
-    if project_id not in _git_locks:
-        _git_locks[project_id] = asyncio.Lock()
-    return _git_locks[project_id]
-
-
-async def _do_git_commit(
-    project_id: int,
-    session_id: int,
-    message: str,
-    auto_push: bool = True,
-) -> dict:
-    """Run git add/commit/push and update DB records.
-
-    This is the single source of truth for committing. Called both by the
-    ``/commits`` endpoint (manual) and by the auto-commit hook after chat.
-
-    Returns dict with keys: success, commit_hash, status, message_id,
-    files_changed, log_id.
+@app.post("/projects/{project_id}/commits")
+async def commit_and_push(project_id: int, req: CommitRequest):
+    """
+    Commit and push changes via backend API.
+    Finds the latest assistant message in the session and updates it with commit_hash.
     """
     import traceback
 
-    lock = _get_git_lock(project_id)
-    async with lock:
-        with get_db() as conn:
-            project = conn.execute(
-                "SELECT project_path FROM projects WHERE id = ?",
-                (project_id,)
-            ).fetchone()
-            if not project:
-                return {"success": False, "error": f"Project {project_id} not found", "status": "failed"}
-            project_path = project["project_path"]
+    with get_db() as conn:
+        # Get project path
+        project = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
-        try:
-            # Fix dubious ownership: register project as safe directory for root
-            subprocess.run(
-                ["git", "config", "--global", "--add", "safe.directory", project_path],
+        project_path = project["project_path"]
+
+    try:
+        # Fix dubious ownership: register project as safe directory for root.
+        # .git may be owned by 'dreampilot' while this API server runs as root.
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", project_path],
+            capture_output=True, text=True, timeout=10
+        )
+
+        # Git add all changes
+        subprocess.run(
+            ["git", "-C", project_path, "add", "-A"],
+            capture_output=True, text=True, timeout=30
+        )
+
+        # Git commit
+        commit_result = subprocess.run(
+            ["git", "-C", project_path, "commit", "-m", req.message],
+            capture_output=True, text=True, timeout=30
+        )
+        if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stderr:
+            logger.error(f"Git commit failed for project {project_id}: {commit_result.stderr}")
+            return {"success": False, "error": commit_result.stderr, "status": "failed"}
+
+        # Get commit hash
+        hash_result = subprocess.run(
+            ["git", "-C", project_path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10
+        )
+        commit_hash = hash_result.stdout.strip()
+
+        # If nothing was committed, still return the current HEAD
+        if "nothing to commit" in commit_result.stderr:
+            logger.info(f"No changes to commit for project {project_id}, returning current HEAD")
+
+        commit_status = "committed"
+
+        # Push if requested (only if remote 'origin' exists)
+        if req.auto_push:
+            # Check if 'origin' remote is configured
+            remote_result = subprocess.run(
+                ["git", "-C", project_path, "remote"],
                 capture_output=True, text=True, timeout=10
             )
+            has_origin = "origin" in remote_result.stdout.split()
 
-            # Count files changed (before staging)
-            status_result = subprocess.run(
-                ["git", "-C", project_path, "status", "--porcelain"],
-                capture_output=True, text=True, timeout=10
-            )
-            files_changed = len([l for l in status_result.stdout.strip().split("\n") if l.strip()]) if status_result.stdout.strip() else 0
-
-            if files_changed == 0:
-                logger.info(f"[AUTO-COMMIT] No changes detected for project {project_id}, skipping")
-                return {"success": True, "status": "no_changes", "files_changed": 0, "commit_hash": None, "message_id": None, "log_id": None}
-
-            # Git add all changes
-            subprocess.run(
-                ["git", "-C", project_path, "add", "-A"],
-                capture_output=True, text=True, timeout=30
-            )
-
-            # Git commit
-            commit_result = subprocess.run(
-                ["git", "-C", project_path, "commit", "-m", message],
-                capture_output=True, text=True, timeout=30
-            )
-            if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stderr:
-                logger.error(f"Git commit failed for project {project_id}: {commit_result.stderr}")
-                return {"success": False, "error": commit_result.stderr, "status": "failed", "files_changed": files_changed}
-
-            # Get commit hash
-            hash_result = subprocess.run(
-                ["git", "-C", project_path, "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=10
-            )
-            commit_hash = hash_result.stdout.strip()
-
-            commit_status = "committed"
-
-            # Push if requested (only if remote 'origin' exists)
-            if auto_push:
-                remote_result = subprocess.run(
-                    ["git", "-C", project_path, "remote"],
-                    capture_output=True, text=True, timeout=10
+            if has_origin:
+                push_result = subprocess.run(
+                    ["git", "-C", project_path, "push", "origin", "main"],
+                    capture_output=True, text=True, timeout=60
                 )
-                has_origin = "origin" in remote_result.stdout.split()
-
-                if has_origin:
-                    push_result = subprocess.run(
-                        ["git", "-C", project_path, "push", "origin", "main"],
-                        capture_output=True, text=True, timeout=60
-                    )
-                    if push_result.returncode != 0:
-                        logger.error(f"Git push failed for project {project_id}: {push_result.stderr}")
-                        commit_status = "committed"
-                    else:
-                        commit_status = "pushed"
+                if push_result.returncode != 0:
+                    logger.error(f"Git push failed for project {project_id}: {push_result.stderr}")
+                    commit_status = "committed"  # committed but not pushed
                 else:
-                    logger.info(f"No 'origin' remote for project {project_id}, commit stays local")
-                    commit_status = "committed"
+                    commit_status = "pushed"
+            else:
+                logger.info(f"No 'origin' remote for project {project_id}, commit stays local")
+                commit_status = "committed"
 
-            # Update latest assistant message + insert commit_log
-            with get_db() as conn:
-                message_row = conn.execute(
-                    "SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
-                    (session_id,)
-                ).fetchone()
+        # Update the latest assistant message in this session with commit_hash
+        # Also INSERT into commit_log for persistent history (survives session deletion)
+        with get_db() as conn:
+            message_row = conn.execute(
+                "SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+                (req.session_id,)
+            ).fetchone()
 
-                message_id = None
-                if message_row:
-                    message_id = message_row["id"]
-                    conn.execute(
-                        "UPDATE messages SET commit_hash = ?, commit_status = ? WHERE id = ?",
-                        (commit_hash, commit_status, message_id)
-                    )
+            message_id = None
+            if message_row:
+                message_id = message_row["id"]
+                conn.execute(
+                    "UPDATE messages SET commit_hash = ?, commit_status = ? WHERE id = ?",
+                    (commit_hash, commit_status, message_id)
+                )
 
-                log_row = conn.execute(
-                    "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
-                    (project_id, session_id, message_id, commit_hash, message, commit_status)
-                ).fetchone()
-                log_id = log_row["id"] if log_row else None
-                conn.commit()
+            # Dual-write: also persist in commit_log (independent of messages table)
+            conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, ?)",
+                (project_id, req.session_id, message_id, commit_hash, req.message, commit_status)
+            )
+            conn.commit()
+            if message_id:
+                logger.info(f"✓ Updated message {message_id} with commit_hash={commit_hash[:8]}, status={commit_status}")
+            logger.info(f"✓ Inserted commit_log entry for project {project_id}, hash={commit_hash[:8]}")
 
-                if message_id:
-                    logger.info(f"[AUTO-COMMIT] ✓ message {message_id} commit_hash={commit_hash[:8]}, status={commit_status}, {files_changed} files")
-                logger.info(f"[AUTO-COMMIT] ✓ commit_log log_id={log_id}, project={project_id}, hash={commit_hash[:8]}")
+        return {
+            "success": True,
+            "commit_hash": commit_hash,
+            "status": commit_status,
+            "message_id": message_id
+        }
 
-            return {
-                "success": True,
-                "commit_hash": commit_hash,
-                "status": commit_status,
-                "message_id": message_id,
-                "files_changed": files_changed,
-                "log_id": log_id,
-            }
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"Git operation timeout for project {project_id}")
-            return {"success": False, "error": "Git operation timed out", "status": "failed"}
-        except Exception as e:
-            logger.error(f"Commit error for project {project_id}: {e}\n{traceback.format_exc()}")
-            return {"success": False, "error": str(e), "status": "failed"}
-
-
-@app.post("/projects/{project_id}/commits")
-async def commit_and_push(project_id: int, req: CommitRequest):
-    """Commit and push changes via backend API (manual or called by auto-commit)."""
-    result = await _do_git_commit(project_id, req.session_id, req.message, req.auto_push)
-    if not result.get("success"):
-        if result.get("status") == "failed":
-            raise HTTPException(status_code=500, detail=result.get("error", "Commit failed"))
-    return result
+    except subprocess.TimeoutExpired:
+        logger.error(f"Git operation timeout for project {project_id}")
+        return {"success": False, "error": "Git operation timed out", "status": "failed"}
+    except Exception as e:
+        logger.error(f"Commit error for project {project_id}: {e}\n{traceback.format_exc()}")
+        return {"success": False, "error": str(e), "status": "failed"}
 
 
 @app.get("/projects/{project_id}/commits")
@@ -4890,7 +5849,23 @@ async def get_commit_history(project_id: int, limit: int = 20, offset: int = 0):
             (project_id,)
         ).fetchone()["cnt"]
 
-        commits = [dict(row) for row in rows]
+        # Map DB columns to frontend-expected field names
+        commits = []
+        for row in rows:
+            r = dict(row)
+            commits.append({
+                "id": r["id"],
+                "project_id": r["project_id"],
+                "session_id": r.get("session_id"),
+                "message_id": r.get("message_id"),
+                "commit_hash": r["commit_hash"],
+                "commit_message": r["commit_message"],
+                "commit_status": r["status"],
+                "reverted_by": r.get("reverted_by"),
+                "created_at": str(r["created_at"]) if r.get("created_at") else "",
+                "files_changed": 0,
+            })
+
         return {"commits": commits, "total": total, "repo_url": repo_url}
 
 
@@ -4921,122 +5896,238 @@ async def get_commit_log_detail(project_id: int, log_id: int):
         if not row:
             raise HTTPException(status_code=404, detail=f"Commit log entry {log_id} not found")
 
-        return dict(row)
+        r = dict(row)
+        return {
+            "id": r["id"],
+            "project_id": r["project_id"],
+            "session_id": r.get("session_id"),
+            "message_id": r.get("message_id"),
+            "commit_hash": r["commit_hash"],
+            "commit_message": r["commit_message"],
+            "commit_status": r["status"],
+            "reverted_by": r.get("reverted_by"),
+            "created_at": str(r["created_at"]) if r.get("created_at") else "",
+            "files_changed": 0,
+        }
 
 
 @app.get("/projects/{project_id}/commits/log/{log_id}/diff")
-async def get_commit_diff(project_id: int, log_id: int):
-    """
-    Get structured diff for a specific commit.
-    Returns files changed, additions, deletions, and per-file patches.
-    """
-    import re as _re
-
-    # 1. Look up commit_hash from commit_log
+async def get_commit_log_diff(project_id: int, log_id: int):
+    """Get diff details for a specific commit log entry."""
     with get_db() as conn:
         row = conn.execute(
-            "SELECT commit_hash, commit_message FROM commit_log WHERE id = ? AND project_id = ?",
+            "SELECT * FROM commit_log WHERE id = ? AND project_id = ?",
             (log_id, project_id)
         ).fetchone()
 
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Commit log entry {log_id} not found")
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Commit log entry {log_id} not found")
 
-    commit_hash = dict(row)["commit_hash"]
-    if not commit_hash:
-        raise HTTPException(status_code=400, detail="No commit hash associated with this log entry")
+        r = dict(row)
+        commit_hash = r.get("commit_hash", "")
 
-    # 2. Get project path
-    with get_db() as conn:
-        proj = conn.execute(
+        # Try to get the actual git diff if we have a commit hash and project path
+        files_list = []
+        total_additions = 0
+        total_deletions = 0
+
+        proj_row = conn.execute(
             "SELECT project_path FROM projects WHERE id = ?",
             (project_id,)
         ).fetchone()
+        project_path = dict(proj_row)["project_path"] if proj_row else None
 
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
+        if commit_hash and project_path and Path(project_path).exists():
+            try:
+                # Get list of changed files
+                result = subprocess.run(
+                    ["git", "diff", f"{commit_hash}~1", commit_hash, "--stat", "--numstat"],
+                    capture_output=True, text=True, timeout=10,
+                    cwd=project_path
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.strip().split("\n"):
+                        if line and not line.startswith("-") and not line.startswith("Total"):
+                            parts = line.split("\t")
+                            if len(parts) >= 3:
+                                adds = int(parts[0]) if parts[0].isdigit() else 0
+                                dels = int(parts[1]) if parts[1].isdigit() else 0
+                                filename = parts[2]
+                                total_additions += adds
+                                total_deletions += dels
 
-    project_path = dict(proj)["project_path"]
+                                # Get patch for this file
+                                patch_result = subprocess.run(
+                                    ["git", "diff", f"{commit_hash}~1", commit_hash, "--", filename],
+                                    capture_output=True, text=True, timeout=10,
+                                    cwd=project_path
+                                )
+                                patch = patch_result.stdout if patch_result.returncode == 0 else ""
 
-    # 3. Run git show to get diff
-    proc = await asyncio.create_subprocess_exec(
-        "git", "-C", project_path, "show", commit_hash, "--format=", "--no-color",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
+                                files_list.append({
+                                    "filename": filename,
+                                    "status": "modified",
+                                    "additions": adds,
+                                    "deletions": dels,
+                                    "patch": patch,
+                                })
+            except Exception as e:
+                logger.warning(f"git diff failed for commit {commit_hash}: {e}")
 
-    if proc.returncode != 0:
-        raise HTTPException(status_code=500, detail=f"git show failed: {stderr.decode()}")
+        return {
+            "commit_hash": commit_hash,
+            "commit_message": r.get("commit_message", ""),
+            "files": files_list,
+            "total_additions": total_additions,
+            "total_deletions": total_deletions,
+            "total_files": len(files_list),
+        }
 
-    diff_text = stdout.decode(errors="replace")
 
-    # 4. Parse diff into structured format
-    files = []
-    total_additions = 0
-    total_deletions = 0
+def _rebuild_after_rollback(project_id: int, project_path: str, project_name: str) -> dict:
+    """
+    Rebuild and redeploy after a rollback, handling all project types:
+      - Website (type_id=1): buildpublish.py in frontend/ + backend/
+      - Telegram bot (type_id=2): pm2 restart tg-bot-{project_id}
+      - Discord bot (type_id=3): pm2 restart dc-bot-{project_id}
+      - Scheduler (type_id=5): pm2 restart (worker runs in main backend)
 
-    # Split by "diff --git" to get per-file sections
-    file_sections = diff_text.split("diff --git a/")
-    for section in file_sections[1:]:  # Skip first empty section
-        lines = section.split("\n")
-        if not lines:
-            continue
+    Non-fatal: returns status dict but never raises.
+    """
+    base = Path(project_path)
 
-        # Parse filename from first line: "path/to/file b/path/to/file"
-        first_line = lines[0]
-        # Format: "filename b/filename" (for modified) or "filename b/filename" (for added/deleted)
-        parts = first_line.split(" b/")
-        filename = parts[0].strip() if parts else first_line.strip()
+    # --- Determine project type from DB ---
+    project_type_id = None
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT type_id FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+        if row:
+            project_type_id = row["type_id"] if isinstance(row, dict) else row[0]
+    except Exception:
+        pass
 
-        # Determine status from diff headers
-        status = "modified"
-        additions = 0
-        deletions = 0
-        patch_lines = []
+    # Also detect from path as fallback
+    path_str = str(base).replace("\\", "/")
+    if project_type_id is None:
+        if "/telegram/" in path_str:
+            project_type_id = 2
+        elif "/discord/" in path_str:
+            project_type_id = 3
+        elif "/scheduler/" in path_str:
+            project_type_id = 5
+        else:
+            project_type_id = 1  # Default: website
 
-        in_hunk = False
-        for line in lines[1:]:
-            if line.startswith("new file mode"):
-                status = "added"
-            elif line.startswith("deleted file mode"):
-                status = "deleted"
-            elif line.startswith("rename from") or line.startswith("rename to"):
-                status = "renamed"
-            elif line.startswith("@@"):
-                in_hunk = True
-                patch_lines.append(line)
-            elif in_hunk:
-                if line.startswith("+") and not line.startswith("+++"):
-                    additions += 1
-                    patch_lines.append(line)
-                elif line.startswith("-") and not line.startswith("---"):
-                    deletions += 1
-                    patch_lines.append(line)
-                elif line.startswith("\\"):
-                    pass  # "\ No newline at end of file"
-                else:
-                    patch_lines.append(line)
+    logger.info(f"🔄 [ROLLBACK] Rebuilding project {project_id} (type_id={project_type_id})")
 
-        total_additions += additions
-        total_deletions += deletions
+    # ========================================================================
+    # Bot/Scheduler projects (type_id 2, 3, 5) — just restart PM2 process
+    # ========================================================================
+    if project_type_id in (2, 3, 5):
+        if project_type_id == 2:
+            pm2_name = f"tg-bot-{project_id}"
+        elif project_type_id == 3:
+            pm2_name = f"dc-bot-{project_id}"
+        else:
+            # Scheduler — no dedicated PM2 process per project, jobs run in main scheduler
+            logger.info(f"🔄 [ROLLBACK] Scheduler project {project_id} — no PM2 restart needed (jobs managed via DB)")
+            return {
+                "type": "scheduler",
+                "restarted": False,
+                "reason": "Scheduler jobs are DB-driven, no rebuild needed",
+            }
 
-        files.append({
-            "filename": filename,
-            "status": status,
-            "additions": additions,
-            "deletions": deletions,
-            "patch": "\n".join(patch_lines),
-        })
+        logger.info(f"🔄 [ROLLBACK] Restarting PM2 process: {pm2_name}")
+        try:
+            result = subprocess.run(
+                ["pm2", "restart", pm2_name],
+                capture_output=True, text=True, timeout=30,
+            )
+            success = result.returncode == 0
+            return {
+                "type": "bot" if project_type_id in (2, 3) else "scheduler",
+                "pm2_process": pm2_name,
+                "restarted": success,
+                "output": result.stdout[-500:] if result.stdout else "",
+                "error": result.stderr[-300:] if result.stderr and not success else None,
+            }
+        except subprocess.TimeoutExpired:
+            logger.error(f"⏱️ [ROLLBACK] PM2 restart timeout for {pm2_name}")
+            return {"type": "bot", "pm2_process": pm2_name, "restarted": False, "error": "PM2 restart timed out"}
+        except Exception as e:
+            logger.error(f"❌ [ROLLBACK] PM2 restart error for {pm2_name}: {e}")
+            return {"type": "bot", "pm2_process": pm2_name, "restarted": False, "error": str(e)}
 
-    return {
-        "commit_hash": commit_hash,
-        "commit_message": dict(row).get("commit_message", ""),
-        "files": files,
-        "total_additions": total_additions,
-        "total_deletions": total_deletions,
-        "total_files": len(files),
-    }
+    # ========================================================================
+    # Website projects (type_id=1) — buildpublish.py for frontend + backend
+    # ========================================================================
+    rebuild_status = {"type": "website", "frontend": None, "backend": None}
+
+    # --- Frontend rebuild ---
+    frontend_path = base / "frontend"
+    if frontend_path.exists() and (frontend_path / "package.json").exists():
+        cmd_args = ["python3", "buildpublish.py"]
+        logger.info(f"🔄 [ROLLBACK] Rebuilding frontend for project {project_id}")
+        try:
+            result = subprocess.run(
+                cmd_args,
+                cwd=str(frontend_path),
+                capture_output=True,
+                text=True,
+                timeout=900,  # 15 minutes
+            )
+            rebuild_status["frontend"] = {
+                "success": result.returncode == 0,
+                "output": result.stdout[-1000:] if result.stdout else "",
+                "error": result.stderr[-500:] if result.stderr and result.returncode != 0 else None,
+            }
+            if result.returncode == 0:
+                logger.info(f"✅ [ROLLBACK] Frontend rebuild succeeded for project {project_id}")
+            else:
+                logger.error(f"❌ [ROLLBACK] Frontend rebuild failed for project {project_id}: {result.stderr[-300:]}")
+        except subprocess.TimeoutExpired:
+            logger.error(f"⏱️ [ROLLBACK] Frontend rebuild timeout for project {project_id}")
+            rebuild_status["frontend"] = {"success": False, "error": "Timed out (15 min)"}
+        except Exception as e:
+            logger.error(f"❌ [ROLLBACK] Frontend rebuild error for project {project_id}: {e}")
+            rebuild_status["frontend"] = {"success": False, "error": str(e)}
+    else:
+        rebuild_status["frontend"] = {"success": True, "skipped": True, "reason": "No frontend directory"}
+
+    # --- Backend rebuild ---
+    backend_path = base / "backend"
+    if backend_path.exists() and (backend_path / "main.py").exists():
+        cmd_args = ["python3", "buildpublish.py"]
+        logger.info(f"🔧 [ROLLBACK] Rebuilding backend for project {project_id}")
+        try:
+            result = subprocess.run(
+                cmd_args,
+                cwd=str(backend_path),
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 minutes
+            )
+            rebuild_status["backend"] = {
+                "success": result.returncode == 0,
+                "output": result.stdout[-1000:] if result.stdout else "",
+                "error": result.stderr[-500:] if result.stderr and result.returncode != 0 else None,
+            }
+            if result.returncode == 0:
+                logger.info(f"✅ [ROLLBACK] Backend rebuild succeeded for project {project_id}")
+            else:
+                logger.error(f"❌ [ROLLBACK] Backend rebuild failed for project {project_id}: {result.stderr[-300:]}")
+        except subprocess.TimeoutExpired:
+            logger.error(f"⏱️ [ROLLBACK] Backend rebuild timeout for project {project_id}")
+            rebuild_status["backend"] = {"success": False, "error": "Timed out (10 min)"}
+        except Exception as e:
+            logger.error(f"❌ [ROLLBACK] Backend rebuild error for project {project_id}: {e}")
+            rebuild_status["backend"] = {"success": False, "error": str(e)}
+    else:
+        rebuild_status["backend"] = {"success": True, "skipped": True, "reason": "No backend directory"}
+
+    return rebuild_status
 
 
 @app.post("/projects/{project_id}/commits/{message_id}/rollback")
@@ -5050,7 +6141,7 @@ async def rollback_commit(project_id: int, message_id: int):
 
     with get_db() as conn:
         original = conn.execute(
-            "SELECT commit_hash, session_id FROM messages WHERE id = ? AND commit_hash IS NOT NULL AND commit_status = 'pushed'",
+            "SELECT commit_hash, session_id FROM messages WHERE id = ? AND commit_hash IS NOT NULL AND commit_status IN ('pushed', 'committed')",
             (message_id,)
         ).fetchone()
 
@@ -5058,13 +6149,14 @@ async def rollback_commit(project_id: int, message_id: int):
             raise HTTPException(status_code=404, detail=f"No pushed commit found for message {message_id}")
 
         project = conn.execute(
-            "SELECT project_path FROM projects WHERE id = ?",
+            "SELECT name, project_path FROM projects WHERE id = ?",
             (project_id,)
         ).fetchone()
         if not project:
             raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
         project_path = project["project_path"]
+        project_name = project["name"]
         original_hash = original["commit_hash"]
         session_id = original["session_id"]
 
@@ -5114,12 +6206,13 @@ async def rollback_commit(project_id: int, message_id: int):
                 (message_id,)
             )
 
-            revert_msg_row = conn.execute(
+            cursor = conn.execute(
                 """INSERT INTO messages (session_id, role, content, commit_hash, commit_status, reverted_message_id)
-                   VALUES (?, 'assistant', ?, ?, 'pushed', ?) RETURNING id""",
+                   VALUES (?, 'assistant', ?, ?, 'pushed', ?)
+                   RETURNING id""",
                 (session_id, f"Reverted commit {original_hash[:8]}", revert_hash, message_id)
-            ).fetchone()
-            revert_message_id = revert_msg_row["id"] if revert_msg_row else None
+            )
+            revert_message_id = cursor.fetchone()["id"]
 
             # Dual-write: also persist in commit_log
             original_log = conn.execute(
@@ -5127,11 +6220,11 @@ async def rollback_commit(project_id: int, message_id: int):
                 (original_hash, project_id)
             ).fetchone()
 
-            revert_log_row = conn.execute(
+            cursor3 = conn.execute(
                 "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
                 (project_id, session_id, revert_message_id, revert_hash, f"Revert {original_hash[:8]}")
-            ).fetchone()
-            revert_log_id = revert_log_row["id"] if revert_log_row else None
+            )
+            revert_log_id = cursor3.fetchone()["id"]
 
             if original_log:
                 conn.execute(
@@ -5143,12 +6236,16 @@ async def rollback_commit(project_id: int, message_id: int):
 
         logger.info(f"✓ Reverted commit {original_hash[:8]}, message_id={revert_message_id}, log_id={revert_log_id}")
 
+        # Rebuild and redeploy after rollback so the live site reflects the reverted code
+        rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
+
         return {
             "success": True,
             "commit_hash": revert_hash,
             "message_id": revert_message_id,
             "reverted_message_id": message_id,
-            "status": "pushed"
+            "status": "pushed",
+            "rebuild": rebuild_status,
         }
 
     except subprocess.TimeoutExpired:
@@ -5169,21 +6266,22 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
 
     with get_db() as conn:
         original = conn.execute(
-            "SELECT commit_hash, session_id, message_id FROM commit_log WHERE id = ? AND project_id = ? AND status = 'pushed'",
+            "SELECT commit_hash, session_id, message_id FROM commit_log WHERE id = ? AND project_id = ? AND status IN ('pushed', 'committed')",
             (log_id, project_id)
         ).fetchone()
 
         if not original:
-            raise HTTPException(status_code=404, detail=f"No pushed commit found for log_id {log_id}")
+            raise HTTPException(status_code=404, detail=f"No revertable commit found for log_id {log_id} (it may already be reverted or not yet committed)")
 
         project = conn.execute(
-            "SELECT project_path FROM projects WHERE id = ?",
+            "SELECT name, project_path FROM projects WHERE id = ?",
             (project_id,)
         ).fetchone()
         if not project:
             raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
         project_path = project["project_path"]
+        project_name = project["name"]
         original_hash = original["commit_hash"]
         session_id = original["session_id"]
         original_message_id = original["message_id"]
@@ -5235,12 +6333,12 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
                 (log_id,)
             )
 
-            # Insert revert entry into commit_log
-            revert_log_row = conn.execute(
+            # Insert revert entry into commit_log (RETURNING id for PostgreSQL compatibility)
+            cursor = conn.execute(
                 "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
                 (project_id, session_id, original_message_id, revert_hash, f"Revert {original_hash[:8]}")
-            ).fetchone()
-            revert_log_id = revert_log_row["id"] if revert_log_row else None
+            )
+            revert_log_id = cursor.fetchone()["id"]
 
             # Set reverted_by on original
             conn.execute(
@@ -5263,12 +6361,16 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
 
         logger.info(f"✓ Reverted commit {original_hash[:8]} via log_id={log_id}, revert_log_id={revert_log_id}")
 
+        # Rebuild and redeploy after rollback so the live site reflects the reverted code
+        rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
+
         return {
             "success": True,
             "commit_hash": revert_hash,
             "log_id": revert_log_id,
             "reverted_log_id": log_id,
-            "status": "pushed"
+            "status": "pushed",
+            "rebuild": rebuild_status,
         }
 
     except subprocess.TimeoutExpired:
@@ -5293,7 +6395,8 @@ async def rate_limit_middleware(request: Request, call_next):
     # Skip paths that don't need rate limiting
     skip_paths = {
         "/health", "/test", "/docs", "/openapi.json", "/redoc",
-        "/auth/signup", "/auth/login", "/auth/logout",
+        "/auth/signup", "/auth/login", "/auth/logout", "/auth/google",
+        "/auth/verify-email", "/auth/resend-verification",
     }
     path = request.url.path
 
@@ -5371,30 +6474,59 @@ async def get_my_limits(authorization: Optional[str] = Header(None)):
 async def admin_list_users(
     limit: int = 50,
     offset: int = 0,
+    sort: str = "cost",
     authorization: Optional[str] = Header(None)
 ):
-    """List all users with their role and subscription tier. Admin only."""
+    """List all users with their role, subscription tier, and token cost. Admin only.
+
+    sort: 'cost' (default, descending) or 'id' (ascending)
+    """
     user_id = get_user_id_from_token(authorization)
     require_admin(user_id)
 
     with get_db() as conn:
-        users = conn.execute(
-            "SELECT id, email, name, role, subscription_tier, created_at FROM users ORDER BY id LIMIT %s OFFSET %s",
-            (limit, offset)
-        ).fetchall()
+        if sort == "cost":
+            users = conn.execute(
+                """SELECT u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at,
+                       COALESCE(SUM(t.total_tokens), 0) as total_tokens,
+                       COALESCE(SUM(t.cost_usd), 0) as total_cost_usd
+                   FROM users u
+                   LEFT JOIN token_usage t ON t.user_id = u.id
+                   GROUP BY u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at
+                   ORDER BY total_cost_usd DESC NULLS LAST, u.id ASC
+                   LIMIT %s OFFSET %s""",
+                (limit, offset)
+            ).fetchall()
+        else:
+            users = conn.execute(
+                """SELECT u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at,
+                       COALESCE(SUM(t.total_tokens), 0) as total_tokens,
+                       COALESCE(SUM(t.cost_usd), 0) as total_cost_usd
+                   FROM users u
+                   LEFT JOIN token_usage t ON t.user_id = u.id
+                   GROUP BY u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at
+                   ORDER BY u.id ASC
+                   LIMIT %s OFFSET %s""",
+                (limit, offset)
+            ).fetchall()
 
         total = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()
         total_count = total["cnt"] if isinstance(total, dict) else total[0]
 
+    def gv(row, key, idx):
+        return row[key] if isinstance(row, dict) else row[idx]
+
     return {
         "users": [
             {
-                "id": u["id"] if isinstance(u, dict) else u[0],
-                "email": u["email"] if isinstance(u, dict) else u[1],
-                "name": u["name"] if isinstance(u, dict) else u[2],
-                "role": u["role"] if isinstance(u, dict) else u[3],
-                "subscription_tier": u["subscription_tier"] if isinstance(u, dict) else u[4],
-                "created_at": str(u["created_at"]) if isinstance(u, dict) else str(u[5]),
+                "id": gv(u, "id", 0),
+                "email": gv(u, "email", 1),
+                "name": gv(u, "name", 2),
+                "role": gv(u, "role", 3),
+                "subscription_tier": gv(u, "subscription_tier", 4),
+                "created_at": str(gv(u, "created_at", 5)),
+                "total_tokens": gv(u, "total_tokens", 6),
+                "total_cost_usd": float(gv(u, "total_cost_usd", 7) or 0),
             }
             for u in users
         ],
@@ -5701,63 +6833,6 @@ async def get_my_usage(
     if usage_type and usage_type not in VALID_TOKEN_USAGE_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid usage_type. Must be one of: {VALID_TOKEN_USAGE_TYPES}")
     return get_user_usage(user_id=user_id, period=period, usage_type=usage_type)
-
-
-@app.get("/auth/usage/logs")
-async def get_my_usage_logs(
-    usage_type: Optional[str] = None,
-    project_id: Optional[int] = None,
-    limit: int = 50,
-    offset: int = 0,
-    authorization: Optional[str] = Header(None)
-):
-    """
-    Get current user's token usage logs with project name.
-
-    Query params:
-        usage_type: filter by 'ai_chat', 'project_create', 'ai_completion'
-        project_id: filter by specific project
-        limit: max results (default 50, max 200)
-        offset: pagination offset
-
-    Returns:
-        {
-            "logs": [
-                {
-                    "id": 1,
-                    "project_id": 5,
-                    "project_name": "my-website",
-                    "project_type_id": 1,
-                    "usage_type": "project_create",
-                    "description": "Website create: my-website",
-                    "input_tokens": 152689,
-                    "output_tokens": 26038,
-                    "total_tokens": 178727,
-                    "model": "glm-5.1",
-                    "cost_usd": 0.3495,
-                    "created_at": "2026-06-14T12:00:00",
-                    ...
-                },
-            ],
-            "total": 42,
-            "totals": {
-                "total_tokens": 500000,
-                "input_tokens": 350000,
-                "output_tokens": 150000,
-                "cost_usd": 1.2345
-            }
-        }
-    """
-    user_id = get_user_id_from_token(authorization)
-    if usage_type and usage_type not in VALID_TOKEN_USAGE_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid usage_type. Must be one of: {VALID_TOKEN_USAGE_TYPES}")
-    return get_user_usage_logs_with_project(
-        user_id=user_id,
-        usage_type=usage_type,
-        project_id=project_id,
-        limit=min(limit, 200),
-        offset=offset,
-    )
 
 
 @app.get("/projects/{project_id}/usage")
