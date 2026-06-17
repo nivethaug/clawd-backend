@@ -60,9 +60,22 @@ def start_bot_pm2(
             "PROJECT_ID": str(project_id)
         }
 
-        if bot_token:
-            env_vars["DISCORD_TOKEN"] = bot_token
-            logger.info(f"  DISCORD_TOKEN: ***{bot_token[-6:]}")
+        # Read existing .env first so we can fall back to it for the token
+        env_file_path = os.path.join(discord_dir, ".env")
+        existing_env = {}
+        if os.path.exists(env_file_path):
+            with open(env_file_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        existing_env[key] = value
+
+        # Resolve bot token: explicit param > DISCORD_BOT_TOKEN from .env > DISCORD_TOKEN from .env
+        resolved_token = bot_token or existing_env.get("DISCORD_BOT_TOKEN") or existing_env.get("DISCORD_TOKEN")
+        if resolved_token:
+            env_vars["DISCORD_TOKEN"] = resolved_token
+            logger.info(f"  DISCORD_TOKEN: ***{resolved_token[-6:]}")
         else:
             logger.error("DISCORD_TOKEN is required!")
             return False, "DISCORD_TOKEN is required"
@@ -85,15 +98,10 @@ def start_bot_pm2(
             logger.warning(f"Shared venv not found, using current Python: {sys.executable}")
 
         # Read existing .env file and merge
-        env_file_path = os.path.join(discord_dir, ".env")
-        if os.path.exists(env_file_path):
-            with open(env_file_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        key, value = line.split('=', 1)
-                        if key not in env_vars:
-                            env_vars[key] = value
+        if existing_env:
+            for key, value in existing_env.items():
+                if key not in env_vars:
+                    env_vars[key] = value
             logger.info(f"Loaded existing .env: {env_file_path}")
 
         # Write back merged env vars

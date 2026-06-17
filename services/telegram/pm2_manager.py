@@ -61,10 +61,22 @@ def start_bot_pm2(
             "PROJECT_ID": str(project_id)
         }
         
-        # Add bot_token if provided
-        if bot_token:
-            env_vars["BOT_TOKEN"] = bot_token
-            logger.info(f"  BOT_TOKEN: ***{bot_token[-6:]}")
+        # Read existing .env first so we can fall back to it for the token
+        env_file_path = os.path.join(telegram_dir, ".env")
+        existing_env = {}
+        if os.path.exists(env_file_path):
+            with open(env_file_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        existing_env[key] = value
+        
+        # Resolve bot token: explicit param > TELEGRAM_BOT_TOKEN from .env > BOT_TOKEN from .env
+        resolved_token = bot_token or existing_env.get("TELEGRAM_BOT_TOKEN") or existing_env.get("BOT_TOKEN")
+        if resolved_token:
+            env_vars["BOT_TOKEN"] = resolved_token
+            logger.info(f"  BOT_TOKEN: ***{resolved_token[-6:]}")
         else:
             logger.error("❌ BOT_TOKEN is required!")
             return False, "BOT_TOKEN is required"
@@ -90,17 +102,11 @@ def start_bot_pm2(
             interpreter = sys.executable
             logger.warning(f"⚠️ Shared venv not found, using current Python: {sys.executable}")
         
-        # Read existing .env file (created by inject_bot_token) and merge with passed values
-        env_file_path = os.path.join(telegram_dir, ".env")
-        if os.path.exists(env_file_path):
-            # Read existing .env and parse into env_vars
-            with open(env_file_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        key, value = line.split('=', 1)
-                        if key not in env_vars:  # Don't override passed values
-                            env_vars[key] = value
+        # Merge remaining existing .env values
+        if existing_env:
+            for key, value in existing_env.items():
+                if key not in env_vars:  # Don't override passed values
+                    env_vars[key] = value
             logger.info(f"📝 Loaded existing .env: {env_file_path}")
         else:
             # Create .env if it doesn't exist (shouldn't happen normally)
