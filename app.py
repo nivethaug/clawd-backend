@@ -1400,6 +1400,29 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         if source_domain and source_domain != clone_domain:
             _replace_domain_in_configs(clone_path, source_domain, clone_domain)
 
+        # --- Rewrite project.json with clone's metadata (not source's) ---
+        # This covers ALL clone types (website, bot, scheduler).
+        # The scheduler section below adds extra scheduler-specific fields.
+        try:
+            import json as _json
+            from datetime import datetime as _dt
+            project_json_path = os.path.join(clone_path, "project.json")
+            clone_metadata = {
+                "project_id": project_id,
+                "project_name": clone_name,
+                "type_id": source_type_id,
+                "description": description or "",
+                "domain": clone_domain,
+                "status": "provisioning",
+                "created_at": _dt.utcnow().isoformat(),
+                "cloned_from": source_project_id,
+            }
+            with open(project_json_path, "w") as f:
+                _json.dump(clone_metadata, f, indent=2)
+            logger.info(f"[CLONE] Rewrote project.json for clone project {project_id}")
+        except Exception as pj_err:
+            logger.warning(f"[CLONE] Failed to rewrite project.json (non-fatal): {pj_err}")
+
         # --- Type-specific deployment ---
         if source_type_id == 1:
             # Website clone -- full infrastructure provisioning
