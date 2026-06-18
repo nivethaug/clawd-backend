@@ -48,6 +48,13 @@ SYSTEM_KEYS = frozenset({
     "PM2_ID",
     "WEBHOOK_URL",      # set by the deployment pipeline
     "WEBHOOK_SECRET",
+    "WEBHOOK_DOMAIN",
+    "DB_HOST",
+    "DB_PORT",
+    "DB_NAME",
+    "DB_USER",
+    "DB_PASSWORD",
+    "COMMAND_PREFIX",
 })
 
 # Patterns that mark a visible variable as sensitive (masked by default)
