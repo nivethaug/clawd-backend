@@ -153,12 +153,13 @@ def get_dns_instructions(domain: str, project_subdomain: str) -> Dict[str, Any]:
 
     if _is_root_domain(domain):
         return {
+            "record_type": "A",
             "type": "A",
             "host": "@",
             "value": SERVER_IP,
             "records": [
-                {"type": "A", "host": "@", "value": SERVER_IP},
-                {"type": "CNAME", "host": "www", "value": frontend_target},
+                {"type": "A", "host": "@", "value": SERVER_IP, "ttl": "3600"},
+                {"type": "CNAME", "host": "www", "value": frontend_target, "ttl": "3600"},
             ],
             "explanation": f"Point your root domain to the server IP ({SERVER_IP}), "
                            f"and optionally add a CNAME for www.",
@@ -169,11 +170,12 @@ def get_dns_instructions(domain: str, project_subdomain: str) -> Dict[str, Any]:
         parts = domain.split(".")
         host = parts[0]
         return {
+            "record_type": "CNAME",
             "type": "CNAME",
             "host": host,
             "value": frontend_target,
             "records": [
-                {"type": "CNAME", "host": host, "value": frontend_target},
+                {"type": "CNAME", "host": host, "value": frontend_target, "ttl": "3600"},
             ],
             "explanation": f"Create a CNAME record pointing {host} to {frontend_target}.",
         }
