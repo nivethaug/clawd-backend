@@ -24,26 +24,41 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # ============================================================================
 
-# Patterns that mark a variable as sensitive (case-insensitive substring match)
+# Variables managed by DreamAgent infrastructure. These are HIDDEN from users
+# entirely — never returned by GET, never editable. Users only see the
+# variables they explicitly added (integrations + bot credentials).
+SYSTEM_KEYS = frozenset({
+    "PORT",
+    "HOST",
+    "DEBUG",
+    "PROJECT_ID",
+    "PROJECT_NAME",
+    "SECRET_KEY",
+    "DATABASE_URL",
+    # Common infrastructure-managed variants
+    "API_HOST",
+    "API_PORT",
+    "APP_ENV",
+    "NODE_ENV",
+    "PYTHON_ENV",
+    "VITE_API_URL",
+    "CORS_ORIGINS",
+    "RELOAD",
+    "LOG_LEVEL",
+    "PM2_ID",
+    "WEBHOOK_URL",      # set by the deployment pipeline
+    "WEBHOOK_SECRET",
+})
+
+# Patterns that mark a visible variable as sensitive (masked by default)
 SENSITIVE_PATTERNS = [
     "TOKEN",
     "SECRET",
     "KEY",
     "PASSWORD",
-    "DATABASE_URL",
-    "WEBHOOK",
     "PASS",
     "CREDENTIAL",
 ]
-
-# Variables that are managed by the deployment pipeline and must NOT
-# be edited or deleted through this UI. They are shown read-only.
-RESERVED_KEYS = frozenset({
-    "PORT",
-    "HOST",
-    "PROJECT_ID",
-    "PROJECT_NAME",
-})
 
 # Valid env var key format: uppercase letters, digits, underscores only,
 # must start with a letter. Rejects lowercase, hyphens, dots.
@@ -71,9 +86,9 @@ def _is_sensitive(key: str) -> bool:
     return any(p in key_upper for p in SENSITIVE_PATTERNS)
 
 
-def _is_reserved(key: str) -> bool:
-    """Return True if the key is reserved (read-only)."""
-    return key in RESERVED_KEYS
+def _is_system(key: str) -> bool:
+    """Return True if the key is infrastructure-managed and should be hidden."""
+    return key in SYSTEM_KEYS
 
 
 # ============================================================================
@@ -135,10 +150,12 @@ def read_env_file(path: str) -> List[Dict]:
     """
     Parse a .env file into a list of variable dicts.
 
+    Only returns USER-MANAGED variables. Infrastructure/system variables
+    (PORT, HOST, DATABASE_URL, SECRET_KEY, etc.) are hidden entirely.
+
     Returns:
-        List of {key, value, masked, editable} dicts.
+        List of {key, value, masked} dicts.
         - masked=True for sensitive keys (value replaced with '********')
-        - editable=False for reserved keys (PORT, HOST, etc.)
         - Comment lines and blank lines are skipped.
     """
     variables: List[Dict] = []
@@ -169,14 +186,16 @@ def read_env_file(path: str) -> List[Dict]:
                 if not key:
                     continue
 
+                # Hide infrastructure-managed variables completely
+                if _is_system(key):
+                    continue
+
                 sensitive = _is_sensitive(key)
-                reserved = _is_reserved(key)
 
                 variables.append({
                     "key": key,
                     "value": MASKED_VALUE if sensitive else value,
                     "masked": sensitive,
-                    "editable": not reserved,
                 })
     except Exception as e:
         logger.error(f"Failed to read .env at {path}: {e}")
@@ -200,7 +219,7 @@ def validate_keys(updates: Dict[str, str]) -> None:
 
     Rules:
         - Must match ^[A-Z][A-Z0-9_]*$  (rejects lowercase, hyphens, dots)
-        - Must not be a reserved key (PORT, HOST, PROJECT_ID, PROJECT_NAME)
+        - Must not be a system/infrastructure key (hidden from users)
 
     Raises:
         EnvValidationError: With a descriptive message listing all problems.
@@ -213,9 +232,9 @@ def validate_keys(updates: Dict[str, str]) -> None:
                 f"Invalid key '{key}': must be uppercase letters, digits, and "
                 f"underscores only, starting with a letter."
             )
-        elif _is_reserved(key):
+        elif _is_system(key):
             errors.append(
-                f"Reserved key '{key}' cannot be modified (managed by the platform)."
+                f"'{key}' is a system variable managed by the platform and cannot be modified."
             )
 
     if errors:
@@ -323,6 +342,69 @@ def reveal_env_value(path: str, key: str) -> Optional[str]:
                 return v
 
     return None
+
+
+# ============================================================================
+# DELETE
+# ============================================================================
+
+def delete_env_keys(path: str, keys: List[str]) -> int:
+    """
+    Remove specified keys from a .env file.
+
+    - Preserves comments, blank lines, and all other variables.
+    - Refuses to delete system/infrastructure keys (safety check).
+    - Writes atomically via temp file + os.replace.
+    - Sets permissions to 600.
+
+    Args:
+        path: Path to .env file
+        keys: List of keys to remove
+
+    Returns:
+        Number of keys actually removed.
+    """
+    # Safety: never allow deleting system keys
+    keys_to_delete = {k for k in keys if not _is_system(k)}
+    if not keys_to_delete:
+        return 0
+
+    if not os.path.exists(path):
+        return 0
+
+    with open(path, "r", encoding="utf-8") as f:
+        existing_lines = f.readlines()
+
+    removed = 0
+    new_lines: List[str] = []
+
+    for line in existing_lines:
+        stripped = line.strip()
+        if "=" in stripped and not stripped.startswith("#"):
+            key = stripped.split("=", 1)[0].strip()
+            if key in keys_to_delete:
+                removed += 1
+                continue
+        new_lines.append(line)
+
+    # Only write if we actually removed something
+    if removed > 0:
+        tmp_path = path + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+            os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
+            os.replace(tmp_path, path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            raise
+
+    logger.info(f"[ENV] Deleted {removed} variable(s) from {os.path.basename(os.path.dirname(path))}/.env")
+    return removed
 
 
 # ============================================================================

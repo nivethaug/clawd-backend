@@ -2958,7 +2958,6 @@ class EnvVar(BaseModel):
     key: str
     value: str
     masked: bool = False
-    editable: bool = True
 
 
 class EnvVarResponse(BaseModel):
@@ -2978,7 +2977,8 @@ class EnvVarUpdateItem(BaseModel):
 
 class EnvVarUpdateRequest(BaseModel):
     """Request body for PUT /projects/{id}/env"""
-    updates: List[EnvVarUpdateItem]
+    updates: List[EnvVarUpdateItem] = []
+    deleted: List[str] = []
 
 
 class EnvVarUpdateResponse(BaseModel):
@@ -3235,8 +3235,9 @@ async def update_project_env(
     """
     Update environment variables for a project.
 
-    - Validates keys (uppercase + underscores only, not reserved).
+    - Validates keys (uppercase + underscores only, not system keys).
     - Writes atomically to the .env file (preserving comments).
+    - Deletes any keys in the `deleted` list.
     - Restarts the relevant PM2 process.
     """
     user_id = get_user_id_from_token(authorization)
@@ -3256,28 +3257,48 @@ async def update_project_env(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    # Write
-    try:
-        env_manager.write_env_file(env_path, updates)
-    except Exception as e:
-        logger.error(f"Failed to write env for project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to write env file: {str(e)}")
+    # Write updates
+    if updates:
+        try:
+            env_manager.write_env_file(env_path, updates)
+        except Exception as e:
+            logger.error(f"Failed to write env for project {project_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to write env file: {str(e)}")
+
+    # Delete keys
+    deleted_count = 0
+    if request.deleted:
+        try:
+            deleted_count = env_manager.delete_env_keys(env_path, request.deleted)
+        except Exception as e:
+            logger.error(f"Failed to delete env keys for project {project_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to delete env keys: {str(e)}")
 
     # Restart PM2 process
     restart_result = env_manager.restart_project_if_required(project_id, type_id, domain)
     restarted = restart_result.get("success", False)
     restart_message = restart_result.get("message", "")
 
-    # Re-read to return current state
+    # Re-read to return current state (system vars already hidden)
     variables = env_manager.read_env_file(env_path)
 
-    msg = f"Updated {len(updates)} variable(s)."
+    parts = []
+    if updates:
+        parts.append(f"Updated {len(updates)} variable(s)")
+    if deleted_count:
+        parts.append(f"Deleted {deleted_count} variable(s)")
+    if not parts:
+        parts.append("No changes")
+    msg = ". ".join(parts) + "."
     if restarted:
         msg += f" {restart_message}"
     else:
         msg += f" (Warning: {restart_message or 'process not restarted'})"
 
-    logger.info(f"[ENV] User {user_id} updated {len(updates)} vars for project {project_id}")
+    logger.info(
+        f"[ENV] User {user_id} updated {len(updates)} / deleted {deleted_count} "
+        f"vars for project {project_id}"
+    )
 
     return EnvVarUpdateResponse(
         success=True,
