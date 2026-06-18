@@ -1056,7 +1056,7 @@ class NginxConfigurator:
     WILDCARD_SSL_CERT = "/etc/letsencrypt/live/dreambigwithai.com/fullchain.pem"
     WILDCARD_SSL_KEY = "/etc/letsencrypt/live/dreambigwithai.com/privkey.pem"
 
-    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = True, project_path: str = None) -> Tuple[str, str]:
+    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = True, project_path: str = None, additional_domains: list = None) -> Tuple[str, str]:
         """
         Generate nginx configuration for project with wildcard SSL.
 
@@ -1067,6 +1067,9 @@ class NginxConfigurator:
             enable_ssl: Whether to generate SSL config (default: True, uses wildcard cert)
             project_path: Actual project folder path (e.g., "686_test_20260313_142220"). 
                           If not provided, falls back to domain name.
+            additional_domains: List of custom domains (e.g. ["www.clientsite.com"])
+                                to append to server_name. Each must have its own SSL
+                                cert provisioned via certbot beforehand.
 
         Returns:
             Tuple of (frontend_domain, backend_domain, config)
@@ -1080,12 +1083,18 @@ class NginxConfigurator:
             # but domain is like "test778786-7hbrzr"
             website_folder = project_path if project_path else domain
 
+            # Custom domains get appended to server_name as aliases.
+            # These use their own SSL certs (provisioned by certbot), which
+            # is handled by separate server blocks generated below.
+            custom_domains = additional_domains or []
+            extra_server_names = " ".join(custom_domains)
+
             # Always use wildcard SSL certificate for *.dreambigwithai.com
-            config = f"""# Frontend: {frontend_domain}
+            config = f"""# Frontend: {frontend_domain}{' + ' + ', '.join(custom_domains) if custom_domains else ''}
 # HTTP -> HTTPS redirect
 server {{
     listen 80;
-    server_name {frontend_domain};
+    server_name {frontend_domain}{' ' + extra_server_names if extra_server_names else ''};
     return 301 https://$host$request_uri;
 }}
 
@@ -1165,7 +1174,56 @@ server {{
 }}
 """
 
-            logger.info(f"✓ Nginx config generated for {domain} (SSL: wildcard *.dreambigwithai.com)")
+            # ----------------------------------------------------------------
+            # Custom domain server blocks (one per domain with its own SSL)
+            # ----------------------------------------------------------------
+            for cd in custom_domains:
+                cd_cert = f"/etc/letsencrypt/live/{cd}/fullchain.pem"
+                cd_key = f"/etc/letsencrypt/live/{cd}/privkey.pem"
+                config += f"""
+# Custom Domain: {cd} -> {frontend_domain}
+# HTTP -> HTTPS redirect
+server {{
+    listen 80;
+    server_name {cd};
+    return 301 https://$host$request_uri;
+}}
+
+# HTTPS with dedicated SSL for custom domain
+server {{
+    listen 443 ssl;
+    server_name {cd};
+
+    ssl_certificate {cd_cert};
+    ssl_certificate_key {cd_key};
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
+    index index.html;
+
+    location / {{
+        try_files $uri $uri/ /index.html;
+    }}
+
+    location /api/ {{
+        proxy_pass http://127.0.0.1:{backend_port}/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }}
+}}
+"""
+
+            logger.info(f"✓ Nginx config generated for {domain} (SSL: wildcard *.dreambigwithai.com{f', {len(custom_domains)} custom domain(s)' if custom_domains else ''})")
             return (frontend_domain, backend_domain, config)
 
         except Exception as e:
@@ -1313,6 +1371,37 @@ server {{
 
         except Exception as e:
             logger.error(f"Failed to reload nginx: {e}")
+            return False
+
+    def regenerate_with_custom_domains(self, project_subdomain: str, frontend_port: int,
+                                       backend_port: int, project_folder: str,
+                                       custom_domains: list) -> bool:
+        """
+        Regenerate and install nginx config for a project, including any
+        custom (verified) domains.
+
+        Args:
+            project_subdomain: The project's subdomain (e.g. "jurassicgenesis-wssy77")
+            frontend_port: Frontend service port
+            backend_port: Backend service port
+            project_folder: Actual folder name on disk
+            custom_domains: List of verified custom domain names to add
+
+        Returns:
+            True if config was regenerated and nginx reloaded successfully.
+        """
+        try:
+            _, _, config = self.generate_config(
+                project_subdomain,
+                frontend_port,
+                backend_port,
+                project_path=project_folder,
+                additional_domains=custom_domains,
+            )
+            self.install_config(project_subdomain, config)
+            return self.reload_nginx()
+        except Exception as e:
+            logger.error(f"[CUSTOM_DOMAIN] Failed to regenerate nginx for {project_subdomain}: {e}")
             return False
 
     def remove_config(self, project_name: str) -> bool:

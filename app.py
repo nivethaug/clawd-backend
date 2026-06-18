@@ -62,6 +62,7 @@ from services.email_service import send_verification_email
 
 import env_manager
 import env_registry_service
+import custom_domain_service
 
 # AI Chat System
 from api.ai_chat import router as ai_chat_router
@@ -3064,6 +3065,52 @@ class EnvRegistryUpdateRequest(BaseModel):
     is_sensitive: Optional[bool] = None
 
 
+# ---------------------------------------------------------------------------
+# Custom Domain models
+# ---------------------------------------------------------------------------
+
+class DnsRecordInstruction(BaseModel):
+    type: str
+    host: str
+    value: str
+    ttl: str = "3600"
+
+
+class CustomDomainDnsInstructions(BaseModel):
+    record_type: str
+    records: List[DnsRecordInstruction]
+    explanation: str
+
+
+class CustomDomainInfo(BaseModel):
+    id: Optional[int] = None
+    domain: Optional[str] = None
+    status: str = "pending"
+    ssl_status: str = "pending"
+    verified_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class CustomDomainResponse(BaseModel):
+    success: bool = True
+    domain: Optional[CustomDomainInfo] = None
+    dns_instructions: Optional[CustomDomainDnsInstructions] = None
+    message: Optional[str] = None
+    project_subdomain: Optional[str] = None
+
+
+class AddCustomDomainRequest(BaseModel):
+    domain: str
+
+
+class VerifyDomainResponse(BaseModel):
+    success: bool
+    status: str
+    ssl_status: str
+    message: str
+    domain: Optional[str] = None
+
+
 @app.post("/projects/{project_id}/publish/frontend", response_model=BuildPublishResponse)
 async def publish_frontend(project_id: int, request: BuildPublishRequest):
     """
@@ -3506,6 +3553,286 @@ async def reveal_project_env(
         key=request.key,
         value=value,
     )
+
+
+# ---------------------------------------------------------------------------
+# Custom Domain Management
+# ---------------------------------------------------------------------------
+
+def _get_project_for_domain(project_id: int):
+    """Fetch project row for custom-domain operations."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, name, domain, project_path, frontend_port, backend_port, user_id FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+    return row
+
+
+def _normalize_project_row(row):
+    """Normalize project row to a dict (handles both dict and tuple cursors)."""
+    if isinstance(row, dict):
+        return row
+    return {
+        "id": row[0],
+        "name": row[1],
+        "domain": row[2],
+        "project_path": row[3],
+        "frontend_port": row[4],
+        "backend_port": row[5],
+        "user_id": row[6],
+    }
+
+
+@app.get("/projects/{project_id}/custom-domain")
+async def get_custom_domain(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Get the current custom domain for a project and DNS setup instructions.
+    """
+    get_user_id_from_token(authorization)
+
+    row = _get_project_for_domain(project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    project = _normalize_project_row(row)
+
+    project_subdomain = project.get("domain") or project.get("name")
+    domain_info = custom_domain_service.get_project_domain(project_id)
+
+    result = {
+        "success": True,
+        "project_subdomain": project_subdomain,
+    }
+
+    if domain_info:
+        result["domain"] = CustomDomainInfo(
+            id=domain_info.get("id"),
+            domain=domain_info.get("domain"),
+            status=domain_info.get("status", "pending"),
+            ssl_status=domain_info.get("ssl_status", "pending"),
+            verified_at=domain_info.get("verified_at"),
+            created_at=domain_info.get("created_at"),
+        )
+
+        # Always return DNS instructions so the UI can display them
+        dns = custom_domain_service.get_dns_instructions(
+            domain_info["domain"], project_subdomain
+        )
+        result["dns_instructions"] = CustomDomainDnsInstructions(
+            record_type=dns["record_type"],
+            records=[DnsRecordInstruction(**r) for r in dns["records"]],
+            explanation=dns["explanation"],
+        )
+    else:
+        result["domain"] = None
+        result["dns_instructions"] = None
+
+    return result
+
+
+@app.post("/projects/{project_id}/custom-domain", status_code=201)
+async def add_custom_domain(
+    project_id: int,
+    request: AddCustomDomainRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Add a custom domain to a project (one per project).
+    Returns DNS instructions the user must configure.
+    """
+    get_user_id_from_token(authorization)
+
+    row = _get_project_for_domain(project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    project = _normalize_project_row(row)
+
+    project_subdomain = project.get("domain") or project.get("name")
+
+    try:
+        created = custom_domain_service.add_domain(project_id, request.domain.strip())
+    except custom_domain_service.DomainValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except custom_domain_service.DomainConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    dns = custom_domain_service.get_dns_instructions(created["domain"], project_subdomain)
+
+    return {
+        "success": True,
+        "message": "Domain added. Configure the DNS records below, then click Verify.",
+        "domain": CustomDomainInfo(
+            id=created.get("id"),
+            domain=created.get("domain"),
+            status=created.get("status", "pending"),
+            ssl_status=created.get("ssl_status", "pending"),
+            verified_at=created.get("verified_at"),
+            created_at=created.get("created_at"),
+        ),
+        "dns_instructions": CustomDomainDnsInstructions(
+            record_type=dns["record_type"],
+            records=[DnsRecordInstruction(**r) for r in dns["records"]],
+            explanation=dns["explanation"],
+        ),
+        "project_subdomain": project_subdomain,
+    }
+
+
+@app.post("/projects/{project_id}/custom-domain/verify")
+async def verify_custom_domain(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Verify DNS for the project's custom domain, then provision SSL and
+    update the nginx config so the domain goes live.
+    """
+    get_user_id_from_token(authorization)
+
+    row = _get_project_for_domain(project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    project = _normalize_project_row(row)
+
+    project_subdomain = project.get("domain") or project.get("name")
+    domain_info = custom_domain_service.get_project_domain(project_id)
+    if not domain_info:
+        raise HTTPException(
+            status_code=404,
+            detail="No custom domain configured for this project",
+        )
+
+    domain_name = domain_info["domain"]
+    domain_id = domain_info["id"]
+
+    # --- Step 1: DNS verification ---
+    ok, dns_msg = custom_domain_service.verify_dns(domain_name, project_subdomain)
+    if not ok:
+        custom_domain_service.mark_failed(domain_id)
+        return VerifyDomainResponse(
+            success=False,
+            status="failed",
+            ssl_status=domain_info.get("ssl_status", "pending"),
+            message=f"DNS verification failed: {dns_msg}",
+            domain=domain_name,
+        )
+
+    custom_domain_service.mark_verified(domain_id)
+    logger.info(f"[CUSTOM_DOMAIN] DNS verified for {domain_name}")
+
+    # --- Step 2: SSL provisioning via certbot ---
+    ssl_ok, ssl_msg = custom_domain_service.provision_ssl(domain_name)
+    if not ssl_ok:
+        custom_domain_service.mark_failed(domain_id, ssl=True)
+        return VerifyDomainResponse(
+            success=False,
+            status="verified",
+            ssl_status="failed",
+            message=f"DNS verified, but SSL provisioning failed: {ssl_msg}",
+            domain=domain_name,
+        )
+
+    custom_domain_service.mark_ssl_active(domain_id)
+    logger.info(f"[CUSTOM_DOMAIN] SSL provisioned for {domain_name}")
+
+    # --- Step 3: Update nginx config to include the custom domain ---
+    frontend_port = project.get("frontend_port")
+    backend_port = project.get("backend_port")
+    project_path = project.get("project_path", "")
+
+    # Derive folder name from path (e.g. /root/.../686_test_xxx -> 686_test_xxx)
+    project_folder = project_path.rstrip("/").split("/")[-1] if project_path else project_subdomain
+
+    nginx_regen_ok = False
+    if frontend_port and backend_port:
+        try:
+            from infrastructure_manager import NginxConfigurator
+            nginx_cfg = NginxConfigurator()
+            nginx_regen_ok = nginx_cfg.regenerate_with_custom_domains(
+                project_subdomain,
+                frontend_port,
+                backend_port,
+                project_folder,
+                [domain_name],
+            )
+        except Exception as e:
+            logger.error(f"[CUSTOM_DOMAIN] Nginx regen error for {domain_name}: {e}")
+
+    if nginx_regen_ok:
+        custom_domain_service.mark_active(domain_id)
+        return VerifyDomainResponse(
+            success=True,
+            status="active",
+            ssl_status="active",
+            message=f"✅ {domain_name} is now live with SSL!",
+            domain=domain_name,
+        )
+    else:
+        return VerifyDomainResponse(
+            success=False,
+            status="verified",
+            ssl_status="active",
+            message=f"SSL provisioned but nginx config update failed. Domain may not be live yet.",
+            domain=domain_name,
+        )
+
+
+@app.delete("/projects/{project_id}/custom-domain")
+async def remove_custom_domain(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Remove the custom domain from a project and regenerate nginx config
+    (reverting to the default subdomain only).
+    """
+    get_user_id_from_token(authorization)
+
+    row = _get_project_for_domain(project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    project = _normalize_project_row(row)
+
+    domain_info = custom_domain_service.get_project_domain(project_id)
+    if not domain_info:
+        raise HTTPException(
+            status_code=404,
+            detail="No custom domain configured for this project",
+        )
+
+    removed_domain = domain_info["domain"]
+    project_subdomain = project.get("domain") or project.get("name")
+
+    # Remove from DB
+    custom_domain_service.remove_domain(domain_info["id"])
+
+    # Regenerate nginx config without the custom domain
+    frontend_port = project.get("frontend_port")
+    backend_port = project.get("backend_port")
+    project_path = project.get("project_path", "")
+    project_folder = project_path.rstrip("/").split("/")[-1] if project_path else project_subdomain
+
+    if frontend_port and backend_port:
+        try:
+            from infrastructure_manager import NginxConfigurator
+            nginx_cfg = NginxConfigurator()
+            nginx_cfg.regenerate_with_custom_domains(
+                project_subdomain,
+                frontend_port,
+                backend_port,
+                project_folder,
+                [],  # no custom domains
+            )
+        except Exception as e:
+            logger.error(f"[CUSTOM_DOMAIN] Nginx regen error on removal: {e}")
+
+    return {
+        "success": True,
+        "message": f"Custom domain {removed_domain} removed. nginx reverted to {project_subdomain}.{custom_domain_service.BASE_DOMAIN}",
+    }
 
 
 # ---------------------------------------------------------------------------

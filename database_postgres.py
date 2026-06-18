@@ -792,6 +792,33 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added env_variable_registry table with seed data")
 
+            # ----------------------------------------------------------------
+            # custom_domains table
+            # Maps custom customer domains (e.g. www.clientsite.com) to
+            # DreamAgent website projects. One custom domain per project (v1).
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS custom_domains (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                domain VARCHAR(255) NOT NULL UNIQUE,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                ssl_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                verified_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.commit()
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_custom_domains_project "
+                "ON custom_domains(project_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_custom_domains_status "
+                "ON custom_domains(status)"
+            )
+            conn.commit()
+            logger.info("✓ Added custom_domains table with indexes")
+
             logger.info("✓ Database schema initialized")
     finally:
         pool.putconn(conn)
