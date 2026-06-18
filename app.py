@@ -2981,9 +2981,17 @@ class EnvVarResponse(BaseModel):
 
 
 class EnvVarUpdateItem(BaseModel):
-    """A single key/value pair for the update request."""
+    """A single key/value pair for the update request.
+
+    Optional metadata fields (title, description, docs_url) are saved to the
+    env_variable_registry so the UI can show helpful context. If omitted, no
+    registry entry is created.
+    """
     key: str
     value: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    docs_url: Optional[str] = None
 
 
 class EnvVarUpdateRequest(BaseModel):
@@ -3347,6 +3355,35 @@ async def update_project_env(
         except Exception as e:
             logger.error(f"Failed to write env for project {project_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to write env file: {str(e)}")
+
+    # Upsert registry metadata for any update items that include title or
+    # description. This allows users to document their custom variables
+    # without needing admin access. Values themselves stay in .env.
+    for item in request.updates:
+        if item.title or item.description or item.docs_url:
+            try:
+                existing = env_registry_service.get_registry_entry(item.key)
+                if existing:
+                    env_registry_service.update_entry(
+                        existing["id"],
+                        title=item.title or None,
+                        description=item.description or None,
+                        docs_url=item.docs_url or None,
+                    )
+                else:
+                    env_registry_service.create_entry(
+                        key_name=item.key,
+                        title=item.title or item.key.replace("_", " ").title(),
+                        description=item.description,
+                        docs_url=item.docs_url,
+                        category="Custom",
+                        is_sensitive=env_manager._is_sensitive(item.key),
+                    )
+            except Exception as e:
+                # Metadata failures should not block the env write
+                logger.warning(
+                    f"[ENV] Registry upsert failed for key '{item.key}': {e}"
+                )
 
     # Delete keys
     deleted_count = 0
