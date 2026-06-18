@@ -3722,14 +3722,14 @@ async def verify_custom_domain(
     domain_id = domain_info["id"]
 
     # --- Step 1: DNS verification ---
-    ok, dns_msg = custom_domain_service.verify_dns(domain_name, project_subdomain)
-    if not ok:
+    dns_result = custom_domain_service.verify_dns(domain_name, project_subdomain)
+    if not dns_result.get("verified"):
         custom_domain_service.mark_failed(domain_id)
         return VerifyDomainResponse(
             success=False,
             status="failed",
             ssl_status=domain_info.get("ssl_status", "pending"),
-            message=f"DNS verification failed: {dns_msg}",
+            message=f"DNS verification failed: {dns_result.get('detail', 'Unknown error')}",
             domain=domain_name,
         )
 
