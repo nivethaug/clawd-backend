@@ -7,7 +7,7 @@ import logging
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncGenerator, Any, Optional, Dict
+from typing import AsyncGenerator, Any, Optional, Dict, List
 from contextlib import contextmanager
 from dotenv import load_dotenv
 
@@ -59,6 +59,8 @@ from services.token_tracker import (
 )
 
 from services.email_service import send_verification_email
+
+import env_manager
 
 # AI Chat System
 from api.ai_chat import router as ai_chat_router
@@ -2946,6 +2948,60 @@ class BuildPublishResponse(BaseModel):
     output: Optional[str] = None
     error: Optional[str] = None
 
+
+# ---------------------------------------------------------------------------
+# Environment Variable models
+# ---------------------------------------------------------------------------
+
+class EnvVar(BaseModel):
+    """A single environment variable as seen by the client."""
+    key: str
+    value: str
+    masked: bool = False
+    editable: bool = True
+
+
+class EnvVarResponse(BaseModel):
+    """Response for GET /projects/{id}/env"""
+    success: bool = True
+    project_id: int
+    project_name: str
+    type_id: int
+    variables: List[EnvVar]
+
+
+class EnvVarUpdateItem(BaseModel):
+    """A single key/value pair for the update request."""
+    key: str
+    value: str
+
+
+class EnvVarUpdateRequest(BaseModel):
+    """Request body for PUT /projects/{id}/env"""
+    updates: List[EnvVarUpdateItem]
+
+
+class EnvVarUpdateResponse(BaseModel):
+    """Response for PUT /projects/{id}/env"""
+    success: bool
+    message: str
+    restarted: bool = False
+    restart_message: Optional[str] = None
+    variables: List[EnvVar] = []
+
+
+class EnvRevealRequest(BaseModel):
+    """Request body for POST /projects/{id}/env/reveal"""
+    key: str
+
+
+class EnvRevealResponse(BaseModel):
+    """Response for POST /projects/{id}/env/reveal"""
+    success: bool
+    key: str
+    value: Optional[str] = None
+
+
 @app.post("/projects/{project_id}/publish/frontend", response_model=BuildPublishResponse)
 async def publish_frontend(project_id: int, request: BuildPublishRequest):
     """
@@ -3137,6 +3193,152 @@ async def publish_backend(project_id: int, request: BuildPublishRequest):
             success=False,
             message=f"Backend build error: {str(e)}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Environment Variables endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/projects/{project_id}/env", response_model=EnvVarResponse)
+async def get_project_env(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Retrieve all environment variables for a project.
+
+    Returns masked values for sensitive variables. To see the real value,
+    use the /env/reveal endpoint.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    try:
+        env_path, type_id, domain, project_name = env_manager.get_project_env_info(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    variables = env_manager.read_env_file(env_path)
+    return EnvVarResponse(
+        project_id=project_id,
+        project_name=project_name,
+        type_id=type_id,
+        variables=[EnvVar(**v) for v in variables],
+    )
+
+
+@app.put("/projects/{project_id}/env", response_model=EnvVarUpdateResponse)
+async def update_project_env(
+    project_id: int,
+    request: EnvVarUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Update environment variables for a project.
+
+    - Validates keys (uppercase + underscores only, not reserved).
+    - Writes atomically to the .env file (preserving comments).
+    - Restarts the relevant PM2 process.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    # Build updates dict from request items
+    updates = {item.key: item.value for item in request.updates}
+
+    # Validate keys
+    try:
+        env_manager.validate_keys(updates)
+    except env_manager.EnvValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Resolve env path
+    try:
+        env_path, type_id, domain, project_name = env_manager.get_project_env_info(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # Write
+    try:
+        env_manager.write_env_file(env_path, updates)
+    except Exception as e:
+        logger.error(f"Failed to write env for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to write env file: {str(e)}")
+
+    # Restart PM2 process
+    restart_result = env_manager.restart_project_if_required(project_id, type_id, domain)
+    restarted = restart_result.get("success", False)
+    restart_message = restart_result.get("message", "")
+
+    # Re-read to return current state
+    variables = env_manager.read_env_file(env_path)
+
+    msg = f"Updated {len(updates)} variable(s)."
+    if restarted:
+        msg += f" {restart_message}"
+    else:
+        msg += f" (Warning: {restart_message or 'process not restarted'})"
+
+    logger.info(f"[ENV] User {user_id} updated {len(updates)} vars for project {project_id}")
+
+    return EnvVarUpdateResponse(
+        success=True,
+        message=msg,
+        restarted=restarted,
+        restart_message=restart_message,
+        variables=[EnvVar(**v) for v in variables],
+    )
+
+
+@app.post("/projects/{project_id}/env/reveal", response_model=EnvRevealResponse)
+async def reveal_project_env(
+    project_id: int,
+    request: EnvRevealRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Reveal the unmasked value of a single environment variable.
+
+    Security:
+        - Only the project owner can reveal values.
+        - All reveal operations are audit-logged.
+        - The actual value is never logged.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    # Verify project ownership
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT user_id FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    owner_id = project["user_id"] if isinstance(project, dict) else project[0]
+    if owner_id != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the project owner can reveal environment variable values",
+        )
+
+    # Resolve path and reveal
+    try:
+        env_path, _, _, _ = env_manager.get_project_env_info(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    value = env_manager.reveal_env_value(env_path, request.key)
+
+    # Audit log (never logs the actual value)
+    logger.info(
+        f"[ENV-AUDIT] user {user_id} revealed {request.key} for project {project_id}"
+    )
+
+    return EnvRevealResponse(
+        success=value is not None,
+        key=request.key,
+        value=value,
+    )
 
 
 @app.get("/projects/{project_id}/status", response_model=ProjectStatusResponse)

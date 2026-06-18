@@ -1,0 +1,421 @@
+"""
+Environment Variables Manager
+
+Provides read/write/reveal/restart capabilities for project .env files.
+Works for all project types (website, telegram bot, discord bot, scheduler)
+by resolving the correct .env path based on project type_id.
+
+No new database tables. .env files are the single source of truth.
+"""
+
+import os
+import re
+import stat
+import subprocess
+import logging
+from typing import Dict, List, Tuple, Optional
+
+from database_adapter import get_db
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+
+# Patterns that mark a variable as sensitive (case-insensitive substring match)
+SENSITIVE_PATTERNS = [
+    "TOKEN",
+    "SECRET",
+    "KEY",
+    "PASSWORD",
+    "DATABASE_URL",
+    "WEBHOOK",
+    "PASS",
+    "CREDENTIAL",
+]
+
+# Variables that are managed by the deployment pipeline and must NOT
+# be edited or deleted through this UI. They are shown read-only.
+RESERVED_KEYS = frozenset({
+    "PORT",
+    "HOST",
+    "PROJECT_ID",
+    "PROJECT_NAME",
+})
+
+# Valid env var key format: uppercase letters, digits, underscores only,
+# must start with a letter. Rejects lowercase, hyphens, dots.
+KEY_REGEX = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+# Map project type_id -> subdirectory containing the .env file
+ENV_SUBDIR_MAP = {
+    1: "backend",      # website
+    2: "telegram",     # telegram bot
+    3: "discord",      # discord bot
+    5: "scheduler",    # scheduler
+}
+
+# Value returned for masked sensitive variables (never the real value)
+MASKED_VALUE = "********"
+
+
+# ============================================================================
+# HELPERS
+# ============================================================================
+
+def _is_sensitive(key: str) -> bool:
+    """Return True if the key should be masked (contains a sensitive pattern)."""
+    key_upper = key.upper()
+    return any(p in key_upper for p in SENSITIVE_PATTERNS)
+
+
+def _is_reserved(key: str) -> bool:
+    """Return True if the key is reserved (read-only)."""
+    return key in RESERVED_KEYS
+
+
+# ============================================================================
+# PATH RESOLUTION
+# ============================================================================
+
+def get_project_env_info(project_id: int) -> Tuple[str, int, Optional[str], str]:
+    """
+    Resolve the .env file path for a project.
+
+    Args:
+        project_id: Project ID
+
+    Returns:
+        Tuple of (env_path, type_id, domain, project_name)
+
+    Raises:
+        ValueError: If project not found or type unsupported
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT project_path, type_id, domain, name FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+
+    if not row:
+        raise ValueError(f"Project {project_id} not found")
+
+    if isinstance(row, dict):
+        project_path = row["project_path"]
+        type_id = row["type_id"]
+        domain = row.get("domain")
+        project_name = row["name"]
+    else:
+        project_path = row[0]
+        type_id = row[1]
+        domain = row[2]
+        project_name = row[3]
+
+    if not project_path:
+        raise ValueError(f"Project {project_id} has no project_path")
+
+    subdir = ENV_SUBDIR_MAP.get(type_id)
+    if not subdir:
+        raise ValueError(
+            f"Environment variable editing is not supported for type_id={type_id}. "
+            f"Supported types: {list(ENV_SUBDIR_MAP.keys())}"
+        )
+
+    env_path = os.path.join(project_path, subdir, ".env")
+    return env_path, type_id, domain, project_name
+
+
+# ============================================================================
+# READ
+# ============================================================================
+
+def read_env_file(path: str) -> List[Dict]:
+    """
+    Parse a .env file into a list of variable dicts.
+
+    Returns:
+        List of {key, value, masked, editable} dicts.
+        - masked=True for sensitive keys (value replaced with '********')
+        - editable=False for reserved keys (PORT, HOST, etc.)
+        - Comment lines and blank lines are skipped.
+    """
+    variables: List[Dict] = []
+
+    if not os.path.exists(path):
+        return variables
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+
+                # Skip blank lines and comments
+                if not stripped or stripped.startswith("#"):
+                    continue
+
+                if "=" not in stripped:
+                    continue
+
+                key, _, value = stripped.partition("=")
+                key = key.strip()
+                value = value.strip()
+
+                # Remove surrounding quotes if present
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                    value = value[1:-1]
+
+                if not key:
+                    continue
+
+                sensitive = _is_sensitive(key)
+                reserved = _is_reserved(key)
+
+                variables.append({
+                    "key": key,
+                    "value": MASKED_VALUE if sensitive else value,
+                    "masked": sensitive,
+                    "editable": not reserved,
+                })
+    except Exception as e:
+        logger.error(f"Failed to read .env at {path}: {e}")
+        raise
+
+    return variables
+
+
+# ============================================================================
+# VALIDATION
+# ============================================================================
+
+class EnvValidationError(Exception):
+    """Raised when env var keys fail validation."""
+    pass
+
+
+def validate_keys(updates: Dict[str, str]) -> None:
+    """
+    Validate env var keys before writing.
+
+    Rules:
+        - Must match ^[A-Z][A-Z0-9_]*$  (rejects lowercase, hyphens, dots)
+        - Must not be a reserved key (PORT, HOST, PROJECT_ID, PROJECT_NAME)
+
+    Raises:
+        EnvValidationError: With a descriptive message listing all problems.
+    """
+    errors: List[str] = []
+
+    for key in updates:
+        if not KEY_REGEX.match(key):
+            errors.append(
+                f"Invalid key '{key}': must be uppercase letters, digits, and "
+                f"underscores only, starting with a letter."
+            )
+        elif _is_reserved(key):
+            errors.append(
+                f"Reserved key '{key}' cannot be modified (managed by the platform)."
+            )
+
+    if errors:
+        raise EnvValidationError("; ".join(errors))
+
+
+# ============================================================================
+# WRITE (atomic, comment-preserving)
+# ============================================================================
+
+def write_env_file(path: str, updates: Dict[str, str]) -> None:
+    """
+    Merge key=value updates into an existing .env file.
+
+    - Preserves comments and unrelated lines.
+    - Updates existing keys in place.
+    - Appends new keys at the end.
+    - Writes atomically via temp file + os.replace.
+    - Sets permissions to 600 (owner read/write only).
+
+    Args:
+        path: Path to the .env file
+        updates: Dict of {KEY: value} to write
+    """
+    # Read existing lines
+    existing_lines: List[str] = []
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            existing_lines = f.readlines()
+
+    updated_keys = set()
+    new_lines: List[str] = []
+
+    for line in existing_lines:
+        stripped = line.strip()
+        if "=" in stripped and not stripped.startswith("#"):
+            key = stripped.split("=", 1)[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}\n")
+                updated_keys.add(key)
+                continue
+        new_lines.append(line)
+
+    # Append keys not already present
+    appended_any = False
+    for key, val in updates.items():
+        if key not in updated_keys:
+            if not appended_any and new_lines and new_lines[-1].strip():
+                new_lines.append("\n")
+            new_lines.append(f"{key}={val}\n")
+            appended_any = True
+
+    # Atomic write: temp file -> rename
+    dir_name = os.path.dirname(path)
+    tmp_path = path + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+
+        # Set permissions before rename so the final file is correct
+        os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
+
+        os.replace(tmp_path, path)
+    except Exception:
+        # Clean up temp file on failure
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise
+
+    logger.info(f"[ENV] Updated {len(updates)} variable(s) in {os.path.basename(os.path.dirname(path))}/.env")
+
+
+# ============================================================================
+# REVEAL
+# ============================================================================
+
+def reveal_env_value(path: str, key: str) -> Optional[str]:
+    """
+    Read a single env var value unmasked.
+
+    Args:
+        path: Path to .env file
+        key: Variable key to reveal
+
+    Returns:
+        The unmasked value, or None if not found.
+    """
+    if not os.path.exists(path):
+        return None
+
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if "=" not in stripped or stripped.startswith("#"):
+                continue
+            k, _, v = stripped.partition("=")
+            k = k.strip()
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+                v = v[1:-1]
+            if k == key:
+                return v
+
+    return None
+
+
+# ============================================================================
+# RESTART
+# ============================================================================
+
+def restart_project_if_required(
+    project_id: int, type_id: int, domain: Optional[str]
+) -> Dict[str, any]:
+    """
+    Restart the appropriate PM2 process after env changes.
+
+    Dispatches by project type:
+        - type_id=1 (website): restart {domain}-backend
+        - type_id=2 (telegram): restart via telegram pm2_manager
+        - type_id=3 (discord): restart via discord pm2_manager
+        - type_id=5 (scheduler): restart shared clawd-scheduler
+
+    Returns:
+        Dict with {success: bool, message: str, process: str}
+        Non-fatal: if restart fails, returns success=False but does NOT raise.
+    """
+    result: Dict[str, any] = {
+        "success": False,
+        "message": "",
+        "process": "",
+    }
+
+    try:
+        if type_id == 1:
+            # Website backend
+            if not domain:
+                # Fallback to project name based process name
+                result["message"] = "No domain available, cannot restart website backend"
+                return result
+
+            process_name = f"{domain.split('.')[0]}-backend"
+            result["process"] = process_name
+            r = subprocess.run(
+                ["pm2", "restart", process_name],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if r.returncode == 0:
+                result["success"] = True
+                result["message"] = f"Restarted {process_name}"
+            else:
+                result["message"] = f"PM2 restart failed: {r.stderr[:200] if r.stderr else 'unknown'}"
+            return result
+
+        elif type_id == 2:
+            # Telegram bot
+            from services.telegram.pm2_manager import restart_bot_pm2
+            success, msg = restart_bot_pm2(project_id, domain)
+            result["success"] = success
+            result["message"] = msg
+            result["process"] = f"tg-bot-{project_id}"
+            return result
+
+        elif type_id == 3:
+            # Discord bot
+            from services.discord.pm2_manager import restart_bot_pm2
+            success, msg = restart_bot_pm2(project_id)
+            result["success"] = success
+            result["message"] = msg
+            result["process"] = f"dc-bot-{project_id}"
+            return result
+
+        elif type_id == 5:
+            # Scheduler (shared centralized process)
+            result["process"] = "clawd-scheduler"
+            r = subprocess.run(
+                ["pm2", "restart", "clawd-scheduler"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if r.returncode == 0:
+                result["success"] = True
+                result["message"] = "Restarted clawd-scheduler"
+            else:
+                result["message"] = f"PM2 restart failed: {r.stderr[:200] if r.stderr else 'unknown'}"
+            return result
+
+        else:
+            result["message"] = f"No restart logic for type_id={type_id}"
+            return result
+
+    except subprocess.TimeoutExpired:
+        result["message"] = "PM2 restart timed out"
+        return result
+    except Exception as e:
+        logger.error(f"[ENV] Restart failed for project {project_id}: {e}")
+        result["message"] = f"Restart error: {str(e)}"
+        return result
