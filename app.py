@@ -3563,7 +3563,7 @@ def _get_project_for_domain(project_id: int):
     """Fetch project row for custom-domain operations."""
     with get_db() as conn:
         row = conn.execute(
-            "SELECT id, name, domain, project_path, frontend_port, backend_port, user_id FROM projects WHERE id = ?",
+            "SELECT id, name, domain, project_path, frontend_port, backend_port, user_id, type_id FROM projects WHERE id = ?",
             (project_id,),
         ).fetchone()
     return row
@@ -3581,7 +3581,17 @@ def _normalize_project_row(row):
         "frontend_port": row[4],
         "backend_port": row[5],
         "user_id": row[6],
+        "type_id": row[7],
     }
+
+
+def _require_website_project(project: dict):
+    """Raise 403 if the project is not a website (type_id == 1)."""
+    if project.get("type_id") != 1:
+        raise HTTPException(
+            status_code=403,
+            detail="Custom domains are only available for website projects",
+        )
 
 
 @app.get("/projects/{project_id}/custom-domain")
@@ -3598,6 +3608,7 @@ async def get_custom_domain(
     if not row:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
     project = _normalize_project_row(row)
+    _require_website_project(project)
 
     project_subdomain = project.get("domain") or project.get("name")
     domain_info = custom_domain_service.get_project_domain(project_id)
@@ -3649,6 +3660,7 @@ async def add_custom_domain(
     if not row:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
     project = _normalize_project_row(row)
+    _require_website_project(project)
 
     project_subdomain = project.get("domain") or project.get("name")
 
@@ -3696,6 +3708,7 @@ async def verify_custom_domain(
     if not row:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
     project = _normalize_project_row(row)
+    _require_website_project(project)
 
     project_subdomain = project.get("domain") or project.get("name")
     domain_info = custom_domain_service.get_project_domain(project_id)
@@ -3795,6 +3808,7 @@ async def remove_custom_domain(
     if not row:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
     project = _normalize_project_row(row)
+    _require_website_project(project)
 
     domain_info = custom_domain_service.get_project_domain(project_id)
     if not domain_info:
