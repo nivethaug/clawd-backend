@@ -61,6 +61,7 @@ from services.token_tracker import (
 from services.email_service import send_verification_email
 
 import env_manager
+import env_registry_service
 
 # AI Chat System
 from api.ai_chat import router as ai_chat_router
@@ -2958,6 +2959,16 @@ class EnvVar(BaseModel):
     key: str
     value: str
     masked: bool = False
+    # --- Registry metadata (merged from env_variable_registry) ---
+    title: Optional[str] = None
+    description: Optional[str] = None
+    docs_url: Optional[str] = None
+    category: Optional[str] = None
+    # Whether the registry marks this key as sensitive. Falls back to the
+    # masked flag for unknown keys.
+    is_sensitive: Optional[bool] = None
+    # True if metadata was found in the registry for this key
+    has_metadata: bool = False
 
 
 class EnvVarResponse(BaseModel):
@@ -3000,6 +3011,49 @@ class EnvRevealResponse(BaseModel):
     success: bool
     key: str
     value: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Environment Variable Registry models
+# ---------------------------------------------------------------------------
+
+class EnvRegistryEntry(BaseModel):
+    """A single env_variable_registry entry (metadata only)."""
+    id: int
+    key_name: str
+    title: str
+    description: Optional[str] = None
+    docs_url: Optional[str] = None
+    category: str
+    is_sensitive: bool
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class EnvRegistryListResponse(BaseModel):
+    """Response for GET /admin/env-registry"""
+    success: bool = True
+    entries: List[EnvRegistryEntry]
+
+
+class EnvRegistryCreateRequest(BaseModel):
+    """Request body for POST /admin/env-registry"""
+    key_name: str
+    title: str
+    description: Optional[str] = None
+    docs_url: Optional[str] = None
+    category: str = "Custom"
+    is_sensitive: bool = True
+
+
+class EnvRegistryUpdateRequest(BaseModel):
+    """Request body for PUT /admin/env-registry/{id}"""
+    key_name: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    docs_url: Optional[str] = None
+    category: Optional[str] = None
+    is_sensitive: Optional[bool] = None
 
 
 @app.post("/projects/{project_id}/publish/frontend", response_model=BuildPublishResponse)
@@ -3218,11 +3272,40 @@ async def get_project_env(
         raise HTTPException(status_code=404, detail=str(e))
 
     variables = env_manager.read_env_file(env_path)
+
+    # Merge metadata from the env_variable_registry so the UI can display
+    # titles, descriptions, docs links, and categories. Runtime values
+    # still come exclusively from the .env file.
+    try:
+        key_list = [v["key"] for v in variables]
+        registry_lookup = env_registry_service.lookup_many(key_list)
+    except Exception as e:
+        logger.warning(f"[ENV] Registry lookup failed for project {project_id}: {e}")
+        registry_lookup = {}
+
+    enriched: List[EnvVar] = []
+    for v in variables:
+        meta = registry_lookup.get(v["key"])
+        if meta:
+            enriched.append(EnvVar(
+                key=v["key"],
+                value=v["value"],
+                masked=v["masked"],
+                title=meta.get("title"),
+                description=meta.get("description"),
+                docs_url=meta.get("docs_url"),
+                category=meta.get("category"),
+                is_sensitive=meta.get("is_sensitive", v["masked"]),
+                has_metadata=True,
+            ))
+        else:
+            enriched.append(EnvVar(**v))
+
     return EnvVarResponse(
         project_id=project_id,
         project_name=project_name,
         type_id=type_id,
-        variables=[EnvVar(**v) for v in variables],
+        variables=enriched,
     )
 
 
@@ -3282,6 +3365,32 @@ async def update_project_env(
     # Re-read to return current state (system vars already hidden)
     variables = env_manager.read_env_file(env_path)
 
+    # Merge registry metadata for the response
+    try:
+        key_list = [v["key"] for v in variables]
+        registry_lookup = env_registry_service.lookup_many(key_list)
+    except Exception as e:
+        logger.warning(f"[ENV] Registry lookup failed for project {project_id}: {e}")
+        registry_lookup = {}
+
+    enriched_after: List[EnvVar] = []
+    for v in variables:
+        meta = registry_lookup.get(v["key"])
+        if meta:
+            enriched_after.append(EnvVar(
+                key=v["key"],
+                value=v["value"],
+                masked=v["masked"],
+                title=meta.get("title"),
+                description=meta.get("description"),
+                docs_url=meta.get("docs_url"),
+                category=meta.get("category"),
+                is_sensitive=meta.get("is_sensitive", v["masked"]),
+                has_metadata=True,
+            ))
+        else:
+            enriched_after.append(EnvVar(**v))
+
     parts = []
     if updates:
         parts.append(f"Updated {len(updates)} variable(s)")
@@ -3305,7 +3414,7 @@ async def update_project_env(
         message=msg,
         restarted=restarted,
         restart_message=restart_message,
-        variables=[EnvVar(**v) for v in variables],
+        variables=enriched_after,
     )
 
 
@@ -3360,6 +3469,123 @@ async def reveal_project_env(
         key=request.key,
         value=value,
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin: Environment Variable Registry
+# ---------------------------------------------------------------------------
+# These endpoints manage METADATA ONLY (title, description, docs link,
+# category, sensitivity). Runtime values continue to live in .env files.
+
+@app.get("/admin/env-registry", response_model=EnvRegistryListResponse)
+async def admin_list_env_registry(
+    category: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    List all env variable registry entries (metadata only).
+
+    Admin only. Optionally filter by category.
+    """
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    try:
+        entries = env_registry_service.list_registry(category=category)
+    except Exception as e:
+        logger.error(f"[ENV_REGISTRY] list failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list registry entries")
+
+    return EnvRegistryListResponse(
+        entries=[EnvRegistryEntry(**e) for e in entries],
+    )
+
+
+@app.post("/admin/env-registry", response_model=EnvRegistryEntry, status_code=201)
+async def admin_create_env_registry(
+    request: EnvRegistryCreateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Create a new env variable registry entry (metadata only). Admin only."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    try:
+        entry = env_registry_service.create_entry(
+            key_name=request.key_name,
+            title=request.title,
+            description=request.description,
+            docs_url=request.docs_url,
+            category=request.category,
+            is_sensitive=request.is_sensitive,
+        )
+    except env_registry_service.RegistryValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.error(f"[ENV_REGISTRY] create failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create registry entry")
+
+    return EnvRegistryEntry(**entry)
+
+
+@app.put("/admin/env-registry/{entry_id}", response_model=EnvRegistryEntry)
+async def admin_update_env_registry(
+    entry_id: int,
+    request: EnvRegistryUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Update an existing env variable registry entry (metadata only). Admin only."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    try:
+        entry = env_registry_service.update_entry(
+            entry_id,
+            key_name=request.key_name,
+            title=request.title,
+            description=request.description,
+            docs_url=request.docs_url,
+            category=request.category,
+            is_sensitive=request.is_sensitive,
+        )
+    except env_registry_service.RegistryValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.error(f"[ENV_REGISTRY] update failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update registry entry")
+
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Registry entry {entry_id} not found")
+
+    return EnvRegistryEntry(**entry)
+
+
+@app.delete("/admin/env-registry/{entry_id}")
+async def admin_delete_env_registry(
+    entry_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Delete an env variable registry entry (metadata only). Admin only.
+
+    Note: This does NOT modify any .env files — only the metadata entry.
+    """
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    try:
+        deleted = env_registry_service.delete_entry(entry_id)
+    except Exception as e:
+        logger.error(f"[ENV_REGISTRY] delete failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete registry entry")
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Registry entry {entry_id} not found")
+
+    return {"success": True, "message": f"Registry entry {entry_id} deleted"}
 
 
 @app.get("/projects/{project_id}/status", response_model=ProjectStatusResponse)

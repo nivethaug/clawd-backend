@@ -603,6 +603,195 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added token_usage table with indexes")
 
+            # ----------------------------------------------------------------
+            # env_variable_registry table
+            # Stores METADATA ONLY for known environment variables.
+            # Actual runtime values remain in project .env files.
+            # This enables a Vercel/Railway-style env variables UI with
+            # descriptions, docs links, and categories that admins can
+            # manage without code changes.
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS env_variable_registry (
+                id SERIAL PRIMARY KEY,
+                key_name TEXT UNIQUE NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                docs_url TEXT,
+                category VARCHAR(50) NOT NULL DEFAULT 'Custom',
+                is_sensitive BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.commit()
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_env_registry_category "
+                "ON env_variable_registry(category)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_env_registry_key "
+                "ON env_variable_registry(key_name)"
+            )
+            conn.commit()
+
+            # Seed default registry entries (idempotent via ON CONFLICT)
+            default_registry = [
+                # key_name, title, description, docs_url, category, is_sensitive
+                (
+                    "OPENAI_API_KEY",
+                    "OpenAI API Key",
+                    "Used for OpenAI integrations and AI features.",
+                    "https://platform.openai.com/api-keys",
+                    "AI",
+                    True,
+                ),
+                (
+                    "ANTHROPIC_API_KEY",
+                    "Anthropic API Key",
+                    "Used for Anthropic Claude integrations.",
+                    "https://console.anthropic.com/settings/keys",
+                    "AI",
+                    True,
+                ),
+                (
+                    "GROQ_API_KEY",
+                    "Groq API Key",
+                    "Used for Groq inference engine integrations.",
+                    "https://console.groq.com/keys",
+                    "AI",
+                    True,
+                ),
+                (
+                    "SUPABASE_URL",
+                    "Supabase Project URL",
+                    "Used for database and authentication.",
+                    "https://supabase.com/docs",
+                    "Database",
+                    False,
+                ),
+                (
+                    "SUPABASE_ANON_KEY",
+                    "Supabase Anon Key",
+                    "Public anon key for Supabase client access.",
+                    "https://supabase.com/docs/guides/api/api-keys",
+                    "Database",
+                    True,
+                ),
+                (
+                    "SUPABASE_SERVICE_ROLE_KEY",
+                    "Supabase Service Role Key",
+                    "Server-side service role key for Supabase (full access).",
+                    "https://supabase.com/docs/guides/api/api-keys",
+                    "Database",
+                    True,
+                ),
+                (
+                    "STRIPE_SECRET_KEY",
+                    "Stripe Secret Key",
+                    "Used for payment processing.",
+                    "https://dashboard.stripe.com/apikeys",
+                    "Payments",
+                    True,
+                ),
+                (
+                    "STRIPE_WEBHOOK_SECRET",
+                    "Stripe Webhook Secret",
+                    "Used to verify Stripe webhook event signatures.",
+                    "https://stripe.com/docs/webhooks/signatures",
+                    "Payments",
+                    True,
+                ),
+                (
+                    "RESEND_API_KEY",
+                    "Resend API Key",
+                    "Used for transactional email delivery via Resend.",
+                    "https://resend.com/api-keys",
+                    "Email",
+                    True,
+                ),
+                (
+                    "SENDGRID_API_KEY",
+                    "SendGrid API Key",
+                    "Used for email delivery via SendGrid.",
+                    "https://app.sendgrid.com/settings/api_keys",
+                    "Email",
+                    True,
+                ),
+                (
+                    "SMTP_HOST",
+                    "SMTP Host",
+                    "Outgoing mail server hostname.",
+                    "https://en.wikipedia.org/wiki/Simple_Mail_Transfer_Protocol",
+                    "Email",
+                    False,
+                ),
+                (
+                    "SMTP_USER",
+                    "SMTP Username",
+                    "Username for SMTP authentication.",
+                    None,
+                    "Email",
+                    False,
+                ),
+                (
+                    "SMTP_PASSWORD",
+                    "SMTP Password",
+                    "Password for SMTP authentication.",
+                    None,
+                    "Email",
+                    True,
+                ),
+                (
+                    "DISCORD_TOKEN",
+                    "Discord Bot Token",
+                    "Used to connect and run the Discord bot.",
+                    "https://discord.com/developers/applications",
+                    "Bots",
+                    True,
+                ),
+                (
+                    "TELEGRAM_BOT_TOKEN",
+                    "Telegram Bot Token",
+                    "Used to connect and run the Telegram bot.",
+                    "https://core.telegram.org/bots#how-do-i-create-a-bot",
+                    "Bots",
+                    True,
+                ),
+                (
+                    "GITHUB_TOKEN",
+                    "GitHub Personal Access Token",
+                    "Used for GitHub API access and repository operations.",
+                    "https://github.com/settings/tokens",
+                    "Integrations",
+                    True,
+                ),
+                (
+                    "SENTRY_DSN",
+                    "Sentry DSN",
+                    "Used for error monitoring and performance tracing.",
+                    "https://docs.sentry.io/product/sentry-basics/dsn-explainer/",
+                    "Integrations",
+                    False,
+                ),
+                (
+                    "JWT_SECRET",
+                    "JWT Secret",
+                    "Secret key for signing JWT authentication tokens.",
+                    None,
+                    "Integrations",
+                    True,
+                ),
+            ]
+            for entry in default_registry:
+                cur.execute(
+                    """INSERT INTO env_variable_registry
+                       (key_name, title, description, docs_url, category, is_sensitive)
+                       VALUES (%s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (key_name) DO NOTHING""",
+                    entry,
+                )
+            conn.commit()
+            logger.info("✓ Added env_variable_registry table with seed data")
+
             logger.info("✓ Database schema initialized")
     finally:
         pool.putconn(conn)
