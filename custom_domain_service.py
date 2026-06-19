@@ -203,14 +203,18 @@ _server_ip_cache: Optional[str] = None
 
 def _get_server_ip() -> str:
     """
-    Detect this server's public IPv4 address at runtime.
+    Detect this server's actual public IPv4 address at runtime.
+
+    IMPORTANT: We must NOT resolve our own dreambigwithai.com subdomains,
+    because those may be behind a CDN/Varnish. The IP we need is the
+    *origin* server IP that nginx listens on and that Let's Encrypt
+    challenges must reach directly.
 
     Strategy (first hit wins):
-    1. Resolve one of our own known-good DreamAgent subdomains via dig —
-       this is the fastest, most reliable method because it uses the same
-       DNS infrastructure we're already verifying against.
-    2. Query external IP-echo services (ipify, icanhazip, ifconfig.me).
-    3. Fall back to the static default if everything else fails.
+    1. Query external IP-echo services (ipify, icanhazip, ifconfig.me) —
+       these return the IP of the machine making the request, which is
+       the real origin server.
+    2. Fall back to the static default if all lookups fail.
 
     The result is cached for the process lifetime.
     """
@@ -218,23 +222,9 @@ def _get_server_ip() -> str:
     if _server_ip_cache:
         return _server_ip_cache
 
-    # --- Strategy 1: resolve a known DreamAgent subdomain ---
-    # These subdomains are created by infrastructure_manager and point to
-    # this server. If DNS is working, this gives us the authoritative IP
-    # without depending on any third-party service.
-    known_probe_domains = [
-        f"app.{BASE_DOMAIN}",
-        f"www.{BASE_DOMAIN}",
-        BASE_DOMAIN,
-    ]
-    for probe in known_probe_domains:
-        ips = _dig_a_record(probe)
-        if ips:
-            logger.info(f"[CUSTOM_DOMAIN] Server IP from {probe}: {ips[0]}")
-            _server_ip_cache = ips[0]
-            return _server_ip_cache
-
-    # --- Strategy 2: external IP-echo services ---
+    # --- Strategy: external IP-echo services ---
+    # curl -4 forces IPv4. These services report the caller's IP — i.e.
+    # the real server, not any CDN in front of it.
     ipv4_services = [
         "https://api.ipify.org",
         "https://icanhazip.com",
@@ -256,12 +246,94 @@ def _get_server_ip() -> str:
             logger.warning(f"[CUSTOM_DOMAIN] Failed to get IP from {service}: {e}")
             continue
 
-    # --- Strategy 3: fallback ---
+    # --- Fallback ---
     logger.warning(
         f"[CUSTOM_DOMAIN] Could not detect server IP, using fallback {SERVER_IP_FALLBACK}"
     )
     _server_ip_cache = SERVER_IP_FALLBACK
     return _server_ip_cache
+
+
+def _check_http_reachability(domain: str) -> Dict[str, Any]:
+    """
+    Check whether an HTTP request to the domain actually reaches this server.
+
+    Let's Encrypt HTTP-01 challenges require the request to hit OUR nginx,
+    not a CDN/proxy in front. We do a HEAD request and inspect the
+    response headers.
+
+    Returns dict:
+        reachable: bool — True if the response appears to come from our nginx
+        server_header: str — value of the Server header
+        http_code: str — HTTP status code
+        detail: str — human-readable explanation
+    """
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "-w",
+             "%{http_code}|%{redirect_url}", "-I",
+             "--max-time", "10",
+             f"http://{domain}/"],
+            capture_output=True, text=True, timeout=15,
+        )
+
+        # Also capture the Server header separately
+        header_result = subprocess.run(
+            ["curl", "-s", "-I", "--max-time", "10", f"http://{domain}/"],
+            capture_output=True, text=True, timeout=15,
+        )
+
+        server_header = ""
+        http_code = ""
+        for line in header_result.stdout.split("\n"):
+            line_lower = line.lower().strip()
+            if line_lower.startswith("server:"):
+                server_header = line.split(":", 1)[1].strip()
+            if line.startswith("HTTP/"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    http_code = parts[1]
+
+        logger.info(f"[CUSTOM_DOMAIN] HTTP check for {domain}: code={http_code}, Server={server_header or '(none)'}")
+
+        # nginx is the expected server. Varnish, cloudflare, etc. mean the
+        # domain is behind a CDN and Let's Encrypt challenges will fail.
+        is_nginx = "nginx" in server_header.lower()
+
+        if is_nginx:
+            return {
+                "reachable": True,
+                "server_header": server_header,
+                "http_code": http_code,
+                "detail": f"Domain reaches nginx (Server: {server_header})",
+            }
+        else:
+            return {
+                "reachable": False,
+                "server_header": server_header,
+                "http_code": http_code,
+                "detail": (
+                    f"Domain does NOT reach this server — got Server: {server_header or 'unknown'}. "
+                    f"The domain appears to be behind a CDN/proxy. "
+                    f"DNS must point directly to this server's IP ({_get_server_ip()}) for SSL to work."
+                ),
+            }
+    except subprocess.TimeoutExpired:
+        logger.warning(f"[CUSTOM_DOMAIN] HTTP check timed out for {domain}")
+        return {
+            "reachable": False,
+            "server_header": "",
+            "http_code": "",
+            "detail": "HTTP request timed out — domain may not be reachable",
+        }
+    except Exception as e:
+        logger.warning(f"[CUSTOM_DOMAIN] HTTP check failed for {domain}: {e}")
+        return {
+            "reachable": False,
+            "server_header": "",
+            "http_code": "",
+            "detail": f"HTTP check error: {e}",
+        }
 
 
 def _normalize_dns_value(value: str) -> str:
@@ -481,29 +553,59 @@ def provision_ssl(domain: str) -> Dict[str, Any]:
     """
     Run certbot to obtain an SSL certificate for the custom domain.
 
-    Uses `certbot certonly --nginx -d <domain>` (non-interactive).
+    Pre-flight: verifies the domain actually reaches this server's nginx
+    (not a CDN/Varnish) before attempting certbot. Let's Encrypt HTTP-01
+    challenges will fail if traffic is intercepted by a proxy.
+
+    Uses `certbot certonly --nginx -d <domain>` (non-interactive, verbose).
 
     After certbot exits, verifies that the certificate files actually exist
-    on disk before reporting success — this prevents marking SSL as active
-    when certbot silently failed.
+    on disk before reporting success.
 
     Returns:
         Dict with success: bool and message: str.
     """
     import os
 
+    # --- Pre-flight: verify the domain reaches our nginx ---
+    http_check = _check_http_reachability(domain)
+    logger.info(f"[CUSTOM_DOMAIN] Pre-flight HTTP check: {http_check['detail']}")
+
+    if not http_check["reachable"]:
+        logger.error(f"[CUSTOM_DOMAIN] Aborting SSL for {domain}: {http_check['detail']}")
+        return {
+            "success": False,
+            "message": (
+                f"SSL aborted — domain is not pointing to this server. "
+                f"{http_check['detail']} "
+                f"Update your DNS A record to point {domain} directly to "
+                f"{_get_server_ip()} (remove any CDN/proxy), then try again."
+            ),
+        }
+
+    # --- Run certbot with verbose logging ---
     try:
+        cmd = [
+            "certbot", "certonly", "--nginx",
+            "-d", domain,
+            "--non-interactive",
+            "--agree-tos",
+            "--register-unsafely-without-email",
+            "--no-eff-email",
+            "-v",
+        ]
+        logger.info(f"[CUSTOM_DOMAIN] Running certbot: {' '.join(cmd)}")
+
         result = subprocess.run(
-            [
-                "certbot", "certonly", "--nginx",
-                "-d", domain,
-                "--non-interactive",
-                "--agree-tos",
-                "--register-unsafely-without-email",
-                "--no-eff-email",
-            ],
+            cmd,
             capture_output=True, text=True, timeout=120,
         )
+
+        logger.info(f"[CUSTOM_DOMAIN] Certbot exit code: {result.returncode}")
+        if result.stdout:
+            logger.info(f"[CUSTOM_DOMAIN] Certbot stdout: {result.stdout[:1000]}")
+        if result.stderr:
+            logger.info(f"[CUSTOM_DOMAIN] Certbot stderr: {result.stderr[:1000]}")
 
         cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
         key_path = f"/etc/letsencrypt/live/{domain}/privkey.pem"

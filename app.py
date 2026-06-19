@@ -3801,6 +3801,100 @@ async def verify_custom_domain(
         )
 
 
+@app.get("/debug/custom-domain/{project_id}")
+async def debug_custom_domain(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Diagnostic endpoint for troubleshooting custom domain issues.
+
+    Returns complete diagnostics: DNS records, server IP comparison,
+    HTTP reachability check, nginx config existence, and SSL cert status.
+    """
+    get_user_id_from_token(authorization)
+
+    row = _get_project_for_domain(project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    project = _normalize_project_row(row)
+
+    project_subdomain = project.get("domain") or project.get("name")
+    domain_info = custom_domain_service.get_project_domain(project_id)
+    domain_name = domain_info["domain"] if domain_info else None
+
+    expected_cname = f"{project_subdomain}.dreambigwithai.com"
+    expected_ip = custom_domain_service._get_server_ip()
+
+    diagnostics: Dict[str, Any] = {
+        "project": {
+            "id": project_id,
+            "name": project.get("name"),
+            "subdomain": project_subdomain,
+        },
+        "domain": domain_name,
+        "expected_ip": expected_ip,
+        "expected_cname": expected_cname,
+        "ssl_cert_path": f"/etc/letsencrypt/live/{domain_name}/fullchain.pem" if domain_name else None,
+    }
+
+    if not domain_name:
+        diagnostics["verification_result"] = "No custom domain configured"
+        return diagnostics
+
+    # --- DNS lookup ---
+    import subprocess as _sp
+    diagnostics["resolved_cname"] = custom_domain_service._dig_cname(domain_name)
+    diagnostics["resolved_cname_chain"] = custom_domain_service._dig_cname_chain(domain_name)
+    diagnostics["resolved_ips"] = custom_domain_service._dig_a_record(domain_name)
+    diagnostics["dns_ip_match"] = expected_ip in diagnostics["resolved_ips"]
+
+    # --- Full DNS verification ---
+    dns_result = custom_domain_service.verify_dns(domain_name, project_subdomain)
+    diagnostics["dns_verification"] = {
+        "verified": dns_result["verified"],
+        "method": dns_result["method"],
+        "detail": dns_result["detail"],
+    }
+
+    # --- HTTP reachability ---
+    http_check = custom_domain_service._check_http_reachability(domain_name)
+    diagnostics["http_reachability"] = http_check
+
+    # --- nginx config ---
+    import os as _os
+    nginx_conf_path = f"/etc/nginx/sites-enabled/{project_subdomain}.conf"
+    diagnostics["nginx_config_exists"] = _os.path.isfile(nginx_conf_path)
+    if _os.path.isfile(nginx_conf_path):
+        try:
+            nginx_test = _sp.run(
+                ["nginx", "-t"], capture_output=True, text=True, timeout=10,
+            )
+            diagnostics["nginx_valid"] = nginx_test.returncode == 0
+            diagnostics["nginx_test_output"] = (nginx_test.stderr + nginx_test.stdout).strip()
+        except Exception as e:
+            diagnostics["nginx_valid"] = False
+            diagnostics["nginx_test_output"] = f"nginx -t failed: {e}"
+
+    # --- SSL cert files ---
+    cert_path = f"/etc/letsencrypt/live/{domain_name}/fullchain.pem"
+    diagnostics["ssl_cert_exists"] = _os.path.isfile(cert_path)
+
+    # --- Overall verdict ---
+    if diagnostics["dns_verification"]["verified"] and http_check["reachable"]:
+        diagnostics["verification_result"] = "PASS — DNS verified and domain reaches this server"
+    elif diagnostics["dns_verification"]["verified"] and not http_check["reachable"]:
+        diagnostics["verification_result"] = (
+            f"MISLEADING PASS — DNS verification passed but domain does NOT reach this server. "
+            f"Server header: {http_check['server_header']}. "
+            f"The domain is behind a CDN/proxy. DNS must point directly to {expected_ip}."
+        )
+    else:
+        diagnostics["verification_result"] = f"FAIL — {dns_result['detail']}"
+
+    return diagnostics
+
+
 @app.delete("/projects/{project_id}/custom-domain")
 async def remove_custom_domain(
     project_id: int,
