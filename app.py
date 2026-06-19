@@ -3812,7 +3812,12 @@ async def debug_custom_domain(
     Returns complete diagnostics: DNS records, server IP comparison,
     HTTP reachability check, nginx config existence, and SSL cert status.
     """
-    get_user_id_from_token(authorization)
+    # Auth is optional for this debug endpoint — it's read-only diagnostics.
+    if authorization:
+        try:
+            get_user_id_from_token(authorization)
+        except HTTPException:
+            pass  # still allow viewing diagnostics without valid token
 
     row = _get_project_for_domain(project_id)
     if not row:
