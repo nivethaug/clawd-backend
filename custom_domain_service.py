@@ -205,16 +205,36 @@ def _get_server_ip() -> str:
     """
     Detect this server's public IPv4 address at runtime.
 
-    Tries multiple external services (ipify, icanhazip, ifconfig.me) to avoid
-    depending on a hardcoded IP that may drift when the server is re-provisioned.
+    Strategy (first hit wins):
+    1. Resolve one of our own known-good DreamAgent subdomains via dig —
+       this is the fastest, most reliable method because it uses the same
+       DNS infrastructure we're already verifying against.
+    2. Query external IP-echo services (ipify, icanhazip, ifconfig.me).
+    3. Fall back to the static default if everything else fails.
 
-    Returns the detected IP, or falls back to the static default if all lookups
-    fail.
+    The result is cached for the process lifetime.
     """
     global _server_ip_cache
     if _server_ip_cache:
         return _server_ip_cache
 
+    # --- Strategy 1: resolve a known DreamAgent subdomain ---
+    # These subdomains are created by infrastructure_manager and point to
+    # this server. If DNS is working, this gives us the authoritative IP
+    # without depending on any third-party service.
+    known_probe_domains = [
+        f"app.{BASE_DOMAIN}",
+        f"www.{BASE_DOMAIN}",
+        BASE_DOMAIN,
+    ]
+    for probe in known_probe_domains:
+        ips = _dig_a_record(probe)
+        if ips:
+            logger.info(f"[CUSTOM_DOMAIN] Server IP from {probe}: {ips[0]}")
+            _server_ip_cache = ips[0]
+            return _server_ip_cache
+
+    # --- Strategy 2: external IP-echo services ---
     ipv4_services = [
         "https://api.ipify.org",
         "https://icanhazip.com",
@@ -229,13 +249,14 @@ def _get_server_ip() -> str:
             if result.returncode == 0:
                 ip = result.stdout.strip()
                 if "." in ip and ":" not in ip and _is_valid_ip(ip):
-                    logger.info(f"[CUSTOM_DOMAIN] Server IPv4 detected: {ip}")
+                    logger.info(f"[CUSTOM_DOMAIN] Server IPv4 from {service}: {ip}")
                     _server_ip_cache = ip
                     return ip
         except Exception as e:
             logger.warning(f"[CUSTOM_DOMAIN] Failed to get IP from {service}: {e}")
             continue
 
+    # --- Strategy 3: fallback ---
     logger.warning(
         f"[CUSTOM_DOMAIN] Could not detect server IP, using fallback {SERVER_IP_FALLBACK}"
     )
