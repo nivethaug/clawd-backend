@@ -185,20 +185,32 @@ def get_dns_instructions(domain: str, project_subdomain: str) -> Dict[str, Any]:
 # DNS VERIFICATION
 # ============================================================================
 
+def _normalize_dns_name(name: Optional[str]) -> str:
+    """
+    Normalize a DNS name for comparison:
+    - Strip leading/trailing whitespace
+    - Lowercase
+    - Remove trailing dot(s)
+    """
+    if not name:
+        return ""
+    return name.strip().lower().rstrip(".")
+
+
 def _dig_cname(domain: str) -> Optional[str]:
-    """Resolve CNAME for domain using `dig`. Returns target or None."""
+    """Resolve CNAME for domain using `dig`. Returns normalized target or None."""
     try:
         result = subprocess.run(
-            ["dig", "+short", "+time=5", "+tries=1", "CNAME", domain],
+            ["dig", "+short", "+time=5", "+tries=1", "CNAME", _normalize_dns_name(domain)],
             capture_output=True, text=True, timeout=15,
         )
-        output = result.stdout.strip().rstrip(".")
+        output = result.stdout.strip()
         if output:
             # dig may return multiple lines; take the first valid CNAME
             for line in output.split("\n"):
-                line = line.strip().rstrip(".")
+                line = line.strip()
                 if line:
-                    return line
+                    return _normalize_dns_name(line)
         return None
     except Exception as e:
         logger.warning(f"[CUSTOM_DOMAIN] dig CNAME failed for {domain}: {e}")
@@ -209,7 +221,7 @@ def _dig_a_record(domain: str) -> List[str]:
     """Resolve A records for domain using `dig`. Returns list of IPs or empty list."""
     try:
         result = subprocess.run(
-            ["dig", "+short", "+time=5", "+tries=1", "A", domain],
+            ["dig", "+short", "+time=5", "+tries=1", "A", _normalize_dns_name(domain)],
             capture_output=True, text=True, timeout=15,
         )
         output = result.stdout.strip()
@@ -221,13 +233,52 @@ def _dig_a_record(domain: str) -> List[str]:
         return []
 
 
+def _resolve_cname_chain(domain: str, max_hops: int = 10) -> tuple:
+    """
+    Resolve the full CNAME chain starting from `domain`.
+
+    Follows CNAME → CNAME → ... until no more CNAME records are found
+    (or max_hops is reached / a loop is detected).
+
+    Returns:
+        (chain, final_name) where:
+        - chain: list of normalized CNAME targets discovered (in order).
+                 The original `domain` is NOT included.
+        - final_name: the terminal name (end of chain) to use for A-record lookup.
+    """
+    chain: List[str] = []
+    current = _normalize_dns_name(domain)
+    visited: set = set()
+
+    for _ in range(max_hops):
+        if current in visited:
+            logger.debug(f"[CUSTOM_DOMAIN] CNAME loop detected at {current}, stopping")
+            break
+        visited.add(current)
+
+        cname = _dig_cname(current)
+        if not cname:
+            break
+
+        chain.append(cname)
+        current = cname
+
+    return chain, current
+
+
 def verify_dns(domain: str, project_subdomain: str) -> Dict[str, Any]:
     """
     Verify that the domain's DNS points to this project.
 
-    Checks:
-    - CNAME: domain -> project_subdomain.dreambigwithai.com
-    - A record: domain -> SERVER_IP
+    Flexible verification that supports:
+    - Direct CNAME → project subdomain
+    - CNAME chains (e.g. www.example.com → example.com → project.dreambigwithai.com)
+    - DNS flattening / Cloudflare proxy (A record → SERVER_IP with no CNAME)
+    - Registrars that use A records instead of CNAME
+
+    Accepts the domain as verified if EITHER:
+    1. The CNAME chain eventually reaches {project_subdomain}.{BASE_DOMAIN}, OR
+    2. The final resolved IP matches SERVER_IP
 
     Returns dict with:
         verified: bool
@@ -236,51 +287,77 @@ def verify_dns(domain: str, project_subdomain: str) -> Dict[str, Any]:
         cname_target: Optional[str]
         a_records: List[str]
     """
-    expected_cname = f"{project_subdomain}.{BASE_DOMAIN}"
+    expected_cname = _normalize_dns_name(f"{project_subdomain}.{BASE_DOMAIN}")
+    domain_clean = _normalize_dns_name(domain)
 
-    # --- Try CNAME first ---
-    cname_target = _dig_cname(domain)
-    if cname_target:
-        cname_target_clean = cname_target.rstrip(".")
-        if cname_target_clean == expected_cname or cname_target_clean == expected_cname.rstrip("."):
-            logger.info(f"[CUSTOM_DOMAIN] CNAME verified: {domain} -> {cname_target_clean}")
+    # --- Resolve CNAME chain ---
+    cname_chain, final_name = _resolve_cname_chain(domain_clean)
+    actual_cname = cname_chain[0] if cname_chain else None
+
+    # --- Resolve A records ---
+    # From the terminal of the CNAME chain (covers CNAME → A record scenarios)
+    chain_ips = _dig_a_record(final_name) if final_name else []
+    # Also check direct A records on the original domain (DNS flattening / Cloudflare)
+    direct_ips = _dig_a_record(domain_clean)
+    all_ips = list(dict.fromkeys(chain_ips + direct_ips))  # deduplicate, preserve order
+
+    # --- Check 1: CNAME chain reaches expected_cname ---
+    cname_match = expected_cname in cname_chain or final_name == expected_cname
+
+    # --- Check 2: Final resolved IP matches SERVER_IP ---
+    ip_match = SERVER_IP in all_ips
+
+    verified = cname_match or ip_match
+
+    # --- Detailed logging ---
+    logger.info(f"[CUSTOM_DOMAIN] DNS verification for {domain_clean}")
+    logger.info(f"[CUSTOM_DOMAIN]   Expected CNAME: {expected_cname}")
+    logger.info(f"[CUSTOM_DOMAIN]   Actual CNAME: {actual_cname or '(none)'}")
+    if cname_chain:
+        chain_display = " -> ".join([domain_clean] + cname_chain)
+        logger.info(f"[CUSTOM_DOMAIN]   CNAME chain: {chain_display}")
+    logger.info(
+        f"[CUSTOM_DOMAIN]   Resolved IP: {', '.join(all_ips) if all_ips else '(none)'}"
+    )
+    logger.info(f"[CUSTOM_DOMAIN]   Expected Server IP: {SERVER_IP}")
+    logger.info(f"[CUSTOM_DOMAIN]   Verification Result: {'PASS' if verified else 'FAIL'}")
+
+    if verified:
+        if cname_match:
             return {
                 "verified": True,
                 "method": "cname",
-                "detail": f"CNAME points to {expected_cname}",
-                "cname_target": cname_target_clean,
-                "a_records": [],
+                "detail": f"CNAME chain resolves to {expected_cname}",
+                "cname_target": actual_cname,
+                "a_records": all_ips,
             }
-
-    # --- Try A record ---
-    a_records = _dig_a_record(domain)
-    if a_records and SERVER_IP in a_records:
-        logger.info(f"[CUSTOM_DOMAIN] A record verified: {domain} -> {SERVER_IP}")
+        # ip_match
         return {
             "verified": True,
             "method": "a_record",
-            "detail": f"A record points to {SERVER_IP}",
-            "cname_target": cname_target,
-            "a_records": a_records,
+            "detail": f"Domain resolves to server IP {SERVER_IP}",
+            "cname_target": actual_cname,
+            "a_records": all_ips,
         }
 
     # --- Not verified ---
     detail_parts = []
-    if cname_target:
-        detail_parts.append(f"CNAME points to {cname_target} (expected {expected_cname})")
+    if cname_chain:
+        chain_display = " -> ".join(cname_chain)
+        detail_parts.append(f"CNAME chain: {chain_display} (expected to reach {expected_cname})")
     else:
         detail_parts.append(f"No CNAME record found (expected {expected_cname})")
-    if a_records:
-        detail_parts.append(f"A records: {', '.join(a_records)} (expected {SERVER_IP})")
+    if all_ips:
+        detail_parts.append(f"Resolved IPs: {', '.join(all_ips)} (expected {SERVER_IP})")
     else:
-        detail_parts.append(f"No A record found (expected {SERVER_IP})")
+        detail_parts.append(f"No A records resolved (expected {SERVER_IP})")
 
     return {
         "verified": False,
         "method": None,
         "detail": " | ".join(detail_parts),
-        "cname_target": cname_target,
-        "a_records": a_records,
+        "cname_target": actual_cname,
+        "a_records": all_ips,
     }
 
 

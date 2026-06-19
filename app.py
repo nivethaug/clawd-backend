@@ -3089,6 +3089,7 @@ class CustomDomainInfo(BaseModel):
     ssl_status: str = "pending"
     verified_at: Optional[str] = None
     created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class CustomDomainResponse(BaseModel):
@@ -3109,6 +3110,7 @@ class VerifyDomainResponse(BaseModel):
     ssl_status: str
     message: str
     domain: Optional[str] = None
+    checked_at: Optional[str] = None
 
 
 @app.post("/projects/{project_id}/publish/frontend", response_model=BuildPublishResponse)
@@ -3731,6 +3733,7 @@ async def verify_custom_domain(
             ssl_status=domain_info.get("ssl_status", "pending"),
             message=f"DNS verification failed: {dns_result.get('detail', 'Unknown error')}",
             domain=domain_name,
+            checked_at=datetime.now().isoformat(),
         )
 
     custom_domain_service.mark_verified(domain_id)
@@ -3746,6 +3749,7 @@ async def verify_custom_domain(
             ssl_status="failed",
             message=f"DNS verified, but SSL provisioning failed: {ssl_msg}",
             domain=domain_name,
+            checked_at=datetime.now().isoformat(),
         )
 
     custom_domain_service.mark_ssl_active(domain_id)
@@ -3782,6 +3786,7 @@ async def verify_custom_domain(
             ssl_status="active",
             message=f"✅ {domain_name} is now live with SSL!",
             domain=domain_name,
+            checked_at=datetime.now().isoformat(),
         )
     else:
         return VerifyDomainResponse(
@@ -3790,6 +3795,7 @@ async def verify_custom_domain(
             ssl_status="active",
             message=f"SSL provisioned but nginx config update failed. Domain may not be live yet.",
             domain=domain_name,
+            checked_at=datetime.now().isoformat(),
         )
 
 
