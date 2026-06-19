@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 BASE_DOMAIN = "dreambigwithai.com"
-SERVER_IP = "195.200.14.37"
+# Fallback only; real IP is resolved dynamically via _get_server_ip()
+SERVER_IP_FALLBACK = "195.200.14.37"
 
 # Valid statuses
 STATUS_PENDING = "pending"
@@ -155,22 +156,23 @@ def get_dns_instructions(domain: str, project_subdomain: str) -> Dict[str, Any]:
         CNAME www -> project_subdomain.dreambigwithai.com
 
     For root domains (example.com):
-        A @ -> SERVER_IP
+        A @ -> server_ip
         (also recommend CNAME www -> project_subdomain.dreambigwithai.com)
     """
     frontend_target = f"{project_subdomain}.{BASE_DOMAIN}"
+    server_ip = _get_server_ip()
 
     if _is_root_domain(domain):
         return {
             "record_type": "A",
             "type": "A",
             "host": "@",
-            "value": SERVER_IP,
+            "value": server_ip,
             "records": [
-                {"type": "A", "host": "@", "value": SERVER_IP, "ttl": "3600"},
+                {"type": "A", "host": "@", "value": server_ip, "ttl": "3600"},
                 {"type": "CNAME", "host": "www", "value": frontend_target, "ttl": "3600"},
             ],
-            "explanation": f"Point your root domain to the server IP ({SERVER_IP}), "
+            "explanation": f"Point your root domain to the server IP ({server_ip}), "
                            f"and optionally add a CNAME for www.",
         }
     else:
@@ -193,6 +195,53 @@ def get_dns_instructions(domain: str, project_subdomain: str) -> Dict[str, Any]:
 # ============================================================================
 # DNS VERIFICATION
 # ============================================================================
+
+# Cache the dynamically-detected server IP so we only query external services
+# once per process lifetime.
+_server_ip_cache: Optional[str] = None
+
+
+def _get_server_ip() -> str:
+    """
+    Detect this server's public IPv4 address at runtime.
+
+    Tries multiple external services (ipify, icanhazip, ifconfig.me) to avoid
+    depending on a hardcoded IP that may drift when the server is re-provisioned.
+
+    Returns the detected IP, or falls back to the static default if all lookups
+    fail.
+    """
+    global _server_ip_cache
+    if _server_ip_cache:
+        return _server_ip_cache
+
+    ipv4_services = [
+        "https://api.ipify.org",
+        "https://icanhazip.com",
+        "https://ifconfig.me/ip",
+    ]
+    for service in ipv4_services:
+        try:
+            result = subprocess.run(
+                ["curl", "-4", "-s", service],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                ip = result.stdout.strip()
+                if "." in ip and ":" not in ip and _is_valid_ip(ip):
+                    logger.info(f"[CUSTOM_DOMAIN] Server IPv4 detected: {ip}")
+                    _server_ip_cache = ip
+                    return ip
+        except Exception as e:
+            logger.warning(f"[CUSTOM_DOMAIN] Failed to get IP from {service}: {e}")
+            continue
+
+    logger.warning(
+        f"[CUSTOM_DOMAIN] Could not detect server IP, using fallback {SERVER_IP_FALLBACK}"
+    )
+    _server_ip_cache = SERVER_IP_FALLBACK
+    return _server_ip_cache
+
 
 def _normalize_dns_value(value: str) -> str:
     """Normalize a DNS value: lowercase, strip whitespace, remove trailing dot."""
@@ -300,7 +349,7 @@ def verify_dns(domain: str, project_subdomain: str) -> Dict[str, Any]:
         expected_ip: str
     """
     expected_cname = _normalize_dns_value(f"{project_subdomain}.{BASE_DOMAIN}")
-    expected_ip = SERVER_IP
+    expected_ip = _get_server_ip()
 
     logger.info(f"[CUSTOM_DOMAIN] === Verifying DNS for {domain} ===")
     logger.info(f"[CUSTOM_DOMAIN] Expected CNAME: {expected_cname}")
