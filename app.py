@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import AsyncGenerator, Any, Optional, Dict, List
 from contextlib import contextmanager
 from dotenv import load_dotenv
+from urllib.parse import quote
 
 # Load environment variables from .env file
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, Body, Header
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +30,8 @@ from file_utils import FileUtils
 from completion_service import CompletionService
 from claude_code_worker import run_claude_code_background
 from github_service import get_github_service
+import github_oauth_service
+import github_export_service
 from services.session_lock_service import SessionLockService
 from services.rate_limiter import (
     rate_limit,
@@ -6018,6 +6021,191 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
             )
 
 
+# ============================================================================
+# GITHUB OAUTH (per-user connection for Export-to-GitHub)
+# ============================================================================
+
+
+class GitHubExportRequest(BaseModel):
+    repo_name: str
+    private: bool = False
+
+
+@app.get("/auth/github/url")
+async def github_oauth_url(authorization: Optional[str] = Header(None)):
+    """
+    Return the GitHub OAuth authorize URL for the current user.
+    The frontend opens this in a new tab/popup. The `state` carries the
+    user_id so the callback knows which user to save the token for.
+    """
+    user_id = get_user_id_from_token(authorization)
+    try:
+        state = f"{user_id}:{secrets.token_hex(8)}"
+        url = github_oauth_service.build_authorize_url(state=state)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"url": url, "state": state}
+
+
+@app.get("/auth/github/callback")
+async def github_oauth_callback(
+    code: str,
+    state: str,
+    error: Optional[str] = None,
+):
+    """
+    GitHub redirects here after the user authorizes. We exchange the code
+    for an access token, save it against the user encoded in `state`, then
+    redirect to the frontend with a success flag.
+    """
+    frontend_url = (os.getenv("FRONTEND_URL") or "").strip() or "https://dreamagent.cloud"
+
+    if error:
+        return RedirectResponse(
+            url=f"{frontend_url}/auth/github/callback?github_error={quote(error)}",
+        )
+
+    # Decode user_id from state
+    try:
+        user_id_str = state.split(":", 1)[0]
+        user_id = int(user_id_str)
+    except (ValueError, AttributeError):
+        return RedirectResponse(
+            url=f"{frontend_url}/auth/github/callback?github_error=invalid_state",
+        )
+
+    try:
+        token_data = await github_oauth_service.exchange_code(code)
+        user_info = await github_oauth_service.get_user_info(token_data["access_token"])
+        github_oauth_service.save_github_connection(
+            user_id=user_id,
+            access_token=token_data["access_token"],
+            scope=token_data.get("scope", "repo"),
+            username=user_info["login"],
+            avatar_url=user_info.get("avatar_url"),
+        )
+    except RuntimeError as e:
+        return RedirectResponse(
+            url=f"{frontend_url}/auth/github/callback?github_error={quote(str(e))}",
+        )
+
+    return RedirectResponse(
+        url=f"{frontend_url}/auth/github/callback?github_connected=true&github_user={quote(user_info['login'])}",
+    )
+
+
+@app.get("/auth/github/status")
+async def github_oauth_status(authorization: Optional[str] = Header(None)):
+    """Return the current user's GitHub connection status (no raw token)."""
+    user_id = get_user_id_from_token(authorization)
+    return github_oauth_service.public_status(user_id)
+
+
+@app.delete("/auth/github/disconnect")
+async def github_oauth_disconnect(authorization: Optional[str] = Header(None)):
+    """Disconnect the current user's GitHub account."""
+    user_id = get_user_id_from_token(authorization)
+    github_oauth_service.disconnect_github(user_id)
+    return {"success": True, "message": "GitHub account disconnected"}
+
+
+# ============================================================================
+# GITHUB EXPORT (push a clean copy of a project to the user's GitHub repo)
+# ============================================================================
+
+
+@app.post("/projects/{project_id}/github-export")
+async def github_export_project(
+    project_id: int,
+    request: GitHubExportRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Export a filtered copy of a project to the user's own GitHub repository.
+
+    Flow:
+      1. Verify user has a GitHub connection.
+      2. Resolve project path + type.
+      3. Build a clean temp copy (secrets + DreamAgent internals removed).
+      4. Generate .gitignore, .env.example, README.md.
+      5. Create a new repo via the GitHub API and push the files.
+      6. Clean up the temp directory.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    access_token = github_oauth_service.get_user_access_token(user_id)
+    if not access_token:
+        raise HTTPException(
+            status_code=403,
+            detail="GitHub account not connected. Connect your GitHub account first.",
+        )
+
+    # Fetch project (verify ownership + read path/type)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, name, project_path, type_id, user_id FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    project = _normalize_project_row(row) if not isinstance(row, dict) else row
+    if str(project.get("user_id")) != str(user_id):
+        raise HTTPException(status_code=403, detail="You do not own this project")
+
+    project_path = project.get("project_path")
+    type_id = project.get("type_id") or 1
+    project_name = project.get("name") or f"project-{project_id}"
+
+    if not project_path or not os.path.isdir(project_path):
+        raise HTTPException(
+            status_code=400,
+            detail="Project directory not found on disk. Cannot export.",
+        )
+
+    repo_name = github_export_service.sanitize_repo_name(request.repo_name)
+
+    # 1. Prepare filtered copy + generated artifacts
+    try:
+        export_dir = github_export_service.prepare_export_directory(
+            project_path=project_path,
+            type_id=type_id,
+            project_name=project_name,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Export preparation failed for project %s", project_id)
+        raise HTTPException(status_code=500, detail=f"Export preparation failed: {e}")
+
+    # 2. Create repo + push files
+    try:
+        result = github_export_service.create_repo_and_push(
+            access_token=access_token,
+            repo_name=repo_name,
+            private=request.private,
+            export_dir=export_dir,
+            description=f"{project_name} — exported from DreamAgent",
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logger.exception("GitHub push failed for project %s", project_id)
+        raise HTTPException(status_code=500, detail=f"GitHub push failed: {e}")
+    finally:
+        github_export_service.cleanup_export_directory(export_dir)
+
+    return {
+        "success": True,
+        "repo_url": result["repo_url"],
+        "repo_full_name": result.get("repo_full_name"),
+        "commit_sha": result.get("commit_sha"),
+        "file_count": result.get("file_count"),
+        "message": f"Exported {result.get('file_count', 0)} files to {result['repo_url']}",
+    }
+
+
 @app.get("/health")
 async def health_check():
     return {
@@ -7380,6 +7568,7 @@ async def rate_limit_middleware(request: Request, call_next):
         "/health", "/test", "/docs", "/openapi.json", "/redoc",
         "/auth/signup", "/auth/login", "/auth/logout", "/auth/google",
         "/auth/verify-email", "/auth/resend-verification",
+        "/auth/github/callback",
     }
     path = request.url.path
 

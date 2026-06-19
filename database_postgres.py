@@ -207,6 +207,27 @@ def init_schema():
                 )
             _run_migration(migrate_verification_token)
 
+            # GitHub OAuth connection columns (per-user GitHub Export feature)
+            def migrate_github_username():
+                cur.execute("ALTER TABLE users ADD COLUMN github_username VARCHAR(255)")
+            _run_migration(migrate_github_username)
+
+            def migrate_github_access_token():
+                cur.execute("ALTER TABLE users ADD COLUMN github_access_token TEXT")
+            _run_migration(migrate_github_access_token)
+
+            def migrate_github_token_scope():
+                cur.execute("ALTER TABLE users ADD COLUMN github_token_scope VARCHAR(255)")
+            _run_migration(migrate_github_token_scope)
+
+            def migrate_github_connected_at():
+                cur.execute("ALTER TABLE users ADD COLUMN github_connected_at TIMESTAMP")
+            _run_migration(migrate_github_connected_at)
+
+            def migrate_github_avatar_url():
+                cur.execute("ALTER TABLE users ADD COLUMN github_avatar_url TEXT")
+            _run_migration(migrate_github_avatar_url)
+
             # Ensure existing users have correct defaults
             try:
                 cur.execute(
