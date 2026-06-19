@@ -1180,7 +1180,13 @@ server {{
             for cd in custom_domains:
                 cd_cert = f"/etc/letsencrypt/live/{cd}/fullchain.pem"
                 cd_key = f"/etc/letsencrypt/live/{cd}/privkey.pem"
-                config += f"""
+                # Safety: skip SSL block if the cert doesn't exist yet to
+                # avoid an nginx config-test failure that takes the whole
+                # site down. Only the HTTP redirect is emitted in that case.
+                import os as _os
+                cd_has_ssl = _os.path.isfile(cd_cert) and _os.path.isfile(cd_key)
+                if cd_has_ssl:
+                    config += f"""
 # Custom Domain: {cd} -> {frontend_domain}
 # HTTP -> HTTPS redirect
 server {{
@@ -1219,6 +1225,34 @@ server {{
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+    }}
+}}
+"""
+                else:
+                    # No SSL cert yet — serve over HTTP only (nginx test won't fail)
+                    config += f"""
+# Custom Domain: {cd} -> {frontend_domain}
+# SSL certificate not available yet — HTTP only
+server {{
+    listen 80;
+    server_name {cd};
+
+    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
+    index index.html;
+
+    location / {{
+        try_files $uri $uri/ /index.html;
+    }}
+
+    location /api/ {{
+        proxy_pass http://127.0.0.1:{backend_port}/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
     }}
 }}
 """

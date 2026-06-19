@@ -3740,7 +3740,9 @@ async def verify_custom_domain(
     logger.info(f"[CUSTOM_DOMAIN] DNS verified for {domain_name}")
 
     # --- Step 2: SSL provisioning via certbot ---
-    ssl_ok, ssl_msg = custom_domain_service.provision_ssl(domain_name)
+    ssl_result = custom_domain_service.provision_ssl(domain_name)
+    ssl_ok = ssl_result.get("success", False)
+    ssl_msg = ssl_result.get("message", "")
     if not ssl_ok:
         custom_domain_service.mark_failed(domain_id, ssl=True)
         return VerifyDomainResponse(

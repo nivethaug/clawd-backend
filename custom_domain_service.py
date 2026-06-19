@@ -481,11 +481,17 @@ def provision_ssl(domain: str) -> Dict[str, Any]:
     """
     Run certbot to obtain an SSL certificate for the custom domain.
 
-    Uses `certbot --nginx -d <domain>` (non-interactive, expanded).
+    Uses `certbot certonly --nginx -d <domain>` (non-interactive).
+
+    After certbot exits, verifies that the certificate files actually exist
+    on disk before reporting success — this prevents marking SSL as active
+    when certbot silently failed.
 
     Returns:
         Dict with success: bool and message: str.
     """
+    import os
+
     try:
         result = subprocess.run(
             [
@@ -499,12 +505,20 @@ def provision_ssl(domain: str) -> Dict[str, Any]:
             capture_output=True, text=True, timeout=120,
         )
 
-        if result.returncode == 0:
-            logger.info(f"[CUSTOM_DOMAIN] SSL certificate obtained for {domain}")
-            return {"success": True, "message": "SSL certificate obtained"}
-        else:
-            logger.error(f"[CUSTOM_DOMAIN] Certbot failed for {domain}: {result.stderr[:500]}")
-            return {"success": False, "message": f"Certbot failed: {result.stderr[:300]}"}
+        cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
+        key_path = f"/etc/letsencrypt/live/{domain}/privkey.pem"
+
+        # Certbot may report success (returncode 0) but still fail challenges.
+        # Verify the cert files actually exist before trusting the result.
+        if result.returncode != 0 or not os.path.isfile(cert_path) or not os.path.isfile(key_path):
+            stderr_snippet = (result.stderr or "")[:500]
+            stdout_snippet = (result.stdout or "")[:300]
+            detail = stderr_snippet or stdout_snippet or "Unknown certbot failure"
+            logger.error(f"[CUSTOM_DOMAIN] Certbot failed for {domain}: {detail}")
+            return {"success": False, "message": f"Certbot failed: {detail.strip()}"}
+
+        logger.info(f"[CUSTOM_DOMAIN] SSL certificate obtained for {domain}")
+        return {"success": True, "message": "SSL certificate obtained"}
     except FileNotFoundError:
         logger.error("[CUSTOM_DOMAIN] certbot not installed on server")
         return {"success": False, "message": "certbot is not installed on the server"}
