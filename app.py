@@ -5,6 +5,8 @@ import shutil
 import re
 import logging
 import subprocess
+import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator, Any, Optional, Dict, List
@@ -16,7 +18,7 @@ from urllib.parse import quote
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, Body, Header
-from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse
+from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +34,7 @@ from claude_code_worker import run_claude_code_background
 from github_service import get_github_service
 import github_oauth_service
 import github_export_service
+import export_service
 from services.session_lock_service import SessionLockService
 from services.rate_limiter import (
     rate_limit,
@@ -6204,6 +6207,104 @@ async def github_export_project(
         "file_count": result.get("file_count"),
         "message": f"Exported {result.get('file_count', 0)} files to {result['repo_url']}",
     }
+
+
+@app.get("/projects/{project_id}/download")
+async def download_project_zip(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Download a filtered ZIP archive of a project.
+
+    Uses the SAME filtering logic as ``/projects/{id}/github-export``
+    (via ``export_service.prepare_export_directory``) so the archive is
+    safe to upload directly to GitHub: no ``.env``, no secrets, no
+    DreamAgent internals. Includes generated ``.gitignore``,
+    ``.env.example``, and ``README.md``.
+
+    Returns:
+        ``application/zip`` file stream with ``Content-Disposition`` set
+        to ``attachment; filename="<project-name>.zip"``.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    # Fetch project (verify ownership + read path/type)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, name, project_path, type_id, user_id FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    project = _normalize_project_row(row) if not isinstance(row, dict) else row
+    if str(project.get("user_id")) != str(user_id):
+        raise HTTPException(status_code=403, detail="You do not own this project")
+
+    project_path = project.get("project_path")
+    type_id = project.get("type_id") or 1
+    project_name = project.get("name") or f"project-{project_id}"
+
+    if not project_path or not os.path.isdir(project_path):
+        raise HTTPException(
+            status_code=400,
+            detail="Project directory not found on disk. Cannot download.",
+        )
+
+    # 1. Prepare filtered copy + generated artifacts (same as GitHub Export)
+    try:
+        export_dir = export_service.prepare_export_directory(
+            project_path=project_path,
+            type_id=type_id,
+            project_name=project_name,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Export preparation failed for project %s", project_id)
+        raise HTTPException(status_code=500, detail=f"Export preparation failed: {e}")
+
+    # 2. Zip the filtered directory
+    safe_name = github_export_service.sanitize_repo_name(project_name)
+    zip_path = os.path.join(
+        tempfile.gettempdir(), f"dreamagent-{project_id}-{uuid.uuid4().hex}.zip"
+    )
+    try:
+        export_service.zip_directory(export_dir, zip_path)
+    except Exception as e:
+        export_service.cleanup_export_directory(export_dir)
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        logger.exception("ZIP creation failed for project %s", project_id)
+        raise HTTPException(status_code=500, detail=f"ZIP creation failed: {e}")
+
+    # 3. Remove the unpacked temp dir (keep only the zip)
+    export_service.cleanup_export_directory(export_dir)
+
+    # 4. Stream the zip back, deleting the temp file after the stream ends
+    def _stream_and_cleanup():
+        try:
+            with open(zip_path, "rb") as f:
+                while True:
+                    chunk = f.read(1024 * 1024)  # 1 MB chunks
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
+
+    return StreamingResponse(
+        _stream_and_cleanup(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.zip"',
+        },
+    )
 
 
 @app.get("/health")
