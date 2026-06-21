@@ -299,6 +299,20 @@ class CreateSessionRequest(BaseModel):
     label: str
     project_id: int = 1
 
+
+class GalleryPublishRequest(BaseModel):
+    """Request body for publishing a project to the public Gallery."""
+    title: str
+    description: str
+    thumbnail_url: Optional[str] = None
+
+
+class GalleryUpdateRequest(BaseModel):
+    """Request body for updating a gallery listing."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+
 class ChatRequest(BaseModel):
     session_key: str
     messages: list[Message]
@@ -6305,6 +6319,299 @@ async def download_project_zip(
             "Content-Disposition": f'attachment; filename="{safe_name}.zip"',
         },
     )
+
+
+# ============================================================================
+# Gallery endpoints — public showcase & community clone
+# ============================================================================
+
+def _gallery_row_to_dict(row):
+    """Normalize a gallery_projects DB row to dict."""
+    if isinstance(row, dict):
+        return row
+    return {
+        "id": row[0],
+        "project_id": row[1],
+        "user_id": row[2],
+        "title": row[3],
+        "description": row[4],
+        "frontend_url": row[5],
+        "project_type": row[6],
+        "thumbnail_url": row[7],
+        "is_featured": row[8],
+        "view_count": row[9],
+        "clone_count": row[10],
+        "created_at": row[11],
+        "updated_at": row[12],
+        "published_at": row[13],
+        "status": row[14] if len(row) > 14 else "public",
+    }
+
+
+@app.get("/gallery")
+async def list_gallery_projects(
+    limit: int = 50,
+    offset: int = 0,
+    type_filter: Optional[int] = None,
+):
+    """List public gallery projects. No auth required — fully public endpoint.
+
+    Supports optional type_filter (project type_id) and standard limit/offset pagination.
+    """
+    # Clamp pagination values
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    with get_db() as conn:
+        if type_filter is not None:
+            rows = conn.execute(
+                """SELECT gp.id, gp.project_id, gp.user_id, gp.title, gp.description,
+                          gp.frontend_url, gp.project_type, gp.thumbnail_url, gp.is_featured,
+                          gp.view_count, gp.clone_count, gp.created_at, gp.updated_at,
+                          gp.published_at, gp.status,
+                          u.name as author_name
+                   FROM gallery_projects gp
+                   LEFT JOIN users u ON gp.user_id = u.id
+                   WHERE gp.status = 'public' AND gp.project_type = %s
+                   ORDER BY gp.is_featured DESC, gp.published_at DESC, gp.created_at DESC
+                   LIMIT %s OFFSET %s""",
+                (type_filter, limit, offset),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT gp.id, gp.project_id, gp.user_id, gp.title, gp.description,
+                          gp.frontend_url, gp.project_type, gp.thumbnail_url, gp.is_featured,
+                          gp.view_count, gp.clone_count, gp.created_at, gp.updated_at,
+                          gp.published_at, gp.status,
+                          u.name as author_name
+                   FROM gallery_projects gp
+                   LEFT JOIN users u ON gp.user_id = u.id
+                   WHERE gp.status = 'public'
+                   ORDER BY gp.is_featured DESC, gp.published_at DESC, gp.created_at DESC
+                   LIMIT %s OFFSET %s""",
+                (limit, offset),
+            ).fetchall()
+
+    results = []
+    for row in rows:
+        item = _gallery_row_to_dict(row)
+        # add author_name (extra column from JOIN)
+        author_name = None
+        if isinstance(row, dict):
+            author_name = row.get("author_name")
+        else:
+            author_name = row[15] if len(row) > 15 else None
+        item["author_name"] = author_name
+        results.append(item)
+
+    return {"projects": results, "limit": limit, "offset": offset}
+
+
+@app.get("/gallery/{gallery_id}")
+async def get_gallery_project(gallery_id: int):
+    """Get a single gallery project detail. Public endpoint (no auth).
+
+    Also increments view_count for analytics.
+    """
+    with get_db() as conn:
+        # Increment view count atomically
+        conn.execute(
+            "UPDATE gallery_projects SET view_count = view_count + 1 WHERE id = %s AND status = 'public'",
+            (gallery_id,),
+        )
+        conn.commit()
+
+        row = conn.execute(
+            """SELECT gp.id, gp.project_id, gp.user_id, gp.title, gp.description,
+                      gp.frontend_url, gp.project_type, gp.thumbnail_url, gp.is_featured,
+                      gp.view_count, gp.clone_count, gp.created_at, gp.updated_at,
+                      gp.published_at, gp.status,
+                      u.name as author_name
+               FROM gallery_projects gp
+               LEFT JOIN users u ON gp.user_id = u.id
+               WHERE gp.id = %s""",
+            (gallery_id,),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Gallery project not found")
+
+    item = _gallery_row_to_dict(row)
+    if isinstance(row, dict):
+        item["author_name"] = row.get("author_name")
+    else:
+        item["author_name"] = row[15] if len(row) > 15 else None
+    return item
+
+
+@app.post("/projects/{project_id}/publish-to-gallery", status_code=201)
+async def publish_to_gallery(
+    project_id: int,
+    request: GalleryPublishRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Publish a project to the public Gallery. Requires auth + project ownership."""
+    user_id = get_user_id_from_token(authorization)
+
+    # Verify the user owns this project
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, user_id, name, description, domain, type_id FROM projects WHERE id = %s",
+            (project_id,),
+        ).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        project = dict(project)
+        if project["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="You can only publish your own projects")
+
+        # Check if already published (unique index on project_id will also enforce)
+        existing = conn.execute(
+            "SELECT id FROM gallery_projects WHERE project_id = %s",
+            (project_id,),
+        ).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="Project already published to gallery")
+
+        # Build frontend URL from domain
+        domain = project.get("domain") or ""
+        frontend_url = f"https://{domain}.dreambigwithai.com" if domain else None
+
+        # Insert gallery listing
+        conn.execute(
+            """INSERT INTO gallery_projects
+               (project_id, user_id, title, description, frontend_url, project_type, thumbnail_url,
+                status, published_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'public', CURRENT_TIMESTAMP) RETURNING id""",
+            (
+                project_id,
+                user_id,
+                request.title,
+                request.description,
+                frontend_url,
+                project.get("type_id") or 1,
+                request.thumbnail_url,
+            ),
+        )
+        result = conn.fetchone()
+        gallery_id = result.get("id") if isinstance(result, dict) else (result[0] if result else None)
+        conn.commit()
+
+    logger.info(f"[GALLERY] User {user_id} published project {project_id} as gallery listing {gallery_id}")
+    return {
+        "success": True,
+        "gallery_id": gallery_id,
+        "message": f"Project published to Gallery successfully",
+    }
+
+
+@app.put("/gallery/{gallery_id}")
+async def update_gallery_listing(
+    gallery_id: int,
+    request: GalleryUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Update a gallery listing. Only the original publisher can edit."""
+    user_id = get_user_id_from_token(authorization)
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM gallery_projects WHERE id = %s",
+            (gallery_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Gallery listing not found")
+        owner_id = dict(row).get("user_id") if row else None
+        if owner_id != user_id:
+            raise HTTPException(status_code=403, detail="Only the publisher can edit this listing")
+
+        # Build dynamic UPDATE — only set provided fields
+        updates = []
+        params = []
+        if request.title is not None:
+            updates.append("title = %s")
+            params.append(request.title)
+        if request.description is not None:
+            updates.append("description = %s")
+            params.append(request.description)
+        if request.thumbnail_url is not None:
+            updates.append("thumbnail_url = %s")
+            params.append(request.thumbnail_url)
+
+        if updates:
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(gallery_id)
+            conn.execute(
+                f"UPDATE gallery_projects SET {', '.join(updates)} WHERE id = %s",
+                tuple(params),
+            )
+            conn.commit()
+
+    return {"success": True, "message": "Gallery listing updated"}
+
+
+@app.delete("/gallery/{gallery_id}", status_code=200)
+async def delete_gallery_listing(
+    gallery_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Remove a gallery listing (hard delete). Only the original publisher can remove."""
+    user_id = get_user_id_from_token(authorization)
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM gallery_projects WHERE id = %s",
+            (gallery_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Gallery listing not found")
+        owner_id = dict(row).get("user_id") if row else None
+        if owner_id != user_id:
+            raise HTTPException(status_code=403, detail="Only the publisher can remove this listing")
+
+        conn.execute("DELETE FROM gallery_projects WHERE id = %s", (gallery_id,))
+        conn.commit()
+
+    logger.info(f"[GALLERY] User {user_id} deleted gallery listing {gallery_id}")
+    return {"success": True, "message": "Gallery listing removed"}
+
+
+@app.get("/projects/{project_id}/gallery-status")
+async def get_gallery_status(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Check if a project is published to the gallery and return its listing id.
+
+    Used by ProjectCard to toggle Publish/Unpublish menu item.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    with get_db() as conn:
+        # Verify ownership
+        project = conn.execute(
+            "SELECT user_id FROM projects WHERE id = %s",
+            (project_id,),
+        ).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if dict(project).get("user_id") != user_id:
+            raise HTTPException(status_code=403, detail="Not your project")
+
+        row = conn.execute(
+            "SELECT id, title, description FROM gallery_projects WHERE project_id = %s",
+            (project_id,),
+        ).fetchone()
+
+    if row:
+        data = dict(row)
+        return {
+            "published": True,
+            "gallery_id": data.get("id"),
+            "title": data.get("title"),
+            "description": data.get("description"),
+        }
+    return {"published": False}
 
 
 @app.get("/health")

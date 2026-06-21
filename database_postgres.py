@@ -468,6 +468,38 @@ def init_schema():
             conn.commit()
             logger.info("✓ Created plans table")
 
+            # Gallery projects table — public showcase for community gallery
+            # Future-ready schema: is_featured supports staff picks;
+            # likes/comments/ratings/marketplace columns can be added later.
+            try:
+                cur.execute("""CREATE TABLE IF NOT EXISTS gallery_projects (
+                    id SERIAL PRIMARY KEY,
+                    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    frontend_url TEXT,
+                    project_type INTEGER,
+                    thumbnail_url TEXT,
+                    is_featured BOOLEAN NOT NULL DEFAULT false,
+                    view_count INTEGER NOT NULL DEFAULT 0,
+                    clone_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    published_at TIMESTAMP,
+                    status VARCHAR(20) NOT NULL DEFAULT 'public'
+                )""")
+                conn.commit()
+                # Indexes: browse by status+recency, unique one-listing-per-project, type filter
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_gallery_projects_status ON gallery_projects(status, published_at DESC)")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_projects_project ON gallery_projects(project_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_gallery_projects_type ON gallery_projects(project_type)")
+                conn.commit()
+                logger.info("✓ Created gallery_projects table with indexes")
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"gallery_projects table creation failed (may already exist): {e}")
+
             # AI Sessions table (for AI chat system)
             # active_project_id stores project domain (TEXT), not numeric ID
             cur.execute("""CREATE TABLE IF NOT EXISTS ai_sessions (
