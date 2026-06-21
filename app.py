@@ -422,24 +422,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
-ALLOWED_ORIGINS = [
-    "http://localhost:8080",
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:8080",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    "https://dreamagent.cloud",
-    "https://dreamagent.dreambigwithai.com",
-    "https://dreamagentapi.dreambigwithai.com",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
