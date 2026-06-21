@@ -17,7 +17,7 @@ from urllib.parse import quote
 # Load environment variables from .env file
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Request, Body, Header
+from fastapi import FastAPI, HTTPException, Request, Body, Header, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -6405,6 +6405,61 @@ async def list_gallery_projects(
         results.append(item)
 
     return {"projects": results, "limit": limit, "offset": offset}
+
+
+@app.post("/gallery/upload-thumbnail")
+async def upload_gallery_thumbnail(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Upload a thumbnail image for a gallery project listing.
+
+    Accepts jpg/jpeg/png/webp up to 5MB. Saves to IMAGES_DIR and returns
+    the publicly accessible URL. Auth required (only project owners publish).
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    # Validate content type
+    allowed_types = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+    }
+    content_type = (file.content_type or "").lower()
+    if content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image format. Accepted: .jpg, .jpeg, .png, .webp",
+        )
+    ext = allowed_types[content_type]
+
+    # Read and validate size (5MB max)
+    contents = await file.read()
+    max_size = 5 * 1024 * 1024  # 5MB
+    if len(contents) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail="Image too large. Maximum size is 5MB.",
+        )
+
+    # Generate unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_id = uuid.uuid4().hex[:8]
+    filename = f"gallery_{user_id}_{timestamp}_{unique_id}{ext}"
+
+    # Save to the public images directory
+    filepath = os.path.join(IMAGES_DIR, filename)
+    try:
+        with open(filepath, "wb") as f:
+            f.write(contents)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save image: {str(e)}")
+
+    # Build public URL — use the API host (frontend-relative /images)
+    thumbnail_url = f"{IMAGES_BASE_URL}/{filename}"
+    logger.info(f"[GALLERY] Thumbnail uploaded by user {user_id}: {thumbnail_url}")
+
+    return {"success": True, "thumbnail_url": thumbnail_url}
 
 
 @app.get("/gallery/my-published")
