@@ -6614,6 +6614,31 @@ async def get_gallery_status(
     return {"published": False}
 
 
+@app.get("/gallery/my-published")
+async def get_my_published_projects(
+    authorization: Optional[str] = Header(None),
+):
+    """Return a map of {project_id: gallery_id} for all projects the current
+    user has published to the gallery.
+
+    Used by the Projects page to mark cards as Public/Private in a single call.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT project_id, id FROM gallery_projects WHERE user_id = %s",
+            (user_id,),
+        ).fetchall()
+
+    published = {}
+    for row in rows:
+        d = dict(row)
+        published[str(d["project_id"])] = d["id"]
+
+    return {"published": published}
+
+
 @app.get("/health")
 async def health_check():
     return {
