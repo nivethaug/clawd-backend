@@ -6407,6 +6407,33 @@ async def list_gallery_projects(
     return {"projects": results, "limit": limit, "offset": offset}
 
 
+@app.get("/gallery/my-published")
+async def get_my_published_projects(
+    authorization: Optional[str] = Header(None),
+):
+    """Return a map of {project_id: gallery_id} for all projects the current
+    user has published to the gallery.
+
+    IMPORTANT: Must be defined before /gallery/{gallery_id} to avoid the
+    static path 'my-published' being captured as an int gallery_id.
+    Used by the Projects page to mark cards as Public/Private in a single call.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT project_id, id FROM gallery_projects WHERE user_id = %s",
+            (user_id,),
+        ).fetchall()
+
+    published = {}
+    for row in rows:
+        d = dict(row)
+        published[str(d["project_id"])] = d["id"]
+
+    return {"published": published}
+
+
 @app.get("/gallery/{gallery_id}")
 async def get_gallery_project(gallery_id: int):
     """Get a single gallery project detail. Public endpoint (no auth).
@@ -6612,31 +6639,6 @@ async def get_gallery_status(
             "description": data.get("description"),
         }
     return {"published": False}
-
-
-@app.get("/gallery/my-published")
-async def get_my_published_projects(
-    authorization: Optional[str] = Header(None),
-):
-    """Return a map of {project_id: gallery_id} for all projects the current
-    user has published to the gallery.
-
-    Used by the Projects page to mark cards as Public/Private in a single call.
-    """
-    user_id = get_user_id_from_token(authorization)
-
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT project_id, id FROM gallery_projects WHERE user_id = %s",
-            (user_id,),
-        ).fetchall()
-
-    published = {}
-    for row in rows:
-        d = dict(row)
-        published[str(d["project_id"])] = d["id"]
-
-    return {"published": published}
 
 
 @app.get("/health")
