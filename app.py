@@ -17,8 +17,8 @@ from urllib.parse import quote
 # Load environment variables from .env file
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Request, Body, Header, UploadFile, File
-from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Request, Body, Header, UploadFile, File, Response
+from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
@@ -7039,6 +7039,199 @@ async def get_template_status(
             "category": data.get("category"),
         }
     return {"is_template": False}
+
+
+# ---------------------------------------------------------------------------
+# Project Logs endpoints
+# ---------------------------------------------------------------------------
+
+PM2_LOGS_DIR = os.path.expanduser("~/.pm2/logs")
+
+
+def _read_log_tail(file_path: str, num_lines: int) -> tuple[str, bool]:
+    """Read the last `num_lines` lines of a log file efficiently.
+
+    Returns (content, exists). If the file does not exist, returns ("", False).
+    """
+    if not os.path.isfile(file_path):
+        return "", False
+    try:
+        from collections import deque
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            tail = deque(f, maxlen=num_lines)
+        return "".join(tail), True
+    except Exception as e:
+        logger.error(f"[LOGS] Failed to read {file_path}: {e}")
+        return f"[Error reading log: {e}]", True
+
+
+def _get_pm2_log_specs(project_row) -> list[dict]:
+    """Return a list of log group specs for a project based on type_id.
+
+    Each spec: {"label": str, "process_name": str}
+    The caller will look up out/error log files for each process_name.
+    """
+    d = dict(project_row) if not isinstance(project_row, dict) else project_row
+    project_id = d.get("id")
+    domain = (d.get("domain") or "").split(".")[0]  # strip subdomain suffix
+    type_id = d.get("type_id")
+
+    if type_id == 1:
+        # Website: separate frontend + backend
+        return [
+            {"label": "Frontend", "process_name": f"{domain}-frontend"},
+            {"label": "Backend", "process_name": f"{domain}-backend"},
+        ]
+    elif type_id == 2:
+        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
+    elif type_id == 3:
+        return [{"label": "Application", "process_name": f"dc-bot-{project_id}"}]
+    elif type_id == 4:
+        # Trading bot — reuses telegram PM2 naming
+        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
+    elif type_id == 5:
+        # Scheduler — central process, not per-project
+        return [{"label": "Application", "process_name": "clawd-scheduler"}]
+    elif type_id == 6:
+        return [{"label": "Application", "process_name": f"{domain}-backend"}]
+    else:
+        # Fallback: try domain-backend
+        if domain:
+            return [{"label": "Application", "process_name": f"{domain}-backend"}]
+        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
+
+
+def _build_project_logs(project_row, num_lines: int) -> dict:
+    """Build the log_groups response for a project."""
+    specs = _get_pm2_log_specs(project_row)
+    d = dict(project_row) if not isinstance(project_row, dict) else project_row
+
+    log_groups = []
+    for spec in specs:
+        proc = spec["process_name"]
+        out_path = os.path.join(PM2_LOGS_DIR, f"{proc}-out.log")
+        err_path = os.path.join(PM2_LOGS_DIR, f"{proc}-error.log")
+
+        stdout_content, out_exists = _read_log_tail(out_path, num_lines)
+        stderr_content, err_exists = _read_log_tail(err_path, num_lines)
+
+        log_groups.append({
+            "label": spec["label"],
+            "process_name": proc,
+            "stdout": stdout_content,
+            "stderr": stderr_content,
+            "stdout_lines": stdout_content.count("\n") if stdout_content else 0,
+            "stderr_lines": stderr_content.count("\n") if stderr_content else 0,
+            "exists": out_exists or err_exists,
+        })
+
+    return {
+        "project_id": d.get("id"),
+        "project_name": d.get("name"),
+        "type_id": d.get("type_id"),
+        "log_groups": log_groups,
+    }
+
+
+@app.get("/projects/{project_id}/logs")
+async def get_project_logs(
+    project_id: int,
+    lines: int = 100,
+    log_type: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Retrieve recent PM2 logs for a project.
+
+    Query params:
+      - lines: Number of lines to fetch from the tail (default 100, max 500).
+      - log_type: Optional filter — "out", "error", or "all" (default "all").
+
+    Returns grouped logs: For websites, separate Frontend/Backend groups.
+    For bots/schedulers/custom, a single "Application" group.
+    """
+    user_id = get_user_id_from_token(authorization)
+    num_lines = max(1, min(lines, 500))
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, name, domain, type_id, user_id FROM projects WHERE id = %s",
+            (project_id,),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    d = dict(row)
+    if d.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    result = _build_project_logs(row, num_lines)
+
+    # Apply log_type filter if specified
+    if log_type in ("out", "error"):
+        for group in result["log_groups"]:
+            if log_type == "out":
+                group["stderr"] = ""
+                group["stderr_lines"] = 0
+            else:
+                group["stdout"] = ""
+                group["stdout_lines"] = 0
+
+    return result
+
+
+@app.get("/projects/{project_id}/logs/download")
+async def download_project_logs(
+    project_id: int,
+    lines: int = 500,
+    authorization: Optional[str] = Header(None),
+):
+    """Download all project logs as a plain-text file."""
+    user_id = get_user_id_from_token(authorization)
+    num_lines = max(1, min(lines, 500))
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, name, domain, type_id, user_id FROM projects WHERE id = %s",
+            (project_id,),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    d = dict(row)
+    if d.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    result = _build_project_logs(row, num_lines)
+    project_name = d.get("name", f"project-{project_id}")
+
+    # Build plain-text output
+    parts = [f"Logs for project: {project_name} (ID: {project_id})\n"]
+    parts.append(f"Generated: {datetime.now().isoformat()}\n")
+    parts.append(f"Lines per file: {num_lines}\n")
+    parts.append("=" * 70 + "\n\n")
+
+    for group in result["log_groups"]:
+        parts.append(f"--- {group['label']} (PM2: {group['process_name']}) ---\n\n")
+        if group["stdout"]:
+            parts.append(f"[stdout]\n{group['stdout']}\n\n")
+        if group["stderr"]:
+            parts.append(f"[stderr]\n{group['stderr']}\n\n")
+        if not group["exists"]:
+            parts.append("(No log files found)\n\n")
+        parts.append("-" * 70 + "\n\n")
+
+    text = "".join(parts)
+    safe_name = project_name.replace(" ", "_").replace("/", "_")
+
+    return PlainTextResponse(
+        content=text,
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}-logs.txt"',
+        },
+    )
 
 
 @app.get("/health")
