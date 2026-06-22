@@ -1984,9 +1984,15 @@ async def select_template(request: TemplateSelectionRequest):
         )
 
 
-@app.get("/templates")
-async def list_templates():
-    """List all available templates from the registry."""
+@app.get("/template-registry")
+async def list_template_registry():
+    """List all available templates from the registry (internal use).
+
+    NOTE: Renamed from /templates to avoid route collision with the
+    admin-managed Templates system (/templates). This endpoint returns
+    the old template_selector.py data (repo, keywords, features) used
+    during project creation.
+    """
     selector = TemplateSelector()
 
     if not selector.is_available():
