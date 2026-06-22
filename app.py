@@ -313,6 +313,24 @@ class GalleryUpdateRequest(BaseModel):
     description: Optional[str] = None
     thumbnail_url: Optional[str] = None
 
+
+class TemplateCreateRequest(BaseModel):
+    """Request body for marking a project as a Template (admin only)."""
+    title: str
+    description: str
+    category: str = "General"
+    thumbnail_url: Optional[str] = None
+    is_featured: bool = False
+
+
+class TemplateUpdateRequest(BaseModel):
+    """Request body for updating a template (admin only)."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    is_featured: Optional[bool] = None
+
 class ChatRequest(BaseModel):
     session_key: str
     messages: list[Message]
@@ -1883,6 +1901,21 @@ async def clone_project(
     worker_thread.start()
 
     logger.info(f"[CLONE] Background worker started for clone project {clone_project_id} (source: {project_id})")
+
+    # Increment template use_count if source project is a template
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE templates SET use_count = use_count + 1 WHERE project_id = %s",
+                (project_id,),
+            )
+            conn.execute(
+                "UPDATE gallery_projects SET clone_count = clone_count + 1 WHERE project_id = %s",
+                (project_id,),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"[CLONE] Failed to increment use/clone count for source {project_id}: {e}")
 
     return {
         "success": True,
@@ -6695,6 +6728,311 @@ async def get_gallery_status(
             "description": data.get("description"),
         }
     return {"published": False}
+
+
+# ============================================================================
+# Templates endpoints — admin-managed starter kits (like gallery but curated)
+# ============================================================================
+
+def _template_row_to_dict(row):
+    """Normalize a templates DB row to dict."""
+    if isinstance(row, dict):
+        return row
+    return {
+        "id": row[0],
+        "project_id": row[1],
+        "user_id": row[2],
+        "title": row[3],
+        "description": row[4],
+        "category": row[5],
+        "frontend_url": row[6],
+        "project_type": row[7],
+        "thumbnail_url": row[8],
+        "is_featured": row[9],
+        "use_count": row[10],
+        "view_count": row[11],
+        "created_at": row[12],
+        "updated_at": row[13],
+        "published_at": row[14],
+        "status": row[15] if len(row) > 15 else "active",
+    }
+
+
+@app.get("/templates")
+async def list_templates(
+    limit: int = 50,
+    offset: int = 0,
+    category_filter: Optional[str] = None,
+    type_filter: Optional[int] = None,
+):
+    """List public templates. No auth required — fully public endpoint.
+
+    Supports optional category_filter (text) and type_filter (project type_id).
+    """
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    conditions = ["t.status = 'active'"]
+    params: list = []
+
+    if category_filter is not None:
+        conditions.append("t.category = %s")
+        params.append(category_filter)
+    if type_filter is not None:
+        conditions.append("t.project_type = %s")
+        params.append(type_filter)
+
+    where_clause = " AND ".join(conditions)
+    params.extend([limit, offset])
+
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""SELECT t.id, t.project_id, t.user_id, t.title, t.description,
+                       t.category, t.frontend_url, t.project_type, t.thumbnail_url,
+                       t.is_featured, t.use_count, t.view_count,
+                       t.created_at, t.updated_at, t.published_at, t.status,
+                       u.name as author_name
+                FROM templates t
+                LEFT JOIN users u ON t.user_id = u.id
+                WHERE {where_clause}
+                ORDER BY t.is_featured DESC, t.published_at DESC, t.created_at DESC
+                LIMIT %s OFFSET %s""",
+            tuple(params),
+        ).fetchall()
+
+    results = []
+    for row in rows:
+        item = _template_row_to_dict(row)
+        if isinstance(row, dict):
+            item["author_name"] = row.get("author_name")
+        else:
+            item["author_name"] = row[16] if len(row) > 16 else None
+        results.append(item)
+
+    return {"templates": results, "limit": limit, "offset": offset}
+
+
+@app.get("/templates/my-templates")
+async def get_my_templates(
+    authorization: Optional[str] = Header(None),
+):
+    """Return a map of {project_id: template_id} for all templates created
+    by the current admin. Used by Projects page to mark cards.
+
+    IMPORTANT: Must be defined before /templates/{template_id} to avoid
+    the static path 'my-templates' being captured as an int template_id.
+    """
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT project_id, id FROM templates WHERE user_id = %s",
+            (user_id,),
+        ).fetchall()
+
+    templates = {}
+    for row in rows:
+        d = dict(row)
+        templates[str(d["project_id"])] = d["id"]
+
+    return {"templates": templates}
+
+
+@app.get("/templates/{template_id}")
+async def get_template(template_id: int):
+    """Get a single template detail. Public endpoint (no auth).
+
+    Also increments view_count for analytics.
+    """
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE templates SET view_count = view_count + 1 WHERE id = %s AND status = 'active'",
+            (template_id,),
+        )
+        conn.commit()
+
+        row = conn.execute(
+            """SELECT t.id, t.project_id, t.user_id, t.title, t.description,
+                      t.category, t.frontend_url, t.project_type, t.thumbnail_url,
+                      t.is_featured, t.use_count, t.view_count,
+                      t.created_at, t.updated_at, t.published_at, t.status,
+                      u.name as author_name
+               FROM templates t
+               LEFT JOIN users u ON t.user_id = u.id
+               WHERE t.id = %s""",
+            (template_id,),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    item = _template_row_to_dict(row)
+    if isinstance(row, dict):
+        item["author_name"] = row.get("author_name")
+    else:
+        item["author_name"] = row[16] if len(row) > 16 else None
+    return item
+
+
+@app.post("/projects/{project_id}/mark-as-template", status_code=201)
+async def mark_as_template(
+    project_id: int,
+    request: TemplateCreateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Mark a project as a Template (admin only)."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, user_id, name, description, domain, type_id FROM projects WHERE id = %s",
+            (project_id,),
+        ).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        project = dict(project)
+
+        # Check if already a template
+        existing = conn.execute(
+            "SELECT id FROM templates WHERE project_id = %s",
+            (project_id,),
+        ).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="Project is already marked as template")
+
+        domain = project.get("domain") or ""
+        frontend_url = f"https://{domain}.dreambigwithai.com" if domain else None
+
+        conn.execute(
+            """INSERT INTO templates
+               (project_id, user_id, title, description, category, frontend_url,
+                project_type, thumbnail_url, is_featured, status, published_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', CURRENT_TIMESTAMP) RETURNING id""",
+            (
+                project_id,
+                user_id,
+                request.title,
+                request.description,
+                request.category,
+                frontend_url,
+                project.get("type_id") or 1,
+                request.thumbnail_url,
+                request.is_featured,
+            ),
+        )
+        result = conn.fetchone()
+        template_id = result.get("id") if isinstance(result, dict) else (result[0] if result else None)
+        conn.commit()
+
+    logger.info(f"[TEMPLATES] Admin {user_id} marked project {project_id} as template {template_id}")
+    return {
+        "success": True,
+        "template_id": template_id,
+        "message": "Project marked as Template successfully",
+    }
+
+
+@app.put("/templates/{template_id}")
+async def update_template(
+    template_id: int,
+    request: TemplateUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Update a template. Admin only."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM templates WHERE id = %s",
+            (template_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Template not found")
+
+        updates = []
+        params = []
+        if request.title is not None:
+            updates.append("title = %s")
+            params.append(request.title)
+        if request.description is not None:
+            updates.append("description = %s")
+            params.append(request.description)
+        if request.category is not None:
+            updates.append("category = %s")
+            params.append(request.category)
+        if request.thumbnail_url is not None:
+            updates.append("thumbnail_url = %s")
+            params.append(request.thumbnail_url)
+        if request.is_featured is not None:
+            updates.append("is_featured = %s")
+            params.append(request.is_featured)
+
+        if updates:
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(template_id)
+            conn.execute(
+                f"UPDATE templates SET {', '.join(updates)} WHERE id = %s",
+                tuple(params),
+            )
+            conn.commit()
+
+    return {"success": True, "message": "Template updated"}
+
+
+@app.delete("/templates/{template_id}", status_code=200)
+async def delete_template(
+    template_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Remove a template (hard delete). Admin only."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM templates WHERE id = %s",
+            (template_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Template not found")
+
+        conn.execute("DELETE FROM templates WHERE id = %s", (template_id,))
+        conn.commit()
+
+    logger.info(f"[TEMPLATES] Admin {user_id} removed template {template_id}")
+    return {"success": True, "message": "Template removed"}
+
+
+@app.get("/projects/{project_id}/template-status")
+async def get_template_status(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Check if a project is marked as a template and return its template id.
+    Admin only — used by ProjectCard to toggle Mark/Remove menu item.
+    """
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, title, description, category FROM templates WHERE project_id = %s",
+            (project_id,),
+        ).fetchone()
+
+    if row:
+        data = dict(row)
+        return {
+            "is_template": True,
+            "template_id": data.get("id"),
+            "title": data.get("title"),
+            "description": data.get("description"),
+            "category": data.get("category"),
+        }
+    return {"is_template": False}
 
 
 @app.get("/health")

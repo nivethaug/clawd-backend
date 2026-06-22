@@ -500,6 +500,37 @@ def init_schema():
                 conn.rollback()
                 logger.warning(f"gallery_projects table creation failed (may already exist): {e}")
 
+            # Templates table — admin-managed starter kits (like gallery but admin-curated)
+            try:
+                cur.execute("""CREATE TABLE IF NOT EXISTS templates (
+                    id SERIAL PRIMARY KEY,
+                    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT 'General',
+                    frontend_url TEXT,
+                    project_type INTEGER,
+                    thumbnail_url TEXT,
+                    is_featured BOOLEAN NOT NULL DEFAULT false,
+                    use_count INTEGER NOT NULL DEFAULT 0,
+                    view_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    published_at TIMESTAMP,
+                    status VARCHAR(20) NOT NULL DEFAULT 'active'
+                )""")
+                conn.commit()
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_templates_status ON templates(status, published_at DESC)")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_project ON templates(project_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_templates_category ON templates(category)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_templates_type ON templates(project_type)")
+                conn.commit()
+                logger.info("✓ Created templates table with indexes")
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"templates table creation failed (may already exist): {e}")
+
             # AI Sessions table (for AI chat system)
             # active_project_id stores project domain (TEXT), not numeric ID
             cur.execute("""CREATE TABLE IF NOT EXISTS ai_sessions (
