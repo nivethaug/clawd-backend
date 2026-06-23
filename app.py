@@ -7096,8 +7096,8 @@ def _read_log_tail(file_path: str | None, num_lines: int) -> tuple[str, bool]:
 def _get_pm2_log_specs(project_row) -> list[dict]:
     """Return a list of log group specs for a project based on type_id.
 
-    Each spec: {"label": str, "process_name": str}
-    The caller will look up out/error log files for each process_name.
+    Each spec: {"label": str, "process_names": [str, ...]}
+    Multiple candidate names are tried in order — first match wins.
     """
     d = dict(project_row) if not isinstance(project_row, dict) else project_row
     project_id = d.get("id")
@@ -7107,28 +7107,29 @@ def _get_pm2_log_specs(project_row) -> list[dict]:
     if type_id == 1:
         # Website: separate frontend + backend
         return [
-            {"label": "Frontend", "process_name": f"{domain}-frontend"},
-            {"label": "Backend", "process_name": f"{domain}-backend"},
+            {"label": "Frontend", "process_names": [f"{domain}-frontend"]},
+            {"label": "Backend", "process_names": [f"{domain}-backend"]},
         ]
     elif type_id == 2:
         # Telegram: PM2 uses {domain}-bot when domain exists, else tg-bot-{id}
-        return [{"label": "Application", "process_name": f"{domain}-bot" if domain else f"tg-bot-{project_id}"}]
+        names = [f"{domain}-bot", f"tg-bot-{project_id}"] if domain else [f"tg-bot-{project_id}"]
+        return [{"label": "Application", "process_names": names}]
     elif type_id == 3:
-        # Discord: PM2 uses {domain}-bot when domain exists, else dc-bot-{id}
-        return [{"label": "Application", "process_name": f"{domain}-bot" if domain else f"dc-bot-{project_id}"}]
+        # Discord: PM2 always uses dc-bot-{project_id} (see pm2_manager._get_process_name)
+        return [{"label": "Application", "process_names": [f"dc-bot-{project_id}"]}]
     elif type_id == 4:
         # Trading bot — reuses telegram PM2 naming
-        return [{"label": "Application", "process_name": f"{domain}-bot" if domain else f"tg-bot-{project_id}"}]
+        names = [f"{domain}-bot", f"tg-bot-{project_id}"] if domain else [f"tg-bot-{project_id}"]
+        return [{"label": "Application", "process_names": names}]
     elif type_id == 5:
         # Scheduler — central process, not per-project
-        return [{"label": "Application", "process_name": "clawd-scheduler"}]
+        return [{"label": "Application", "process_names": ["clawd-scheduler"]}]
     elif type_id == 6:
-        return [{"label": "Application", "process_name": f"{domain}-backend"}]
+        return [{"label": "Application", "process_names": [f"{domain}-backend"]}]
     else:
-        # Fallback: try domain-backend
-        if domain:
-            return [{"label": "Application", "process_name": f"{domain}-backend"}]
-        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
+        # Fallback: try domain-backend, then tg-bot-{id}
+        names = [f"{domain}-backend", f"tg-bot-{project_id}"] if domain else [f"tg-bot-{project_id}"]
+        return [{"label": "Application", "process_names": names}]
 
 
 def _build_project_logs(project_row, num_lines: int) -> dict:
@@ -7138,16 +7139,27 @@ def _build_project_logs(project_row, num_lines: int) -> dict:
 
     log_groups = []
     for spec in specs:
-        proc = spec["process_name"]
-        out_path = _find_pm2_log(proc, "out")
-        err_path = _find_pm2_log(proc, "error")
+        names = spec["process_names"]
+        out_path = None
+        err_path = None
+        matched_name = names[0]
+
+        # Try each candidate process name until we find log files
+        for name in names:
+            out_candidate = _find_pm2_log(name, "out")
+            err_candidate = _find_pm2_log(name, "error")
+            if out_candidate or err_candidate:
+                out_path = out_candidate
+                err_path = err_candidate
+                matched_name = name
+                break
 
         stdout_content, out_exists = _read_log_tail(out_path, num_lines)
         stderr_content, err_exists = _read_log_tail(err_path, num_lines)
 
         log_groups.append({
             "label": spec["label"],
-            "process_name": proc,
+            "process_name": matched_name,
             "stdout": stdout_content,
             "stderr": stderr_content,
             "stdout_lines": stdout_content.count("\n") if stdout_content else 0,
