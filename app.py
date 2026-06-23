@@ -1590,6 +1590,33 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             except Exception as pm2_err:
                 logger.warning(f"[CLONE] PM2 start failed (non-fatal): {pm2_err}")
 
+            # Configure nginx + DNS for the clone's webhook domain (same as create flow)
+            try:
+                from infrastructure_manager import NginxConfigurator
+                nginx = NginxConfigurator()
+                _, nginx_config = nginx.generate_telegram_bot_config(clone_domain, 8000 + (project_id % 1000))
+                if nginx.install_config(clone_domain, nginx_config):
+                    nginx.reload_nginx()
+                    logger.info(f"[CLONE] Nginx configured for {clone_domain}.dreambigwithai.com")
+            except Exception as nginx_err:
+                logger.warning(f"[CLONE] Nginx config failed (non-fatal): {nginx_err}")
+
+            # Register Telegram webhook for the clone (async with retries, same as create flow)
+            if source_type_id == 2 and bot_token:
+                try:
+                    from services.telegram.webhook import register_webhook_async
+                    full_domain = f"{clone_domain}.dreambigwithai.com"
+                    register_webhook_async(
+                        bot_token=bot_token,
+                        domain=full_domain,
+                        project_id=project_id,
+                        max_retries=9,
+                        initial_delay=10
+                    )
+                    logger.info(f"[CLONE] Telegram webhook registration started for {full_domain}")
+                except Exception as wh_err:
+                    logger.warning(f"[CLONE] Webhook registration failed (non-fatal): {wh_err}")
+
             with get_db() as conn:
                 conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
                 conn.commit()
