@@ -1537,7 +1537,11 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 "PROJECT_NAME": clone_name,
                 "DOMAIN": clone_domain,
                 "PORT": str(8000 + (project_id % 1000)),
+                "WEBHOOK_DOMAIN": clone_domain,
             }
+            # Update webhook URL to point to the clone's domain
+            if source_type_id == 2:
+                env_updates["WEBHOOK_URL"] = f"https://{clone_domain}.dreambigwithai.com/webhook"
             # Overwrite source bot token with the new one (if provided)
             if bot_token:
                 if source_type_id == 2:

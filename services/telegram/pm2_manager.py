@@ -83,7 +83,13 @@ def start_bot_pm2(
             logger.error("❌ BOT_TOKEN is required!")
             return False, "BOT_TOKEN is required"
         
-        # Add webhook_url if provided
+        # Update webhook config from domain (matches Discord behaviour — prevents
+        # stale source values surviving the env merge below)
+        if domain:
+            env_vars["WEBHOOK_DOMAIN"] = domain
+            env_vars["WEBHOOK_URL"] = f"https://{domain}.dreambigwithai.com/webhook"
+            logger.info(f"  WEBHOOK_DOMAIN: {domain}")
+        # webhook_url param still takes priority if explicitly passed
         if webhook_url:
             env_vars["WEBHOOK_URL"] = webhook_url
             logger.info(f"  WEBHOOK_URL: {webhook_url}")
