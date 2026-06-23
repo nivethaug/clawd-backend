@@ -4924,6 +4924,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                     if hasattr(handler, '_last_query_response') and handler._last_query_response:
                         logger.info(f"[ACP-STREAM] Background save (full response): {len(handler._last_query_response)} chars")
                         await save_response_to_db(handler._last_query_response)
+                        await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                         return
 
                     # Fallback to chunks
@@ -4936,6 +4937,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                             if content:
                                 logger.info(f"[ACP-STREAM] Background save (chunks fallback): {len(content)} chars")
                                 await save_response_to_db(content)
+                                await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                                 return
 
                     logger.warning(f"[ACP-STREAM] Background save: no content found to save")
@@ -4959,7 +4961,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                     
                     if assistant_content:
                         await save_response_to_db(assistant_content)
-                    
+                        await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
+
                     # Cleanup temp image file
                     if image_path_for_context and os.path.exists(image_path_for_context):
                         try:
@@ -4998,6 +5001,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 if content:
                                     logger.info(f"[ACP-STREAM] Background saved (full response): {len(content)} chars")
                                     await save_response_to_db(content)
+                                    await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                                     return
 
                             # Fallback to chunks if _last_query_response not set
@@ -5010,6 +5014,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                                     if content and len(content) > 50:
                                         logger.info(f"[ACP-STREAM] Background saved (chunks fallback): {len(content)} chars")
                                         await save_response_to_db(content)
+                                        await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                                         return
                             
                             # Fall back to what we collected before disconnect
@@ -5017,6 +5022,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                                 content = '\n'.join(real_chunks).strip()
                                 logger.info(f"[ACP-STREAM] Background saved (partial, timeout): {len(content)} chars")
                                 await save_response_to_db(content)
+                                await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                             else:
                                 logger.warning(f"[ACP-STREAM] Background save: no content found after 600s wait")
                         except Exception as e:
@@ -7898,6 +7904,162 @@ async def execute_app_action(
 # ============================================================================
 # Commit Tracking Endpoints
 # ============================================================================
+
+async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode: str) -> None:
+    """Auto-commit and push after a query completes, if files were modified.
+
+    Checks the wrapper's usage side-channel (has_writes flag) to determine
+    whether the model actually wrote/edited files. Only commits for dream mode
+    (website_chat_edit, etc.) — skips plan mode (read-only).
+
+    Args:
+        project_id: Database project ID
+        session_id: Database session ID
+        handler: ACPChatHandler instance with last_token_usage
+        mode: The request mode ('dream', 'plan', etc.)
+    """
+    try:
+        # Skip plan mode — it's read-only, no files change
+        if mode == "plan":
+            logger.info(f"[AUTO-COMMIT] Skipping — plan mode (read-only)")
+            return
+
+        # Check if the model actually wrote/edited files
+        usage = None
+        if hasattr(handler, "last_token_usage"):
+            usage = handler.last_token_usage
+        elif hasattr(handler, "get_last_token_usage"):
+            usage = handler.get_last_token_usage()
+
+        if not usage:
+            logger.info(f"[AUTO-COMMIT] Skipping — no token usage data from handler")
+            return
+
+        has_writes = usage.get("has_writes", False)
+        if not has_writes:
+            logger.info(f"[AUTO-COMMIT] Skipping — no writes detected (has_writes=False)")
+            return
+
+        logger.info(f"[AUTO-COMMIT] Writes detected — committing project {project_id}, session {session_id}")
+
+        # Get project path from DB
+        with get_db() as conn:
+            project = conn.execute(
+                "SELECT project_path FROM projects WHERE id = ?",
+                (project_id,)
+            ).fetchone()
+            if not project:
+                logger.warning(f"[AUTO-COMMIT] Project {project_id} not found")
+                return
+            project_path = project["project_path"]
+
+        # Fix dubious ownership for git
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", project_path],
+            capture_output=True, text=True, timeout=10
+        )
+
+        # Check if there are actual changes to commit
+        status_result = subprocess.run(
+            ["git", "-C", project_path, "status", "--porcelain"],
+            capture_output=True, text=True, timeout=15
+        )
+        if status_result.returncode != 0:
+            logger.error(f"[AUTO-COMMIT] git status failed: {status_result.stderr}")
+            return
+
+        if not status_result.stdout.strip():
+            logger.info(f"[AUTO-COMMIT] No changes to commit (git status clean)")
+            return
+
+        changed_files = len(status_result.stdout.strip().splitlines())
+        logger.info(f"[AUTO-COMMIT] {changed_files} changed files detected")
+
+        # Generate commit message from the user's original request
+        commit_msg = f"Auto-commit: website edit (session {session_id})"
+
+        # Try to get a better commit message from the latest user message
+        try:
+            with get_db() as conn:
+                user_msg_row = conn.execute(
+                    "SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+                    (session_id,)
+                ).fetchone()
+                if user_msg_row:
+                    user_text = user_msg_row["content"][:80].replace("\n", " ").strip()
+                    if user_text:
+                        commit_msg = f"Edit: {user_text}"
+        except Exception:
+            pass
+
+        # Git add all changes
+        subprocess.run(
+            ["git", "-C", project_path, "add", "-A"],
+            capture_output=True, text=True, timeout=30
+        )
+
+        # Git commit
+        commit_result = subprocess.run(
+            ["git", "-C", project_path, "commit", "-m", commit_msg],
+            capture_output=True, text=True, timeout=30
+        )
+        if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stderr:
+            logger.error(f"[AUTO-COMMIT] Git commit failed: {commit_result.stderr}")
+            return
+
+        # Get commit hash
+        hash_result = subprocess.run(
+            ["git", "-C", project_path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10
+        )
+        commit_hash = hash_result.stdout.strip()
+        commit_status = "committed"
+
+        # Push if origin remote exists
+        remote_result = subprocess.run(
+            ["git", "-C", project_path, "remote"],
+            capture_output=True, text=True, timeout=10
+        )
+        has_origin = "origin" in remote_result.stdout.split()
+
+        if has_origin:
+            push_result = subprocess.run(
+                ["git", "-C", project_path, "push", "origin", "main"],
+                capture_output=True, text=True, timeout=60
+            )
+            if push_result.returncode != 0:
+                logger.error(f"[AUTO-COMMIT] Git push failed: {push_result.stderr}")
+                commit_status = "committed"
+            else:
+                commit_status = "pushed"
+                logger.info(f"[AUTO-COMMIT] ✓ Pushed to origin/main: {commit_hash[:8]}")
+        else:
+            logger.info(f"[AUTO-COMMIT] No 'origin' remote — commit stays local")
+
+        # Update message + commit_log in DB
+        with get_db() as conn:
+            message_row = conn.execute(
+                "SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+                (session_id,)
+            ).fetchone()
+            message_id = None
+            if message_row:
+                message_id = message_row["id"]
+                conn.execute(
+                    "UPDATE messages SET commit_hash = ?, commit_status = ? WHERE id = ?",
+                    (commit_hash, commit_status, message_id)
+                )
+            conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, ?)",
+                (project_id, session_id, message_id, commit_hash, commit_msg, commit_status)
+            )
+            conn.commit()
+
+        logger.info(f"[AUTO-COMMIT] ✓ {commit_status} hash={commit_hash[:8]} msg='{commit_msg}'")
+
+    except Exception as e:
+        logger.error(f"[AUTO-COMMIT] Error: {e}", exc_info=True)
+
 
 class CommitRequest(BaseModel):
     session_id: int
