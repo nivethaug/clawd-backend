@@ -7942,17 +7942,37 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
 
         logger.info(f"[AUTO-COMMIT] Writes detected — committing project {project_id}, session {session_id}")
 
-        # Get project path + repo_url from DB
+        # Get project path, repo_url, and domain from DB
         with get_db() as conn:
             project = conn.execute(
-                "SELECT project_path, repo_url FROM projects WHERE id = ?",
+                "SELECT project_path, repo_url, domain FROM projects WHERE id = ?",
                 (project_id,)
             ).fetchone()
             if not project:
                 logger.warning(f"[AUTO-COMMIT] Project {project_id} not found")
                 return
             project_path = project["project_path"]
-            repo_url = project["repo_url"] if "repo_url" in project.keys() else None
+            repo_url = project.get("repo_url")
+            domain = project.get("domain", "")
+
+        # If repo_url is missing, try to reconstruct from domain via GitHubService
+        if not repo_url and domain:
+            try:
+                from github_service import get_github_service
+                gh = get_github_service()
+                reconstructed = gh.get_repo_url(domain)
+                if reconstructed:
+                    repo_url = reconstructed
+                    logger.info(f"[AUTO-COMMIT] Reconstructed repo_url from domain '{domain}': {repo_url}")
+                    # Persist it so future runs don't need to reconstruct
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE projects SET repo_url = ? WHERE id = ?",
+                            (repo_url, project_id)
+                        )
+                        conn.commit()
+            except Exception as e:
+                logger.warning(f"[AUTO-COMMIT] Could not reconstruct repo_url: {e}")
 
         # Fix dubious ownership for git
         subprocess.run(
