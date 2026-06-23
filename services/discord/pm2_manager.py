@@ -75,6 +75,8 @@ def start_bot_pm2(
         resolved_token = bot_token or existing_env.get("DISCORD_BOT_TOKEN") or existing_env.get("DISCORD_TOKEN")
         if resolved_token:
             env_vars["DISCORD_TOKEN"] = resolved_token
+            # Also set DISCORD_BOT_TOKEN so stale source value doesn't survive env merge
+            env_vars["DISCORD_BOT_TOKEN"] = resolved_token
             logger.info(f"  DISCORD_TOKEN: ***{resolved_token[-6:]}")
         else:
             logger.error("DISCORD_TOKEN is required!")

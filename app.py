@@ -1529,25 +1529,37 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                                 ignore=shutil.ignore_patterns("__pycache__", ".git", "logs", "node_modules"))
                 logger.info(f"[CLONE] Copied {bot_type_label}/ directory")
 
-            # Update .env with new project metadata + bot-specific credentials
-            env_path = os.path.join(clone_path, ".env")
-            if os.path.exists(env_path):
-                env_updates = {
-                    "PROJECT_ID": str(project_id),
-                    "PROJECT_NAME": clone_name,
-                    "DOMAIN": clone_domain,
-                    "PORT": str(8000 + (project_id % 1000)),
-                }
-                # Overwrite source bot token with the new one (if provided)
-                if bot_token:
-                    if source_type_id == 2:
-                        env_updates["TELEGRAM_BOT_TOKEN"] = bot_token
-                        env_updates["BOT_TOKEN"] = bot_token
-                    elif source_type_id == 3:
-                        env_updates["DISCORD_BOT_TOKEN"] = bot_token
-                        env_updates["BOT_TOKEN"] = bot_token
-                _update_env_file(env_path, env_updates)
-                logger.info(f"[CLONE] Updated .env for {bot_type_label} project {project_id} (token {'provided' if bot_token else 'inherited from source'})")
+            # Update .env files with new project metadata + bot-specific credentials.
+            # The bot subdirectory (telegram/ or discord/) has its OWN .env copied from
+            # source — that's the one PM2 actually reads. Update BOTH root and subdir.
+            env_updates = {
+                "PROJECT_ID": str(project_id),
+                "PROJECT_NAME": clone_name,
+                "DOMAIN": clone_domain,
+                "PORT": str(8000 + (project_id % 1000)),
+            }
+            # Overwrite source bot token with the new one (if provided)
+            if bot_token:
+                if source_type_id == 2:
+                    env_updates["TELEGRAM_BOT_TOKEN"] = bot_token
+                    env_updates["BOT_TOKEN"] = bot_token
+                elif source_type_id == 3:
+                    env_updates["DISCORD_BOT_TOKEN"] = bot_token
+                    env_updates["BOT_TOKEN"] = bot_token
+
+            # 1) Project root .env
+            root_env_path = os.path.join(clone_path, ".env")
+            if os.path.exists(root_env_path):
+                _update_env_file(root_env_path, env_updates)
+                logger.info(f"[CLONE] Updated root .env for {bot_type_label} project {project_id}")
+
+            # 2) Bot subdirectory .env (this is the one PM2 actually reads)
+            bot_env_path = os.path.join(clone_path, bot_type_label, ".env")
+            if os.path.exists(bot_env_path):
+                _update_env_file(bot_env_path, env_updates)
+                logger.info(f"[CLONE] Updated {bot_type_label}/.env for project {project_id} (token {'provided' if bot_token else 'inherited from source'})")
+            else:
+                logger.warning(f"[CLONE] {bot_type_label}/.env not found at {bot_env_path} — bot may use stale source token!")
 
             # Start bot via PM2 — point to the bot subdirectory (where main.py lives)
             try:
