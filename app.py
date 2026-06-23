@@ -1557,21 +1557,65 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 _update_env_file(root_env_path, env_updates)
                 logger.info(f"[CLONE] Updated root .env for {bot_type_label} project {project_id}")
 
-            # 2) Bot subdirectory .env (this is the one PM2 actually reads)
-            bot_env_path = os.path.join(clone_path, bot_type_label, ".env")
-            if os.path.exists(bot_env_path):
-                _update_env_file(bot_env_path, env_updates)
-                logger.info(f"[CLONE] Updated {bot_type_label}/.env for project {project_id} (token {'provided' if bot_token else 'inherited from source'})")
+            # 2) For Telegram: regenerate .env from clean template (same as create flow)
+            #    This ensures NO stale source values survive.
+            bot_run_path = os.path.join(clone_path, bot_type_label)
+            if not os.path.isfile(os.path.join(bot_run_path, "main.py")):
+                bot_run_path = clone_path
+
+            if source_type_id == 2:
+                # Use inject_bot_token — the same function the create flow uses.
+                # It reads .env.example as a clean base and writes a fresh .env
+                # with correct BOT_TOKEN, WEBHOOK_DOMAIN, WEBHOOK_URL, PORT, PROJECT_ID.
+                try:
+                    from services.telegram.env_injector import inject_bot_token
+
+                    # Resolve token: explicit param > read from copied .env > error
+                    resolved_token = bot_token
+                    if not resolved_token:
+                        copied_env = os.path.join(bot_run_path, ".env")
+                        if os.path.exists(copied_env):
+                            with open(copied_env, "r") as f:
+                                for line in f:
+                                    line = line.strip()
+                                    if line.startswith("BOT_TOKEN="):
+                                        resolved_token = line.split("=", 1)[1]
+                                        break
+                                    if line.startswith("TELEGRAM_BOT_TOKEN="):
+                                        resolved_token = line.split("=", 1)[1]
+
+                    if resolved_token:
+                        success_env, env_msg = inject_bot_token(
+                            project_path=bot_run_path,
+                            bot_token=resolved_token,
+                            domain=clone_domain,
+                            port=8000 + (project_id % 1000),
+                            project_id=project_id,
+                        )
+                        if success_env:
+                            logger.info(f"[CLONE] Regenerated telegram/.env from clean template for project {project_id}")
+                        else:
+                            logger.warning(f"[CLONE] inject_bot_token failed: {env_msg} — falling back to _update_env_file")
+                            bot_env_path = os.path.join(bot_run_path, ".env")
+                            if os.path.exists(bot_env_path):
+                                _update_env_file(bot_env_path, env_updates)
+                    else:
+                        logger.warning(f"[CLONE] No bot token resolved — cannot regenerate telegram/.env")
+                except Exception as inj_err:
+                    logger.warning(f"[CLONE] inject_bot_token error (non-fatal): {inj_err}")
+                    # Fallback to patch
+                    bot_env_path = os.path.join(bot_run_path, ".env")
+                    if os.path.exists(bot_env_path):
+                        _update_env_file(bot_env_path, env_updates)
             else:
-                logger.warning(f"[CLONE] {bot_type_label}/.env not found at {bot_env_path} — bot may use stale source token!")
+                # Discord: patch the subdir .env (Discord already works with patching)
+                bot_env_path = os.path.join(bot_run_path, ".env")
+                if os.path.exists(bot_env_path):
+                    _update_env_file(bot_env_path, env_updates)
+                    logger.info(f"[CLONE] Updated discord/.env for project {project_id}")
 
             # Start bot via PM2 — point to the bot subdirectory (where main.py lives)
             try:
-                bot_run_path = os.path.join(clone_path, bot_type_label)
-                if not os.path.isfile(os.path.join(bot_run_path, "main.py")):
-                    # Fallback to clone root if main.py is at project root
-                    bot_run_path = clone_path
-
                 if source_type_id == 2:
                     from services.telegram.pm2_manager import start_bot_pm2
                     pm2_name = f"tg-bot-{project_id}"
