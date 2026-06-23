@@ -1,39 +1,24 @@
-root@srv1285345:~/clawd-backend# docker exec dreampilot-postgres psql -U admin -d dreampilot -c "DELETE FROM templates;"
+[TAILING] Tailing last 15 lines for [11] process (change the value with --lines option)
+/root/.pm2/logs/dc-bot-1596-out.log last 15 lines:
+11|dc-bot- | 2026-06-23 16:14:16 +00:00: Database tables verified.
+11|dc-bot- | 2026-06-23 16:20:33 +00:00: Database tables verified.
+11|dc-bot- | 2026-06-23 16:20:33 +00:00: 
 
-docker exec dreampilot-postgres psql -U admin -d dreampilot -c "SELECT COUNT(*) AS remaining FROM templates;"
-DELETE 0
- remaining 
------------
-         0
-(1 row)
+/root/dreampilot/projects/discord/1596_dirsord_20260623_161410/discord/logs/error.log last 15 lines:
+11|dc-bot- | 2026-06-23 16:20:36 +00:00: 2026-06-23 16:20:36 INFO [bot]   - Bot test (ID: 1442536693373866025, members: 3)
+11|dc-bot- | 2026-06-23 16:20:36 +00:00: 2026-06-23 16:20:36 INFO [bot] Bot is ready!
+11|dc-bot- | 2026-06-23 16:21:44 +00:00: 2026-06-23 16:21:44 INFO [bot] [MSG] Bot test/#general | dreambigai_admin: !help
+11|dc-bot- | 2026-06-23 16:21:44 +00:00: 2026-06-23 16:21:44 INFO [bot] [CMD] !help | by dreambigai_admin in Bot test/#general | args: []
+11|dc-bot- | 2026-06-23 16:21:44 +00:00: 2026-06-23 16:21:44 INFO [bot] [CMD-DONE] !help completed for dreambigai_admin
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: 2026-06-23 16:22:00 INFO [bot] [MSG] Bot test/#general | dreambigai_admin: !ask price  btc
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: 2026-06-23 16:22:00 INFO [commands.ask] Processing query from dreambigai_admin: price  btc
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: 2026-06-23 16:22:00 INFO [services.api_client] CoinGecko GET /coins/markets params={'vs_currency': 'usd', 'ids': 'bitcoin', 'sparkline': 'false', 'price_change_percentage': '24h'}
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: 2026-06-23 16:22:00 INFO [commands.ask] Response (151 chars): **Bitcoin** (`BTC`) | Rank #1
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: Price: **$62,604.00** 📉 -3.21%
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: Market Cap: $1.25T
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: 24h Volume: $30.69B
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: ...
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: 2026-06-23 16:22:00 INFO [bot] [CMD] !ask | by dreambigai_admin in Bot test/#general | args: []
+11|dc-bot- | 2026-06-23 16:22:00 +00:00: 2026-06-23 16:22:00 INFO [bot] [CMD-DONE] !ask completed for dreambigai_admin
 
-root@srv1285345:~/clawd-backend# 
 
-
-{
-    "success": true,
-    "templates": [
-        {
-            "id": "blank",
-            "category": "blank",
-            "repo": "file:///root/clawd-backend/templates/blank-template",
-            "keywords": [
-                "blank",
-                "empty",
-                "minimal",
-                "ai-first",
-                "custom"
-            ],
-            "features": [
-                "blank",
-                "minimal",
-                "ai-first"
-            ]
-        },
-        {
-            "id": "finance",
-            "category": "finance",
-            "repo": "https://github.com/billionairebyalgo-byte/finflow-ui",
-            "keywords": [
-                "finance",
-                "crypto",
