@@ -7054,7 +7054,29 @@ async def get_template_status(
 PM2_LOGS_DIR = os.path.expanduser("~/.pm2/logs")
 
 
-def _read_log_tail(file_path: str, num_lines: int) -> tuple[str, bool]:
+def _find_pm2_log(proc_name: str, log_type: str) -> str | None:
+    """Resolve the actual log file path for a PM2 process.
+
+    PM2 may append a numeric suffix to log filenames, e.g.:
+      clawd-scheduler-out-18.log  (instead of clawd-scheduler-out.log)
+    This tries the plain name first, then falls back to the highest-suffixed match.
+    """
+    plain = os.path.join(PM2_LOGS_DIR, f"{proc_name}-{log_type}.log")
+    if os.path.isfile(plain):
+        return plain
+
+    # Glob for suffixed variants: {proc}-{log_type}-N.log
+    import glob
+    pattern = os.path.join(PM2_LOGS_DIR, f"{proc_name}-{log_type}-*.log")
+    candidates = glob.glob(pattern)
+    if candidates:
+        # Return the most recently modified file
+        return max(candidates, key=os.path.getmtime)
+
+    return None
+
+
+def _read_log_tail(file_path: str | None, num_lines: int) -> tuple[str, bool]:
     """Read the last `num_lines` lines of a log file efficiently.
 
     Returns (content, exists). If the file does not exist, returns ("", False).
@@ -7115,8 +7137,8 @@ def _build_project_logs(project_row, num_lines: int) -> dict:
     log_groups = []
     for spec in specs:
         proc = spec["process_name"]
-        out_path = os.path.join(PM2_LOGS_DIR, f"{proc}-out.log")
-        err_path = os.path.join(PM2_LOGS_DIR, f"{proc}-error.log")
+        out_path = _find_pm2_log(proc, "out")
+        err_path = _find_pm2_log(proc, "error")
 
         stdout_content, out_exists = _read_log_tail(out_path, num_lines)
         stderr_content, err_exists = _read_log_tail(err_path, num_lines)
@@ -7942,37 +7964,17 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
 
         logger.info(f"[AUTO-COMMIT] Writes detected — committing project {project_id}, session {session_id}")
 
-        # Get project path, repo_url, and domain from DB
+        # Get project path + repo_url from DB
         with get_db() as conn:
             project = conn.execute(
-                "SELECT project_path, repo_url, domain FROM projects WHERE id = ?",
+                "SELECT project_path, repo_url FROM projects WHERE id = ?",
                 (project_id,)
             ).fetchone()
             if not project:
                 logger.warning(f"[AUTO-COMMIT] Project {project_id} not found")
                 return
             project_path = project["project_path"]
-            repo_url = project.get("repo_url")
-            domain = project.get("domain", "")
-
-        # If repo_url is missing, try to reconstruct from domain via GitHubService
-        if not repo_url and domain:
-            try:
-                from github_service import get_github_service
-                gh = get_github_service()
-                reconstructed = gh.get_repo_url(domain)
-                if reconstructed:
-                    repo_url = reconstructed
-                    logger.info(f"[AUTO-COMMIT] Reconstructed repo_url from domain '{domain}': {repo_url}")
-                    # Persist it so future runs don't need to reconstruct
-                    with get_db() as conn:
-                        conn.execute(
-                            "UPDATE projects SET repo_url = ? WHERE id = ?",
-                            (repo_url, project_id)
-                        )
-                        conn.commit()
-            except Exception as e:
-                logger.warning(f"[AUTO-COMMIT] Could not reconstruct repo_url: {e}")
+            repo_url = project["repo_url"] if "repo_url" in project.keys() else None
 
         # Fix dubious ownership for git
         subprocess.run(
