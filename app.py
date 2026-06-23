@@ -7081,7 +7081,7 @@ def _read_log_tail(file_path: str | None, num_lines: int) -> tuple[str, bool]:
 
     Returns (content, exists). If the file does not exist, returns ("", False).
     """
-    if not os.path.isfile(file_path):
+    if not file_path or not os.path.isfile(file_path):
         return "", False
     try:
         from collections import deque
