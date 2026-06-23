@@ -7111,12 +7111,14 @@ def _get_pm2_log_specs(project_row) -> list[dict]:
             {"label": "Backend", "process_name": f"{domain}-backend"},
         ]
     elif type_id == 2:
-        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
+        # Telegram: PM2 uses {domain}-bot when domain exists, else tg-bot-{id}
+        return [{"label": "Application", "process_name": f"{domain}-bot" if domain else f"tg-bot-{project_id}"}]
     elif type_id == 3:
-        return [{"label": "Application", "process_name": f"dc-bot-{project_id}"}]
+        # Discord: PM2 uses {domain}-bot when domain exists, else dc-bot-{id}
+        return [{"label": "Application", "process_name": f"{domain}-bot" if domain else f"dc-bot-{project_id}"}]
     elif type_id == 4:
         # Trading bot — reuses telegram PM2 naming
-        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
+        return [{"label": "Application", "process_name": f"{domain}-bot" if domain else f"tg-bot-{project_id}"}]
     elif type_id == 5:
         # Scheduler — central process, not per-project
         return [{"label": "Application", "process_name": "clawd-scheduler"}]
