@@ -7942,16 +7942,17 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
 
         logger.info(f"[AUTO-COMMIT] Writes detected — committing project {project_id}, session {session_id}")
 
-        # Get project path from DB
+        # Get project path + repo_url from DB
         with get_db() as conn:
             project = conn.execute(
-                "SELECT project_path FROM projects WHERE id = ?",
+                "SELECT project_path, repo_url FROM projects WHERE id = ?",
                 (project_id,)
             ).fetchone()
             if not project:
                 logger.warning(f"[AUTO-COMMIT] Project {project_id} not found")
                 return
             project_path = project["project_path"]
+            repo_url = project["repo_url"] if "repo_url" in project.keys() else None
 
         # Fix dubious ownership for git
         subprocess.run(
@@ -8022,9 +8023,22 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
         )
         has_origin = "origin" in remote_result.stdout.split()
 
+        # If no origin remote but repo_url exists in DB, add it
+        if not has_origin and repo_url:
+            add_remote_result = subprocess.run(
+                ["git", "-C", project_path, "remote", "add", "origin", repo_url],
+                capture_output=True, text=True, timeout=10
+            )
+            if add_remote_result.returncode == 0:
+                has_origin = True
+                logger.info(f"[AUTO-COMMIT] Added origin remote: {repo_url}")
+            else:
+                logger.warning(f"[AUTO-COMMIT] Failed to add origin remote: {add_remote_result.stderr}")
+
         if has_origin:
+            # Use --set-upstream in case branch tracking isn't configured yet
             push_result = subprocess.run(
-                ["git", "-C", project_path, "push", "origin", "main"],
+                ["git", "-C", project_path, "push", "--set-upstream", "origin", "main"],
                 capture_output=True, text=True, timeout=60
             )
             if push_result.returncode != 0:
@@ -8034,7 +8048,7 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
                 commit_status = "pushed"
                 logger.info(f"[AUTO-COMMIT] ✓ Pushed to origin/main: {commit_hash[:8]}")
         else:
-            logger.info(f"[AUTO-COMMIT] No 'origin' remote — commit stays local")
+            logger.info(f"[AUTO-COMMIT] No 'origin' remote and no repo_url in DB — commit stays local")
 
         # Update message + commit_log in DB
         with get_db() as conn:
