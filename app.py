@@ -7054,23 +7054,63 @@ async def get_template_status(
 PM2_LOGS_DIR = os.path.expanduser("~/.pm2/logs")
 
 
-def _find_pm2_log(proc_name: str, log_type: str) -> str | None:
+def _get_pm2_process_log_paths() -> dict[str, dict[str, str | None]]:
+    """Query PM2 for actual log file paths of all running processes.
+
+    Returns: { process_name: { "out": path, "error": path } }
+    Bots are started with custom --log/--error paths (inside project dir),
+    so we must read the real paths from PM2, not guess from ~/.pm2/logs/.
+    """
+    import json as _json
+    try:
+        result = subprocess.run(
+            ["pm2", "jlist"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            logger.warning(f"[LOGS] pm2 jlist failed: {result.stderr[:200]}")
+            return {}
+        procs = _json.loads(result.stdout)
+        mapping: dict[str, dict[str, str | None]] = {}
+        for p in procs:
+            name = p.get("name", "")
+            pm2_env = p.get("pm2_env", {})
+            mapping[name] = {
+                "out": pm2_env.get("pm_out_log_path") or pm2_env.get("out_file"),
+                "error": pm2_env.get("pm_err_log_path") or pm2_env.get("error_file"),
+            }
+        return mapping
+    except Exception as e:
+        logger.warning(f"[LOGS] Failed to query PM2 process list: {e}")
+        return {}
+
+
+def _find_pm2_log(proc_name: str, log_type: str, pm2_paths: dict | None = None) -> str | None:
     """Resolve the actual log file path for a PM2 process.
 
-    PM2 may append a numeric suffix to log filenames, e.g.:
-      clawd-scheduler-out-18.log  (instead of clawd-scheduler-out.log)
-    This tries the plain name first, then falls back to the highest-suffixed match.
+    Strategy (in order):
+    1. Check pm2_paths dict (from pm2 jlist) — the real configured paths.
+    2. Try ~/.pm2/logs/{proc}-{log_type}.log (default PM2 location).
+    3. Glob for suffixed variants: {proc}-{log_type}-N.log.
     """
+    # 1. Real paths from PM2
+    if pm2_paths:
+        entry = pm2_paths.get(proc_name)
+        if entry:
+            real = entry.get(log_type)
+            if real and os.path.isfile(real):
+                return real
+
+    # 2. Default PM2 log dir
     plain = os.path.join(PM2_LOGS_DIR, f"{proc_name}-{log_type}.log")
     if os.path.isfile(plain):
         return plain
 
-    # Glob for suffixed variants: {proc}-{log_type}-N.log
+    # 3. Glob for suffixed variants
     import glob
     pattern = os.path.join(PM2_LOGS_DIR, f"{proc_name}-{log_type}-*.log")
     candidates = glob.glob(pattern)
     if candidates:
-        # Return the most recently modified file
         return max(candidates, key=os.path.getmtime)
 
     return None
@@ -7137,6 +7177,9 @@ def _build_project_logs(project_row, num_lines: int) -> dict:
     specs = _get_pm2_log_specs(project_row)
     d = dict(project_row) if not isinstance(project_row, dict) else project_row
 
+    # Query PM2 once for real log paths (bots use custom --log/--error paths)
+    pm2_paths = _get_pm2_process_log_paths()
+
     log_groups = []
     for spec in specs:
         names = spec["process_names"]
@@ -7146,8 +7189,8 @@ def _build_project_logs(project_row, num_lines: int) -> dict:
 
         # Try each candidate process name until we find log files
         for name in names:
-            out_candidate = _find_pm2_log(name, "out")
-            err_candidate = _find_pm2_log(name, "error")
+            out_candidate = _find_pm2_log(name, "out", pm2_paths)
+            err_candidate = _find_pm2_log(name, "error", pm2_paths)
             if out_candidate or err_candidate:
                 out_path = out_candidate
                 err_path = err_candidate
