@@ -1721,6 +1721,21 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             except Exception as nginx_err:
                 logger.warning(f"[CLONE] Nginx config failed (non-fatal): {nginx_err}")
 
+            # Provision DNS for the clone's webhook domain (same as create flow Step 7)
+            try:
+                from infrastructure_manager import DNSProvisioner
+                dns = DNSProvisioner()
+                if dns.dns_skill_available:
+                    dns_ok = dns.create_a_record(clone_domain, "dreambigwithai.com", "195.200.14.37")
+                    if dns_ok:
+                        logger.info(f"[CLONE] DNS A record created for {clone_domain}.dreambigwithai.com")
+                    else:
+                        logger.warning(f"[CLONE] DNS A record creation failed, wildcard DNS may work")
+                else:
+                    logger.info(f"[CLONE] DNS provisioning skipped (HOSTINGER_API_TOKEN not set, wildcard DNS)")
+            except Exception as dns_err:
+                logger.warning(f"[CLONE] DNS provisioning error (non-fatal): {dns_err}")
+
             # Register Telegram webhook for the clone (async with retries, same as create flow)
             if source_type_id == 2 and bot_token:
                 try:
