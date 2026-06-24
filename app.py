@@ -1620,7 +1620,24 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                     else:
                         logger.info(f"[CLONE-DEBUG] Using explicit bot_token (last6={resolved_token[-6:]})")
 
-                    logger.info(f"[CLONE-DEBUG] inject_bot_token -> path={bot_run_path}, domain={clone_domain}, port={8000 + (project_id % 1000)}, project_id={project_id}")
+                    # Extract DATABASE_URL from the copied source .env BEFORE
+                    # inject_bot_token regenerates from .env.example (which only
+                    # has a placeholder).  Also fall back to the backend's own
+                    # DATABASE_URL env var if the source .env doesn't have one.
+                    resolved_db_url = None
+                    _src_env_for_db = os.path.join(bot_run_path, ".env")
+                    if os.path.exists(_src_env_for_db):
+                        with open(_src_env_for_db, "r") as _f:
+                            for _line in _f:
+                                _line = _line.strip()
+                                if _line.startswith("DATABASE_URL="):
+                                    resolved_db_url = _line.split("=", 1)[1].strip()
+                                    break
+                    if not resolved_db_url:
+                        resolved_db_url = os.environ.get("DATABASE_URL")
+                    logger.info(f"[CLONE-DEBUG] resolved_db_url={'(from source .env)' if resolved_db_url else 'NONE'}")
+
+                    logger.info(f"[CLONE-DEBUG] inject_bot_token -> path={bot_run_path}, domain={clone_domain}, port={8000 + (project_id % 1000)}, project_id={project_id}, database_url={'yes' if resolved_db_url else 'no'}")
                     if resolved_token:
                         success_env, env_msg = inject_bot_token(
                             project_path=bot_run_path,
@@ -1628,6 +1645,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                             domain=clone_domain,
                             port=8000 + (project_id % 1000),
                             project_id=project_id,
+                            database_url=resolved_db_url,
                         )
                         if success_env:
                             logger.info(f"[CLONE] Regenerated telegram/.env from clean template for project {project_id}")
