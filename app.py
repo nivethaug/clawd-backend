@@ -1519,8 +1519,15 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             bot_type_label = "telegram" if source_type_id == 2 else "discord"
             logger.info(f"[CLONE] Provisioning {bot_type_label} bot for project {project_id}")
 
+            # Log all key variables for debugging
+            logger.info(f"[CLONE-DEBUG] source_path={source_path}")
+            logger.info(f"[CLONE-DEBUG] clone_path={clone_path}")
+            logger.info(f"[CLONE-DEBUG] clone_domain={clone_domain}")
+            logger.info(f"[CLONE-DEBUG] bot_token provided={bool(bot_token)} (last6={bot_token[-6:] if bot_token else 'N/A'})")
+
             # Copy bot-specific subdirectory from source if it exists
             bot_subdir = os.path.join(source_path, bot_type_label)
+            logger.info(f"[CLONE-DEBUG] bot_subdir={bot_subdir} exists={os.path.isdir(bot_subdir)}")
             if os.path.isdir(bot_subdir):
                 dst_bot_dir = os.path.join(clone_path, bot_type_label)
                 if os.path.exists(dst_bot_dir):
@@ -1528,6 +1535,27 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 shutil.copytree(bot_subdir, dst_bot_dir, dirs_exist_ok=True,
                                 ignore=shutil.ignore_patterns("__pycache__", ".git", "logs", "node_modules"))
                 logger.info(f"[CLONE] Copied {bot_type_label}/ directory")
+                logger.info(f"[CLONE-DEBUG] dst_bot_dir={dst_bot_dir}")
+
+            # Log what .env files exist in the clone after copy
+            for _label, _p in [
+                ("root", os.path.join(clone_path, ".env")),
+                ("root .env.example", os.path.join(clone_path, ".env.example")),
+                (f"{bot_type_label}/", os.path.join(clone_path, bot_type_label, ".env")),
+                (f"{bot_type_label}/.env.example", os.path.join(clone_path, bot_type_label, ".env.example")),
+            ]:
+                if os.path.isfile(_p):
+                    try:
+                        with open(_p, "r") as _f:
+                            _content = _f.read()
+                        # Log first 500 chars (mask token)
+                        import re as _re
+                        _masked = _re.sub(r'(BOT_TOKEN=|TELEGRAM_BOT_TOKEN=)(.+)', r'\1***MASKED***', _content)
+                        logger.info(f"[CLONE-DEBUG] .env at {_label} ({_p}):\n{_masked[:500]}")
+                    except Exception as _e:
+                        logger.warning(f"[CLONE-DEBUG] Could not read {_p}: {_e}")
+                else:
+                    logger.info(f"[CLONE-DEBUG] .env NOT FOUND at {_label} ({_p})")
 
             # Update .env files with new project metadata + bot-specific credentials.
             # The bot subdirectory (telegram/ or discord/) has its OWN .env copied from
@@ -1561,7 +1589,9 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             #    This ensures NO stale source values survive.
             bot_run_path = os.path.join(clone_path, bot_type_label)
             if not os.path.isfile(os.path.join(bot_run_path, "main.py")):
+                logger.info(f"[CLONE-DEBUG] main.py NOT found at {bot_run_path}/main.py, falling back to clone root")
                 bot_run_path = clone_path
+            logger.info(f"[CLONE-DEBUG] bot_run_path (PM2 cwd) = {bot_run_path}")
 
             if source_type_id == 2:
                 # Use inject_bot_token — the same function the create flow uses.
@@ -1574,16 +1604,22 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                     resolved_token = bot_token
                     if not resolved_token:
                         copied_env = os.path.join(bot_run_path, ".env")
+                        logger.info(f"[CLONE-DEBUG] No explicit bot_token, reading from {copied_env}")
                         if os.path.exists(copied_env):
                             with open(copied_env, "r") as f:
                                 for line in f:
                                     line = line.strip()
                                     if line.startswith("BOT_TOKEN="):
                                         resolved_token = line.split("=", 1)[1]
+                                        logger.info(f"[CLONE-DEBUG] Found BOT_TOKEN in .env (last6={resolved_token[-6:]})")
                                         break
                                     if line.startswith("TELEGRAM_BOT_TOKEN="):
                                         resolved_token = line.split("=", 1)[1]
+                                        logger.info(f"[CLONE-DEBUG] Found TELEGRAM_BOT_TOKEN in .env (last6={resolved_token[-6:]})")
+                    else:
+                        logger.info(f"[CLONE-DEBUG] Using explicit bot_token (last6={resolved_token[-6:]})")
 
+                    logger.info(f"[CLONE-DEBUG] inject_bot_token -> path={bot_run_path}, domain={clone_domain}, port={8000 + (project_id % 1000)}, project_id={project_id}")
                     if resolved_token:
                         success_env, env_msg = inject_bot_token(
                             project_path=bot_run_path,
@@ -1594,6 +1630,14 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                         )
                         if success_env:
                             logger.info(f"[CLONE] Regenerated telegram/.env from clean template for project {project_id}")
+                            # Read back and log the result (masked)
+                            _verify_env = os.path.join(bot_run_path, ".env")
+                            if os.path.isfile(_verify_env):
+                                with open(_verify_env, "r") as _f:
+                                    _vc = _f.read()
+                                import re as _re
+                                _vm = _re.sub(r'(BOT_TOKEN=|TELEGRAM_BOT_TOKEN=)(.+)', r'\1***MASKED***', _vc)
+                                logger.info(f"[CLONE-DEBUG] telegram/.env AFTER inject_bot_token:\n{_vm[:800]}")
                         else:
                             logger.warning(f"[CLONE] inject_bot_token failed: {env_msg} — falling back to _update_env_file")
                             bot_env_path = os.path.join(bot_run_path, ".env")
@@ -1631,6 +1675,17 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                     bot_token=bot_token,
                 )
                 logger.info(f"[CLONE] PM2 started: {pm2_name}")
+
+                # Log final .env state AFTER pm2_manager potentially rewrites it
+                _final_env = os.path.join(bot_run_path, ".env")
+                if os.path.isfile(_final_env):
+                    with open(_final_env, "r") as _f:
+                        _fc = _f.read()
+                    import re as _re
+                    _fm = _re.sub(r'(BOT_TOKEN=|TELEGRAM_BOT_TOKEN=)(.+)', r'\1***MASKED***', _fc)
+                    logger.info(f"[CLONE-DEBUG] {bot_type_label}/.env AFTER start_bot_pm2:\n{_fm[:800]}")
+                else:
+                    logger.warning(f"[CLONE-DEBUG] {bot_type_label}/.env NOT FOUND after PM2 start at {_final_env}")
             except Exception as pm2_err:
                 logger.warning(f"[CLONE] PM2 start failed (non-fatal): {pm2_err}")
 
