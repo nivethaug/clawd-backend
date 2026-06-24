@@ -525,7 +525,14 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         # ── Persist user message ─────────────────────────────────────
         # Store the user's message now (before LLM call) if we have a project context
         _active_domain = active_project["domain"] if active_project else None
-        if _active_domain:
+        
+        # Messages about switching/clearing projects should NOT be persisted
+        # — they are flow-control noise, not project-specific conversation.
+        _switch_keywords = ["switch project", "change project", "select project",
+                           "clear project", "switch to", "change to", "use project"]
+        _is_switch_msg = any(kw in request.message.strip().lower() for kw in _switch_keywords)
+        
+        if _active_domain and not _is_switch_msg:
             chat_repo.add_message(
                 user_id=user_id,
                 project_domain=_active_domain,
@@ -535,8 +542,16 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         
         # ── Helper: persist assistant response then return ────────────
         def _finalize(resp: dict) -> dict:
-            """Persist assistant message to projectchat and return response."""
-            if _active_domain and resp.get("type") != "error":
+            """Persist assistant message to projectchat and return response.
+            Skips: errors, selection/confirmation prompts, and switch-related messages."""
+            _skip_types = {"selection", "confirmation", "error"}
+            # Check if response text is about project switching
+            _resp_text = (resp.get("text") or resp.get("message") or "").lower()
+            _is_switch_resp = any(kw in _resp_text for kw in _switch_keywords) or \
+                              "successfully switched" in _resp_text or \
+                              "which project" in _resp_text
+            
+            if _active_domain and resp.get("type") not in _skip_types and not _is_switch_msg and not _is_switch_resp:
                 chat_repo.add_message(
                     user_id=user_id,
                     project_domain=_active_domain,

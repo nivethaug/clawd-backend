@@ -94,25 +94,12 @@ async def ai_selection(request: AISelectionRequest, authorization: Optional[str]
         chat_repo = ProjectChatRepository()
         chat_repo.set_active_project(user_id, request.selection)
         
-        # Persist user selection message
-        chat_repo.add_message(
-            user_id=user_id,
-            project_domain=request.selection,
-            role="user",
-            content=f"Selected project: {request.selection}",
-            response_type=None,
-        )
+        # NOTE: Project selection messages are NOT persisted to projectchat.
+        # They are flow-control noise ("Selected project: X", "You have switched...").
+        # Only real project-specific conversations are stored.
         
-        # Helper to persist assistant response
+        # Helper to persist assistant response — no-op for selection flow
         def _finalize(resp: dict) -> dict:
-            chat_repo.add_message(
-                user_id=user_id,
-                project_domain=request.selection,
-                role="assistant",
-                content=resp.get("text") or resp.get("message") or "",
-                response_type=resp.get("type"),
-                metadata=resp,
-            )
             return resp
         
         # Execute tool
