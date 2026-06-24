@@ -1548,10 +1548,11 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                     try:
                         with open(_p, "r") as _f:
                             _content = _f.read()
-                        # Log first 500 chars (mask token)
+                        # Mask token then join all lines with | for single-line grep
                         import re as _re
                         _masked = _re.sub(r'(BOT_TOKEN=|TELEGRAM_BOT_TOKEN=)(.+)', r'\1***MASKED***', _content)
-                        logger.info(f"[CLONE-DEBUG] .env at {_label} ({_p}):\n{_masked[:500]}")
+                        _oneline = ' | '.join(l.strip() for l in _masked.strip().split('\n') if l.strip())
+                        logger.info(f"[CLONE-DEBUG] .env at {_label} ({_p}): {_oneline[:800]}")
                     except Exception as _e:
                         logger.warning(f"[CLONE-DEBUG] Could not read {_p}: {_e}")
                 else:
@@ -1637,7 +1638,8 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                                     _vc = _f.read()
                                 import re as _re
                                 _vm = _re.sub(r'(BOT_TOKEN=|TELEGRAM_BOT_TOKEN=)(.+)', r'\1***MASKED***', _vc)
-                                logger.info(f"[CLONE-DEBUG] telegram/.env AFTER inject_bot_token:\n{_vm[:800]}")
+                                _vline = ' | '.join(l.strip() for l in _vm.strip().split('\n') if l.strip())
+                                logger.info(f"[CLONE-DEBUG] telegram/.env AFTER inject_bot_token: {_vline[:800]}")
                         else:
                             logger.warning(f"[CLONE] inject_bot_token failed: {env_msg} — falling back to _update_env_file")
                             bot_env_path = os.path.join(bot_run_path, ".env")
@@ -1683,7 +1685,8 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                         _fc = _f.read()
                     import re as _re
                     _fm = _re.sub(r'(BOT_TOKEN=|TELEGRAM_BOT_TOKEN=)(.+)', r'\1***MASKED***', _fc)
-                    logger.info(f"[CLONE-DEBUG] {bot_type_label}/.env AFTER start_bot_pm2:\n{_fm[:800]}")
+                    _fline = ' | '.join(l.strip() for l in _fm.strip().split('\n') if l.strip())
+                    logger.info(f"[CLONE-DEBUG] {bot_type_label}/.env AFTER start_bot_pm2: {_fline[:800]}")
                 else:
                     logger.warning(f"[CLONE-DEBUG] {bot_type_label}/.env NOT FOUND after PM2 start at {_final_env}")
             except Exception as pm2_err:
