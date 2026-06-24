@@ -1693,6 +1693,8 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                     port=8000 + (project_id % 1000),
                     domain=clone_domain,
                     bot_token=bot_token,
+                    webhook_url=f"https://{clone_domain}.dreambigwithai.com/webhook",
+                    database_url=resolved_db_url if source_type_id == 2 else None,
                 )
                 logger.info(f"[CLONE] PM2 started: {pm2_name}")
 
