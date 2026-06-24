@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 Z_AI_API_KEY = os.getenv("Z_AI_API_KEY", "")
 Z_AI_API_BASE = os.getenv("Z_AI_API_BASE", "https://api.z.ai/api/coding/paas/v4")
-Z_AI_MODEL = os.getenv("Z_AI_MODEL", "glm-4.7-flash")  # GLM-4.7-Flash: faster + better tool calling
+Z_AI_MODEL = os.getenv("Z_AI_MODEL", "GLM-4.7-Flash")  # GLM-4.7-Flash: faster + better tool calling
 DEFAULT_TIMEOUT = 30.0
 RETRY_TIMEOUT = 60.0
 
