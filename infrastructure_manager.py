@@ -1619,6 +1619,37 @@ class DNSProvisioner:
             logger.error(f"Failed to create A record: {e}")
             return False
 
+    def delete_a_record(self, subdomain: str, domain: str = None) -> bool:
+        """
+        Delete A record for subdomain.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.dns_skill_available:
+            logger.warning(f"  Skipping DNS A record deletion (HOSTINGER_API_TOKEN not set)")
+            logger.warning(f"  Manually delete A record: {subdomain}.{BASE_DOMAIN}")
+            return False
+
+        try:
+            if not domain:
+                domain = BASE_DOMAIN
+
+            logger.info(f"Deleting A record: {subdomain}.{domain}")
+
+            result = dns_manager.delete_a_record(domain, subdomain)
+
+            if result.get("success"):
+                logger.info(f"✓ A record deleted: {subdomain}.{domain}")
+                return True
+            else:
+                logger.error(f"Failed to delete A record: {result.get('error')}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to delete A record: {e}")
+            return False
+
     def provision_project_dns(self, domain: str, project_name: str = "project") -> Dict[str, bool]:
         """
         Provision DNS records for a project (frontend + backend).
