@@ -529,7 +529,8 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         # Messages about switching/clearing projects should NOT be persisted
         # — they are flow-control noise, not project-specific conversation.
         _switch_keywords = ["switch project", "change project", "select project",
-                           "clear project", "switch to", "change to", "use project"]
+                           "clear project", "switch to", "change to", "use project",
+                           "clear active project", "clear active"]
         _is_switch_msg = any(kw in request.message.strip().lower() for kw in _switch_keywords)
         
         if _active_domain and not _is_switch_msg:
@@ -549,7 +550,9 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
             _resp_text = (resp.get("text") or resp.get("message") or "").lower()
             _is_switch_resp = any(kw in _resp_text for kw in _switch_keywords) or \
                               "successfully switched" in _resp_text or \
-                              "which project" in _resp_text
+                              "which project" in _resp_text or \
+                              "cleared the active project" in _resp_text or \
+                              "cleared the active" in _resp_text
             
             if _active_domain and resp.get("type") not in _skip_types and not _is_switch_msg and not _is_switch_resp:
                 chat_repo.add_message(
