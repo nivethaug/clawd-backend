@@ -503,15 +503,72 @@ TOOLS_CONFIRM = [
 
 TOOLS_DISABLED = []  # Remove delete_project from disabled - now requires confirmation
 
+# Tool name prefixes for scheduler-only tools
+SCHEDULER_TOOL_PREFIXES = {"scheduler_"}
+
+# Tools available regardless of project selection (context / project management)
+CONTEXT_TOOL_NAMES = {
+    "set_active_project", "clear_active_project", "get_active_project",
+    "list_projects", "get_project_info",
+}
+
+
+def _is_scheduler_tool(tool_name: str) -> bool:
+    """Check if a tool is scheduler-specific."""
+    return any(tool_name.startswith(prefix) for prefix in SCHEDULER_TOOL_PREFIXES)
+
 
 def get_all_tools() -> List[Dict[str, Any]]:
     """
-    Get all tool definitions for GLM API.
+    Get all tool definitions for GLM API (unfiltered).
     
     Returns:
         Combined list of auto-execute and confirmation-required tools
     """
     return TOOLS_AUTO + TOOLS_CONFIRM
+
+
+def get_tools_for_project(project_type: str = None) -> List[Dict[str, Any]]:
+    """
+    Get filtered tool definitions based on the active project type.
+    
+    - Scheduler tools (scheduler_*) are only included if project_type == 'scheduler'.
+    - All other tools are always included.
+    
+    Args:
+        project_type: The type slug of the active project (e.g. 'website', 'scheduler').
+                      None to include all non-scheduler tools.
+    
+    Returns:
+        Filtered list of tool definitions appropriate for the project type.
+    """
+    all_tools = TOOLS_AUTO + TOOLS_CONFIRM
+    is_scheduler = project_type == "scheduler"
+    
+    filtered = []
+    for tool in all_tools:
+        name = tool["function"]["name"]
+        if _is_scheduler_tool(name) and not is_scheduler:
+            continue
+        filtered.append(tool)
+    
+    return filtered
+
+
+def get_tools_without_project() -> List[Dict[str, Any]]:
+    """
+    Get only context tools — used when no project is selected.
+    Forces the user to select a project before any action tools appear.
+    
+    Returns:
+        Minimal set: set_active_project, clear_active_project, get_active_project,
+        list_projects, get_project_info.
+    """
+    all_tools = TOOLS_AUTO + TOOLS_CONFIRM
+    return [
+        tool for tool in all_tools
+        if tool["function"]["name"] in CONTEXT_TOOL_NAMES
+    ]
 
 
 def is_safe_tool(tool_name: str) -> bool:

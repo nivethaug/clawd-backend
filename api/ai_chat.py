@@ -21,7 +21,7 @@ class DateTimeEncoder(json.JSONEncoder):
 
 # Import AI services
 from services.ai.glm_client import get_glm_client
-from services.ai.tool_registry import get_all_tools, is_disabled, validate_tool_args
+from services.ai.tool_registry import get_all_tools, get_tools_for_project, get_tools_without_project, is_disabled, validate_tool_args
 from services.ai.tool_executor import get_tool_executor
 from services.ai.project_resolver import get_project_resolver
 from utils.ai_response_formatter import (
@@ -441,7 +441,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         # 2. Load all projects from DB
         with get_db() as conn:
             result = conn.execute("""
-                SELECT p.*, pt.display_name as type_name
+                SELECT p.*, pt.display_name as type_name, pt.type as type_slug
                 FROM projects p
                 LEFT JOIN project_types pt ON p.type_id = pt.id
                 WHERE p.status != %s
@@ -512,8 +512,28 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         
         # 6. Build messages for GLM (with conversation history: last 4 messages)
         system_content = SYSTEM_PROMPT
-        if active_project:
-            system_content += f"\n\nCurrent active project: {active_project['name']} (domain: {active_project['domain']})"
+        
+        # ── Tool filtering based on project state ────────────────────
+        # No project selected → only context tools (set_active_project, list, etc.)
+        # Project selected → all tools filtered by project type (scheduler tools
+        # only for scheduler-type projects)
+        if not active_project:
+            tools = get_tools_without_project()
+            system_content += (
+                "\n\n⚠️ NO ACTIVE PROJECT SELECTED.\n"
+                "You MUST tell the user to select a project first using 'switch project'.\n"
+                "DO NOT attempt any project actions (start, stop, restart, logs, status) until a project is selected.\n"
+                "DO NOT list what you can do — instead ask the user to select a project."
+            )
+            logger.info(f"[AI-CHAT] No active project → {len(tools)} context-only tools")
+        else:
+            _project_type = active_project.get("type_slug") or active_project.get("type_name", "")
+            tools = get_tools_for_project(_project_type)
+            system_content += (
+                f"\n\nCurrent active project: {active_project['name']} "
+                f"(domain: {active_project['domain']}, type: {_project_type or 'unknown'})"
+            )
+            logger.info(f"[AI-CHAT] Active project type='{_project_type}' → {len(tools)} tools")
         
         messages = [{"role": "system", "content": system_content}]
         
@@ -534,7 +554,6 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         
         # 5. Call GLM with tools
         glm_client = get_glm_client()
-        tools = get_all_tools()
         
         # ── Persist user message ─────────────────────────────────────
         # Store the user's message now (before LLM call) if we have a project context
