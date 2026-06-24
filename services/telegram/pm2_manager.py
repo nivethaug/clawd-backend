@@ -126,6 +126,19 @@ def start_bot_pm2(
                 f.write(f"{key}={value}\n")
         logger.info(f"📝 Updated .env file with {len(env_vars)} variables")
         
+        # Delete any existing PM2 process with the same name FIRST.
+        # PM2 caches environment variables — calling `pm2 start` on an existing
+        # process name will restart it with the OLD cached env, ignoring the
+        # new .env file.  Deleting ensures a clean start with fresh env vars.
+        try:
+            subprocess.run(
+                ["pm2", "delete", process_name],
+                capture_output=True, text=True, timeout=10
+            )
+            # Non-zero exit is fine — means process didn't exist yet
+        except Exception:
+            pass
+
         # Build PM2 start command with explicit parameters (no ecosystem file)
         # This avoids conflicts with other PM2 processes
         pm2_cmd = [
