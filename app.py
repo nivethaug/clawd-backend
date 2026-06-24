@@ -8856,14 +8856,15 @@ async def rollback_commit(project_id: int, message_id: int):
                     "UPDATE commit_log SET status = 'active' WHERE id = ?",
                     (original_log["id"],)
                 )
+                # DELETE all commits after target — they're erased from the branch
                 conn.execute(
-                    "UPDATE commit_log SET status = 'reverted' WHERE project_id = ? AND id > ?",
+                    "DELETE FROM commit_log WHERE project_id = ? AND id > ?",
                     (project_id, original_log["id"])
                 )
 
             conn.commit()
 
-        logger.info(f"✓ Reset to commit {original_hash[:8]}, message_id={message_id}, discarded {discarded_count} commits (was {previous_head[:8]})")
+        logger.info(f"✓ Reset to commit {original_hash[:8]}, message_id={message_id}, deleted {discarded_count} commits (was {previous_head[:8]})")
 
         # Rebuild and redeploy after rollback so the live site reflects the reset code
         rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
@@ -8974,9 +8975,9 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
                 (log_id,)
             )
 
-            # Mark ALL commits AFTER target as reverted (they're erased from branch)
+            # DELETE all commits after target — they're erased from the branch
             conn.execute(
-                "UPDATE commit_log SET status = 'reverted' WHERE project_id = ? AND id > ?",
+                "DELETE FROM commit_log WHERE project_id = ? AND id > ?",
                 (project_id, log_id)
             )
 
@@ -8993,7 +8994,7 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
 
             conn.commit()
 
-        logger.info(f"✓ Reset to commit {original_hash[:8]} via log_id={log_id}, discarded {discarded_count} commits (was {previous_head[:8]})")
+        logger.info(f"✓ Reset to commit {original_hash[:8]} via log_id={log_id}, deleted {discarded_count} commits (was {previous_head[:8]})")
 
         # Rebuild and redeploy after rollback so the live site reflects the reset code
         rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
