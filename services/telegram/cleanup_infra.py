@@ -105,62 +105,53 @@ def cleanup_telegram_bot_infrastructure(
         logger.warning("No project_id found, skipping PM2 cleanup")
         cleanup_results["steps"]["pm2"] = {"skipped": True, "reason": "No project_id"}
     
-    # STEP 2: Remove Nginx configuration (if any)
+# STEP 2: Remove Nginx configuration
     try:
-        from infrastructure_manager import cleanup_nginx_config
+        from infrastructure_manager import NginxConfigurator
         nginx_name = domain or project_name
         if nginx_name:
-            cleanup_results["steps"]["nginx"] = cleanup_nginx_config(nginx_name)
+            nginx = NginxConfigurator()
+            removed = nginx.remove_config(nginx_name)
+            cleanup_results["steps"]["nginx"] = {"success": removed, "message": f"Removed nginx config for {nginx_name}"}
+            logger.info(f"🗑 Nginx config cleanup for {nginx_name}: {'✅ removed' if removed else '⚠️ failed'}")
         else:
             cleanup_results["steps"]["nginx"] = {"skipped": True, "reason": "No domain"}
-    except ImportError:
-        logger.warning("infrastructure_manager not available for nginx cleanup")
-        cleanup_results["steps"]["nginx"] = {"skipped": True, "reason": "Module not available"}
     except Exception as e:
         logger.error(f"Error in Nginx cleanup: {e}")
         cleanup_results["steps"]["nginx"] = {"error": str(e)}
-    
-    # STEP 3: Remove SSL certificates (if any)
+
+    # STEP 3: SSL cleanup
+    # All bots use the wildcard *.dreambigwithai.com certificate, so there's
+    # no per-domain SSL cert to remove. Nothing to do here.
+    cleanup_results["steps"]["ssl"] = {"skipped": True, "reason": "Uses wildcard cert (*.dreambigwithai.com)"}
+
+    # STEP 4: Remove DNS records
     try:
-        from infrastructure_manager import cleanup_ssl_certificates
-        full_domain = f"{domain}.dreambigwithai.com" if domain else ""
-        if full_domain:
-            cleanup_results["steps"]["ssl"] = cleanup_ssl_certificates(full_domain, "")
-        else:
-            cleanup_results["steps"]["ssl"] = {"skipped": True, "reason": "No domain"}
-    except ImportError:
-        logger.warning("infrastructure_manager not available for SSL cleanup")
-        cleanup_results["steps"]["ssl"] = {"skipped": True, "reason": "Module not available"}
-    except Exception as e:
-        logger.error(f"Error in SSL cleanup: {e}")
-        cleanup_results["steps"]["ssl"] = {"error": str(e)}
-    
-    # STEP 4: Remove DNS records (if any)
-    try:
-        from infrastructure_manager import cleanup_dns_records
+        from infrastructure_manager import DNSProvisioner
         if domain:
-            cleanup_results["steps"]["dns"] = cleanup_dns_records(domain, "")
+            dns = DNSProvisioner()
+            deleted = dns.delete_a_record(domain)
+            cleanup_results["steps"]["dns"] = {"success": deleted, "message": f"DNS A record deletion for {domain}"
+                + (" — skipped (DNS API not configured)" if not dns.dns_skill_available else "")}
+            logger.info(f"🗑 DNS cleanup for {domain}: {'✅ deleted' if deleted else '⚠️ skipped/failed'}")
         else:
             cleanup_results["steps"]["dns"] = {"skipped": True, "reason": "No domain"}
-    except ImportError:
-        logger.warning("infrastructure_manager not available for DNS cleanup")
-        cleanup_results["steps"]["dns"] = {"skipped": True, "reason": "Module not available"}
     except Exception as e:
         logger.error(f"Error in DNS cleanup: {e}")
         cleanup_results["steps"]["dns"] = {"error": str(e)}
-    
+
     # STEP 5: Drop PostgreSQL database (if any)
     try:
-        from infrastructure_manager import delete_project_database
+        from infrastructure_manager import DatabaseProvisioner
         db_service_name = domain or project_name
-        if db_name and db_user:
-            cleanup_results["steps"]["database"] = delete_project_database(db_service_name, force=False)
+        if db_service_name:
+            db_prov = DatabaseProvisioner()
+            db_prov.drop_database_and_user(db_service_name)
+            cleanup_results["steps"]["database"] = {"success": True, "message": f"Dropped database for {db_service_name}"}
+            logger.info(f"🗑 Database dropped for {db_service_name}")
         else:
-            logger.info("Skipping database cleanup: no database info found")
+            logger.info("Skipping database cleanup: no service name found")
             cleanup_results["steps"]["database"] = {"skipped": True}
-    except ImportError:
-        logger.warning("infrastructure_manager not available for database cleanup")
-        cleanup_results["steps"]["database"] = {"skipped": True, "reason": "Module not available"}
     except Exception as e:
         logger.error(f"Error in database cleanup: {e}")
         cleanup_results["steps"]["database"] = {"error": str(e)}
