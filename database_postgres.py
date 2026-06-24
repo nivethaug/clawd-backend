@@ -228,6 +228,11 @@ def init_schema():
                 cur.execute("ALTER TABLE users ADD COLUMN github_avatar_url TEXT")
             _run_migration(migrate_github_avatar_url)
 
+            def migrate_active_project():
+                cur.execute("ALTER TABLE users ADD COLUMN active_project TEXT")
+                logger.info("✓ Added active_project column to users")
+            _run_migration(migrate_active_project)
+
             # Ensure existing users have correct defaults
             try:
                 cur.execute(
@@ -686,6 +691,30 @@ def init_schema():
             """)
             conn.commit()
             logger.info("✓ Added token_usage table with indexes")
+
+            # ----------------------------------------------------------------
+            # projectchat table
+            # Stores per-project chat messages for the global AI chat.
+            # Max 10 messages per project enforced in repository layer.
+            # Only last 4 sent to LLM for context.
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS projectchat (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                project_domain TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                response_type TEXT,
+                metadata JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.commit()
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_projectchat_lookup
+                ON projectchat(user_id, project_domain, created_at DESC)
+            """)
+            conn.commit()
+            logger.info("✓ Added projectchat table with index")
 
             # ----------------------------------------------------------------
             # env_variable_registry table

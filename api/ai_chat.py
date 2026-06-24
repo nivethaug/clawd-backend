@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header, Query
 from pydantic import BaseModel, Field
 
 
@@ -32,6 +32,8 @@ from utils.ai_response_formatter import (
     error_response
 )
 from utils.ai_session_manager import get_session_manager
+from utils.auth_helpers import get_user_id_from_token
+from utils.project_chat_repo import ProjectChatRepository
 from database_postgres import get_db
 
 logger = logging.getLogger(__name__)
@@ -413,7 +415,7 @@ User: "which project am I using"
 # ============================================================================
 
 @router.post("/chat", response_model=AIChatResponse)
-async def ai_chat(request: AIChatRequest):
+async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(None)):
     """
     Main AI chat endpoint.
     
@@ -427,7 +429,10 @@ async def ai_chat(request: AIChatRequest):
     4. Return formatted response
     """
     try:
-        logger.info(f"[AI-CHAT] Message from session {request.session_id}: {request.message[:100]}")
+        # ── Authentication ──────────────────────────────────────────
+        user_id = get_user_id_from_token(authorization)
+        
+        logger.info(f"[AI-CHAT] Message from session {request.session_id} (user={user_id}): {request.message[:100]}")
         
         # 1. Get or create session
         session_manager = get_session_manager()
@@ -480,19 +485,67 @@ async def ai_chat(request: AIChatRequest):
                     logger.debug(f"[AI-CHAT] Matched from session: {session_project_domain}")
                     break
         
-        # 6. Build messages for GLM
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": request.message}
-        ]
+        # 5b. Check users.active_project as third source (priority: request > session > users table)
+        chat_repo = ProjectChatRepository()
+        if not active_project:
+            user_active = chat_repo.get_active_project(user_id)
+            if user_active:
+                for project in projects:
+                    if project["domain"] == user_active:
+                        active_project = project
+                        logger.debug(f"[AI-CHAT] Matched from users.active_project: {user_active}")
+                        break
         
-        # Add project context if available (always use domain)
+        # 6. Build messages for GLM (with conversation history: last 4 messages)
+        system_content = SYSTEM_PROMPT
         if active_project:
-            messages[0]["content"] += f"\n\nCurrent active project: {active_project['name']} (domain: {active_project['domain']})"
+            system_content += f"\n\nCurrent active project: {active_project['name']} (domain: {active_project['domain']})"
+        
+        messages = [{"role": "system", "content": system_content}]
+        
+        # Inject last 4 persisted messages as conversation context
+        if active_project:
+            recent = chat_repo.get_recent_messages(user_id, active_project["domain"], limit=4)
+            for msg in recent:
+                messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+                logger.debug(f"[AI-CHAT] History context: {msg['role']} = {msg['content'][:60]}...")
+        
+        # Finally, add the current user message
+        messages.append({"role": "user", "content": request.message})
+        
+        logger.debug(f"[AI-CHAT] Sending {len(messages)} messages to GLM (system + {len(messages)-2} history + current)")
         
         # 5. Call GLM with tools
         glm_client = get_glm_client()
         tools = get_all_tools()
+        
+        # ── Persist user message ─────────────────────────────────────
+        # Store the user's message now (before LLM call) if we have a project context
+        _active_domain = active_project["domain"] if active_project else None
+        if _active_domain:
+            chat_repo.add_message(
+                user_id=user_id,
+                project_domain=_active_domain,
+                role="user",
+                content=request.message,
+            )
+        
+        # ── Helper: persist assistant response then return ────────────
+        def _finalize(resp: dict) -> dict:
+            """Persist assistant message to projectchat and return response."""
+            if _active_domain and resp.get("type") != "error":
+                chat_repo.add_message(
+                    user_id=user_id,
+                    project_domain=_active_domain,
+                    role="assistant",
+                    content=resp.get("text") or resp.get("message") or "",
+                    response_type=resp.get("type"),
+                    metadata=resp,
+                )
+            return resp
         
         try:
             response = await glm_client.chat_with_tools(
@@ -504,7 +557,7 @@ async def ai_chat(request: AIChatRequest):
             )
         except Exception as e:
             logger.error(f"[AI-CHAT] GLM API error: {e}")
-            return error_response(f"AI service error: {str(e)}")
+            return _finalize(error_response(f"AI service error: {str(e)}"))
         
         # 6. Parse response
         tool_calls = glm_client.parse_tool_calls(response)
@@ -514,7 +567,7 @@ async def ai_chat(request: AIChatRequest):
             text = glm_client.get_text_response(response)
             logger.info(f"[AI-CHAT] Text response: {text[:100]}")
             await session_manager.update_last_used(request.session_id)
-            return text_response(text)
+            return _finalize(text_response(text))
         
         # 7. Process tool calls
         # For now, handle first tool call only (can extend to multiple)
@@ -533,14 +586,14 @@ async def ai_chat(request: AIChatRequest):
         if is_disabled(tool_name):
             logger.warning(f"[AI-CHAT] Tool is disabled: {tool_name}")
             await session_manager.update_last_used(request.session_id)
-            return error_response(f"Tool '{tool_name}' is disabled and cannot be executed")
+            return _finalize(error_response(f"Tool '{tool_name}' is disabled and cannot be executed"))
         
         # 9. Validate args
         is_valid, error_msg = validate_tool_args(tool_name, args)
         if not is_valid:
             logger.warning(f"[AI-CHAT] Invalid args: {error_msg}")
             await session_manager.update_last_used(request.session_id)
-            return error_response(error_msg)
+            return _finalize(error_response(error_msg))
         
         # 10. Resolve project if needed
         tools_needing_project = [
@@ -571,7 +624,7 @@ async def ai_chat(request: AIChatRequest):
                 if not resolution.candidates or len(resolution.candidates) == 0:
                     logger.warning(f"[AI-CHAT] Selection status but no candidates provided")
                     await session_manager.update_last_used(request.session_id)
-                    return error_response("No projects available for selection")
+                    return _finalize(error_response("No projects available for selection"))
                 
                 options = [
                     {"label": f"{p['name']} ({p['domain']})", "value": p["domain"]}
@@ -581,38 +634,38 @@ async def ai_chat(request: AIChatRequest):
                 logger.info(f"[AI-CHAT] Returning selection with {len(options)} options")
                 
                 await session_manager.update_last_used(request.session_id)
-                return selection_response(
+                return _finalize(selection_response(
                     message=resolution.message,
                     options=options,
                     intent={"tool": tool_name, "args": args}
-                )
+                ))
             
             elif resolution.status == "not_found":
                 await session_manager.update_last_used(request.session_id)
-                return error_response(resolution.message)
+                return _finalize(error_response(resolution.message))
             
             # Resolved - update args
             args["project_id"] = resolution.project["domain"]
         
         # 11. Execute tool
         executor = get_tool_executor()
-        result = await executor.execute(tool_name, args, session_key=request.session_id)
+        result = await executor.execute(tool_name, args, session_key=request.session_id, user_id=user_id)
         
         # 12. Handle result
         # SELECTION RESPONSE: Return immediately, bypass LLM summarization
         if result.get("type") == "selection" or result.get("status") == "selection":
             logger.info(f"[AI-CHAT] Selection response, returning structured data")
             await session_manager.update_last_used(request.session_id)
-            return result
+            return _finalize(result)
         
         if result["status"] == "confirmation_required":
             # Store pending intent in session
             await session_manager.set_pending_intent(request.session_id, result["intent"])
             await session_manager.update_last_used(request.session_id)
-            return confirmation_response(
+            return _finalize(confirmation_response(
                 message=f"Do you want to {tool_name.replace('_', ' ')}?",
                 intent=result["intent"]
-            )
+            ))
         
         elif result["status"] == "success":
             # 13. NEW: Send tool result back to LLM for natural language summarization
@@ -659,19 +712,19 @@ async def ai_chat(request: AIChatRequest):
                 
                 if tool_name in action_tools:
                     # Action tools: return execution response with progress
-                    return execution_response(
+                    return _finalize(execution_response(
                         progress=[result],
                         text=final_text
-                    )
+                    ))
                 else:
                     # Info/context tools: return text response
-                    return text_response(final_text)
+                    return _finalize(text_response(final_text))
                     
             except Exception as e:
                 logger.error(f"[AI-CHAT] LLM summarization failed: {e}")
                 # Fallback: return tool message directly (should not happen)
                 await session_manager.update_last_used(request.session_id)
-                return text_response(result.get("message", "Operation completed successfully"))
+                return _finalize(text_response(result.get("message", "Operation completed successfully")))
         
         else:
             # Error case: also send to LLM for natural error message
@@ -706,13 +759,47 @@ async def ai_chat(request: AIChatRequest):
                 
                 final_text = glm_client.get_text_response(final_response)
                 await session_manager.update_last_used(request.session_id)
-                return text_response(final_text)
+                return _finalize(text_response(final_text))
                 
             except Exception as e:
                 logger.error(f"[AI-CHAT] Error summarization failed: {e}")
                 await session_manager.update_last_used(request.session_id)
-                return error_response(result.get("message", "Tool execution failed"), result)
+                return _finalize(error_response(result.get("message", "Tool execution failed"), result))
     
     except Exception as e:
         logger.error(f"[AI-CHAT] Unexpected error: {e}", exc_info=True)
         return error_response(f"Internal error: {str(e)}")
+
+
+# ============================================================================
+# Message History & Active Project Endpoints
+# ============================================================================
+
+@router.get("/messages")
+async def get_chat_messages(
+    project: str = Query(..., description="Project domain"),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Get persisted chat messages for a project (max 10, oldest→newest).
+    Used by frontend to load conversation history on mount / project switch.
+    """
+    user_id = get_user_id_from_token(authorization)
+    repo = ProjectChatRepository()
+    messages = repo.get_messages(user_id, project)
+    return {"messages": messages}
+
+
+@router.get("/active-project")
+async def get_active_project(
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Get the user's active project domain from the users table.
+    Returns {"project": "<domain>"} or {"project": null}.
+    """
+    user_id = get_user_id_from_token(authorization)
+    repo = ProjectChatRepository()
+    project = repo.get_active_project(user_id)
+    return {"project": project}
+

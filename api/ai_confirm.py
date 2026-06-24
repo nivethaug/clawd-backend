@@ -6,13 +6,14 @@ Handle user confirmation/cancel for dangerous operations
 import logging
 from typing import Dict, Any, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 
 from services.ai.tool_executor import get_tool_executor
 from services.ai.tool_registry import requires_confirmation
 from utils.ai_response_formatter import text_response, execution_response, error_response
 from utils.ai_session_manager import get_session_manager
+from utils.auth_helpers import get_user_id_from_token
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class AIConfirmResponse(BaseModel):
 # ============================================================================
 
 @router.post("/confirm", response_model=AIConfirmResponse)
-async def ai_confirm(request: AIConfirmRequest):
+async def ai_confirm(request: AIConfirmRequest, authorization: Optional[str] = Header(None)):
     """
     Handle user confirmation/cancel for dangerous operations.
     
@@ -53,7 +54,9 @@ async def ai_confirm(request: AIConfirmRequest):
     3. If cancelled: clear intent, return cancellation message
     """
     try:
-        logger.info(f"[AI-CONFIRM] Session {request.session_id}, confirmed={request.confirmed}")
+        user_id = get_user_id_from_token(authorization)
+        
+        logger.info(f"[AI-CONFIRM] Session {request.session_id} (user={user_id}), confirmed={request.confirmed}")
         
         # Get pending intent from session
         session_manager = get_session_manager()
@@ -196,7 +199,7 @@ async def ai_confirm(request: AIConfirmRequest):
             
             else:
                 # Generic execution
-                result = await executor.execute(tool_name, args, session_key=request.session_id)
+                result = await executor.execute(tool_name, args, session_key=request.session_id, user_id=user_id)
                 await session_manager.clear_pending_intent(request.session_id)
                 
                 if result["status"] == "success":

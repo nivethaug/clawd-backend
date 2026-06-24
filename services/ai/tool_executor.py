@@ -30,7 +30,8 @@ class ToolExecutor:
         self,
         tool_name: str,
         args: Dict[str, Any],
-        session_key: str = None
+        session_key: str = None,
+        user_id: int = None
     ) -> Dict[str, Any]:
         """
         Execute a tool with given arguments.
@@ -39,6 +40,7 @@ class ToolExecutor:
             tool_name: Name of tool to execute
             args: Tool arguments
             session_key: Session identifier (required for context management tools)
+            user_id: Optional authenticated user ID (for users.active_project updates)
             
         Returns:
             {
@@ -100,9 +102,9 @@ class ToolExecutor:
             elif tool_name == "remove_all_projects":
                 return await self._execute_remove_all_projects(args)
             elif tool_name == "set_active_project":
-                return await self._execute_set_active_project(args, session_key)
+                return await self._execute_set_active_project(args, session_key, user_id=user_id)
             elif tool_name == "clear_active_project":
-                return await self._execute_clear_active_project(args, session_key)
+                return await self._execute_clear_active_project(args, session_key, user_id=user_id)
             elif tool_name == "get_active_project":
                 return await self._execute_get_active_project(args, session_key)
             elif tool_name == "get_project_info":
@@ -547,7 +549,8 @@ class ToolExecutor:
     async def _execute_set_active_project(
         self,
         args: Dict[str, Any],
-        session_key: str = None
+        session_key: str = None,
+        user_id: int = None
     ) -> Dict[str, Any]:
         """
         Set active project for session.
@@ -592,6 +595,11 @@ class ToolExecutor:
         session_manager = get_session_manager()
         await session_manager.set_active_project(session_key, project["domain"])
         
+        # Also update users.active_project for persistence
+        if user_id:
+            from utils.project_chat_repo import ProjectChatRepository
+            ProjectChatRepository().set_active_project(user_id, project["domain"])
+        
         return {
             "status": "success",
             "message": f"Switched to {project['name']} project ✅",
@@ -605,7 +613,8 @@ class ToolExecutor:
     async def _execute_clear_active_project(
         self,
         args: Dict[str, Any],
-        session_key: str = None
+        session_key: str = None,
+        user_id: int = None
     ) -> Dict[str, Any]:
         """
         Clear active project for session.
@@ -613,12 +622,18 @@ class ToolExecutor:
         Args:
             args: No parameters required
             session_key: Session identifier (injected by caller)
+            user_id: Optional user ID for users.active_project update
         """
         if not session_key:
             return {"status": "error", "message": "Missing session context"}
         
         session_manager = get_session_manager()
         await session_manager.clear_active_project(session_key)
+        
+        # Also clear users.active_project
+        if user_id:
+            from utils.project_chat_repo import ProjectChatRepository
+            ProjectChatRepository().clear_active_project(user_id)
         
         return {
             "status": "success",

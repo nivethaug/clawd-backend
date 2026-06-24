@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 
 from services.ai.glm_client import get_glm_client
@@ -16,6 +16,8 @@ from services.ai.tool_registry import get_all_tools
 from services.ai.tool_executor import get_tool_executor
 from utils.ai_response_formatter import execution_response, text_response, error_response
 from utils.ai_session_manager import get_session_manager
+from utils.auth_helpers import get_user_id_from_token
+from utils.project_chat_repo import ProjectChatRepository
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -56,7 +58,7 @@ class AISelectionResponse(BaseModel):
 # ============================================================================
 
 @router.post("/selection", response_model=AISelectionResponse)
-async def ai_selection(request: AISelectionRequest):
+async def ai_selection(request: AISelectionRequest, authorization: Optional[str] = Header(None)):
     """
     Handle user selection from options.
     
@@ -67,7 +69,9 @@ async def ai_selection(request: AISelectionRequest):
     4. Return formatted response
     """
     try:
-        logger.info(f"[AI-SELECTION] Session {request.session_id} selected: {request.selection}")
+        user_id = get_user_id_from_token(authorization)
+        
+        logger.info(f"[AI-SELECTION] Session {request.session_id} (user={user_id}) selected: {request.selection}")
         
         # Get intent
         intent = request.intent
@@ -86,9 +90,34 @@ async def ai_selection(request: AISelectionRequest):
         session_manager = get_session_manager()
         await session_manager.set_active_project(request.session_id, request.selection)
         
+        # Also update users.active_project for persistence
+        chat_repo = ProjectChatRepository()
+        chat_repo.set_active_project(user_id, request.selection)
+        
+        # Persist user selection message
+        chat_repo.add_message(
+            user_id=user_id,
+            project_domain=request.selection,
+            role="user",
+            content=f"Selected project: {request.selection}",
+            response_type=None,
+        )
+        
+        # Helper to persist assistant response
+        def _finalize(resp: dict) -> dict:
+            chat_repo.add_message(
+                user_id=user_id,
+                project_domain=request.selection,
+                role="assistant",
+                content=resp.get("text") or resp.get("message") or "",
+                response_type=resp.get("type"),
+                metadata=resp,
+            )
+            return resp
+        
         # Execute tool
         executor = get_tool_executor()
-        result = await executor.execute(tool_name, args, session_key=request.session_id)
+        result = await executor.execute(tool_name, args, session_key=request.session_id, user_id=user_id)
         
         # Send result to LLM for natural language summarization
         glm_client = get_glm_client()
@@ -147,24 +176,24 @@ async def ai_selection(request: AISelectionRequest):
             action_tools = ["start_project", "stop_project", "restart_project", "delete_project"]
             
             if tool_name in action_tools:
-                return {
+                return _finalize({
                     "type": "execution",
                     "text": final_text,
                     "progress": [result],
                     "message": final_text,
                     "details": None
-                }
+                })
             else:
                 # Context/info tools
-                return {
+                return _finalize({
                     "type": "text",
                     "text": final_text,
                     "progress": None,
                     "message": None,
                     "details": None
-                }
+                })
         else:
-            return error_response(result.get("message", "Execution failed"), result)
+            return _finalize(error_response(result.get("message", "Execution failed"), result))
     
     except Exception as e:
         logger.error(f"[AI-SELECTION] Error: {e}", exc_info=True)
