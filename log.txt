@@ -1,13 +1,43 @@
-  GNU nano 7.2                                                                  .env                                                                            
-PORT=8593
-PROJECT_ID=1593
-BOT_TOKEN=dfdfs
-WEBHOOK_URL=https://crytpo-k4w64k.dreambigwithai.com/webhook
-DATABASE_URL=postgresql://admin:StrongAdminPass123@localhost:5432/dreampilot
-BOT_NAME=AI Assistant Bot
-API_TIMEOUT=10
-DEFAULT_CURRENCY=usd
-SECRET_KEY=change-this-in-production-use-random-string
-ACCESS_TOKEN_EXPIRE_HOURS=24
-WEBHOOK_DOMAIN=crytpo-k4w64k
-WEBHOOK_PATH=/webhook
+1|clawd-backend  | 2026-06-24 05:16:54 +00:00: INFO:services.telegram.webhook:✅ Telegram webhook registered successfully
+1|clawd-backend  | 2026-06-24 05:16:54 +00:00: INFO:services.telegram.webhook:📍 Webhook URL: https://crytpo-wina9w.dreambigwithai.com/webhook
+1|clawd-backend  | 2026-06-24 05:16:54 +00:00: INFO:services.telegram.webhook:✅ Webhook registration succeeded on attempt 6/9
+1|clawd-backend  | 2026-06-24 05:16:54 +00:00: INFO:services.telegram.webhook:✅ Async webhook registration completed: Webhook registered successfully
+1|clawd-backend  | 2026-06-24 05:17:10 +00:00: INFO:     110.224.94.217:0 - "GET /project-types HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-24 05:17:10 +00:00: INFO:     110.224.94.217:0 - "GET /projects HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-24 05:17:10 +00:00: INFO:     110.224.94.217:0 - "GET /gallery/my-published HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-24 05:17:10 +00:00: INFO:     110.224.94.217:0 - "GET /templates/my-templates HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-24 05:17:15 +00:00: INFO:     110.224.94.217:0 - "OPTIONS /projects/1607 HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-24 05:17:15 +00:00: INFO:app:[GITHUB] Attempting to delete repository: nivethaug/crytpo-wina9w
+1|clawd-backend  | 2026-06-24 05:17:15 +00:00: INFO:app:[GITHUB] Full repo_url from DB: https://github.com/nivethaug/crytpo-wina9w
+1|clawd-backend  | 2026-06-24 05:17:15 +00:00: INFO:github_service:[GITHUB] Deleting repository: nivethaug/crytpo-wina9w
+1|clawd-backend  | 2026-06-24 05:17:15 +00:00: INFO:github_service:[GITHUB] Running: gh repo delete nivethaug/crytpo-wina9w --yes
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:github_service:[GITHUB] Success: 
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:github_service:[GITHUB] ✓ Successfully deleted nivethaug/crytpo-wina9w
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:app:[GITHUB] ✓ Repository deleted: nivethaug/crytpo-wina9w
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:app:✓ Deleted project 1607 from database (infrastructure cleanup in background)
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:app:[BG] Starting infrastructure cleanup for project 1607: /root/dreampilot/projects/telegram/1607_crytpo-copy_20260624_051130
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:     110.224.94.217:0 - "DELETE /projects/1607 HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:app:Starting infrastructure cleanup for: /root/dreampilot/projects/telegram/1607_crytpo-copy_20260624_051130
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:app:Using constructed database: crytpo Copy_db, user: crytpo Copy_user
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:app:Using telegram bot cleanup module for project 1607
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:services.telegram.cleanup_infra:🤖 Starting telegram bot infrastructure cleanup for: /root/dreampilot/projects/telegram/1607_crytpo-copy_20260624_051130
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:services.telegram.cleanup_infra:📦 Using domain from project.json: crytpo-wina9w
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:services.telegram.cleanup_infra:🗑 Deleting Telegram bot PM2 process for project 1607
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:services.telegram.pm2_manager:Deleting PM2 process: crytpo-wina9w-bot
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:     110.224.94.217:0 - "GET /projects HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:services.telegram.pm2_manager:✅ PM2 process deleted: crytpo-wina9w-bot
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:services.telegram.cleanup_infra:✅ PM2 process deleted successfully
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:infrastructure_manager:✓ Symlink removed: /etc/nginx/sites-enabled/crytpo-wina9w.conf
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:infrastructure_manager:✓ Config removed: /etc/nginx/sites-available/crytpo-wina9w.conf
+1|clawd-backend  | 2026-06-24 05:17:16 +00:00: INFO:infrastructure_manager:Reloading nginx...
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: INFO:infrastructure_manager:✓ Nginx reloaded successfully
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: INFO:services.telegram.cleanup_infra:🗑 Nginx config cleanup for crytpo-wina9w: ✅ removed
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: ERROR:services.telegram.cleanup_infra:Error in DNS cleanup: 'DNSProvisioner' object has no attribute 'delete_a_record'
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: INFO:infrastructure_manager:Dropping database: crytpo_wina9w_db
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: INFO:infrastructure_manager:✓ Database dropped: crytpo_wina9w_db
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: INFO:infrastructure_manager:✓ User dropped: crytpo_wina9w_user
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: INFO:services.telegram.cleanup_infra:🗑 Database dropped for crytpo-wina9w
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: INFO:services.telegram.cleanup_infra:✅ Removed project directory: /root/dreampilot/projects/telegram/1607_crytpo-copy_20260624_051130
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: INFO:services.telegram.cleanup_infra:✅ Telegram bot infrastructure cleanup completed for crytpo Copy
+1|clawd-backend  | 2026-06-24 05:17:17 +00:00: INFO:app:Telegram bot cleanup completed
+1|clawd-backend  | 2026-06-24 
