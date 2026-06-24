@@ -457,6 +457,11 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         if request.active_project is not None:
             active_project_value = str(request.active_project)
         
+        logger.info(f"[AI-CHAT] Resolving active_project: request={active_project_value}, "
+                    f"session={session.get('active_project_id')}, projects_count={len(projects)}")
+        if projects:
+            logger.info(f"[AI-CHAT] Available project domains: {[p['domain'] for p in projects]}")
+        
         # 4. Get active project - prefer domain, with numeric ID fallback
         active_project = None
         if active_project_value:
@@ -464,8 +469,11 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
             for project in projects:
                 if project["domain"] == active_project_value:
                     active_project = project
-                    logger.debug(f"[AI-CHAT] Matched by domain: {project['domain']}")
+                    logger.info(f"[AI-CHAT] ✓ Matched by domain: {project['domain']}")
                     break
+            
+            if not active_project:
+                logger.warning(f"[AI-CHAT] ✗ Domain '{active_project_value}' not found in {len(projects)} projects")
             
             # Second try: numeric ID fallback
             if not active_project and active_project_value.isdigit():
@@ -473,7 +481,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 for project in projects:
                     if project["id"] == numeric_id:
                         active_project = project
-                        logger.debug(f"[AI-CHAT] Matched by numeric ID {numeric_id}, using domain: {project['domain']}")
+                        logger.info(f"[AI-CHAT] ✓ Matched by numeric ID {numeric_id}, using domain: {project['domain']}")
                         break
         
         # 5. Check session's active project (stored as domain string)
@@ -482,7 +490,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
             for project in projects:
                 if project["domain"] == session_project_domain:
                     active_project = project
-                    logger.debug(f"[AI-CHAT] Matched from session: {session_project_domain}")
+                    logger.info(f"[AI-CHAT] ✓ Matched from session: {session_project_domain}")
                     break
         
         # 5b. Check users.active_project as third source (priority: request > session > users table)
@@ -490,11 +498,17 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         if not active_project:
             user_active = chat_repo.get_active_project(user_id)
             if user_active:
+                logger.info(f"[AI-CHAT] users.active_project = {user_active}")
                 for project in projects:
                     if project["domain"] == user_active:
                         active_project = project
-                        logger.debug(f"[AI-CHAT] Matched from users.active_project: {user_active}")
+                        logger.info(f"[AI-CHAT] ✓ Matched from users.active_project: {user_active}")
                         break
+                if not active_project:
+                    logger.warning(f"[AI-CHAT] ✗ users.active_project '{user_active}' not found in projects list")
+        
+        if not active_project:
+            logger.warning(f"[AI-CHAT] ✗ No active project resolved from any source")
         
         # 6. Build messages for GLM (with conversation history: last 4 messages)
         system_content = SYSTEM_PROMPT
