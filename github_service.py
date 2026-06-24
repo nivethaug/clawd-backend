@@ -213,7 +213,7 @@ class GitHubService:
             logger.error(f"[GITHUB] Error adding remote: {e}")
             return False
     
-    def push_to_github(self, project_path: str, branch: str = "main", remote_name: str = "origin") -> bool:
+    def push_to_github(self, project_path: str, branch: str = "main", remote_name: str = "origin", repo_url: str = None) -> bool:
         """
         Push local repository to GitHub.
         
@@ -221,21 +221,70 @@ class GitHubService:
             project_path: Path to local git repository
             branch: Branch name to push (default: main, auto-detected if not found)
             remote_name: Remote name (default: origin)
+            repo_url: Optional repo URL — if provided, ensures remote is set correctly
             
         Returns:
             True if successful
         """
         try:
-            # Step 0: Configure git to use gh CLI for authentication
-            logger.info(f"[GITHUB] Configuring git to use gh CLI for authentication")
+            # Step 0: Fix dubious ownership for git operations (PM2 runs as root)
             subprocess.run(
+                ["git", "config", "--global", "--add", "safe.directory", project_path],
+                capture_output=True, text=True, timeout=10
+            )
+
+            # Step 1: Configure git to use gh CLI for authentication (run from project dir)
+            logger.info(f"[GITHUB] Configuring git to use gh CLI for authentication")
+            setup_result = subprocess.run(
                 ["gh", "auth", "setup-git"],
+                capture_output=True,
+                text=True,
+                cwd=project_path,
+                timeout=15
+            )
+            if setup_result.returncode != 0:
+                logger.warning(f"[GITHUB] gh auth setup-git warning: {setup_result.stderr.strip()}")
+
+            # Step 1b: Get the gh token for fallback authentication
+            gh_token = None
+            token_result = subprocess.run(
+                ["gh", "auth", "token"],
                 capture_output=True,
                 text=True,
                 timeout=10
             )
-            
-            # Step 1: Check if there are any commits
+            if token_result.returncode == 0:
+                gh_token = token_result.stdout.strip()
+                logger.info(f"[GITHUB] ✓ Retrieved gh token for fallback auth")
+
+            # Step 2: Ensure remote is configured correctly
+            remote_check = subprocess.run(
+                ["git", "remote", "get-url", remote_name],
+                capture_output=True, text=True,
+                cwd=project_path, timeout=10
+            )
+            if remote_check.returncode != 0 or not remote_check.stdout.strip():
+                # Remote doesn't exist — add it
+                if repo_url:
+                    logger.info(f"[GITHUB] Remote '{remote_name}' not found, adding: {repo_url}")
+                    subprocess.run(
+                        ["git", "remote", "add", remote_name, repo_url],
+                        capture_output=True, text=True,
+                        cwd=project_path, timeout=10
+                    )
+                else:
+                    logger.error(f"[GITHUB] Remote '{remote_name}' not found and no repo_url provided")
+                    return False
+            elif repo_url and repo_url not in remote_check.stdout.strip():
+                # Remote exists but URL doesn't match — update it
+                logger.info(f"[GITHUB] Updating remote URL to: {repo_url}")
+                subprocess.run(
+                    ["git", "remote", "set-url", remote_name, repo_url],
+                    capture_output=True, text=True,
+                    cwd=project_path, timeout=10
+                )
+
+            # Step 3: Check if there are any commits
             result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
                 capture_output=True,
@@ -272,7 +321,7 @@ class GitHubService:
                 else:
                     logger.info(f"[GITHUB] Created initial commit")
             
-            # Step 2: Detect actual branch name
+            # Step 4: Detect actual branch name
             result = subprocess.run(
                 ["git", "branch", "--show-current"],
                 capture_output=True,
@@ -315,7 +364,7 @@ class GitHubService:
             
             logger.info(f"[GITHUB] Using branch: {actual_branch}")
             
-            # Step 3: Push with upstream tracking
+            # Step 5: Push with upstream tracking (standard attempt)
             logger.info(f"[GITHUB] Pushing {actual_branch} to {remote_name}")
             result = subprocess.run(
                 ["git", "push", "-u", remote_name, actual_branch],
@@ -328,9 +377,57 @@ class GitHubService:
             if result.returncode == 0:
                 logger.info(f"[GITHUB] Successfully pushed to {remote_name}/{actual_branch}")
                 return True
-            else:
-                logger.error(f"[GITHUB] Push failed: {result.stderr}")
-                return False
+            
+            # Push failed — log the actual error
+            push_stderr = result.stderr.strip()
+            logger.error(f"[GITHUB] Push failed (attempt 1): {push_stderr}")
+
+            # Step 6: Fallback — use token-embedded URL for push
+            if gh_token:
+                logger.info(f"[GITHUB] Retrying push with token-authenticated URL")
+                current_remote_url = subprocess.run(
+                    ["git", "remote", "get-url", remote_name],
+                    capture_output=True, text=True,
+                    cwd=project_path, timeout=10
+                )
+                remote_url_str = current_remote_url.stdout.strip()
+                if remote_url_str.startswith("https://github.com/"):
+                    # Insert token: https://x-access-token:{token}@github.com/...
+                    authed_url = remote_url_str.replace(
+                        "https://github.com/",
+                        f"https://x-access-token:{gh_token}@github.com/"
+                    )
+                    result2 = subprocess.run(
+                        ["git", "push", "-u", authed_url, actual_branch],
+                        capture_output=True,
+                        text=True,
+                        cwd=project_path,
+                        timeout=120
+                    )
+                    if result2.returncode == 0:
+                        logger.info(f"[GITHUB] ✓ Push succeeded with token auth")
+                        return True
+                    logger.error(f"[GITHUB] Push failed (token attempt): {result2.stderr.strip()}")
+                elif remote_url_str.startswith("git@github.com:"):
+                    # SSH remote — try switching to HTTPS with token
+                    if repo_url:
+                        authed_url = repo_url.replace(
+                            "https://github.com/",
+                            f"https://x-access-token:{gh_token}@github.com/"
+                        )
+                        result2 = subprocess.run(
+                            ["git", "push", "-u", authed_url, actual_branch],
+                            capture_output=True,
+                            text=True,
+                            cwd=project_path,
+                            timeout=120
+                        )
+                        if result2.returncode == 0:
+                            logger.info(f"[GITHUB] ✓ Push succeeded with token auth (SSH→HTTPS)")
+                            return True
+                        logger.error(f"[GITHUB] Push failed (SSH→HTTPS attempt): {result2.stderr.strip()}")
+            
+            return False
                 
         except subprocess.TimeoutExpired:
             logger.error("[GITHUB] Push timed out")

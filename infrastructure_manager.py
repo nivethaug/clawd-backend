@@ -2069,7 +2069,7 @@ class InfrastructureManager:
                     logger.info(f"📤 Pushing all project code to GitHub: {self.repo_url}")
                     from github_service import get_github_service
                     github = get_github_service()
-                    if github.push_to_github(str(self.project_path), branch="main"):
+                    if github.push_to_github(str(self.project_path), branch="main", repo_url=self.repo_url):
                         logger.info("✓ All project code pushed to GitHub")
                     else:
                         logger.warning("⚠️ Failed to push to GitHub, continuing anyway")
