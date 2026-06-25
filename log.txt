@@ -1,33 +1,11 @@
-hat you can do
+{
+    "message": "what you can do",
+    "session_id": "353f1bbf-91c8-408e-97f3-93bc871b97b7",
+    "active_project": "dirsord-z1klbp"
+}
 
-22:28
-I can help you manage your projects and perform various DevOps operations. Here's what I can do:
-
-Project Management
-View projects - List all your projects and their status
-Get project details - Understand what each project does
-Create projects - Set up new projects (websites, bots, schedulers, etc.)
-Delete projects - Remove projects you no longer need
-Switch projects - Change which project you're working with
-Service Control
-Start services - Launch frontend and backend
-Stop services - Shut down services gracefully
-Restart services - Restart both frontend and backend
-Check status - See detailed status including database and services
-Logs & Monitoring
-View logs - Get recent PM2 logs for your projects
-Job logs - See execution history for scheduled tasks
-Scheduler (for scheduling projects)
-List jobs - Show all scheduled tasks
-Create jobs - Schedule new tasks (interval, daily, or one-time)
-Edit jobs - Change schedules, payloads, or status
-Pause/Resume - Temporarily stop or restart jobs
-Run now - Test a job immediately
-Delete jobs - Remove scheduled tasks
-Bulk Operations
-Start/Stop/Restart all projects - Manage everything at once
-Remove all projects - Clean up all projects
-Want me to help you with something specific? Just let me know!
-
-
-
+{
+    "message": "what you can do",
+    "session_id": "353f1bbf-91c8-408e-97f3-93bc871b97b7",
+    "active_project": "dirsord-z1klbp"
+}

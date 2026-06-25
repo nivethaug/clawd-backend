@@ -752,7 +752,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 await session_manager.update_last_used(request.session_id)
                 
                 # Determine response type based on tool category
-                action_tools = ["start_project", "stop_project", "restart_project", "delete_project"]
+                action_tools = ["start_project", "stop_project", "restart_project", "delete_project", "clear_active_project"]
                 
                 if tool_name in action_tools:
                     # Action tools: return execution response with progress
