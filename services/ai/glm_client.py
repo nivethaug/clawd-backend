@@ -86,7 +86,8 @@ class GLMClient:
                         "tools": tools,
                         "tool_choice": tool_choice,
                         "temperature": temperature,
-                        "max_tokens": max_tokens
+                        "max_tokens": max_tokens,
+                        "thinking": {"type": "disabled"}
                     }
                 )
                 response.raise_for_status()
@@ -114,7 +115,8 @@ class GLMClient:
                             "tools": tools,
                             "tool_choice": tool_choice,
                             "temperature": temperature,
-                            "max_tokens": max_tokens
+                            "max_tokens": max_tokens,
+                            "thinking": {"type": "disabled"}
                         }
                     )
                     response.raise_for_status()
