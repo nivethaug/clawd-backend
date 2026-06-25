@@ -958,3 +958,21 @@ async def get_active_project(
     project = repo.get_active_project(user_id)
     return {"project": project}
 
+
+@router.delete("/messages")
+async def clear_chat_history(
+    project: str = Query(..., description="Project domain"),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Delete all persisted chat messages for a project.
+    Used by frontend 'Clear History' button.
+    """
+    user_id = get_user_id_from_token(authorization)
+    repo = ProjectChatRepository()
+    deleted = repo.clear_messages(user_id, project)
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Failed to clear chat history")
+    logger.info(f"[AI-CHAT] Cleared chat history for project={project}, user={user_id}")
+    return {"success": True}
+
