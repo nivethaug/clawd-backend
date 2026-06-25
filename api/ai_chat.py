@@ -577,17 +577,10 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         # ── Helper: persist assistant response then return ────────────
         def _finalize(resp: dict) -> dict:
             """Persist assistant message to projectchat and return response.
-            Skips: errors, selection/confirmation prompts, and switch-related messages."""
+            Skips: errors, selection/confirmation prompts, and switch commands."""
             _skip_types = {"selection", "confirmation", "error"}
-            # Check if response text is about project switching
-            _resp_text = (resp.get("text") or resp.get("message") or "").lower()
-            _is_switch_resp = any(kw in _resp_text for kw in _switch_keywords) or \
-                              "successfully switched" in _resp_text or \
-                              "which project" in _resp_text or \
-                              "cleared the active project" in _resp_text or \
-                              "cleared the active" in _resp_text
             
-            if _active_domain and resp.get("type") not in _skip_types and not _is_switch_msg and not _is_switch_resp:
+            if _active_domain and resp.get("type") not in _skip_types and not _is_switch_msg:
                 chat_repo.add_message(
                     user_id=user_id,
                     project_domain=_active_domain,
