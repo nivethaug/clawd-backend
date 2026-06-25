@@ -950,13 +950,26 @@ async def get_active_project(
     authorization: Optional[str] = Header(None),
 ):
     """
-    Get the user's active project domain from the users table.
-    Returns {"project": "<domain>"} or {"project": null}.
+    Get the user's active project domain + type from the users table.
+    Returns {"project": "<domain>", "type": "<type_slug>"} or {"project": null, "type": null}.
     """
     user_id = get_user_id_from_token(authorization)
     repo = ProjectChatRepository()
     project = repo.get_active_project(user_id)
-    return {"project": project}
+
+    project_type = None
+    if project:
+        with get_db() as conn:
+            row = conn.execute("""
+                SELECT pt.type as type_slug
+                FROM projects p
+                LEFT JOIN project_types pt ON p.type_id = pt.id
+                WHERE p.domain = %s
+            """, (project,)).fetchone()
+            if row:
+                project_type = row["type_slug"]
+
+    return {"project": project, "type": project_type}
 
 
 @router.delete("/messages")

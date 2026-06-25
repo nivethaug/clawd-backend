@@ -1,11 +1,30 @@
-{
-    "message": "what you can do",
-    "session_id": "353f1bbf-91c8-408e-97f3-93bc871b97b7",
-    "active_project": "dirsord-z1klbp"
-}
+what you can do
 
-{
-    "message": "what you can do",
-    "session_id": "353f1bbf-91c8-408e-97f3-93bc871b97b7",
-    "active_project": "dirsord-z1klbp"
-}
+17:44
+I'm here to help you manage your projects. Here's what I can do:
+🔧 Project Management
+Start / Stop / Restart your projects
+Check Status — see if services are running
+View Logs — see frontend and backend logs
+Create Projects — build websites, bots, schedulers, etc.
+Delete Projects — remove projects you no longer need
+🧩 For Website Projects
+See your site's details and configuration
+Manage PM2 services and logs
+Monitor uptime and health
+🤖 For Telegram & Discord Bots
+Start, stop, and restart your bots
+View logs to debug issues
+Check bot status and health
+⏰ For Trading & Scheduler Projects
+Run scheduled tasks
+View job schedules and execution history
+Edit, pause, or resume jobs
+What would you like to do? For example:
+
+"Start my project"
+"Create a new bot"
+"Show logs"
+"Switch to another project"
+
+
