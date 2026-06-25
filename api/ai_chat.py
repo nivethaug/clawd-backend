@@ -93,6 +93,8 @@ You are both:
 
 # ⚖️ INTENT TYPES
 
+# ⚖️ INTENT TYPES
+
 ## 1. CONVERSATION (NO TOOL)
 
 If the user is:
@@ -409,6 +411,107 @@ User: "which project am I using"
 "Be natural first. Use tools only when needed. Always choose the correct tool for the user's intent. Always summarize tool output into user-friendly language."
 """
 
+# ============================================================================
+# Project-Type-Specific Capability Descriptions
+# Used to tailor "what can you do" answers to the active project type.
+# ============================================================================
+
+PROJECT_TYPE_CAPABILITIES = {
+    "website": """
+# 🔧 YOUR CAPABILITIES FOR THIS WEBSITE PROJECT
+
+When asked "what can you do", ONLY list these website-specific capabilities:
+- Start / Stop / Restart the website services
+- Check project status — see if frontend and backend are running
+- View frontend and backend logs
+- Get project details and configuration
+- Create / Delete projects
+
+DO NOT mention telegram bots, discord bots, trading bots, schedulers, or job management.
+This is a WEBSITE project — tailor your answers accordingly.
+""",
+    "telegrambot": """
+# 🔧 YOUR CAPABILITIES FOR THIS TELEGRAM BOT PROJECT
+
+When asked "what can you do", ONLY list these telegram-bot-specific capabilities:
+- Start / Stop / Restart the bot
+- Check bot status and health
+- View bot logs to debug issues
+- Get project details and configuration
+- Create / Delete projects
+
+DO NOT mention websites, discord bots, trading bots, or schedulers.
+This is a TELEGRAM BOT project — tailor your answers accordingly.
+""",
+    "discordbot": """
+# 🔧 YOUR CAPABILITIES FOR THIS DISCORD BOT PROJECT
+
+When asked "what can you do", ONLY list these discord-bot-specific capabilities:
+- Start / Stop / Restart the bot
+- Check bot status and health
+- View bot logs to debug issues
+- Get project details and configuration
+- Create / Delete projects
+
+DO NOT mention websites, telegram bots, trading bots, or schedulers.
+This is a DISCORD BOT project — tailor your answers accordingly.
+""",
+    "tradingbot": """
+# 🔧 YOUR CAPABILITIES FOR THIS TRADING BOT PROJECT
+
+When asked "what can you do", ONLY list these trading-bot-specific capabilities:
+- Start / Stop / Restart the trading bot
+- Check bot status and health
+- View bot logs to debug issues
+- Get project details and configuration
+- Create / Delete projects
+
+DO NOT mention websites, telegram, discord, or scheduler jobs.
+This is a TRADING BOT project — tailor your answers accordingly.
+""",
+    "scheduler": """
+# 🔧 YOUR CAPABILITIES FOR THIS SCHEDULER PROJECT
+
+When asked "what can you do", ONLY list these scheduler-specific capabilities:
+- View scheduled jobs and execution history
+- Create / Edit / Delete scheduled jobs
+- Pause / Resume jobs
+- Run a job immediately (test)
+- View job logs
+- Start / Stop / Restart the scheduler service
+- Check scheduler status
+- Get project details and configuration
+- Create / Delete projects
+
+DO NOT mention websites, telegram bots, discord bots, or trading bots.
+This is a SCHEDULER project — tailor your answers accordingly.
+""",
+    "custom": """
+# 🔧 YOUR CAPABILITIES FOR THIS CUSTOM PROJECT
+
+When asked "what can you do", ONLY list these capabilities:
+- Start / Stop / Restart the project services
+- Check project status
+- View logs
+- Get project details and configuration
+- Create / Delete projects
+
+This is a CUSTOM project — tailor your answers accordingly.
+""",
+    "default": """
+# 🔧 YOUR CAPABILITIES FOR THIS PROJECT
+
+When asked "what can you do", list these capabilities:
+- Start / Stop / Restart the project services
+- Check project status
+- View logs
+- Get project details and configuration
+- Create / Delete projects
+
+Tailor your answers to the active project type only.
+""",
+}
+
 
 # ============================================================================
 # Main Chat Endpoint
@@ -533,6 +636,14 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 f"\n\nCurrent active project: {active_project['name']} "
                 f"(domain: {active_project['domain']}, type: {_project_type or 'unknown'})"
             )
+            # ── Inject project-type-specific capabilities ────────────
+            # GLM must tailor 'what can you do' answers to the ACTIVE
+            # project type only — not list every possible project type.
+            _type_capabilities = PROJECT_TYPE_CAPABILITIES.get(
+                (_project_type or "").lower(),
+                PROJECT_TYPE_CAPABILITIES["default"],
+            )
+            system_content += "\n" + _type_capabilities
             logger.info(f"[AI-CHAT] Active project type='{_project_type}' → {len(tools)} tools")
         
         messages = [{"role": "system", "content": system_content}]
