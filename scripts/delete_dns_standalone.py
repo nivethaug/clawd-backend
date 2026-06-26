@@ -30,7 +30,7 @@ import argparse
 API_TOKEN = "sqS6XPGMnWQXZytrxZGPDSZ2qyBGbrGOaTaf4tbbb621d0df"
 
 # Base domain
-BASE_DOMAIN = "dreambigwithai.com"
+BASE_DOMAIN = "dreamagent.cloud"
 
 # Server IP (for reference)
 SERVER_IP = "195.200.14.37"
@@ -41,8 +41,8 @@ SERVER_IP = "195.200.14.37"
 
 # System/infrastructure subdomains that should NEVER be deleted
 WHITELIST = [
-    "@",           # Root domain (dreambigwithai.com)
-    "www",         # www.dreambigwithai.com
+    "@",           # Root domain (dreamagent.cloud)
+    "www",         # www.dreamagent.cloud
     "mail",        # Mail server
     "ftp",         # FTP server
     "localhost",   # Localhost
@@ -52,11 +52,11 @@ WHITELIST = [
     "dev",         # Development environment
     "test",        # Test environment
     # Protected production subdomains
-    "esignpilot",  # esignpilot.dreambigwithai.com
-    "salesdocpilot", # salesdocpilot.dreambigwithai.com
-    "botpilot",    # botpilot.dreambigwithai.com
-    "calmcrypto",  # calmcrypto.dreambigwithai.com
-    "promptcraft", # promptcraft.dreambigwithai.com
+    "esignpilot",  # esignpilot.dreamagent.cloud
+    "salesdocpilot", # salesdocpilot.dreamagent.cloud
+    "botpilot",    # botpilot.dreamagent.cloud
+    "calmcrypto",  # calmcrypto.dreamagent.cloud
+    "promptcraft", # promptcraft.dreamagent.cloud
     # Add more protected subdomains here
 ]
 
@@ -76,7 +76,7 @@ def make_request(endpoint, method="GET", data=None):
     Make HTTP request to Hostinger API.
     
     Args:
-        endpoint: API endpoint (e.g., "/zones/dreambigwithai.com")
+        endpoint: API endpoint (e.g., "/zones/dreamagent.cloud")
         method: HTTP method (GET, PUT, DELETE)
         data: JSON data for PUT requests
     
@@ -120,7 +120,7 @@ def list_dns_records(domain):
     List all DNS records for a domain.
     
     Args:
-        domain: Base domain (e.g., "dreambigwithai.com")
+        domain: Base domain (e.g., "dreamagent.cloud")
     
     Returns:
         List of record dicts or None on error
@@ -153,7 +153,7 @@ def delete_subdomain(domain, subdomain, current_records=None):
     Delete a subdomain's DNS records using DELETE with filters.
     
     Args:
-        domain: Base domain (e.g., "dreambigwithai.com")
+        domain: Base domain (e.g., "dreamagent.cloud")
         subdomain: Subdomain name to delete (e.g., "cryptoprice")
         current_records: Not used (kept for compatibility)
     
@@ -232,7 +232,7 @@ def bulk_delete_subdomains(domain, filters_list):
     Delete multiple subdomains using DELETE with filters (efficient bulk delete).
     
     Args:
-        domain: Base domain (e.g., "dreambigwithai.com")
+        domain: Base domain (e.g., "dreamagent.cloud")
         filters_list: List of {"name": subdomain, "type": "A"} dicts
     
     Returns:

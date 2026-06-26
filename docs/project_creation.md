@@ -192,14 +192,14 @@
 |----------|--------|---------|
 | `BOT_TOKEN` | User input | `1234567890:ABCdef...` |
 | `PROJECT_ID` | Injected by worker.py | `123` |
-| `WEBHOOK_DOMAIN` | Auto-generated | `mybot-api.dreambigwithai.com` |
+| `WEBHOOK_DOMAIN` | Auto-generated | `mybot-api.dreamagent.cloud` |
 | `PORT` | Port allocation | `8123` |
 | `BOT_NAME` | Project name | `My Telegram Bot` |
 
-**Webhook URL:** `https://{domain}.dreambigwithai.com/webhook`
-**Health Endpoint:** `https://{domain}.dreambigwithai.com/health`
+**Webhook URL:** `https://{domain}.dreamagent.cloud/webhook`
+**Health Endpoint:** `https://{domain}.dreamagent.cloud/health`
 
-**Domain:** Extracted from project metadata (e.g., `{project_name}-api.dreambigwithai.com`)
+**Domain:** Extracted from project metadata (e.g., `{project_name}-api.dreamagent.cloud`)
 
 **Status Updates:**
 - Creating → Pipeline running
@@ -238,7 +238,7 @@ python3 buildpublish.py --no-restart # Skip PM2 restart
 
 **Step 8 (Base Verification)**:
 - Fast HTTP check (< 1 second)
-- Endpoint: `https://{domain}.dreambigwithai.com/health`
+- Endpoint: `https://{domain}.dreamagent.cloud/health`
 - Expected: `{"status": "healthy", "service": "telegram-bot"}`
 - On failure: Continue anyway (base may still work)
 
@@ -363,13 +363,13 @@ def process_user_input(text: str, user: Optional[User] = None) -> str:
 | `PROJECT_ID` | Injected by worker.py | `123` |
 | `PORT` | Port allocation | `8123` |
 | `DATABASE_URL` | Shared PostgreSQL | `postgresql://admin:xxx@localhost:5432/dreampilot` |
-| `WEBHOOK_DOMAIN` | Auto-generated | `mybot-api.dreambigwithai.com` |
+| `WEBHOOK_DOMAIN` | Auto-generated | `mybot-api.dreamagent.cloud` |
 
-**Health Endpoint:** `https://{domain}.dreambigwithai.com/health`
+**Health Endpoint:** `https://{domain}.dreamagent.cloud/health`
 - Runs lightweight HTTP server in background thread
 - Returns: `{"status": "healthy", "service": "discord-bot"}`
 
-**Domain:** `{project_name}-api.dreambigwithai.com`
+**Domain:** `{project_name}-api.dreamagent.cloud`
 
 **Token Validation:**
 - Endpoint: `GET https://discord.com/api/v10/users/@me`
@@ -716,7 +716,7 @@ The central scheduler runs as a single process:
 
 **Port Ranges:** Frontend 3010-4000, Backend 8010-9000
 **Database Naming:** `{project_name}_db`, user `{project_name}_user`
-**DNS Records:** `{domain}.dreambigwithai.com`, `{domain}-api.dreambigwithai.com`
+**DNS Records:** `{domain}.dreamagent.cloud`, `{domain}-api.dreamagent.cloud`
 **Nginx Features:** SPA routing, API proxy, SSL/HTTPS, Let's Encrypt
 
 ---
@@ -920,7 +920,7 @@ All 6 prompt-dispatching locations in the handler include `elif self.is_schedule
 **Verification Checks:**
 1. **Build output:** Check `dist/index.html` exists and not empty
 2. **Nginx config:** Verify `{domain}.conf` exists in `/etc/nginx/sites-available/`
-3. **DNS resolution:** Resolve `{domain}.dreambigwithai.com` to server IP
+3. **DNS resolution:** Resolve `{domain}.dreamagent.cloud` to server IP
 4. **HTTP response:** GET request to frontend, expect 200 OK
 5. **PM2 status:** Check PM2 process running for frontend/backend services
 
@@ -945,7 +945,7 @@ All 6 prompt-dispatching locations in the handler include `elif self.is_schedule
 **Hostinger API Integration:**
 - Requires `HOSTINGER_API_TOKEN` environment variable
 - Base URL: `https://developers.hostinger.com/api/dns/v1`
-- Zone ID: `dreambigwithai.com`
+- Zone ID: `dreamagent.cloud`
 
 **DNS Record Types:**
 - **A Record:** Maps subdomain to IPv4 address (195.200.14.37)
@@ -958,7 +958,7 @@ All 6 prompt-dispatching locations in the handler include `elif self.is_schedule
 - `update_a_record(domain, subdomain, ip)` → Updates existing record
 - `delete_a_record(domain, subdomain)` → Removes record
 
-**Wildcard DNS:** `*.dreambigwithai.com` pre-configured, so manual DNS provisioning often skipped
+**Wildcard DNS:** `*.dreamagent.cloud` pre-configured, so manual DNS provisioning often skipped
 
 ---
 
@@ -1241,7 +1241,7 @@ def phase_X_name(self) -> bool:
 
 | Task | File | Lines | Action |
 |------|------|-------|--------|
-| Change base domain | `infrastructure_manager.py` | 36 | Update `BASE_DOMAIN = "dreambigwithai.com"` |
+| Change base domain | `infrastructure_manager.py` | 36 | Update `BASE_DOMAIN = "dreamagent.cloud"` |
 | Change server IP | `infrastructure_manager.py` | 37 | Update `SERVER_IP = "195.200.14.37"` |
 | Add DNS provider | `dns_manager.py` | 1-150 | Implement new provider API client |
 | Modify nginx template | `infrastructure_manager.py` | 878-1021 | Edit `generate_config()` method |

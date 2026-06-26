@@ -6,8 +6,8 @@
  */
 
 // Base URL placeholder - replaced during deployment
-// Format: {domain}.dreambigwithai.com → actual domain (e.g., myproject-abc123.dreambigwithai.com)
-const API_BASE_URL = "https://{domain}-api.dreambigwithai.com";
+// Format: {domain}.dreamagent.cloud → actual domain (e.g., myproject-abc123.dreamagent.cloud)
+const API_BASE_URL = "https://{domain}-api.dreamagent.cloud";
 
 /**
  * API Endpoints

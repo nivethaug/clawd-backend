@@ -10,6 +10,8 @@ import logging
 from utils.logger import logger  # noqa: F811 — reassign below
 logger = logging.getLogger("services.telegram.env_injector")
 
+from domain_config import BASE_DOMAIN, webhook_url as _webhook_url
+
 
 def inject_bot_token(
     project_path: str, 
@@ -72,7 +74,7 @@ DATABASE_URL=postgresql://user:password@localhost:5432/db_name
 
 # Webhook Configuration
 PORT=8010
-WEBHOOK_DOMAIN=your-subdomain.dreambigwithai.com
+WEBHOOK_DOMAIN=your-subdomain.{BASE_DOMAIN}
 WEBHOOK_PATH=/webhook
 """
         
@@ -107,8 +109,8 @@ WEBHOOK_PATH=/webhook
                 set_keys.add('WEBHOOK_DOMAIN')
             elif line.startswith('WEBHOOK_URL='):
                 if domain:
-                    updated_lines.append(f'WEBHOOK_URL=https://{domain}.dreambigwithai.com/webhook')
-                    logger.info(f"   ✅ Set WEBHOOK_URL=https://{domain}.dreambigwithai.com/webhook")
+                    updated_lines.append(f'WEBHOOK_URL={_webhook_url(domain)}')
+                    logger.info(f"   ✅ Set WEBHOOK_URL={_webhook_url(domain)}")
                 else:
                     updated_lines.append(line)
                     logger.warning(f"   ⚠️ No domain provided, keeping original WEBHOOK_URL")
@@ -142,8 +144,8 @@ WEBHOOK_PATH=/webhook
             updated_lines.append(f'WEBHOOK_DOMAIN={domain}')
             logger.info(f"   ✅ Added WEBHOOK_DOMAIN={domain}")
         if domain and 'WEBHOOK_URL' not in set_keys:
-            updated_lines.append(f'WEBHOOK_URL=https://{domain}.dreambigwithai.com/webhook')
-            logger.info(f"   ✅ Added WEBHOOK_URL=https://{domain}.dreambigwithai.com/webhook")
+            updated_lines.append(f'WEBHOOK_URL={_webhook_url(domain)}')
+            logger.info(f"   ✅ Added WEBHOOK_URL={_webhook_url(domain)}")
         if port and 'PORT' not in set_keys:
             updated_lines.append(f'PORT={port}')
             logger.info(f"   ✅ Added PORT={port}")

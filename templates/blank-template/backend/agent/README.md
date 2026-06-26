@@ -11,8 +11,8 @@ This folder helps AI assistants understand and modify the codebase efficiently.
 | Property | Value |
 |----------|-------|
 | **PM2 Process Name** | `{domain}-backend` |
-| **Domain** | `{domain}.dreambigwithai.com` |
-| **API Domain** | `{domain}-api.dreambigwithai.com` |
+| **Domain** | `{domain}.dreamagent.cloud` |
+| **API Domain** | `{domain}-api.dreamagent.cloud` |
 | **PM2 Config File** | `ecosystem.config.json` |
 | **Entry Point** | `main:app` (uvicorn ASGI) |
 | **Default Port** | `8010` |

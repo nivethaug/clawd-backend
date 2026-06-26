@@ -29,7 +29,7 @@ import requests
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_USER = os.getenv("SMTP_USER", "support@dreambigwithai.com")
+SMTP_USER = os.getenv("SMTP_USER", "support@dreamagent.cloud")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8754771378:AAFqdZNwYc8JbZanNy901IQr6lFmJs1gtm4")

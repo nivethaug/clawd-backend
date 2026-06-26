@@ -28,8 +28,8 @@ try:
     handler.project_name = "test-project"
     handler.frontend_path = MockPath("/test/project/frontend")
     handler.frontend_src_path = MockPath("/test/project/frontend/src")
-    handler.frontend_domain = "test.dreambigwithai.com"
-    handler.backend_domain = "test-api.dreambigwithai.com"
+    handler.frontend_domain = "test.dreamagent.cloud"
+    handler.backend_domain = "test-api.dreamagent.cloud"
     handler.claude_agent = None
     handler.progress_mapper = None
     

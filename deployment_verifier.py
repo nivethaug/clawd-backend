@@ -388,7 +388,7 @@ class DeploymentVerifier:
             ("nginx_config", self.check_nginx_config),
         ]
         
-        # DNS check is optional - skip by default since *.dreambigwithai.com wildcard exists
+        # DNS check is optional - skip by default since *.dreamagent.cloud wildcard exists
         if include_dns:
             checks.append(("domain_resolution", self.check_domain_resolution))
         

@@ -12,6 +12,8 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+from domain_config import BASE_DOMAIN, frontend_domain as _frontend_domain
+
 
 def cleanup_discord_bot_infrastructure(
     project_path: str,
@@ -55,7 +57,7 @@ def cleanup_discord_bot_infrastructure(
     domain = project_metadata.get("domain", "")
 
     if not domain:
-        domain = project_metadata.get("frontend_domain", "").replace(".dreambigwithai.com", "")
+        domain = project_metadata.get("frontend_domain", "").replace(f".{BASE_DOMAIN}", "")
 
     if not domain:
         domain = project_name
@@ -112,7 +114,7 @@ def cleanup_discord_bot_infrastructure(
     # STEP 3: Remove SSL certificates
     try:
         from infrastructure_manager import cleanup_ssl_certificates
-        full_domain = f"{domain}.dreambigwithai.com" if domain and '.' not in domain else domain
+        full_domain = _frontend_domain(domain) if domain and '.' not in domain else domain
         if full_domain:
             cleanup_results["steps"]["ssl"] = cleanup_ssl_certificates(full_domain, "")
         else:

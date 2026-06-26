@@ -243,7 +243,7 @@ def poll_project_status(project_id: int, timeout: int = DEFAULT_TIMEOUT, agent_m
 
 def verify_frontend(domain: str) -> bool:
     """Verify frontend is reachable via HTTP."""
-    full_domain = f"{domain}.dreambigwithai.com" if "." not in domain else domain
+    full_domain = f"{domain}.dreamagent.cloud" if "." not in domain else domain
     url = f"http://{full_domain}"
     log_check(f"Verifying frontend: {url}")
     
@@ -263,7 +263,7 @@ def verify_frontend(domain: str) -> bool:
 def verify_backend(domain: str) -> bool:
     """Verify backend health endpoint on -api subdomain."""
     base_domain = domain.split('.')[0] if '.' in domain else domain
-    api_domain = f"{base_domain}-api.dreambigwithai.com"
+    api_domain = f"{base_domain}-api.dreamagent.cloud"
     url = f"http://{api_domain}/health"
     log_check(f"Verifying backend health: {url}")
     
@@ -287,7 +287,7 @@ def verify_backend(domain: str) -> bool:
 
 def check_dns(domain: str) -> bool:
     """Check DNS resolution."""
-    full_domain = f"{domain}.dreambigwithai.com" if "." not in domain else domain
+    full_domain = f"{domain}.dreamagent.cloud" if "." not in domain else domain
     log_check(f"Verifying DNS resolution: {full_domain}")
     
     try:
@@ -360,7 +360,7 @@ def verify_telegram_bot(project_id: int, domain: str) -> Tuple[bool, bool, bool]
     log_check(f"Verifying Telegram bot webhook endpoints...")
     
     base_domain = domain.split('.')[0] if '.' in domain else domain
-    bot_domain = f"{base_domain}-api.dreambigwithai.com"
+    bot_domain = f"{base_domain}-api.dreamagent.cloud"
     
     health_ok = False
     root_ok = False
@@ -436,8 +436,8 @@ def print_deployment_info(project: Dict) -> None:
     """Print deployment URLs and info."""
     domain = project.get("domain", "")
     base_domain = domain.split('.')[0] if '.' in domain else domain
-    frontend_domain = f"{base_domain}.dreambigwithai.com"
-    backend_domain = f"{base_domain}-api.dreambigwithai.com"
+    frontend_domain = f"{base_domain}.dreamagent.cloud"
+    backend_domain = f"{base_domain}-api.dreamagent.cloud"
     
     print()
     print("=" * 60)
@@ -489,8 +489,8 @@ def run_pipeline_test(
         "project_id": project_id,
         "status": final_status,
         "domain": domain,
-        "frontend_url": f"http://{base_domain}.dreambigwithai.com",
-        "backend_url": f"http://{base_domain}-api.dreambigwithai.com",
+        "frontend_url": f"http://{base_domain}.dreamagent.cloud",
+        "backend_url": f"http://{base_domain}-api.dreamagent.cloud",
         "pipeline_time": f"{elapsed // 60}m {elapsed % 60}s"
     }
     
@@ -620,8 +620,8 @@ def run_telegram_pipeline_test(
         "status": final_status,
         "domain": domain,
         "bot_port": bot_port,
-        "webhook_url": f"https://{base_domain}-api.dreambigwithai.com/",
-        "health_url": f"https://{base_domain}-api.dreambigwithai.com/health",
+        "webhook_url": f"https://{base_domain}-api.dreamagent.cloud/",
+        "health_url": f"https://{base_domain}-api.dreamagent.cloud/health",
         "pm2_process": f"tg-bot-{project_id}",
         "pipeline_time": f"{elapsed // 60}m {elapsed % 60}s"
     }
@@ -667,8 +667,8 @@ def run_telegram_pipeline_test(
         print(f"PM2 Process:   tg-bot-{project_id}")
         print()
         print("Endpoints:")
-        print(f"  Webhook:     https://{base_domain}-api.dreambigwithai.com/")
-        print(f"  Health:      https://{base_domain}-api.dreambigwithai.com/health")
+        print(f"  Webhook:     https://{base_domain}-api.dreamagent.cloud/")
+        print(f"  Health:      https://{base_domain}-api.dreamagent.cloud/health")
         print("=" * 60)
         log_success(f"Pipeline completed in {result['pipeline_time']}")
     
@@ -913,7 +913,7 @@ def verify_discord_bot(project_id: int, domain: str) -> Tuple[bool, bool]:
     log_check(f"Verifying Discord bot deployment...")
 
     base_domain = domain.split('.')[0] if '.' in domain else domain
-    bot_domain = f"{base_domain}.dreambigwithai.com"
+    bot_domain = f"{base_domain}.dreamagent.cloud"
 
     health_ok = False
 
@@ -1003,7 +1003,7 @@ def run_discord_pipeline_test(
         "status": final_status,
         "domain": domain,
         "bot_port": bot_port,
-        "health_url": f"https://{base_domain}.dreambigwithai.com/health",
+        "health_url": f"https://{base_domain}.dreamagent.cloud/health",
         "pm2_process": f"dc-bot-{project_id}",
         "pipeline_time": f"{elapsed // 60}m {elapsed % 60}s"
     }
@@ -1048,7 +1048,7 @@ def run_discord_pipeline_test(
         print(f"PM2 Process:   dc-bot-{project_id}")
         print()
         print("Endpoints:")
-        print(f"  Health:      https://{base_domain}.dreambigwithai.com/health")
+        print(f"  Health:      https://{base_domain}.dreamagent.cloud/health")
         print("=" * 60)
         log_success(f"Pipeline completed in {result['pipeline_time']}")
 

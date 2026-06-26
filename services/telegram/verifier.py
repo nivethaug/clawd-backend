@@ -8,7 +8,8 @@ Verification Steps:
 3. Checks console for errors
 4. Checks network requests
 5. Navigates to root endpoint
-6. Verifies JSON response
+The domain is dynamically resolved at runtime via domain_config.BASE_DOMAIN
+and no longer needs to be hardcoded.6. Verifies JSON response
 7. Takes screenshot (WebP 75%)
 8. Closes page
 
@@ -46,7 +47,7 @@ async def verify_telegram_bot_webhook(domain: str, project_path: str = None, tim
     If verification fails, Claude agent will attempt to diagnose and fix issues, then retest.
     
     Args:
-        domain: Full domain (e.g., "mybot-api.dreambigwithai.com")
+        domain: Full domain (e.g., "mybot-api.dreamagent.cloud")
         project_path: Path to the telegram bot project directory (for fixing code)
         timeout: Timeout in seconds for verification (default: 120)
         max_retries: Maximum number of retry attempts if verification fails (default: 2)
@@ -428,7 +429,7 @@ def verify_telegram_bot_webhook_sync(domain: str, timeout: int = 120, max_retrie
     Synchronous wrapper for verify_telegram_bot_webhook.
     
     Args:
-        domain: Full domain (e.g., "mybot-api.dreambigwithai.com")
+        domain: Full domain (e.g., "mybot-api.dreamagent.cloud")
         timeout: Timeout in seconds for verification (default: 120)
         max_retries: Maximum number of retry attempts (default: 2)
     
@@ -452,7 +453,7 @@ if __name__ == "__main__":
     
     if len(sys.argv) < 2:
         print("Usage: python verifier.py <domain>")
-        print("Example: python verifier.py mybot-api.dreambigwithai.com")
+        print("Example: python verifier.py mybot-api.dreamagent.cloud")
         sys.exit(1)
     
     domain = sys.argv[1]

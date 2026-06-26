@@ -11,8 +11,8 @@ This folder helps AI assistants understand and modify telegram bot codebase effi
 | Property | Value |
 |----------|-------|
 | **PM2 Process Name** | `{domain}-bot` or `tg-bot-{project_id}` |
-| **Domain** | `{domain}.dreambigwithai.com` |
-| **Webhook URL** | `https://{domain}.dreambigwithai.com/webhook` |
+| **Domain** | `{domain}.dreamagent.cloud` |
+| **Webhook URL** | `https://{domain}.dreamagent.cloud/webhook` |
 | **PM2 Config File** | `ecosystem.config.json` (auto-generated) |
 | **Entry Point** | `main:app` (python-telegram-bot) |
 | **Default Port** | `{port}` (from .env, default: 8443) |
@@ -105,7 +105,7 @@ The bot uses **SQLAlchemy ORM** with a connection string from environment variab
 | `DATABASE_URL` | Full PostgreSQL connection string | `postgresql://{user}:{pass}@{host}:5432/{db}` |
 | `PORT` | Bot webhook server port | `8443` |
 | `WEBHOOK_DOMAIN` | Webhook subdomain | `crypto-bot-x123` |
-| `WEBHOOK_URL` | Full webhook URL | `https://crypto-bot-x123.dreambigwithai.com/webhook` |
+| `WEBHOOK_URL` | Full webhook URL | `https://crypto-bot-x123.dreamagent.cloud/webhook` |
 | `BOT_TOKEN` | Telegram bot token | `123456:ABC...` |
 | `SECRET_KEY` | JWT secret key | `random-string` |
 
@@ -527,13 +527,13 @@ The bot uses **webhooks** (not polling) for real-time message delivery:
 ### Webhook URL Format
 
 ```
-https://{domain}.dreambigwithai.com/webhook
+https://{domain}.dreamagent.cloud/webhook
 ```
 
 | Component | Value |
 |-----------|-------|
 | Protocol | `https://` |
-| Domain | `{WEBHOOK_DOMAIN}.dreambigwithai.com` |
+| Domain | `{WEBHOOK_DOMAIN}.dreamagent.cloud` |
 | Path | `/webhook` |
 
 ### Webhook Registration

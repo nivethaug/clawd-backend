@@ -36,13 +36,14 @@ from typing import Dict, List, Optional, Any
 
 from database_adapter import get_db
 
+from domain_config import BASE_DOMAIN
+
 logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CONSTANTS
 # ============================================================================
 
-BASE_DOMAIN = "dreambigwithai.com"
 # Fallback only; real IP is resolved dynamically via _get_server_ip()
 SERVER_IP_FALLBACK = "195.200.14.37"
 
@@ -153,11 +154,11 @@ def get_dns_instructions(domain: str, project_subdomain: str) -> Dict[str, Any]:
     Build DNS instructions for the user.
 
     For non-root domains (www.example.com):
-        CNAME www -> project_subdomain.dreambigwithai.com
+        CNAME www -> project_subdomain.{BASE_DOMAIN}
 
     For root domains (example.com):
         A @ -> server_ip
-        (also recommend CNAME www -> project_subdomain.dreambigwithai.com)
+        (also recommend CNAME www -> project_subdomain.{BASE_DOMAIN})
     """
     frontend_target = f"{project_subdomain}.{BASE_DOMAIN}"
     server_ip = _get_server_ip()
@@ -205,7 +206,7 @@ def _get_server_ip() -> str:
     """
     Detect this server's actual public IPv4 address at runtime.
 
-    IMPORTANT: We must NOT resolve our own dreambigwithai.com subdomains,
+    IMPORTANT: We must NOT resolve our own {BASE_DOMAIN} subdomains,
     because those may be behind a CDN/Varnish. The IP we need is the
     *origin* server IP that nginx listens on and that Let's Encrypt
     challenges must reach directly.

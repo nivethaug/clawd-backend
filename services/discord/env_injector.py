@@ -10,6 +10,8 @@ import logging
 from utils.logger import logger  # noqa: F811 — reassign below
 logger = logging.getLogger("services.discord.env_injector")
 
+from domain_config import BASE_DOMAIN, frontend_url as _frontend_url
+
 
 def inject_bot_token(
     project_path: str,
@@ -120,8 +122,8 @@ PROJECT_ID=1
                 set_keys.add('WEBHOOK_DOMAIN')
             elif line.startswith('WEBHOOK_URL='):
                 if domain:
-                    updated_lines.append(f'WEBHOOK_URL=https://{domain}.dreambigwithai.com/health')
-                    logger.info(f"   Set WEBHOOK_URL=https://{domain}.dreambigwithai.com/health")
+                    updated_lines.append(f'WEBHOOK_URL={_frontend_url(domain)}/health')
+                    logger.info(f"   Set WEBHOOK_URL={_frontend_url(domain)}/health")
                 else:
                     updated_lines.append(line)
                 set_keys.add('WEBHOOK_URL')
@@ -153,7 +155,7 @@ PROJECT_ID=1
             updated_lines.append(f'WEBHOOK_DOMAIN={domain}')
             logger.info(f"   Added WEBHOOK_DOMAIN={domain}")
         if domain and 'WEBHOOK_URL' not in set_keys:
-            updated_lines.append(f'WEBHOOK_URL=https://{domain}.dreambigwithai.com/health')
+            updated_lines.append(f'WEBHOOK_URL={_frontend_url(domain)}/health')
             logger.info(f"   Added WEBHOOK_URL")
 
         # Write .env file

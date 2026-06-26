@@ -21,6 +21,9 @@ from pathlib import Path
 from acp_progress_mapper import ClaudeProgressMapper
 from workflow_prompt_meta import build_workflow_meta_block
 
+# Import centralized domain configuration
+from domain_config import BASE_DOMAIN, frontend_domain as _frontend_domain, backend_domain as _backend_domain, DEFAULT_BOT_EMAIL
+
 # Try to import ClaudeCodeAgent (preferred backend)
 try:
     from claude_code_agent import ClaudeCodeAgent
@@ -215,8 +218,8 @@ class ACPChatHandler:
         """Load project domain from database to populate prompt placeholders."""
         # Set defaults first (will be overwritten if DB lookup succeeds)
         self.domain = self.project_name
-        self.frontend_domain = f"{self.project_name}.dreambigwithai.com"
-        self.backend_domain = f"{self.project_name}-api.dreambigwithai.com"
+        self.frontend_domain = _frontend_domain(self.project_name)
+        self.backend_domain = _backend_domain(self.project_name)
 
         try:
             from database_adapter import get_db
@@ -235,8 +238,8 @@ class ACPChatHandler:
                 self.domain = domain
                 # Build full domain if not already a full domain
                 if '.' not in domain:
-                    self.frontend_domain = f"{domain}.dreambigwithai.com"
-                    self.backend_domain = f"{domain}-api.dreambigwithai.com"
+                    self.frontend_domain = _frontend_domain(domain)
+                    self.backend_domain = _backend_domain(domain)
                 else:
                     # Already a full domain
                     self.frontend_domain = domain
@@ -954,7 +957,7 @@ Step 3: mcp__chrome-devtools__close_page
 1. **First time** (no `backend/user.json`): Create test user via signup API, then Write `backend/user.json`:
    ```json
    {{
-     "email": "testbot_{self.project_id}@dreambigwithai.com",
+     "email": "testbot_{self.project_id}@{BASE_DOMAIN}",
      "password": "TestBot_<random_8chars>!",
      "created_at": "<ISO timestamp>"
    }}

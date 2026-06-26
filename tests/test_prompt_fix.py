@@ -4,8 +4,8 @@
 import sys
 
 # Test the f-string directly
-frontend_domain = "test.dreambigwithai.com"
-backend_domain = "api.test.dreambigwithai.com"
+frontend_domain = "test.dreamagent.cloud"
+backend_domain = "api.test.dreamagent.cloud"
 project_path = "/tmp/test"
 
 # This is the problematic f-string from the code

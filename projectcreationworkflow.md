@@ -174,10 +174,10 @@ Backend: 8016
 
 **Nginx Config Structure:**
 ```nginx
-# Frontend: {project_name}.dreambigwithai.com
+# Frontend: {project_name}.dreamagent.cloud
 server {
     listen 80;
-    server_name {project_name}.dreambigwithai.com;
+    server_name {project_name}.dreamagent.cloud;
 
     location / {
         proxy_pass http://127.0.0.1:{frontend_port};
@@ -191,10 +191,10 @@ server {
     }
 }
 
-# Backend: {project_name}-api.dreambigwithai.com
+# Backend: {project_name}-api.dreamagent.cloud
 server {
     listen 80;
-    server_name {project_name}-api.dreambigwithai.com;
+    server_name {project_name}-api.dreamagent.cloud;
 
     location / {
         proxy_pass http://127.0.0.1:{backend_port};
@@ -217,8 +217,8 @@ server {
 3. Configure SSL for HTTPS
 
 **SSL Details:**
-- **Frontend:** `https://{project_name}.dreambigwithai.com`
-- **Backend:** `https://{project_name}-api.dreambigwithai.com`
+- **Frontend:** `https://{project_name}.dreamagent.cloud`
+- **Backend:** `https://{project_name}-api.dreamagent.cloud`
 - **Certificates:** Stored in `/etc/letsencrypt/live/`
 
 ### 6.3 Nginx Reload
@@ -242,8 +242,8 @@ server {
 
 **Actions:**
 1. Check Hostinger DNS for existing records
-2. Create A record for frontend: `{project_name}.dreambigwithai.com` → server IP
-3. Create A record for backend: `{project_name}-api.dreambigwithai.com` → server IP
+2. Create A record for frontend: `{project_name}.dreamagent.cloud` → server IP
+3. Create A record for backend: `{project_name}-api.dreamagent.cloud` → server IP
 4. Log DNS changes
 
 **DNS Details:**
@@ -419,8 +419,8 @@ creating → infrastructure_provisioning → ai_provisioning → ready
     "backend": 8016
   },
   "domains": {
-    "frontend": "project.dreambigwithai.com",
-    "backend": "project-api.dreambigwithai.com"
+    "frontend": "project.dreamagent.cloud",
+    "backend": "project-api.dreamagent.cloud"
   },
   "dns": {
     "frontend": true,
@@ -722,19 +722,19 @@ cat project.json
 **Test Frontend:**
 ```bash
 curl -I http://localhost:{frontend_port}/
-curl -I http://{project_name}.dreambigwithai.com/
+curl -I http://{project_name}.dreamagent.cloud/
 ```
 
 **Test Backend:**
 ```bash
 curl -I http://localhost:{backend_port}/health
-curl -I http://{project_name}-api.dreambigwithai.com/health
+curl -I http://{project_name}-api.dreamagent.cloud/health
 ```
 
 **Check DNS:**
 ```bash
-nslookup {project_name}.dreambigwithai.com
-dig A {project_name}.dreambigwithai.com
+nslookup {project_name}.dreamagent.cloud
+dig A {project_name}.dreamagent.cloud
 ```
 
 ---

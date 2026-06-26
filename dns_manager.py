@@ -156,7 +156,7 @@ class HostingerDNSAPI:
         Delete a subdomain's DNS records using DELETE with filters.
 
         Args:
-            domain: Base domain (e.g., "dreambigwithai.com")
+            domain: Base domain (e.g., "dreamagent.cloud")
             subdomain: Subdomain name to delete (e.g., "cryptoprice")
 
         Returns:
@@ -221,7 +221,7 @@ class HostingerDNSAPI:
         Create a new A record (subdomain → IPv4 address).
 
         Args:
-            domain: Base domain (e.g., "dreambigwithai.com")
+            domain: Base domain (e.g., "dreamagent.cloud")
             subdomain: Subdomain name (e.g., "cryptoprice")
             ip: Target IPv4 address (e.g., "195.200.14.37")
             ttl: Time to live in seconds (default: 14400)
@@ -318,7 +318,7 @@ def list_dns_records(domain: str) -> dict:
     List all current DNS records for a domain.
 
     Args:
-        domain: Domain name (e.g., "dreambigwithai.com")
+        domain: Domain name (e.g., "dreamagent.cloud")
 
     Returns:
         Dict with records list or error
@@ -333,7 +333,7 @@ def check_subdomain_exists(domain: str, subdomain: str) -> dict:
     Check if subdomain (A/AAAA/CNAME) already exists and what it points to.
 
     Args:
-        domain: Base domain (e.g., "dreambigwithai.com")
+        domain: Base domain (e.g., "dreamagent.cloud")
         subdomain: Subdomain name (e.g., "cryptoprice")
 
     Returns:
@@ -349,7 +349,7 @@ def create_a_record(domain: str, subdomain: str, ip: str, ttl: int = 14400) -> d
     Create a new A record (subdomain → IPv4 address).
 
     Args:
-        domain: Base domain (e.g., "dreambigwithai.com")
+        domain: Base domain (e.g., "dreamagent.cloud")
         subdomain: Subdomain name (e.g., "cryptoprice")
         ip: Target IPv4 address (e.g., "195.200.14.37")
         ttl: Time to live in seconds (default: 14400)
@@ -367,7 +367,7 @@ def delete_a_record(domain: str, subdomain: str) -> dict:
     Delete a subdomain's DNS records.
 
     Args:
-        domain: Base domain (e.g., "dreambigwithai.com")
+        domain: Base domain (e.g., "dreamagent.cloud")
         subdomain: Subdomain name to delete (e.g., "cryptoprice")
 
     Returns:

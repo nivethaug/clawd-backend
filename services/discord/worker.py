@@ -18,6 +18,8 @@ from services.discord.env_injector import inject_bot_token
 from services.discord.installer import install_bot_dependencies
 from services.discord.pm2_manager import start_bot_pm2, get_bot_status_pm2
 
+from domain_config import BASE_DOMAIN, SERVER_IP, frontend_domain as _frontend_domain
+
 
 def _save_project_metadata(
     project_path: str,
@@ -55,7 +57,7 @@ def _save_project_metadata(
             "type_id": 3,  # Discord bot type
             "bot_username": bot_username,
             "domain": domain,
-            "full_domain": f"{domain}.dreambigwithai.com" if domain and '.' not in domain else domain,
+            "full_domain": _frontend_domain(domain) if domain and '.' not in domain else domain,
             "port": port,
             "pm2_process": pm2_process,
             "discord_path": discord_path,
@@ -236,7 +238,7 @@ def run_discord_bot_pipeline(
             from infrastructure_manager import NginxConfigurator
 
             nginx = NginxConfigurator()
-            full_domain = f"{domain}.dreambigwithai.com" if domain and '.' not in domain else domain
+            full_domain = _frontend_domain(domain) if domain and '.' not in domain else domain
 
             # Use telegram bot config as template (same proxy pattern)
             config_domain, config = nginx.generate_telegram_bot_config(domain, port)
@@ -265,7 +267,7 @@ def run_discord_bot_pipeline(
             dns = DNSProvisioner()
 
             if dns.dns_skill_available:
-                dns_result = dns.create_a_record(domain, "dreambigwithai.com", "195.200.14.37")
+                dns_result = dns.create_a_record(domain, BASE_DOMAIN, SERVER_IP)
 
                 if dns_result:
                     logger.info(f"DNS A record created for {full_domain}")
@@ -285,7 +287,7 @@ def run_discord_bot_pipeline(
         try:
             import requests
 
-            full_domain = f"{domain}.dreambigwithai.com" if domain and '.' not in domain else domain
+            full_domain = _frontend_domain(domain) if domain and '.' not in domain else domain
             health_url = f"https://{full_domain}/health"
 
             response = requests.get(health_url, timeout=10, verify=True)
@@ -412,7 +414,7 @@ def run_discord_bot_pipeline(
 
             time.sleep(3)
 
-            full_domain = f"{domain}.dreambigwithai.com" if domain and '.' not in domain else domain
+            full_domain = _frontend_domain(domain) if domain and '.' not in domain else domain
             health_url = f"https://{full_domain}/health"
 
             response = requests.get(health_url, timeout=10, verify=True)

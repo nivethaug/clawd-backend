@@ -16,6 +16,8 @@ import logging
 from utils.logger import logger  # noqa: F811 — reassign below
 logger = logging.getLogger("services.scheduler.validator")
 
+from domain_config import DEFAULT_SUPPORT_EMAIL, DEFAULT_FROM_EMAIL
+
 # Load backend .env for SMTP defaults
 load_dotenv()
 
@@ -203,9 +205,9 @@ def _validate_email_channel(email_to: str) -> Dict:
     """Validate email by sending test email via shared SMTP."""
     smtp_host = os.getenv("SMTP_HOST", "smtp.hostinger.com")
     smtp_port = int(os.getenv("SMTP_PORT", "465"))
-    smtp_user = os.getenv("SMTP_USER", "support@dreambigwithai.com")
+    smtp_user = os.getenv("SMTP_USER", DEFAULT_SUPPORT_EMAIL)
     smtp_pass = os.getenv("SMTP_PASS", "")
-    smtp_from = os.getenv("SMTP_FROM", "dreamagent@dreambigwithai.com")
+    smtp_from = os.getenv("SMTP_FROM", DEFAULT_FROM_EMAIL)
 
     try:
         from email.mime.text import MIMEText

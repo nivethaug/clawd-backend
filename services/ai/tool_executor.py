@@ -14,6 +14,8 @@ from apps_service import pm2_action, get_pm2_processes
 from services.ai.tool_registry import is_safe_tool, requires_confirmation, is_disabled
 from utils.ai_session_manager import get_session_manager
 
+from domain_config import frontend_url as _frontend_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -763,7 +765,7 @@ class ToolExecutor:
             text_parts.append(f"with status: {status}")
         
         # Add frontend URL if available
-        frontend_url = f"https://{domain}.dreambigwithai.com"  # Adjust based on your domain
+        frontend_url = _frontend_url(domain)
         text_parts.append(f"Access it at {frontend_url}")
         
         # Add description if available

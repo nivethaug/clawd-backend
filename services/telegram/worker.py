@@ -17,6 +17,8 @@ from services.telegram.env_injector import inject_bot_token
 from services.telegram.installer import install_bot_dependencies
 from services.telegram.pm2_manager import start_bot_pm2, get_bot_status_pm2
 
+from domain_config import BASE_DOMAIN, SERVER_IP, frontend_domain as _frontend_domain, webhook_url as _webhook_url
+
 
 def _save_project_metadata(
     project_path: str,
@@ -38,7 +40,7 @@ def _save_project_metadata(
         project_id: Project ID
         project_name: Bot name
         bot_username: Telegram bot username (without @)
-        domain: Webhook domain (without .dreambigwithai.com)
+        domain: Webhook domain (without .{BASE_DOMAIN})
         port: Webhook server port
         pm2_process: PM2 process name
         telegram_path: Path to telegram bot files
@@ -57,11 +59,11 @@ def _save_project_metadata(
             "bot_username": bot_username,
             # Note: bot_token is NOT included for security
             "domain": domain,
-            "full_domain": f"{domain}.dreambigwithai.com",
+            "full_domain": _frontend_domain(domain),
             "port": port,
             "pm2_process": pm2_process,
             "telegram_path": telegram_path,
-            "webhook_url": f"https://{domain}.dreambigwithai.com/webhook",
+            "webhook_url": _webhook_url(domain),
             "status": "ready",
             "created_at": datetime.utcnow().isoformat()
         }
@@ -82,7 +84,7 @@ def _verify_dns_resolves(domain: str, timeout: int = 5) -> bool:
     Check if a domain resolves (DNS lookup).
     
     Args:
-        domain: Domain to check (e.g., mybot.dreambigwithai.com)
+        domain: Domain to check (e.g., mybot.{BASE_DOMAIN})
         timeout: DNS lookup timeout in seconds
     
     Returns:
@@ -121,7 +123,7 @@ def run_telegram_bot_pipeline(
         description: Bot description (for AI enhancement)
         bot_token: Telegram bot token
         project_path: Base project path (e.g., /root/dreampilot/projects/123/)
-        domain: Webhook domain (e.g., mybot.dreambigwithai.com)
+        domain: Webhook domain (e.g., mybot.{BASE_DOMAIN})
         port: Port for webhook server
         database_url: Database connection URL (optional)
     
@@ -230,7 +232,7 @@ def run_telegram_bot_pipeline(
             port, 
             domain,
             bot_token=bot_token,
-            webhook_url=f"https://{domain}.dreambigwithai.com/webhook",
+            webhook_url=_webhook_url(domain),
             database_url=database_url
         )
         
@@ -263,7 +265,7 @@ def run_telegram_bot_pipeline(
             from infrastructure_manager import NginxConfigurator
             
             nginx = NginxConfigurator()
-            full_domain = f"{domain}.dreambigwithai.com"
+            full_domain = _frontend_domain(domain)
             
             # Generate telegram bot nginx config
             config_domain, config = nginx.generate_telegram_bot_config(domain, port)
@@ -296,7 +298,7 @@ def run_telegram_bot_pipeline(
             # Check if DNS skill is available
             if dns.dns_skill_available:
                 # Create A record for webhook domain
-                dns_result = dns.create_a_record(domain, "dreambigwithai.com", "195.200.14.37")
+                dns_result = dns.create_a_record(domain, BASE_DOMAIN, SERVER_IP)
                 
                 if dns_result:
                     logger.info(f"✅ DNS A record created for {full_domain}")
@@ -317,7 +319,7 @@ def run_telegram_bot_pipeline(
         try:
             import requests
             
-            full_domain = f"{domain}.dreambigwithai.com"
+            full_domain = _frontend_domain(domain)
             health_url = f"https://{full_domain}/health"
             
             # Fast HTTP check (< 1 second)
@@ -480,7 +482,7 @@ def run_telegram_bot_pipeline(
             # Wait for PM2 restart to complete
             time.sleep(3)
             
-            full_domain = f"{domain}.dreambigwithai.com"
+            full_domain = _frontend_domain(domain)
             health_url = f"https://{full_domain}/health"
             
             # Fast HTTP check
@@ -630,7 +632,7 @@ if __name__ == "__main__":
         "description": "crypto price tracker",
         "bot_token": "test_token",
         "project_path": "/tmp/test-telegram",
-        "domain": "test.dreambigwithai.com",
+        "domain": f"test.{BASE_DOMAIN}",
         "port": 8999
     }
     

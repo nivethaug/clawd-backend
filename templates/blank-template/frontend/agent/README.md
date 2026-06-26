@@ -45,7 +45,7 @@ import { API_ENDPOINTS, getApiUrl } from "@/lib/api-config";
 
 // Get full URL for an endpoint
 const loginUrl = getApiUrl(API_ENDPOINTS.auth.login);
-// → "https://{domain}-api.dreambigwithai.com/api/auth/login"
+// → "https://{domain}-api.dreamagent.cloud/api/auth/login"
 ```
 
 **Available Endpoints:**

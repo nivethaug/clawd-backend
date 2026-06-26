@@ -26,6 +26,14 @@ from httpx import AsyncClient
 
 import image_handler
 from database_adapter import get_db, init_schema, is_master_database, validate_project_database_deletion, delete_project_database, get_database_info
+from domain_config import (
+    BASE_DOMAIN,
+    SERVER_IP as _SERVER_IP,
+    DEFAULT_BOT_EMAIL,
+    frontend_domain as _frontend_domain,
+    backend_domain as _backend_domain,
+    webhook_url as _webhook_url,
+)
 from project_manager import ProjectFileManager
 from chat_handlers import generate_sse_stream, generate_sse_stream_with_db_save, handle_chat_with_image, handle_chat_text_only
 from file_utils import FileUtils
@@ -1417,8 +1425,8 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         subprocess.run(
             ["git", "commit", "-m", "Initial commit (cloned from source)"],
             cwd=clone_path, capture_output=True, timeout=60,
-            env={**os.environ, "GIT_AUTHOR_NAME": "DreamPilot", "GIT_AUTHOR_EMAIL": "bot@dreambigwithai.com",
-                 "GIT_COMMITTER_NAME": "DreamPilot", "GIT_COMMITTER_EMAIL": "bot@dreambigwithai.com"}
+            env={**os.environ, "GIT_AUTHOR_NAME": "DreamPilot", "GIT_AUTHOR_EMAIL": DEFAULT_BOT_EMAIL,
+                 "GIT_COMMITTER_NAME": "DreamPilot", "GIT_COMMITTER_EMAIL": DEFAULT_BOT_EMAIL}
         )
         logger.info(f"[CLONE] Git re-initialised for project {project_id}")
 
@@ -1564,7 +1572,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             }
             # Update webhook URL to point to the clone's domain
             if source_type_id == 2:
-                env_updates["WEBHOOK_URL"] = f"https://{clone_domain}.dreambigwithai.com/webhook"
+                env_updates["WEBHOOK_URL"] = _webhook_url(clone_domain)
             # Overwrite source bot token with the new one (if provided)
             if bot_token:
                 if source_type_id == 2:
@@ -1687,7 +1695,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                     port=8000 + (project_id % 1000),
                     domain=clone_domain,
                     bot_token=bot_token,
-                    webhook_url=f"https://{clone_domain}.dreambigwithai.com/webhook",
+                    webhook_url=_webhook_url(clone_domain),
                     database_url=resolved_db_url if source_type_id == 2 else None,
                 )
                 logger.info(f"[CLONE] PM2 started: {pm2_name}")
@@ -1713,7 +1721,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 _, nginx_config = nginx.generate_telegram_bot_config(clone_domain, 8000 + (project_id % 1000))
                 if nginx.install_config(clone_domain, nginx_config):
                     nginx.reload_nginx()
-                    logger.info(f"[CLONE] Nginx configured for {clone_domain}.dreambigwithai.com")
+                    logger.info(f"[CLONE] Nginx configured for {_frontend_domain(clone_domain)}")
             except Exception as nginx_err:
                 logger.warning(f"[CLONE] Nginx config failed (non-fatal): {nginx_err}")
 
@@ -1722,9 +1730,9 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 from infrastructure_manager import DNSProvisioner
                 dns = DNSProvisioner()
                 if dns.dns_skill_available:
-                    dns_ok = dns.create_a_record(clone_domain, "dreambigwithai.com", "195.200.14.37")
+                    dns_ok = dns.create_a_record(clone_domain, BASE_DOMAIN, _SERVER_IP)
                     if dns_ok:
-                        logger.info(f"[CLONE] DNS A record created for {clone_domain}.dreambigwithai.com")
+                        logger.info(f"[CLONE] DNS A record created for {_frontend_domain(clone_domain)}")
                     else:
                         logger.warning(f"[CLONE] DNS A record creation failed, wildcard DNS may work")
                 else:
@@ -1736,7 +1744,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             if source_type_id == 2 and bot_token:
                 try:
                     from services.telegram.webhook import register_webhook_async
-                    full_domain = f"{clone_domain}.dreambigwithai.com"
+                    full_domain = _frontend_domain(clone_domain)
                     register_webhook_async(
                         bot_token=bot_token,
                         domain=full_domain,
@@ -2322,8 +2330,8 @@ def cleanup_ssl_certificates(frontend_domain: str, backend_domain: str) -> Dict[
     Remove SSL certificates for a project.
 
     Args:
-        frontend_domain: Frontend domain (e.g., "project.dreambigwithai.com")
-        backend_domain: Backend domain (e.g., "project-api.dreambigwithai.com")
+        frontend_domain: Frontend domain (e.g., "project.{BASE_DOMAIN}")
+        backend_domain: Backend domain (e.g., "project-api.{BASE_DOMAIN}")
 
     Returns:
         Dict with cleanup status
@@ -2708,8 +2716,8 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
         frontend_domain = project_metadata.get("domain", "")
         backend_domain = ""  # Bot projects don't have backend domains
     else:
-        frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(".dreambigwithai.com", "")
-        backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(".dreambigwithai.com", "")
+        frontend_domain = project_metadata.get("domains", {}).get("frontend", "").replace(f".{BASE_DOMAIN}", "")
+        backend_domain = project_metadata.get("domains", {}).get("backend", "").replace(f".{BASE_DOMAIN}", "")
     
     # HIGHEST PRIORITY: Use domain_override from database (guaranteed source of truth)
     # This fixes orphaned nginx configs when project.json is missing/stale
@@ -2727,12 +2735,12 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
     if not frontend_domain and not is_bot_project:
         full_frontend = project_metadata.get("frontend_domain", "")
         if full_frontend:
-            frontend_domain = full_frontend.replace(".dreambigwithai.com", "")
+            frontend_domain = full_frontend.replace(f".{BASE_DOMAIN}", "")
 
     if not backend_domain:
         full_backend = project_metadata.get("backend_domain", "")
         if full_backend:
-            backend_domain = full_backend.replace(".dreambigwithai.com", "")
+            backend_domain = full_backend.replace(f".{BASE_DOMAIN}", "")
 
     # Fallback: extract from project.json database field
     if not db_name:
@@ -2871,8 +2879,8 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
 
     # STEP 3: Remove SSL certificates
     try:
-        full_frontend = f"{frontend_domain}.dreambigwithai.com" if frontend_domain else ""
-        full_backend = f"{backend_domain}.dreambigwithai.com" if backend_domain else ""
+        full_frontend = _frontend_domain(frontend_domain) if frontend_domain else ""
+        full_backend = _backend_domain(backend_domain) if backend_domain else ""
         if full_frontend or full_backend:
             cleanup_results["steps"]["ssl"] = cleanup_ssl_certificates(full_frontend, full_backend)
         else:
@@ -4062,7 +4070,7 @@ async def debug_custom_domain(
     domain_info = custom_domain_service.get_project_domain(project_id)
     domain_name = domain_info["domain"] if domain_info else None
 
-    expected_cname = f"{project_subdomain}.dreambigwithai.com"
+    expected_cname = _frontend_domain(project_subdomain)
     expected_ip = custom_domain_service._get_server_ip()
 
     diagnostics: Dict[str, Any] = {
@@ -6777,7 +6785,7 @@ async def publish_to_gallery(
 
         # Build frontend URL from domain
         domain = project.get("domain") or ""
-        frontend_url = f"https://{domain}.dreambigwithai.com" if domain else None
+        frontend_url = f"https://{_frontend_domain(domain)}" if domain else None
 
         # Insert gallery listing
         conn.execute(
@@ -7089,7 +7097,7 @@ async def mark_as_template(
             raise HTTPException(status_code=409, detail="Project is already marked as template")
 
         domain = project.get("domain") or ""
-        frontend_url = f"https://{domain}.dreambigwithai.com" if domain else None
+        frontend_url = f"https://{_frontend_domain(domain)}" if domain else None
 
         conn.execute(
             """INSERT INTO templates

@@ -23,7 +23,7 @@ def register_telegram_webhook(
     
     Args:
         bot_token: Telegram bot token
-        domain: Webhook domain (e.g., mybot.dreambigwithai.com)
+        domain: Webhook domain (e.g., mybot.dreamagent.cloud)
         project_id: Project ID for webhook path
     
     Returns:
@@ -201,7 +201,7 @@ def register_telegram_webhook_with_retry(
     
     Args:
         bot_token: Telegram bot token
-        domain: Webhook domain (e.g., mybot.dreambigwithai.com)
+        domain: Webhook domain (e.g., mybot.dreamagent.cloud)
         project_id: Project ID for webhook path
         max_retries: Maximum number of retry attempts (default: 9)
         initial_delay: Initial delay before first retry in seconds (default: 10)
@@ -265,7 +265,7 @@ def register_webhook_async(
     
     Args:
         bot_token: Telegram bot token
-        domain: Webhook domain (e.g., mybot.dreambigwithai.com)
+        domain: Webhook domain (e.g., mybot.dreamagent.cloud)
         project_id: Project ID
         max_retries: Maximum retry attempts (default: 6)
         initial_delay: Initial delay in seconds (default: 10)

@@ -12,6 +12,8 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+from domain_config import BASE_DOMAIN, frontend_domain as _frontend_domain
+
 
 def cleanup_telegram_bot_infrastructure(
     project_path: str,
@@ -56,7 +58,7 @@ def cleanup_telegram_bot_infrastructure(
     
     if not domain:
         # Fallback: try frontend_domain
-        domain = project_metadata.get("frontend_domain", "").replace(".dreambigwithai.com", "")
+        domain = project_metadata.get("frontend_domain", "").replace(f".{BASE_DOMAIN}", "")
     
     if not domain:
         # Last resort: use project_name (but log warning)
@@ -121,9 +123,9 @@ def cleanup_telegram_bot_infrastructure(
         cleanup_results["steps"]["nginx"] = {"error": str(e)}
 
     # STEP 3: SSL cleanup
-    # All bots use the wildcard *.dreambigwithai.com certificate, so there's
+    # All bots use the wildcard *.{BASE_DOMAIN} certificate, so there's
     # no per-domain SSL cert to remove. Nothing to do here.
-    cleanup_results["steps"]["ssl"] = {"skipped": True, "reason": "Uses wildcard cert (*.dreambigwithai.com)"}
+    cleanup_results["steps"]["ssl"] = {"skipped": True, "reason": f"Uses wildcard cert (*.{BASE_DOMAIN})"}
 
     # STEP 4: Remove DNS records
     try:

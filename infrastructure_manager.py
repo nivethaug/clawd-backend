@@ -32,6 +32,14 @@ from deployment_verifier import DeploymentVerifier as EnhancedDeploymentVerifier
 # Import PostgreSQL connection
 from database_postgres import get_connection_pool
 
+# Import centralized domain configuration
+from domain_config import (
+    BASE_DOMAIN,
+    WILDCARD_SSL_CERT as _WC_CERT,
+    WILDCARD_SSL_KEY as _WC_KEY,
+    SERVER_IP,
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -66,15 +74,13 @@ FRONTEND_PORT_MAX = 4000
 BACKEND_PORT_MIN = 8010
 BACKEND_PORT_MAX = 9000
 
-# DNS settings
-BASE_DOMAIN = "dreambigwithai.com"
+# NGINX settings
 NGINX_CONFIG_DIR = "/etc/nginx/sites-available"
 NGINX_ENABLED_DIR = "/etc/nginx/sites-enabled"
 
 # DNS settings
 HOSTINGER_DNS_SKILL_DIR = "/usr/lib/node_modules/openclaw/skills/hostinger-dns"
 HOSTINGER_DNS_SKILL = "/usr/lib/node_modules/openclaw/skills/hostinger-dns/hostinger_dns.py"
-SERVER_IP = "195.200.14.37"  # Default server IP for DNS A records
 
 # Shared runtime venv
 SHARED_VENV_PATH = "/root/dreampilot/dreampilotvenv"
@@ -1052,9 +1058,9 @@ class NginxConfigurator:
         self.config_dir = NGINX_CONFIG_DIR
         self.enabled_dir = NGINX_ENABLED_DIR
 
-    # Wildcard SSL certificate paths for *.dreambigwithai.com
-    WILDCARD_SSL_CERT = "/etc/letsencrypt/live/dreambigwithai.com/fullchain.pem"
-    WILDCARD_SSL_KEY = "/etc/letsencrypt/live/dreambigwithai.com/privkey.pem"
+    # Wildcard SSL certificate paths (from domain_config)
+    WILDCARD_SSL_CERT = _WC_CERT
+    WILDCARD_SSL_KEY = _WC_KEY
 
     def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = True, project_path: str = None, additional_domains: list = None) -> Tuple[str, str]:
         """
@@ -1089,7 +1095,7 @@ class NginxConfigurator:
             custom_domains = additional_domains or []
             extra_server_names = " ".join(custom_domains)
 
-            # Always use wildcard SSL certificate for *.dreambigwithai.com
+            # Always use wildcard SSL certificate
             config = f"""# Frontend: {frontend_domain}{' + ' + ', '.join(custom_domains) if custom_domains else ''}
 # HTTP -> HTTPS redirect
 server {{
@@ -1103,7 +1109,7 @@ server {{
     listen 443 ssl;
     server_name {frontend_domain};
 
-    # Wildcard SSL certificate for *.dreambigwithai.com
+    # Wildcard SSL certificate
     ssl_certificate {self.WILDCARD_SSL_CERT};
     ssl_certificate_key {self.WILDCARD_SSL_KEY};
 
@@ -1148,7 +1154,7 @@ server {{
     listen 443 ssl;
     server_name {backend_domain};
 
-    # Wildcard SSL certificate for *.dreambigwithai.com
+    # Wildcard SSL certificate
     ssl_certificate {self.WILDCARD_SSL_CERT};
     ssl_certificate_key {self.WILDCARD_SSL_KEY};
 
@@ -1257,7 +1263,7 @@ server {{
 }}
 """
 
-            logger.info(f"✓ Nginx config generated for {domain} (SSL: wildcard *.dreambigwithai.com{f', {len(custom_domains)} custom domain(s)' if custom_domains else ''})")
+            logger.info(f"✓ Nginx config generated for {domain} (SSL: wildcard *.{BASE_DOMAIN}{f', {len(custom_domains)} custom domain(s)' if custom_domains else ''})")
             return (frontend_domain, backend_domain, config)
 
         except Exception as e:
@@ -1276,7 +1282,7 @@ server {{
             Tuple of (full_domain, config)
         """
         try:
-            # Full domain for webhook (e.g., mybot-api.dreambigwithai.com)
+            # Full domain for webhook (e.g., mybot-api.{BASE_DOMAIN})
             full_domain = f"{domain}.{BASE_DOMAIN}"
             
             # Use wildcard SSL certificate
@@ -1293,7 +1299,7 @@ server {{
     listen 443 ssl;
     server_name {full_domain};
 
-    # Wildcard SSL certificate for *.dreambigwithai.com
+    # Wildcard SSL certificate
     ssl_certificate {self.WILDCARD_SSL_CERT};
     ssl_certificate_key {self.WILDCARD_SSL_KEY};
 
@@ -1814,7 +1820,7 @@ class InfrastructureManager:
         8. Health check
         9. Mark project READY
 
-        Note: DNS provisioning is SKIPPED - wildcard DNS (*.dreambigwithai.com) is pre-configured.
+        Note: DNS provisioning is SKIPPED - wildcard DNS (*.{BASE_DOMAIN}) is pre-configured.
 
         Returns:
             True if successful, False otherwise
@@ -1834,10 +1840,10 @@ class InfrastructureManager:
             self._save_ports_to_db()
 
             # Log API URL creation
-            api_url = f"http://{self.domain}.dreambigwithai.com/api"
+            api_url = f"http://{self.domain}.{BASE_DOMAIN}/api"
             # logger.info(f"🔗 Backend API URL: {api_url}")  # Commented for cleaner logs
             # logger.info(f"🔌 Backend port: {self.ports['backend']}")  # Commented for cleaner logs
-            # logger.info(f"🌐 Frontend domain: http://{self.domain}.dreambigwithai.com")  # Commented for cleaner logs
+            # logger.info(f"🌐 Frontend domain: http://{self.domain}.{BASE_DOMAIN}")  # Commented for cleaner logs
 
             # Phase 2: Provision database
             logger.info("Phase 2/8: Database provisioning")
@@ -2794,7 +2800,7 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
         create DNS A records for the project's frontend domain.
         
         Args:
-            project_domain: The auto-generated domain (e.g., "project-name-xxxxx.dreambigwithai.com")
+            project_domain: The auto-generated domain (e.g., "project-name-xxxxx.{BASE_DOMAIN}")
         
         Returns:
             True if DNS record created successfully, False otherwise
@@ -2811,7 +2817,7 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             dns_manager = HostingerDNSAPI(api_token)
 
             # Extract subdomain from project domain
-            # Format: "project-name-xxxxx.dreambigwithai.com"
+            # Format: "project-name-xxxxx.{BASE_DOMAIN}"
             if '.' in project_domain:
                 # Split and take the project subdomain part
                 parts = project_domain.split('.')
@@ -2836,8 +2842,8 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             logger.info(f"[DNS] Server IP: {server_ip}")
             
             # Create A records for BOTH frontend and backend subdomains
-            # Frontend: subdomain.base_domain (e.g., test4-xxx.dreambigwithai.com)
-            # Backend: subdomain-api.base_domain (e.g., test4-xxx-api.dreambigwithai.com)
+            # Frontend: subdomain.base_domain (e.g., test4-xxx.{BASE_DOMAIN})
+            # Backend: subdomain-api.base_domain (e.g., test4-xxx-api.{BASE_DOMAIN})
             
             frontend_success = False
             backend_success = False

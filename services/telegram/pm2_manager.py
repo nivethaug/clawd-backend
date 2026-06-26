@@ -11,6 +11,8 @@ import logging
 from utils.logger import logger  # noqa: F811 — reassign below
 logger = logging.getLogger("services.telegram.pm2_manager")
 
+from domain_config import webhook_url as _webhook_url
+
 # Shared virtual environment path (same as backend)
 SHARED_VENV_PATH = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")
 
@@ -87,7 +89,7 @@ def start_bot_pm2(
         # stale source values surviving the env merge below)
         if domain:
             env_vars["WEBHOOK_DOMAIN"] = domain
-            env_vars["WEBHOOK_URL"] = f"https://{domain}.dreambigwithai.com/webhook"
+            env_vars["WEBHOOK_URL"] = _webhook_url(domain)
             logger.info(f"  WEBHOOK_DOMAIN: {domain}")
         # webhook_url param still takes priority if explicitly passed
         if webhook_url:

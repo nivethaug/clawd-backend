@@ -185,7 +185,7 @@
 - ✅ `generate_telegram_bot_config()` method added to NginxConfigurator class
 - ✅ Webhook routing: `/webhook` → `http://localhost:{port}/webhook`
 - ✅ Health check: `/health` → `http://localhost:{port}/health`
-- ✅ Wildcard SSL support for `*.dreambigwithai.com`
+- ✅ Wildcard SSL support for `*.dreamagent.cloud`
 - ✅ HTTP to HTTPS redirect
 - ✅ Integrated into worker pipeline (Step 7/8)
 
@@ -196,7 +196,7 @@
 **Implementation:**
 - ✅ Integrated into worker pipeline (Step 8/8)
 - ✅ Uses existing DNSProvisioner class
-- ✅ Creates A record: `{domain}.dreambigwithai.com` → `195.200.14.37`
+- ✅ Creates A record: `{domain}.dreamagent.cloud` → `195.200.14.37`
 - ✅ Gracefully skips if HOSTINGER_API_TOKEN not configured (wildcard DNS works)
 - ✅ Logs webhook URL for manual configuration if needed
 

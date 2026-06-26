@@ -16,9 +16,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Infrastructure settings
-BASE_DOMAIN = "dreambigwithai.com"
-SERVER_IP = "195.200.14.37"  # Default server IP for DNS A records
+# Infrastructure settings (from centralized domain_config)
+from domain_config import BASE_DOMAIN, SERVER_IP
 
 
 class DNSProvisioner:

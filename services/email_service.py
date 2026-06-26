@@ -15,17 +15,19 @@ from dotenv import load_dotenv
 import logging
 logger = logging.getLogger(__name__)
 
+from domain_config import DEFAULT_SUPPORT_EMAIL, DEFAULT_FROM_EMAIL, CONTROL_BUILDER_HOST
+
 load_dotenv()
 
 # SMTP configuration (same defaults as scheduler/validator.py)
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_USER = os.getenv("SMTP_USER", "support@dreambigwithai.com")
+SMTP_USER = os.getenv("SMTP_USER", DEFAULT_SUPPORT_EMAIL)
 SMTP_PASS = os.getenv("SMTP_PASS", "")
-SMTP_FROM = os.getenv("SMTP_FROM", "dreamagent@dreambigwithai.com")
+SMTP_FROM = os.getenv("SMTP_FROM", DEFAULT_FROM_EMAIL)
 
 # Frontend URL for verification links
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://dreambigwithai.com")
+FRONTEND_URL = os.getenv("FRONTEND_URL", f"https://{CONTROL_BUILDER_HOST}")
 
 
 def send_verification_email(to_email: str, token: str, user_name: Optional[str] = None) -> bool:

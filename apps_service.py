@@ -14,6 +14,7 @@ import time
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from database_postgres import get_db
+from domain_config import BASE_DOMAIN, frontend_url as _frontend_url
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ def get_pm2_process_for_project(project_domain: str, pm2_processes: Dict[str, An
     Convention: {project_domain}-frontend or {project_domain}-backend
     
     Args:
-        project_domain: Project domain (e.g., "crypto" from "crypto.dreambigwithai.com")
+        project_domain: Project domain (e.g., "crypto" from "crypto.{BASE_DOMAIN}")
         pm2_processes: PM2 process map from get_pm2_processes()
     
     Returns:
@@ -137,7 +138,7 @@ def get_pm2_process_for_project(project_domain: str, pm2_processes: Dict[str, An
     """
     # Extract subdomain from full domain if needed
     if project_domain and "." in project_domain:
-        # Extract subdomain (e.g., "crypto" from "crypto.dreambigwithai.com")
+        # Extract subdomain (e.g., "crypto" from "crypto.{BASE_DOMAIN}")
         project_domain = project_domain.split(".")[0]
     
     if not project_domain:
@@ -357,14 +358,14 @@ def build_app_item(
     if pm2_data and pm2_data.get("status") == "online":
         uptime_seconds = calculate_uptime_seconds(pm2_data.get("pm_uptime"))
     
-    # Build domain URL - add .dreambigwithai.com suffix if not already present
+    # Build domain URL - add .{BASE_DOMAIN} suffix if not already present
     domain_url = None
     if project_domain:
         if project_domain.startswith("http"):
             domain_url = project_domain
         elif "." not in project_domain:
             # Domain is just subdomain (e.g., "thinkai-likrt6") - add full suffix
-            domain_url = f"https://{project_domain}.dreambigwithai.com"
+            domain_url = _frontend_url(project_domain)
         else:
             # Already has a dot but no http - add https
             domain_url = f"https://{project_domain}"
@@ -441,7 +442,7 @@ def pm2_action(project_domain: str, action: str) -> Dict[str, Any]:
     Execute a PM2 action on a project.
     
     Args:
-        project_domain: Project domain (e.g., "crypto" or "crypto.dreambigwithai.com")
+        project_domain: Project domain (e.g., "crypto" or "crypto.{BASE_DOMAIN}")
         action: Action to perform (start, stop, restart)
     
     Returns:
