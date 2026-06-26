@@ -30,7 +30,7 @@ WILDCARD_SSL_KEY = f"/etc/letsencrypt/live/{BASE_DOMAIN}/privkey.pem"
 # Control-plane hosts (builder / API servers — NOT project subdomains)
 # ---------------------------------------------------------------------------
 
-CONTROL_API_HOST = os.getenv("CONTROL_API_HOST", f"dreamagentapi.{BASE_DOMAIN}")
+CONTROL_API_HOST = os.getenv("CONTROL_API_HOST", f"api.{BASE_DOMAIN}")
 CONTROL_BUILDER_HOST = os.getenv("CONTROL_BUILDER_HOST", f"builderapi.{BASE_DOMAIN}")
 
 # ---------------------------------------------------------------------------
