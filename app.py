@@ -26,20 +26,13 @@ from httpx import AsyncClient
 
 import image_handler
 from database_adapter import get_db, init_schema, is_master_database, validate_project_database_deletion, delete_project_database, get_database_info
-from domain_config import (
-    BASE_DOMAIN,
-    SERVER_IP as _SERVER_IP,
-    DEFAULT_BOT_EMAIL,
-    frontend_domain as _frontend_domain,
-    backend_domain as _backend_domain,
-    webhook_url as _webhook_url,
-)
 from project_manager import ProjectFileManager
 from chat_handlers import generate_sse_stream, generate_sse_stream_with_db_save, handle_chat_with_image, handle_chat_text_only
 from file_utils import FileUtils
 from completion_service import CompletionService
 from claude_code_worker import run_claude_code_background
 from github_service import get_github_service
+from domain_config import BASE_DOMAIN
 import github_oauth_service
 import github_export_service
 import export_service
@@ -1425,8 +1418,8 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         subprocess.run(
             ["git", "commit", "-m", "Initial commit (cloned from source)"],
             cwd=clone_path, capture_output=True, timeout=60,
-            env={**os.environ, "GIT_AUTHOR_NAME": "DreamPilot", "GIT_AUTHOR_EMAIL": DEFAULT_BOT_EMAIL,
-                 "GIT_COMMITTER_NAME": "DreamPilot", "GIT_COMMITTER_EMAIL": DEFAULT_BOT_EMAIL}
+            env={**os.environ, "GIT_AUTHOR_NAME": "DreamPilot", "GIT_AUTHOR_EMAIL": f"bot@{BASE_DOMAIN}",
+                 "GIT_COMMITTER_NAME": "DreamPilot", "GIT_COMMITTER_EMAIL": f"bot@{BASE_DOMAIN}"}
         )
         logger.info(f"[CLONE] Git re-initialised for project {project_id}")
 
@@ -1527,7 +1520,6 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             bot_type_label = "telegram" if source_type_id == 2 else "discord"
             logger.info(f"[CLONE] Provisioning {bot_type_label} bot for project {project_id}")
 
-          
             # Copy bot-specific subdirectory from source if it exists
             bot_subdir = os.path.join(source_path, bot_type_label)
             if os.path.isdir(bot_subdir):
@@ -1537,151 +1529,34 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 shutil.copytree(bot_subdir, dst_bot_dir, dirs_exist_ok=True,
                                 ignore=shutil.ignore_patterns("__pycache__", ".git", "logs", "node_modules"))
                 logger.info(f"[CLONE] Copied {bot_type_label}/ directory")
-                logger.info(f"[CLONE-DEBUG] dst_bot_dir={dst_bot_dir}")
 
-            # Log what .env files exist in the clone after copy
-            for _label, _p in [
-                ("root", os.path.join(clone_path, ".env")),
-                ("root .env.example", os.path.join(clone_path, ".env.example")),
-                (f"{bot_type_label}/", os.path.join(clone_path, bot_type_label, ".env")),
-                (f"{bot_type_label}/.env.example", os.path.join(clone_path, bot_type_label, ".env.example")),
-            ]:
-                if os.path.isfile(_p):
-                    try:
-                        with open(_p, "r") as _f:
-                            _content = _f.read()
-                        # Mask token then join all lines with | for single-line grep
-                        import re as _re
-                        _masked = _re.sub(r'(BOT_TOKEN=|TELEGRAM_BOT_TOKEN=)(.+)', r'\1***MASKED***', _content)
-                        _oneline = ' | '.join(l.strip() for l in _masked.strip().split('\n') if l.strip())
-                        logger.info(f"[CLONE-DEBUG] .env at {_label} ({_p}): {_oneline[:800]}")
-                    except Exception as _e:
-                        logger.warning(f"[CLONE-DEBUG] Could not read {_p}: {_e}")
-                else:
-                    logger.info(f"[CLONE-DEBUG] .env NOT FOUND at {_label} ({_p})")
-
-            # Update .env files with new project metadata + bot-specific credentials.
-            # The bot subdirectory (telegram/ or discord/) has its OWN .env copied from
-            # source — that's the one PM2 actually reads. Update BOTH root and subdir.
-            env_updates = {
-                "PROJECT_ID": str(project_id),
-                "PROJECT_NAME": clone_name,
-                "DOMAIN": clone_domain,
-                "PORT": str(8000 + (project_id % 1000)),
-                "WEBHOOK_DOMAIN": clone_domain,
-            }
-            # Update webhook URL to point to the clone's domain
-            if source_type_id == 2:
-                env_updates["WEBHOOK_URL"] = _webhook_url(clone_domain)
-            # Overwrite source bot token with the new one (if provided)
-            if bot_token:
-                if source_type_id == 2:
-                    env_updates["TELEGRAM_BOT_TOKEN"] = bot_token
-                    env_updates["BOT_TOKEN"] = bot_token
-                elif source_type_id == 3:
-                    env_updates["DISCORD_BOT_TOKEN"] = bot_token
-                    env_updates["BOT_TOKEN"] = bot_token
-
-            # 1) Project root .env
-            root_env_path = os.path.join(clone_path, ".env")
-            if os.path.exists(root_env_path):
-                _update_env_file(root_env_path, env_updates)
-                logger.info(f"[CLONE] Updated root .env for {bot_type_label} project {project_id}")
-
-            # 2) For Telegram: regenerate .env from clean template (same as create flow)
-            #    This ensures NO stale source values survive.
-            bot_run_path = os.path.join(clone_path, bot_type_label)
-            if not os.path.isfile(os.path.join(bot_run_path, "main.py")):
-                logger.info(f"[CLONE-DEBUG] main.py NOT found at {bot_run_path}/main.py, falling back to clone root")
-                bot_run_path = clone_path
-            logger.info(f"[CLONE-DEBUG] bot_run_path (PM2 cwd) = {bot_run_path}")
-
-            if source_type_id == 2:
-                # Use inject_bot_token — the same function the create flow uses.
-                # It reads .env.example as a clean base and writes a fresh .env
-                # with correct BOT_TOKEN, WEBHOOK_DOMAIN, WEBHOOK_URL, PORT, PROJECT_ID.
-                try:
-                    from services.telegram.env_injector import inject_bot_token
-
-                    # Resolve token: explicit param > read from copied .env > error
-                    resolved_token = bot_token
-                    if not resolved_token:
-                        copied_env = os.path.join(bot_run_path, ".env")
-                        logger.info(f"[CLONE-DEBUG] No explicit bot_token, reading from {copied_env}")
-                        if os.path.exists(copied_env):
-                            with open(copied_env, "r") as f:
-                                for line in f:
-                                    line = line.strip()
-                                    if line.startswith("BOT_TOKEN="):
-                                        resolved_token = line.split("=", 1)[1]
-                                        logger.info(f"[CLONE-DEBUG] Found BOT_TOKEN in .env (last6={resolved_token[-6:]})")
-                                        break
-                                    if line.startswith("TELEGRAM_BOT_TOKEN="):
-                                        resolved_token = line.split("=", 1)[1]
-                                        logger.info(f"[CLONE-DEBUG] Found TELEGRAM_BOT_TOKEN in .env (last6={resolved_token[-6:]})")
-                    else:
-                        logger.info(f"[CLONE-DEBUG] Using explicit bot_token (last6={resolved_token[-6:]})")
-
-                    # Extract DATABASE_URL from the copied source .env BEFORE
-                    # inject_bot_token regenerates from .env.example (which only
-                    # has a placeholder).  Also fall back to the backend's own
-                    # DATABASE_URL env var if the source .env doesn't have one.
-                    resolved_db_url = None
-                    _src_env_for_db = os.path.join(bot_run_path, ".env")
-                    if os.path.exists(_src_env_for_db):
-                        with open(_src_env_for_db, "r") as _f:
-                            for _line in _f:
-                                _line = _line.strip()
-                                if _line.startswith("DATABASE_URL="):
-                                    resolved_db_url = _line.split("=", 1)[1].strip()
-                                    break
-                    if not resolved_db_url:
-                        resolved_db_url = os.environ.get("DATABASE_URL")
-                    logger.info(f"[CLONE-DEBUG] resolved_db_url={'(from source .env)' if resolved_db_url else 'NONE'}")
-
-                    logger.info(f"[CLONE-DEBUG] inject_bot_token -> path={bot_run_path}, domain={clone_domain}, port={8000 + (project_id % 1000)}, project_id={project_id}, database_url={'yes' if resolved_db_url else 'no'}")
-                    if resolved_token:
-                        success_env, env_msg = inject_bot_token(
-                            project_path=bot_run_path,
-                            bot_token=resolved_token,
-                            domain=clone_domain,
-                            port=8000 + (project_id % 1000),
-                            project_id=project_id,
-                            database_url=resolved_db_url,
-                        )
-                        if success_env:
-                            logger.info(f"[CLONE] Regenerated telegram/.env from clean template for project {project_id}")
-                            # Read back and log the result (masked)
-                            _verify_env = os.path.join(bot_run_path, ".env")
-                            if os.path.isfile(_verify_env):
-                                with open(_verify_env, "r") as _f:
-                                    _vc = _f.read()
-                                import re as _re
-                                _vm = _re.sub(r'(BOT_TOKEN=|TELEGRAM_BOT_TOKEN=)(.+)', r'\1***MASKED***', _vc)
-                                _vline = ' | '.join(l.strip() for l in _vm.strip().split('\n') if l.strip())
-                                logger.info(f"[CLONE-DEBUG] telegram/.env AFTER inject_bot_token: {_vline[:800]}")
-                        else:
-                            logger.warning(f"[CLONE] inject_bot_token failed: {env_msg} — falling back to _update_env_file")
-                            bot_env_path = os.path.join(bot_run_path, ".env")
-                            if os.path.exists(bot_env_path):
-                                _update_env_file(bot_env_path, env_updates)
-                    else:
-                        logger.warning(f"[CLONE] No bot token resolved — cannot regenerate telegram/.env")
-                except Exception as inj_err:
-                    logger.warning(f"[CLONE] inject_bot_token error (non-fatal): {inj_err}")
-                    # Fallback to patch
-                    bot_env_path = os.path.join(bot_run_path, ".env")
-                    if os.path.exists(bot_env_path):
-                        _update_env_file(bot_env_path, env_updates)
-            else:
-                # Discord: patch the subdir .env (Discord already works with patching)
-                bot_env_path = os.path.join(bot_run_path, ".env")
-                if os.path.exists(bot_env_path):
-                    _update_env_file(bot_env_path, env_updates)
-                    logger.info(f"[CLONE] Updated discord/.env for project {project_id}")
+            # Update .env with new project metadata + bot-specific credentials
+            env_path = os.path.join(clone_path, ".env")
+            if os.path.exists(env_path):
+                env_updates = {
+                    "PROJECT_ID": str(project_id),
+                    "PROJECT_NAME": clone_name,
+                    "DOMAIN": clone_domain,
+                    "PORT": str(8000 + (project_id % 1000)),
+                }
+                # Overwrite source bot token with the new one (if provided)
+                if bot_token:
+                    if source_type_id == 2:
+                        env_updates["TELEGRAM_BOT_TOKEN"] = bot_token
+                        env_updates["BOT_TOKEN"] = bot_token
+                    elif source_type_id == 3:
+                        env_updates["DISCORD_BOT_TOKEN"] = bot_token
+                        env_updates["BOT_TOKEN"] = bot_token
+                _update_env_file(env_path, env_updates)
+                logger.info(f"[CLONE] Updated .env for {bot_type_label} project {project_id} (token {'provided' if bot_token else 'inherited from source'})")
 
             # Start bot via PM2 — point to the bot subdirectory (where main.py lives)
             try:
+                bot_run_path = os.path.join(clone_path, bot_type_label)
+                if not os.path.isfile(os.path.join(bot_run_path, "main.py")):
+                    # Fallback to clone root if main.py is at project root
+                    bot_run_path = clone_path
+
                 if source_type_id == 2:
                     from services.telegram.pm2_manager import start_bot_pm2
                     pm2_name = f"tg-bot-{project_id}"
@@ -1695,66 +1570,10 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                     port=8000 + (project_id % 1000),
                     domain=clone_domain,
                     bot_token=bot_token,
-                    webhook_url=_webhook_url(clone_domain),
-                    database_url=resolved_db_url if source_type_id == 2 else None,
                 )
                 logger.info(f"[CLONE] PM2 started: {pm2_name}")
-
-                # Log final .env state AFTER pm2_manager potentially rewrites it
-                _final_env = os.path.join(bot_run_path, ".env")
-                if os.path.isfile(_final_env):
-                    with open(_final_env, "r") as _f:
-                        _fc = _f.read()
-                    import re as _re
-                    _fm = _re.sub(r'(BOT_TOKEN=|TELEGRAM_BOT_TOKEN=)(.+)', r'\1***MASKED***', _fc)
-                    _fline = ' | '.join(l.strip() for l in _fm.strip().split('\n') if l.strip())
-                    logger.info(f"[CLONE-DEBUG] {bot_type_label}/.env AFTER start_bot_pm2: {_fline[:800]}")
-                else:
-                    logger.warning(f"[CLONE-DEBUG] {bot_type_label}/.env NOT FOUND after PM2 start at {_final_env}")
             except Exception as pm2_err:
                 logger.warning(f"[CLONE] PM2 start failed (non-fatal): {pm2_err}")
-
-            # Configure nginx + DNS for the clone's webhook domain (same as create flow)
-            try:
-                from infrastructure_manager import NginxConfigurator
-                nginx = NginxConfigurator()
-                _, nginx_config = nginx.generate_telegram_bot_config(clone_domain, 8000 + (project_id % 1000))
-                if nginx.install_config(clone_domain, nginx_config):
-                    nginx.reload_nginx()
-                    logger.info(f"[CLONE] Nginx configured for {_frontend_domain(clone_domain)}")
-            except Exception as nginx_err:
-                logger.warning(f"[CLONE] Nginx config failed (non-fatal): {nginx_err}")
-
-            # Provision DNS for the clone's webhook domain (same as create flow Step 7)
-            try:
-                from infrastructure_manager import DNSProvisioner
-                dns = DNSProvisioner()
-                if dns.dns_skill_available:
-                    dns_ok = dns.create_a_record(clone_domain, BASE_DOMAIN, _SERVER_IP)
-                    if dns_ok:
-                        logger.info(f"[CLONE] DNS A record created for {_frontend_domain(clone_domain)}")
-                    else:
-                        logger.warning(f"[CLONE] DNS A record creation failed, wildcard DNS may work")
-                else:
-                    logger.info(f"[CLONE] DNS provisioning skipped (HOSTINGER_API_TOKEN not set, wildcard DNS)")
-            except Exception as dns_err:
-                logger.warning(f"[CLONE] DNS provisioning error (non-fatal): {dns_err}")
-
-            # Register Telegram webhook for the clone (async with retries, same as create flow)
-            if source_type_id == 2 and bot_token:
-                try:
-                    from services.telegram.webhook import register_webhook_async
-                    full_domain = _frontend_domain(clone_domain)
-                    register_webhook_async(
-                        bot_token=bot_token,
-                        domain=full_domain,
-                        project_id=project_id,
-                        max_retries=9,
-                        initial_delay=10
-                    )
-                    logger.info(f"[CLONE] Telegram webhook registration started for {full_domain}")
-                except Exception as wh_err:
-                    logger.warning(f"[CLONE] Webhook registration failed (non-fatal): {wh_err}")
 
             with get_db() as conn:
                 conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
@@ -2330,8 +2149,8 @@ def cleanup_ssl_certificates(frontend_domain: str, backend_domain: str) -> Dict[
     Remove SSL certificates for a project.
 
     Args:
-        frontend_domain: Frontend domain (e.g., "project.{BASE_DOMAIN}")
-        backend_domain: Backend domain (e.g., "project-api.{BASE_DOMAIN}")
+        frontend_domain: Frontend domain (e.g., f"project.{BASE_DOMAIN}")
+        backend_domain: Backend domain (e.g., f"project-api.{BASE_DOMAIN}")
 
     Returns:
         Dict with cleanup status
@@ -2879,8 +2698,8 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
 
     # STEP 3: Remove SSL certificates
     try:
-        full_frontend = _frontend_domain(frontend_domain) if frontend_domain else ""
-        full_backend = _backend_domain(backend_domain) if backend_domain else ""
+        full_frontend = f"{frontend_domain}.{BASE_DOMAIN}" if frontend_domain else ""
+        full_backend = f"{backend_domain}.{BASE_DOMAIN}" if backend_domain else ""
         if full_frontend or full_backend:
             cleanup_results["steps"]["ssl"] = cleanup_ssl_certificates(full_frontend, full_backend)
         else:
@@ -4070,7 +3889,7 @@ async def debug_custom_domain(
     domain_info = custom_domain_service.get_project_domain(project_id)
     domain_name = domain_info["domain"] if domain_info else None
 
-    expected_cname = _frontend_domain(project_subdomain)
+    expected_cname = f"{project_subdomain}.{BASE_DOMAIN}"
     expected_ip = custom_domain_service._get_server_ip()
 
     diagnostics: Dict[str, Any] = {
@@ -6785,7 +6604,7 @@ async def publish_to_gallery(
 
         # Build frontend URL from domain
         domain = project.get("domain") or ""
-        frontend_url = f"https://{_frontend_domain(domain)}" if domain else None
+        frontend_url = f"https://{domain}.{BASE_DOMAIN}" if domain else None
 
         # Insert gallery listing
         conn.execute(
@@ -7097,7 +6916,7 @@ async def mark_as_template(
             raise HTTPException(status_code=409, detail="Project is already marked as template")
 
         domain = project.get("domain") or ""
-        frontend_url = f"https://{_frontend_domain(domain)}" if domain else None
+        frontend_url = f"https://{domain}.{BASE_DOMAIN}" if domain else None
 
         conn.execute(
             """INSERT INTO templates
@@ -7236,74 +7055,12 @@ async def get_template_status(
 PM2_LOGS_DIR = os.path.expanduser("~/.pm2/logs")
 
 
-def _get_pm2_process_log_paths() -> dict[str, dict[str, str | None]]:
-    """Query PM2 for actual log file paths of all running processes.
-
-    Returns: { process_name: { "out": path, "error": path } }
-    Bots are started with custom --log/--error paths (inside project dir),
-    so we must read the real paths from PM2, not guess from ~/.pm2/logs/.
-    """
-    import json as _json
-    try:
-        result = subprocess.run(
-            ["pm2", "jlist"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode != 0:
-            logger.warning(f"[LOGS] pm2 jlist failed: {result.stderr[:200]}")
-            return {}
-        procs = _json.loads(result.stdout)
-        mapping: dict[str, dict[str, str | None]] = {}
-        for p in procs:
-            name = p.get("name", "")
-            pm2_env = p.get("pm2_env", {})
-            mapping[name] = {
-                "out": pm2_env.get("pm_out_log_path") or pm2_env.get("out_file"),
-                "error": pm2_env.get("pm_err_log_path") or pm2_env.get("error_file"),
-            }
-        return mapping
-    except Exception as e:
-        logger.warning(f"[LOGS] Failed to query PM2 process list: {e}")
-        return {}
-
-
-def _find_pm2_log(proc_name: str, log_type: str, pm2_paths: dict | None = None) -> str | None:
-    """Resolve the actual log file path for a PM2 process.
-
-    Strategy (in order):
-    1. Check pm2_paths dict (from pm2 jlist) — the real configured paths.
-    2. Try ~/.pm2/logs/{proc}-{log_type}.log (default PM2 location).
-    3. Glob for suffixed variants: {proc}-{log_type}-N.log.
-    """
-    # 1. Real paths from PM2
-    if pm2_paths:
-        entry = pm2_paths.get(proc_name)
-        if entry:
-            real = entry.get(log_type)
-            if real and os.path.isfile(real):
-                return real
-
-    # 2. Default PM2 log dir
-    plain = os.path.join(PM2_LOGS_DIR, f"{proc_name}-{log_type}.log")
-    if os.path.isfile(plain):
-        return plain
-
-    # 3. Glob for suffixed variants
-    import glob
-    pattern = os.path.join(PM2_LOGS_DIR, f"{proc_name}-{log_type}-*.log")
-    candidates = glob.glob(pattern)
-    if candidates:
-        return max(candidates, key=os.path.getmtime)
-
-    return None
-
-
-def _read_log_tail(file_path: str | None, num_lines: int) -> tuple[str, bool]:
+def _read_log_tail(file_path: str, num_lines: int) -> tuple[str, bool]:
     """Read the last `num_lines` lines of a log file efficiently.
 
     Returns (content, exists). If the file does not exist, returns ("", False).
     """
-    if not file_path or not os.path.isfile(file_path):
+    if not os.path.isfile(file_path):
         return "", False
     try:
         from collections import deque
@@ -7318,8 +7075,8 @@ def _read_log_tail(file_path: str | None, num_lines: int) -> tuple[str, bool]:
 def _get_pm2_log_specs(project_row) -> list[dict]:
     """Return a list of log group specs for a project based on type_id.
 
-    Each spec: {"label": str, "process_names": [str, ...]}
-    Multiple candidate names are tried in order — first match wins.
+    Each spec: {"label": str, "process_name": str}
+    The caller will look up out/error log files for each process_name.
     """
     d = dict(project_row) if not isinstance(project_row, dict) else project_row
     project_id = d.get("id")
@@ -7329,29 +7086,26 @@ def _get_pm2_log_specs(project_row) -> list[dict]:
     if type_id == 1:
         # Website: separate frontend + backend
         return [
-            {"label": "Frontend", "process_names": [f"{domain}-frontend"]},
-            {"label": "Backend", "process_names": [f"{domain}-backend"]},
+            {"label": "Frontend", "process_name": f"{domain}-frontend"},
+            {"label": "Backend", "process_name": f"{domain}-backend"},
         ]
     elif type_id == 2:
-        # Telegram: PM2 uses {domain}-bot when domain exists, else tg-bot-{id}
-        names = [f"{domain}-bot", f"tg-bot-{project_id}"] if domain else [f"tg-bot-{project_id}"]
-        return [{"label": "Application", "process_names": names}]
+        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
     elif type_id == 3:
-        # Discord: PM2 always uses dc-bot-{project_id} (see pm2_manager._get_process_name)
-        return [{"label": "Application", "process_names": [f"dc-bot-{project_id}"]}]
+        return [{"label": "Application", "process_name": f"dc-bot-{project_id}"}]
     elif type_id == 4:
         # Trading bot — reuses telegram PM2 naming
-        names = [f"{domain}-bot", f"tg-bot-{project_id}"] if domain else [f"tg-bot-{project_id}"]
-        return [{"label": "Application", "process_names": names}]
+        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
     elif type_id == 5:
         # Scheduler — central process, not per-project
-        return [{"label": "Application", "process_names": ["clawd-scheduler"]}]
+        return [{"label": "Application", "process_name": "clawd-scheduler"}]
     elif type_id == 6:
-        return [{"label": "Application", "process_names": [f"{domain}-backend"]}]
+        return [{"label": "Application", "process_name": f"{domain}-backend"}]
     else:
-        # Fallback: try domain-backend, then tg-bot-{id}
-        names = [f"{domain}-backend", f"tg-bot-{project_id}"] if domain else [f"tg-bot-{project_id}"]
-        return [{"label": "Application", "process_names": names}]
+        # Fallback: try domain-backend
+        if domain:
+            return [{"label": "Application", "process_name": f"{domain}-backend"}]
+        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
 
 
 def _build_project_logs(project_row, num_lines: int) -> dict:
@@ -7359,32 +7113,18 @@ def _build_project_logs(project_row, num_lines: int) -> dict:
     specs = _get_pm2_log_specs(project_row)
     d = dict(project_row) if not isinstance(project_row, dict) else project_row
 
-    # Query PM2 once for real log paths (bots use custom --log/--error paths)
-    pm2_paths = _get_pm2_process_log_paths()
-
     log_groups = []
     for spec in specs:
-        names = spec["process_names"]
-        out_path = None
-        err_path = None
-        matched_name = names[0]
-
-        # Try each candidate process name until we find log files
-        for name in names:
-            out_candidate = _find_pm2_log(name, "out", pm2_paths)
-            err_candidate = _find_pm2_log(name, "error", pm2_paths)
-            if out_candidate or err_candidate:
-                out_path = out_candidate
-                err_path = err_candidate
-                matched_name = name
-                break
+        proc = spec["process_name"]
+        out_path = os.path.join(PM2_LOGS_DIR, f"{proc}-out.log")
+        err_path = os.path.join(PM2_LOGS_DIR, f"{proc}-error.log")
 
         stdout_content, out_exists = _read_log_tail(out_path, num_lines)
         stderr_content, err_exists = _read_log_tail(err_path, num_lines)
 
         log_groups.append({
             "label": spec["label"],
-            "process_name": matched_name,
+            "process_name": proc,
             "stdout": stdout_content,
             "stderr": stderr_content,
             "stdout_lines": stdout_content.count("\n") if stdout_content else 0,
@@ -8203,17 +7943,37 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
 
         logger.info(f"[AUTO-COMMIT] Writes detected — committing project {project_id}, session {session_id}")
 
-        # Get project path + repo_url from DB
+        # Get project path, repo_url, and domain from DB
         with get_db() as conn:
             project = conn.execute(
-                "SELECT project_path, repo_url FROM projects WHERE id = ?",
+                "SELECT project_path, repo_url, domain FROM projects WHERE id = ?",
                 (project_id,)
             ).fetchone()
             if not project:
                 logger.warning(f"[AUTO-COMMIT] Project {project_id} not found")
                 return
             project_path = project["project_path"]
-            repo_url = project["repo_url"] if "repo_url" in project.keys() else None
+            repo_url = project.get("repo_url")
+            domain = project.get("domain", "")
+
+        # If repo_url is missing, try to reconstruct from domain via GitHubService
+        if not repo_url and domain:
+            try:
+                from github_service import get_github_service
+                gh = get_github_service()
+                reconstructed = gh.get_repo_url(domain)
+                if reconstructed:
+                    repo_url = reconstructed
+                    logger.info(f"[AUTO-COMMIT] Reconstructed repo_url from domain '{domain}': {repo_url}")
+                    # Persist it so future runs don't need to reconstruct
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE projects SET repo_url = ? WHERE id = ?",
+                            (repo_url, project_id)
+                        )
+                        conn.commit()
+            except Exception as e:
+                logger.warning(f"[AUTO-COMMIT] Could not reconstruct repo_url: {e}")
 
         # Fix dubious ownership for git
         subprocess.run(
@@ -8769,9 +8529,9 @@ def _rebuild_after_rollback(project_id: int, project_path: str, project_name: st
 @app.post("/projects/{project_id}/commits/{message_id}/rollback")
 async def rollback_commit(project_id: int, message_id: int):
     """
-    Rollback to a commit by resetting the branch via git reset --hard (legacy — by message_id).
-    Discards all commits after the target commit. Force-pushes to origin.
-    Updates commit_log and messages to reflect the reset.
+    Rollback a commit by reverting it via git (legacy — by message_id).
+    Creates a new message row for the revert with reverted_message_id pointing to the original.
+    Also writes to commit_log for persistent history.
     """
     import traceback
 
@@ -8803,31 +8563,20 @@ async def rollback_commit(project_id: int, message_id: int):
             capture_output=True, text=True, timeout=10
         )
 
-        # --- git reset --hard approach (discards later commits) ---
-
-        # Capture current HEAD before reset (for audit)
-        head_result = subprocess.run(
-            ["git", "-C", project_path, "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=10
-        )
-        previous_head = head_result.stdout.strip()
-
-        # Count commits that will be discarded
-        count_result = subprocess.run(
-            ["git", "-C", project_path, "rev-list", "--count", f"{original_hash}..HEAD"],
-            capture_output=True, text=True, timeout=10
-        )
-        discarded_count = int(count_result.stdout.strip()) if count_result.returncode == 0 else 0
-
-        # Hard reset to target commit
-        reset_result = subprocess.run(
-            ["git", "-C", project_path, "reset", "--hard", original_hash],
+        revert_result = subprocess.run(
+            ["git", "-C", project_path, "revert", original_hash, "--no-edit"],
             capture_output=True, text=True, timeout=60
         )
 
-        if reset_result.returncode != 0:
-            logger.error(f"Git reset --hard failed: {reset_result.stderr}")
-            return {"success": False, "error": reset_result.stderr, "status": "failed"}
+        if revert_result.returncode != 0:
+            logger.error(f"Git revert failed: {revert_result.stderr}")
+            return {"success": False, "error": revert_result.stderr, "status": "failed"}
+
+        hash_result = subprocess.run(
+            ["git", "-C", project_path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10
+        )
+        revert_hash = hash_result.stdout.strip()
 
         # Only push if 'origin' remote exists
         remote_result = subprocess.run(
@@ -8838,56 +8587,65 @@ async def rollback_commit(project_id: int, message_id: int):
 
         if has_origin:
             push_result = subprocess.run(
-                ["git", "-C", project_path, "push", "--force-with-lease", "origin", "main"],
+                ["git", "-C", project_path, "push", "origin", "main"],
                 capture_output=True, text=True, timeout=60
             )
             if push_result.returncode != 0:
-                logger.error(f"Git force push failed: {push_result.stderr}")
-                return {"success": False, "error": "Reset done but force push failed", "status": "committed"}
+                logger.error(f"Git push revert failed: {push_result.stderr}")
+                return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
         else:
-            logger.info(f"No 'origin' remote for project {project_id}, reset stays local")
+            logger.info(f"No 'origin' remote for project {project_id}, revert stays local")
 
         with get_db() as conn:
-            # Mark the original message's commit as active (it's HEAD again)
             conn.execute(
-                "UPDATE messages SET commit_status = 'active' WHERE id = ?",
+                "UPDATE messages SET commit_status = 'reverted' WHERE id = ?",
                 (message_id,)
             )
 
-            # Mark the original commit_log entry as active and later commits as reverted
+            cursor = conn.execute(
+                """INSERT INTO messages (session_id, role, content, commit_hash, commit_status, reverted_message_id)
+                   VALUES (?, 'assistant', ?, ?, 'pushed', ?)
+                   RETURNING id""",
+                (session_id, f"Reverted commit {original_hash[:8]}", revert_hash, message_id)
+            )
+            revert_message_id = cursor.fetchone()["id"]
+
+            # Dual-write: also persist in commit_log
             original_log = conn.execute(
                 "SELECT id FROM commit_log WHERE commit_hash = ? AND project_id = ?",
                 (original_hash, project_id)
             ).fetchone()
+
+            cursor3 = conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
+                (project_id, session_id, revert_message_id, revert_hash, f"Revert {original_hash[:8]}")
+            )
+            revert_log_id = cursor3.fetchone()["id"]
+
             if original_log:
                 conn.execute(
-                    "UPDATE commit_log SET status = 'active' WHERE id = ?",
-                    (original_log["id"],)
-                )
-                # DELETE all commits after target — they're erased from the branch
-                conn.execute(
-                    "DELETE FROM commit_log WHERE project_id = ? AND id > ?",
-                    (project_id, original_log["id"])
+                    "UPDATE commit_log SET status = 'reverted', reverted_by = ? WHERE id = ?",
+                    (revert_log_id, original_log["id"])
                 )
 
             conn.commit()
 
-        logger.info(f"✓ Reset to commit {original_hash[:8]}, message_id={message_id}, deleted {discarded_count} commits (was {previous_head[:8]})")
+        logger.info(f"✓ Reverted commit {original_hash[:8]}, message_id={revert_message_id}, log_id={revert_log_id}")
 
-        # Rebuild and redeploy after rollback so the live site reflects the reset code
+        # Rebuild and redeploy after rollback so the live site reflects the reverted code
         rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
 
         return {
             "success": True,
-            "reset_to_hash": original_hash,
-            "previous_head": previous_head,
-            "discarded_commits": discarded_count,
-            "status": "reset",
+            "commit_hash": revert_hash,
+            "message_id": revert_message_id,
+            "reverted_message_id": message_id,
+            "status": "pushed",
             "rebuild": rebuild_status,
         }
 
     except subprocess.TimeoutExpired:
-        logger.error(f"Git reset timeout for project {project_id}")
+        logger.error(f"Git revert timeout for project {project_id}")
         return {"success": False, "error": "Git operation timed out", "status": "failed"}
     except Exception as e:
         logger.error(f"Rollback error for project {project_id}: {e}\n{traceback.format_exc()}")
@@ -8897,9 +8655,8 @@ async def rollback_commit(project_id: int, message_id: int):
 @app.post("/projects/{project_id}/commits/log/{log_id}/rollback")
 async def rollback_commit_by_log_id(project_id: int, log_id: int):
     """
-    Rollback to a commit by resetting the branch via git reset --hard.
-    Discards all commits after the target commit (identified by commit_log id).
-    Force-pushes to origin. Works even after session/message deletion.
+    Rollback a commit by commit_log id (works even after session/message deletion).
+    Uses commit_log as the source of truth for commit hash.
     """
     import traceback
 
@@ -8932,31 +8689,20 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
             capture_output=True, text=True, timeout=10
         )
 
-        # --- git reset --hard approach (discards later commits) ---
-
-        # Capture current HEAD before reset (for audit)
-        head_result = subprocess.run(
-            ["git", "-C", project_path, "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=10
-        )
-        previous_head = head_result.stdout.strip()
-
-        # Count commits that will be discarded
-        count_result = subprocess.run(
-            ["git", "-C", project_path, "rev-list", "--count", f"{original_hash}..HEAD"],
-            capture_output=True, text=True, timeout=10
-        )
-        discarded_count = int(count_result.stdout.strip()) if count_result.returncode == 0 else 0
-
-        # Hard reset to target commit
-        reset_result = subprocess.run(
-            ["git", "-C", project_path, "reset", "--hard", original_hash],
+        revert_result = subprocess.run(
+            ["git", "-C", project_path, "revert", original_hash, "--no-edit"],
             capture_output=True, text=True, timeout=60
         )
 
-        if reset_result.returncode != 0:
-            logger.error(f"Git reset --hard failed: {reset_result.stderr}")
-            return {"success": False, "error": reset_result.stderr, "status": "failed"}
+        if revert_result.returncode != 0:
+            logger.error(f"Git revert failed: {revert_result.stderr}")
+            return {"success": False, "error": revert_result.stderr, "status": "failed"}
+
+        hash_result = subprocess.run(
+            ["git", "-C", project_path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10
+        )
+        revert_hash = hash_result.stdout.strip()
 
         # Only push if 'origin' remote exists
         remote_result = subprocess.run(
@@ -8967,26 +8713,33 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
 
         if has_origin:
             push_result = subprocess.run(
-                ["git", "-C", project_path, "push", "--force-with-lease", "origin", "main"],
+                ["git", "-C", project_path, "push", "origin", "main"],
                 capture_output=True, text=True, timeout=60
             )
             if push_result.returncode != 0:
-                logger.error(f"Git force push failed: {push_result.stderr}")
-                return {"success": False, "error": "Reset done but force push failed", "status": "committed"}
+                logger.error(f"Git push revert failed: {push_result.stderr}")
+                return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
         else:
-            logger.info(f"No 'origin' remote for project {project_id}, reset stays local")
+            logger.info(f"No 'origin' remote for project {project_id}, revert stays local")
 
         with get_db() as conn:
-            # Mark target commit as active (it's HEAD again)
+            # Update original commit_log entry
             conn.execute(
-                "UPDATE commit_log SET status = 'active' WHERE id = ?",
+                "UPDATE commit_log SET status = 'reverted' WHERE id = ?",
                 (log_id,)
             )
 
-            # DELETE all commits after target — they're erased from the branch
+            # Insert revert entry into commit_log (RETURNING id for PostgreSQL compatibility)
+            cursor = conn.execute(
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
+                (project_id, session_id, original_message_id, revert_hash, f"Revert {original_hash[:8]}")
+            )
+            revert_log_id = cursor.fetchone()["id"]
+
+            # Set reverted_by on original
             conn.execute(
-                "DELETE FROM commit_log WHERE project_id = ? AND id > ?",
-                (project_id, log_id)
+                "UPDATE commit_log SET reverted_by = ? WHERE id = ?",
+                (revert_log_id, log_id)
             )
 
             # Also update messages table if message still exists
@@ -8996,28 +8749,28 @@ async def rollback_commit_by_log_id(project_id: int, log_id: int):
                 ).fetchone()
                 if msg_exists:
                     conn.execute(
-                        "UPDATE messages SET commit_status = 'active' WHERE id = ?",
+                        "UPDATE messages SET commit_status = 'reverted' WHERE id = ?",
                         (original_message_id,)
                     )
 
             conn.commit()
 
-        logger.info(f"✓ Reset to commit {original_hash[:8]} via log_id={log_id}, deleted {discarded_count} commits (was {previous_head[:8]})")
+        logger.info(f"✓ Reverted commit {original_hash[:8]} via log_id={log_id}, revert_log_id={revert_log_id}")
 
-        # Rebuild and redeploy after rollback so the live site reflects the reset code
+        # Rebuild and redeploy after rollback so the live site reflects the reverted code
         rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
 
         return {
             "success": True,
-            "reset_to_hash": original_hash,
-            "previous_head": previous_head,
-            "discarded_commits": discarded_count,
-            "status": "reset",
+            "commit_hash": revert_hash,
+            "log_id": revert_log_id,
+            "reverted_log_id": log_id,
+            "status": "pushed",
             "rebuild": rebuild_status,
         }
 
     except subprocess.TimeoutExpired:
-        logger.error(f"Git reset timeout for project {project_id}")
+        logger.error(f"Git revert timeout for project {project_id}")
         return {"success": False, "error": "Git operation timed out", "status": "failed"}
     except Exception as e:
         logger.error(f"Rollback error for project {project_id}: {e}\n{traceback.format_exc()}")
