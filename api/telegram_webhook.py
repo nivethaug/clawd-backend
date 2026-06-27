@@ -19,6 +19,7 @@ from services.telegram_client import (
     set_webhook as tg_set_webhook,
     delete_webhook as tg_delete_webhook,
     get_bot_info,
+    set_my_commands as tg_set_my_commands,
     WEBHOOK_SECRET,
     is_configured,
 )
@@ -360,7 +361,8 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
             "2. Go to Settings → Connect Telegram\n"
             "3. Copy the 6-character code\n"
             "4. Send it here: `/link YOURCODE`\n\n"
-            "Once linked, try: `status`, `stop`, `start`, `restart`, `logs`",
+            "Once linked, type `/` to see all commands.\n"
+            "Or just chat naturally!",
             reply_to_message_id=message_id,
         )
         return {"ok": True}
@@ -398,11 +400,70 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         )
         return {"ok": True}
 
+    # ── /list → show all projects as inline buttons ──────
+    if text.startswith("/list"):
+        user_id = _lookup_user_by_chat_id(chat_id)
+        if not user_id:
+            await send_message(chat_id, "🔒 Not linked. Send `/link CODE` first.", reply_to_message_id=message_id)
+            return {"ok": True}
+
+        with get_db() as conn:
+            rows = conn.execute(
+                """SELECT p.name, p.domain, p.status FROM projects p
+                   WHERE p.status != 'deleted' ORDER BY p.created_at DESC"""
+            ).fetchall()
+
+        if not rows:
+            await send_message(chat_id, "📭 You have no projects yet.", reply_to_message_id=message_id)
+            return {"ok": True}
+
+        _lines = [f"📋 *Your Projects* ({len(rows)}):", ""]
+        for r in rows:
+            _status_emoji = {
+                "running": "🟢", "stopped": "🔴", "error": "💥",
+                "creating": "⚙️", "deploying": "🚀",
+            }.get(r["status"], "⚪")
+            _lines.append(f"{_status_emoji} *{r['name']}* — `{r['domain']}`")
+        _lines.append("\nTap a button below to switch:")
+
+        _keyboard = {"inline_keyboard": [[
+            {"text": f"{r['name']} ({r['domain']})", "callback_data": f"switch:{r['domain']}"}
+        ] for r in rows]}
+
+        await send_message(chat_id, "\n".join(_lines), reply_markup=_keyboard)
+        return {"ok": True}
+
+    # ── /current → show active project ───────────────────
+    if text.startswith("/current"):
+        user_id = _lookup_user_by_chat_id(chat_id)
+        if not user_id:
+            await send_message(chat_id, "🔒 Not linked. Send `/link CODE` first.", reply_to_message_id=message_id)
+            return {"ok": True}
+
+        from utils.project_chat_repo import ProjectChatRepository
+        _active = ProjectChatRepository().get_active_project(user_id)
+        if _active:
+            with get_db() as conn:
+                _p = conn.execute(
+                    "SELECT name, domain, status FROM projects WHERE domain = %s", (_active,)
+                ).fetchone()
+            if _p:
+                await send_message(
+                    chat_id,
+                    f"📌 Active project: *{_p['name']}* (`{_p['domain']}`)\nStatus: {_p['status']}",
+                    reply_to_message_id=message_id,
+                )
+            else:
+                await send_message(chat_id, f"📌 Active: `{_active}`", reply_to_message_id=message_id)
+        else:
+            await send_message(chat_id, "📌 No active project. Send `/switch` to pick one.", reply_to_message_id=message_id)
+        return {"ok": True}
+
     # ── Normalize slash commands to natural language ───────
     # /switch project   →  "switch project" (shows picker)
     # /switch myapp     →  "switch to myapp"
     # /status           →  "status"
-    _KNOWN_BOT_CMDS = {"/link", "/unlink", "/help", "/start"}
+    _KNOWN_BOT_CMDS = {"/link", "/unlink", "/help", "/start", "/list", "/current"}
     if text.startswith("/") and text.split()[0] not in _KNOWN_BOT_CMDS:
         _cmd = text[1:].strip()
         if _cmd.lower().startswith("switch"):
@@ -479,12 +540,16 @@ async def setup_webhook():
     
     webhook_url = f"https://{CONTROL_API_HOST}/bot/telegram/webhook"
     result = await tg_set_webhook(webhook_url)
-    
+
+    # Register bot command menu (shows in Telegram's "/" autocomplete)
+    cmd_result = await tg_set_my_commands()
+
     bot_info = await get_bot_info()
     bot_username = bot_info.get("result", {}).get("username", "unknown") if bot_info.get("ok") else "unknown"
-    
+
     return {
         "webhook_result": result,
+        "commands_result": cmd_result,
         "webhook_url": webhook_url,
         "bot_username": f"@{bot_username}",
     }

@@ -185,3 +185,37 @@ def json_updates() -> list:
 def is_configured() -> bool:
     """Check if Telegram bot is configured."""
     return bool(BOT_TOKEN)
+
+
+# ── Bot Commands ────────────────────────────────────────────
+# Registered via setMyCommands — shows in Telegram's "/" menu.
+
+BOT_COMMANDS = [
+    {"command": "switch",   "description": "🔄 Switch project"},
+    {"command": "list",     "description": "📋 List all projects"},
+    {"command": "current",  "description": "📌 Show active project"},
+    {"command": "status",   "description": "📊 Project status"},
+    {"command": "start",    "description": "▶️ Start project"},
+    {"command": "stop",     "description": "⏹️ Stop project"},
+    {"command": "restart",  "description": "🔁 Restart project"},
+    {"command": "logs",     "description": "📜 Recent logs"},
+    {"command": "link",     "description": "🔗 Link your account"},
+    {"command": "unlink",   "description": "🔓 Unlink account"},
+    {"command": "help",     "description": "❓ Help"},
+]
+
+
+async def set_my_commands() -> dict:
+    """Register the bot command menu (shows when user types /)."""
+    if not BOT_TOKEN:
+        return {"ok": False, "error": "BOT_TOKEN not configured"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{API_BASE}/setMyCommands",
+                json={"commands": BOT_COMMANDS},
+            )
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
