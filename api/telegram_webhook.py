@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from database_postgres import get_db
 from services.telegram_client import (
     send_message,
+    send_chat_action,
     set_webhook as tg_set_webhook,
     delete_webhook as tg_delete_webhook,
     get_bot_info,
@@ -255,6 +256,24 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
             reply_to_message_id=message_id,
         )
         return {"ok": True}
+
+    # ── Normalize slash commands to natural language ───────
+    # /switch project   →  "switch to project"
+    # /status           →  "status"
+    # etc.
+    _KNOWN_BOT_CMDS = {"/link", "/unlink", "/help", "/start"}
+    if text.startswith("/") and text.split()[0] not in _KNOWN_BOT_CMDS:
+        # Strip the / and normalize
+        _cmd = text[1:].strip()
+        # Common shorthand: /switch myapp  →  "switch to myapp"
+        if _cmd.lower().startswith("switch"):
+            parts = _cmd.split(maxsplit=1)
+            if len(parts) == 2:
+                text = f"switch to {parts[1]}"
+            else:
+                text = "switch project"
+        else:
+            text = _cmd
     
     # ── Route to AI chat engine ─────────────────────────────
     
@@ -270,13 +289,10 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
     
     # Use per-Telegram-user session
     session_id = f"tg_{chat_id}"
-    
-    try:
-        # Send "typing..." indicator
-        await send_message(chat_id, "⏳", reply_to_message_id=message_id)
-    except:
-        pass
-    
+
+    # Show native "typing..." indicator (NOT a visible message)
+    await send_chat_action(chat_id, "typing")
+
     try:
         resp = await process_message(
             user_id=user_id,

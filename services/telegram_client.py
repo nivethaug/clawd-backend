@@ -64,6 +64,25 @@ async def send_message(
         return False
 
 
+async def send_chat_action(chat_id: int | str, action: str = "typing") -> bool:
+    """
+    Send a chat action indicator (e.g. "typing...").
+    This is NOT a visible message — just a status indicator.
+    """
+    if not BOT_TOKEN:
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.post(
+                f"{API_BASE}/sendChatAction",
+                json={"chat_id": chat_id, "action": action},
+            )
+            return resp.json().get("ok", False)
+    except Exception:
+        return False
+
+
 async def set_webhook(webhook_url: str) -> dict:
     """
     Register webhook URL with Telegram.
