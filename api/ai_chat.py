@@ -523,6 +523,39 @@ async def process_message(
                     f"(domain: `{active_project['domain']}`)."
                 ))
         
+        # ── No active project + action keyword → instant selection ──
+        # When user sends an action command (status, stop, start, restart,
+        # logs, etc.) without an active project, return a selection prompt
+        # immediately. Without this, the request goes to the LLM, which
+        # calls a tool, which triggers the resolver to return "selection"
+        # — a 3-20s wasted round-trip just to show a project picker.
+        if not active_project and projects:
+            _action_patterns = {
+                "status", "start", "stop", "restart", "logs", "log",
+                "start project", "stop project", "restart project",
+                "project status", "get logs", "get status",
+                "what's the status", "check status",
+            }
+            # Also match "start X", "stop X" where X isn't a project name
+            _action_verbs = {"start", "stop", "restart", "status", "logs", "log"}
+            _is_action = (
+                _msg_lower in _action_patterns
+                or any(_msg_lower.startswith(v + " ") for v in _action_verbs)
+            )
+            
+            if _is_action:
+                _options = [
+                    {"label": f"{p['name']} ({p['domain']})", "value": p["domain"]}
+                    for p in projects
+                ]
+                logger.info(f"[AI-CHAT] ⚡ Fast-path: action without project → instant selection ({len(_options)} projects, no LLM call)")
+                await session_manager.update_last_used(session_id)
+                return _finalize(selection_response(
+                    message="Which project would you like to use?",
+                    options=_options,
+                    intent={"tool": "action", "args": {"original_message": message}},
+                ))
+        
         try:
             response = await glm_client.chat_with_tools(
                 messages=messages,
