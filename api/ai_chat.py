@@ -586,21 +586,40 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
             ))
         
         elif result["status"] == "success":
-            # 13. Return tool result directly for simple context tools (skip 2nd LLM call).
-            # These tools already produce human-readable messages; calling the LLM
-            # again just to rephrase them adds ~2-20s latency for zero value.
-            _fast_tools = {
+            # 13. Fast-path: return tool result directly without 2nd LLM call.
+            # These tools already produce human-readable messages; calling the
+            # LLM again just to rephrase adds ~1-20s latency for zero value.
+            # Tools that return RAW data (get_logs, project_status) still need
+            # the LLM to summarize, so they stay on the normal path.
+            
+            # Context tools → simple text_response
+            _fast_text_tools = {
                 "set_active_project",
                 "clear_active_project",
                 "get_active_project",
                 "get_project_info",
             }
             
-            if tool_name in _fast_tools:
-                logger.info(f"[AI-CHAT] Fast-path: returning {tool_name} result without LLM summarization")
+            # Action tools → execution_response with progress
+            _fast_action_tools = {
+                "start_project",
+                "stop_project",
+                "restart_project",
+            }
+            
+            if tool_name in _fast_text_tools:
+                logger.info(f"[AI-CHAT] ⚡ Fast-path: returning {tool_name} result without LLM summarization")
                 await session_manager.update_last_used(request.session_id)
                 return _finalize(text_response(
                     result.get("message", "Done.")
+                ))
+            
+            if tool_name in _fast_action_tools:
+                logger.info(f"[AI-CHAT] ⚡ Fast-path: returning {tool_name} result without LLM summarization")
+                await session_manager.update_last_used(request.session_id)
+                return _finalize(execution_response(
+                    progress=[result],
+                    text=result.get("message", f"{tool_name} completed."),
                 ))
             
             # For action/info tools: send tool result back to LLM for natural language summarization
