@@ -321,6 +321,61 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         if not active_project:
             logger.warning(f"[AI-CHAT] ✗ No active project resolved from any source")
         
+        # ── PRE-LLM FAST PATH ───────────────────────────────────────
+        # Intercept deterministic commands and execute directly, skipping
+        # the LLM entirely. Saves ~3-20s per request for the most common
+        # chat operations (switch, clear, current project).
+        import re
+        _msg_lower = request.message.strip().lower()
+        executor = get_tool_executor()
+        
+        # "switch to {domain}" → set_active_project directly
+        _switch_match = re.match(r'^(?:switch to|use|change to|set active project(?: to)?)\s+(.+)$', _msg_lower)
+        if _switch_match:
+            _target = _switch_match.group(1).strip()
+            # Find matching project domain (exact or starts-with)
+            _matched_project = None
+            for p in projects:
+                if p["domain"] == _target or p["domain"].startswith(_target + "-") or _target in p["domain"]:
+                    _matched_project = p
+                    break
+            if _matched_project:
+                logger.info(f"[AI-CHAT] ⚡ Fast-path: switching to {_matched_project['domain']} (no LLM call)")
+                result = await executor.execute(
+                    "set_active_project",
+                    {"project_id": _matched_project["domain"]},
+                    session_key=request.session_id,
+                    user_id=user_id,
+                )
+                await session_manager.update_last_used(request.session_id)
+                return _finalize(text_response(
+                    result.get("message", f"Switched to {_matched_project['name']} ✅")
+                ))
+        
+        # "clear project" / "forget project" → clear_active_project directly
+        if _msg_lower in ("clear project", "forget project", "clear active project", "clear active"):
+            logger.info("[AI-CHAT] ⚡ Fast-path: clearing active project (no LLM call)")
+            result = await executor.execute(
+                "clear_active_project",
+                {},
+                session_key=request.session_id,
+                user_id=user_id,
+            )
+            await session_manager.update_last_used(request.session_id)
+            return _finalize(text_response(
+                result.get("message", "Cleared active project. ✅")
+            ))
+        
+        # "which project am I using" / "current project" → get_active_project directly
+        if _msg_lower in ("which project am i using", "current project", "which project", "what project am i using"):
+            if active_project:
+                logger.info("[AI-CHAT] ⚡ Fast-path: returning active project info (no LLM call)")
+                await session_manager.update_last_used(request.session_id)
+                return _finalize(text_response(
+                    f"You are currently working with **{active_project['name']}** "
+                    f"(domain: `{active_project['domain']}`)."
+                ))
+        
         # 6. Build messages for GLM (with conversation history: last 4 messages)
         system_content = SYSTEM_PROMPT
         
