@@ -1,8 +1,13 @@
-/switch project
-
-I found 4 active projects. Which one would you like to switch to?
-
-1. telebot (Telegram Bot)
-2. dirsord (Discord Bot)
-3. JurassicGenesis (Website)
-4. flow (Scheduler)
+|clawd-ba | 2026-06-27 15:02:00 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/sendChatAction "HTTP/1.1 200 OK"
+1|clawd-ba | 2026-06-27 15:02:00 +00:00: INFO:api.ai_chat:[AI-CHAT:TELEGRAM] Message from session tg_2048754634 (user=24): switch to project
+1|clawd-ba | 2026-06-27 15:02:00 +00:00: INFO:api.ai_chat:[AI-CHAT] Resolving active_project: request=None, session=telebot-eabhq7, projects_count=4
+1|clawd-ba | 2026-06-27 15:02:00 +00:00: INFO:api.ai_chat:[AI-CHAT] Available project domains: ['telebot-eabhq7', 'dirsord-cdvxx9', 'jurassicgenesis-0x7yop', 'flow-c776g1']
+1|clawd-ba | 2026-06-27 15:02:00 +00:00: INFO:api.ai_chat:[AI-CHAT] ✓ Matched from session: telebot-eabhq7
+1|clawd-ba | 2026-06-27 15:02:00 +00:00: INFO:api.ai_chat:[AI-CHAT] Active project type='telegrambot' → 12 tools
+1|clawd-ba | 2026-06-27 15:02:02 +00:00: INFO:httpx:HTTP Request: POST https://api.z.ai/api/coding/paas/v4/chat/completions "HTTP/1.1 200 OK"
+1|clawd-ba | 2026-06-27 15:02:02 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Response has tool_calls: True
+1|clawd-ba | 2026-06-27 15:02:02 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Parsed 1 tool calls
+1|clawd-ba | 2026-06-27 15:02:02 +00:00: INFO:api.ai_chat:[AI-CHAT] Tool call: set_active_project with args: {}
+1|clawd-ba | 2026-06-27 15:02:02 +00:00: INFO:services.ai.project_resolver:[PROJECT-RESOLVER] No matches, showing all projects for selection
+1|clawd-ba | 2026-06-27 15:02:02 +00:00: INFO:api.ai_chat:[AI-CHAT] Returning selection with 4 options
+1|clawd-ba | 2026-06-27 15:02:03 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/sendMessage "HTTP/1.1 200 OK

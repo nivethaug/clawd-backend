@@ -251,20 +251,24 @@ async def _handle_callback(callback: dict):
             f"✅ Switching to `{project_domain}`...",
         )
         
-        resp = await process_message(
-            user_id=user_id,
-            message=f"switch to {project_domain}",
-            session_id=session_id,
-            source="telegram",
-        )
-        
-        reply_text = _format_for_telegram(resp)
-        reply_markup = _build_keyboard(resp)
-        
-        await send_message(
-            chat_id, reply_text,
-            reply_markup=reply_markup,
-        )
+        try:
+            resp = await process_message(
+                user_id=user_id,
+                message=f"switch to {project_domain}",
+                session_id=session_id,
+                source="telegram",
+            )
+            
+            reply_text = _format_for_telegram(resp)
+            reply_markup = _build_keyboard(resp)
+            
+            await send_message(
+                chat_id, reply_text,
+                reply_markup=reply_markup,
+            )
+        except Exception as e:
+            logger.error(f"[TELEGRAM] Callback error: {e}", exc_info=True)
+            await send_message(chat_id, "❌ Failed to switch project. Please try again.")
     
     elif data.startswith("confirm:"):
         answer = data[len("confirm:"):]
@@ -378,19 +382,19 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         return {"ok": True}
 
     # ── Normalize slash commands to natural language ───────
-    # /switch project   →  "switch to project"
+    # /switch project   →  "switch project" (shows picker)
+    # /switch myapp     →  "switch to myapp"
     # /status           →  "status"
-    # etc.
     _KNOWN_BOT_CMDS = {"/link", "/unlink", "/help", "/start"}
     if text.startswith("/") and text.split()[0] not in _KNOWN_BOT_CMDS:
-        # Strip the / and normalize
         _cmd = text[1:].strip()
-        # Common shorthand: /switch myapp  →  "switch to myapp"
         if _cmd.lower().startswith("switch"):
             parts = _cmd.split(maxsplit=1)
-            if len(parts) == 2:
+            if len(parts) == 2 and parts[1].lower() not in ("project", "projects"):
+                # /switch myapp → "switch to myapp"
                 text = f"switch to {parts[1]}"
             else:
+                # /switch or /switch project → "switch project"
                 text = "switch project"
         else:
             text = _cmd

@@ -453,8 +453,9 @@ async def process_message(
         _bare_switch_patterns = {
             "switch project", "switch", "change project", "select project",
             "change", "pick project", "choose project",
+            "switch to project", "change to project", "use project",
         }
-        if _msg_lower in _bare_switch_patterns or re.match(r'^switch\s+project$', _msg_lower):
+        if _msg_lower in _bare_switch_patterns:
             if projects:
                 _options = [
                     {"label": f"{p['name']} ({p['domain']})", "value": p["domain"]}
