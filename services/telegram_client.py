@@ -23,6 +23,7 @@ async def send_message(
     text: str,
     parse_mode: str = "Markdown",
     reply_to_message_id: Optional[int] = None,
+    reply_markup: Optional[dict] = None,
 ) -> bool:
     """
     Send a text message to a Telegram chat.
@@ -41,6 +42,8 @@ async def send_message(
     }
     if reply_to_message_id:
         payload["reply_to_message_id"] = reply_to_message_id
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -61,6 +64,49 @@ async def send_message(
 
     except Exception as e:
         logger.error(f"[TELEGRAM] sendMessage error: {e}")
+        return False
+
+
+async def answer_callback_query(callback_query_id: str, text: Optional[str] = None) -> bool:
+    """Answer a callback query — removes the loading spinner on the button."""
+    if not BOT_TOKEN:
+        return False
+    payload = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.post(f"{API_BASE}/answerCallbackQuery", json=payload)
+            return resp.json().get("ok", False)
+    except Exception:
+        return False
+
+
+async def edit_message_text(
+    chat_id: int | str,
+    message_id: int,
+    text: str,
+    parse_mode: str = "Markdown",
+) -> bool:
+    """Edit an existing message's text (used to update button messages)."""
+    if not BOT_TOKEN:
+        return False
+    payload: dict = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": parse_mode,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(f"{API_BASE}/editMessageText", json=payload)
+            if not resp.json().get("ok"):
+                # Try plain text fallback
+                payload["parse_mode"] = ""
+                resp2 = await client.post(f"{API_BASE}/editMessageText", json=payload)
+                return resp2.json().get("ok", False)
+            return True
+    except Exception:
         return False
 
 
@@ -132,8 +178,8 @@ async def get_bot_info() -> dict:
 
 
 def json_updates() -> list:
-    """Allowed update types — only text messages + commands."""
-    return ["message"]
+    """Allowed update types — text messages, commands, and callback queries."""
+    return ["message", "callback_query"]
 
 
 def is_configured() -> bool:

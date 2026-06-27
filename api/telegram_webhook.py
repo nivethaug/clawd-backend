@@ -14,6 +14,8 @@ from database_postgres import get_db
 from services.telegram_client import (
     send_message,
     send_chat_action,
+    answer_callback_query,
+    edit_message_text,
     set_webhook as tg_set_webhook,
     delete_webhook as tg_delete_webhook,
     get_bot_info,
@@ -143,6 +145,38 @@ def _extract_message(update: dict) -> tuple[Optional[int], Optional[str], Option
 
 # ── Format AI response for Telegram ─────────────────────────
 
+def _build_keyboard(resp: dict) -> Optional[dict]:
+    """Build Telegram inline keyboard from selection/confirmation responses."""
+    resp_type = resp.get("type", "text")
+    
+    if resp_type == "selection":
+        options = resp.get("options", [])
+        if not options:
+            return None
+        keyboard = []
+        for opt in options:
+            keyboard.append([{
+                "text": opt["label"],
+                "callback_data": f"switch:{opt['value']}",
+            }])
+        return {"inline_keyboard": keyboard}
+    
+    if resp_type == "confirmation":
+        intent = resp.get("intent", {})
+        # Encode the intent as a simple callback
+        import json as _json
+        _data = _json.dumps(intent, separators=(',', ':'))
+        # Telegram callback_data max 64 bytes — truncate if needed
+        if len(_data) > 60:
+            _data = _data[:60]
+        return {"inline_keyboard": [[
+            {"text": "✅ Confirm", "callback_data": f"confirm:{_data}"},
+            {"text": "❌ Cancel", "callback_data": "confirm:no"},
+        ]]}
+    
+    return None
+
+
 def _format_for_telegram(resp: dict) -> str:
     """
     Convert AI chat response dict to Telegram-friendly text.
@@ -167,22 +201,102 @@ def _format_for_telegram(resp: dict) -> str:
         return text or "Done."
     
     elif resp_type == "selection":
-        # Convert selection to text list (Telegram has no native radio buttons)
-        msg = resp.get("message", "Select a project:")
-        options = resp.get("options", [])
-        lines = [msg, ""]
-        for i, opt in enumerate(options):
-            lines.append(f"{i+1}. {opt['label']}  (send: `switch to {opt['value']}`)")
-        return "\n".join(lines)
+        # Text portion only — buttons are sent via reply_markup
+        return resp.get("message", "Select a project:")
     
     elif resp_type == "confirmation":
         msg = resp.get("message", "Confirm?")
-        return f"⚠️ {msg}\n\nReply *yes* to confirm or *no* to cancel."
+        return f"⚠️ {msg}"
     
     elif resp_type == "error":
         return f"❌ {resp.get('text', resp.get('message', 'An error occurred'))}"
     
     return resp.get("text", resp.get("message", "Done."))
+
+
+# ── Callback query handler (button taps) ────────────────────
+
+async def _handle_callback(callback: dict):
+    """Handle inline keyboard button taps."""
+    callback_id = callback.get("id", "")
+    data = callback.get("data", "")
+    msg = callback.get("message", {})
+    chat_id = msg.get("chat", {}).get("id")
+    message_id = msg.get("message_id")
+    
+    logger.info(f"[TELEGRAM] Callback: data={data[:60]} from chat_id={chat_id}")
+    
+    # Always answer the callback first to remove the loading spinner
+    await answer_callback_query(callback_id)
+    
+    if not chat_id:
+        return
+    
+    # Parse callback data
+    if data.startswith("switch:"):
+        # Project selection button
+        project_domain = data[len("switch:"):]
+        
+        user_id = _lookup_user_by_chat_id(chat_id)
+        if not user_id:
+            await send_message(chat_id, "🔒 Your Telegram is not linked.")
+            return
+        
+        session_id = f"tg_{chat_id}"
+        await send_chat_action(chat_id, "typing")
+        
+        # Update the original message to show selection
+        await edit_message_text(
+            chat_id, message_id,
+            f"✅ Switching to `{project_domain}`...",
+        )
+        
+        resp = await process_message(
+            user_id=user_id,
+            message=f"switch to {project_domain}",
+            session_id=session_id,
+            source="telegram",
+        )
+        
+        reply_text = _format_for_telegram(resp)
+        reply_markup = _build_keyboard(resp)
+        
+        await send_message(
+            chat_id, reply_text,
+            reply_markup=reply_markup,
+        )
+    
+    elif data.startswith("confirm:"):
+        answer = data[len("confirm:"):]
+        
+        user_id = _lookup_user_by_chat_id(chat_id)
+        if not user_id:
+            return
+        
+        session_id = f"tg_{chat_id}"
+        
+        if answer.lower() in ("no", "cancel"):
+            await edit_message_text(chat_id, message_id, "❌ Cancelled.")
+            return
+        
+        # Confirmed — send "yes" to trigger the pending intent
+        await edit_message_text(chat_id, message_id, "✅ Confirmed. Processing...")
+        await send_chat_action(chat_id, "typing")
+        
+        resp = await process_message(
+            user_id=user_id,
+            message="yes",
+            session_id=session_id,
+            source="telegram",
+        )
+        
+        reply_text = _format_for_telegram(resp)
+        reply_markup = _build_keyboard(resp)
+        
+        await send_message(
+            chat_id, reply_text,
+            reply_markup=reply_markup,
+        )
 
 
 # ── Webhook endpoint ────────────────────────────────────────
@@ -199,6 +313,12 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         raise HTTPException(status_code=403, detail="Forbidden")
     
     update = await request.json()
+    
+    # ── Handle callback queries (button taps) ──────────────
+    callback = update.get("callback_query")
+    if callback:
+        await _handle_callback(callback)
+        return {"ok": True}
     
     chat_id, text, message_id = _extract_message(update)
     if chat_id is None or text is None:
@@ -302,12 +422,17 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         )
         
         reply_text = _format_for_telegram(resp)
+        reply_markup = _build_keyboard(resp)
         
         # Telegram has a 4096 char limit per message
         if len(reply_text) > 4000:
             reply_text = reply_text[:4000] + "\n\n... (truncated)"
         
-        await send_message(chat_id, reply_text, reply_to_message_id=message_id)
+        await send_message(
+            chat_id, reply_text,
+            reply_to_message_id=message_id,
+            reply_markup=reply_markup,
+        )
         
     except Exception as e:
         logger.error(f"[TELEGRAM] Error processing message: {e}", exc_info=True)
