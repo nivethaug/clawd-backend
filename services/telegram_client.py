@@ -191,14 +191,8 @@ def is_configured() -> bool:
 # Registered via setMyCommands — shows in Telegram's "/" menu.
 
 BOT_COMMANDS = [
-    {"command": "switch",   "description": "🔄 Switch project"},
-    {"command": "list",     "description": "📋 List all projects"},
+    {"command": "switch",   "description": "🔄 Switch / select project"},
     {"command": "current",  "description": "📌 Show active project"},
-    {"command": "status",   "description": "📊 Project status"},
-    {"command": "start",    "description": "▶️ Start project"},
-    {"command": "stop",     "description": "⏹️ Stop project"},
-    {"command": "restart",  "description": "🔁 Restart project"},
-    {"command": "logs",     "description": "📜 Recent logs"},
     {"command": "link",     "description": "🔗 Link your account"},
     {"command": "unlink",   "description": "🔓 Unlink account"},
     {"command": "help",     "description": "❓ Help"},

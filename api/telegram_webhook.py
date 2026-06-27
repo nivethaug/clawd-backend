@@ -386,51 +386,16 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
     if text.startswith("/help"):
         await send_message(
             chat_id,
-            "*DreamAgent Bot Commands*\n\n"
-            "• `/link CODE` — Link your DreamAgent account\n"
+            "*DreamAgent Bot*\n\n"
+            "• `/switch` — Select or change project\n"
+            "• `/current` — Show active project\n"
+            "• `/link CODE` — Link your account\n"
             "• `/unlink` — Unlink this chat\n"
-            "• `/help` — Show this help\n\n"
-            "*Chat commands* (after linking):\n"
-            "• `status` — Project status\n"
-            "• `start` / `stop` / `restart`\n"
-            "• `logs` — Recent logs\n"
-            "• `switch to {project}` — Switch active project\n"
-            "• Or just type naturally!",
+            "• `/help` — This help\n\n"
+            "Once a project is selected, just type naturally:\n"
+            "`status` • `start` • `stop` • `restart` • `logs`",
             reply_to_message_id=message_id,
         )
-        return {"ok": True}
-
-    # ── /list → show all projects as inline buttons ──────
-    if text.startswith("/list"):
-        user_id = _lookup_user_by_chat_id(chat_id)
-        if not user_id:
-            await send_message(chat_id, "🔒 Not linked. Send `/link CODE` first.", reply_to_message_id=message_id)
-            return {"ok": True}
-
-        with get_db() as conn:
-            rows = conn.execute(
-                """SELECT p.name, p.domain, p.status FROM projects p
-                   WHERE p.status != 'deleted' ORDER BY p.created_at DESC"""
-            ).fetchall()
-
-        if not rows:
-            await send_message(chat_id, "📭 You have no projects yet.", reply_to_message_id=message_id)
-            return {"ok": True}
-
-        _lines = [f"📋 *Your Projects* ({len(rows)}):", ""]
-        for r in rows:
-            _status_emoji = {
-                "running": "🟢", "stopped": "🔴", "error": "💥",
-                "creating": "⚙️", "deploying": "🚀",
-            }.get(r["status"], "⚪")
-            _lines.append(f"{_status_emoji} *{r['name']}* — `{r['domain']}`")
-        _lines.append("\nTap a button below to switch:")
-
-        _keyboard = {"inline_keyboard": [[
-            {"text": f"{r['name']} ({r['domain']})", "callback_data": f"switch:{r['domain']}"}
-        ] for r in rows]}
-
-        await send_message(chat_id, "\n".join(_lines), reply_markup=_keyboard)
         return {"ok": True}
 
     # ── /current → show active project ───────────────────
@@ -463,7 +428,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
     # /switch project   →  "switch project" (shows picker)
     # /switch myapp     →  "switch to myapp"
     # /status           →  "status"
-    _KNOWN_BOT_CMDS = {"/link", "/unlink", "/help", "/start", "/list", "/current"}
+    _KNOWN_BOT_CMDS = {"/link", "/unlink", "/help", "/start", "/current"}
     if text.startswith("/") and text.split()[0] not in _KNOWN_BOT_CMDS:
         _cmd = text[1:].strip()
         if _cmd.lower().startswith("switch"):

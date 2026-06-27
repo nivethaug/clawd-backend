@@ -335,7 +335,31 @@ async def process_message(
         # No project selected → only context tools (set_active_project, list, etc.)
         # Project selected → all tools filtered by project type (scheduler tools
         # only for scheduler-type projects)
+        
+        # For Telegram: project management is handled by slash commands and
+        # inline buttons — remove set_active_project / clear_active_project /
+        # list_projects from the LLM tool list so the AI can't attempt
+        # project switching through tool calls.
+        _telegram_no_select_tools = {
+            "set_active_project", "clear_active_project", "list_projects",
+        }
+        
         if not active_project:
+            if source == "telegram":
+                # Telegram with no project: DON'T send to LLM at all.
+                # Return instant "select a project" with inline buttons.
+                _options = [
+                    {"label": f"{p['name']} ({p['domain']})", "value": p["domain"]}
+                    for p in projects
+                ] if projects else []
+                logger.info(f"[AI-CHAT:TELEGRAM] ⚡ No project → instant selection (no LLM)")
+                await session_manager.update_last_used(session_id)
+                return selection_response(
+                    message="📌 Please select a project first:",
+                    options=_options,
+                    intent={"tool": "set_active_project", "args": {}},
+                )
+            
             tools = get_tools_without_project()
             system_content += (
                 "\n\n⚠️ NO ACTIVE PROJECT SELECTED.\n"
@@ -347,6 +371,14 @@ async def process_message(
         else:
             _project_type = active_project.get("type_slug") or active_project.get("type_name", "")
             tools = get_tools_for_project(_project_type)
+            
+            # Strip project-selection tools for Telegram — handled by UI
+            if source == "telegram":
+                tools = [
+                    t for t in tools
+                    if t["function"]["name"] not in _telegram_no_select_tools
+                ]
+            
             system_content += (
                 f"\n\nCurrent active project: {active_project['name']} "
                 f"(domain: {active_project['domain']}, type: {_project_type or 'unknown'})"
