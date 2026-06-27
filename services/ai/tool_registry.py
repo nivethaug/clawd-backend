@@ -352,72 +352,6 @@ TOOLS_CONFIRM = [
     {
         "type": "function",
         "function": {
-            "name": "create_project",
-            "description": "Create a new project with specified type and configuration",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Project name (e.g., 'My Crypto Bot')"
-                    },
-                    "domain": {
-                        "type": "string",
-                        "description": "Project domain (e.g., 'crypto-bot', 'my-website')"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Project description"
-                    },
-                    "project_type": {
-                        "type": "string",
-                        "enum": ["website", "telegram_bot", "discord_bot", "trading_bot", "scheduler", "custom"],
-                        "description": "Type of project to create"
-                    }
-                },
-                "required": ["name", "project_type"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "start_all_projects",
-            "description": "Start PM2 services for ALL projects (bulk operation - requires confirmation)",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "stop_all_projects",
-            "description": "Stop PM2 services for ALL projects (bulk operation - requires confirmation)",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "restart_all_projects",
-            "description": "Restart PM2 services for ALL projects (bulk operation - requires confirmation)",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "delete_project",
             "description": "Delete a project permanently (destructive operation - requires confirmation)",
             "parameters": {
@@ -446,18 +380,6 @@ TOOLS_CONFIRM = [
                     }
                 },
                 "required": ["project_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "remove_all_projects",
-            "description": "Remove/delete ALL projects (destructive bulk operation - requires confirmation)",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
             }
         }
     },
