@@ -1,13 +1,8 @@
 /switch project
 
-I found 4 active projects. Please select one by telling me its name or domain:
+I found 4 active projects. Which one would you like to switch to?
 
-1.  telebot (Telegram Bot)
-2.  dirsord (Discord Bot)
-3.  JurassicGenesis (Website)
-4.  flow (Scheduler)
-telebot
-
-I don't have an active project selected yet. Please select a project first using "switch project" and then let me know what you'd like to do with it.
-
-If you'd like to see what projects are available, I can show you the list.
+1. telebot (Telegram Bot)
+2. dirsord (Discord Bot)
+3. JurassicGenesis (Website)
+4. flow (Scheduler)

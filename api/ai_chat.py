@@ -447,6 +447,27 @@ async def process_message(
                     result.get("message", f"Switched to {_matched_project['name']} ✅")
                 ))
         
+        # ── "switch project" (bare, no target) → selection response ──
+        # Show project picker WITHOUT calling LLM. This returns type="selection"
+        # which the Telegram webhook converts to inline keyboard buttons.
+        _bare_switch_patterns = {
+            "switch project", "switch", "change project", "select project",
+            "change", "pick project", "choose project",
+        }
+        if _msg_lower in _bare_switch_patterns or re.match(r'^switch\s+project$', _msg_lower):
+            if projects:
+                _options = [
+                    {"label": f"{p['name']} ({p['domain']})", "value": p["domain"]}
+                    for p in projects
+                ]
+                logger.info(f"[AI-CHAT] ⚡ Fast-path: project selection ({len(_options)} projects, no LLM call)")
+                await session_manager.update_last_used(session_id)
+                return _finalize(selection_response(
+                    message="Which project would you like to switch to?",
+                    options=_options,
+                    intent={"tool": "set_active_project", "args": {}},
+                ))
+        
         # ── Selection reply detection ─────────────────────────────
         # When no active project is set and user sends a short message
         # that matches a project name/domain, treat it as a selection
