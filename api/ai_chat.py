@@ -225,29 +225,38 @@ Tailor your answers to the active project type only.
 # Main Chat Endpoint
 # ============================================================================
 
-@router.post("/chat", response_model=AIChatResponse)
-async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(None)):
+# ============================================================================
+# Core Chat Engine — shared by HTTP, Telegram, Discord
+# ============================================================================
+
+async def process_message(
+    user_id: int,
+    message: str,
+    session_id: str,
+    active_project_override: Optional[str] = None,
+    source: str = "web",
+) -> dict:
     """
-    Main AI chat endpoint.
-    
-    Flow:
-    1. Load session and projects
-    2. Call GLM with tools
-    3. If tool_call:
-       - Resolve project if needed
-       - Handle selection if needed
-       - Execute or return confirmation
-    4. Return formatted response
+    Core AI chat logic — callable from HTTP endpoint, Telegram webhook, etc.
+
+    Args:
+        user_id: Authenticated user ID
+        message: User's text message
+        session_id: Session identifier (UUID for web, tg_{chat_id} for Telegram)
+        active_project_override: Project domain from request (web only)
+        source: "web" | "telegram" — for logging
+
+    Returns:
+        Response dict: {type: "text"|"execution"|"selection"|"confirmation"|"error", ...}
     """
     try:
-        # ── Authentication ──────────────────────────────────────────
-        user_id = get_user_id_from_token(authorization)
+        _src_tag = f"[AI-CHAT:{source.upper()}]" if source != "web" else "[AI-CHAT]"
         
-        logger.info(f"[AI-CHAT] Message from session {request.session_id} (user={user_id}): {request.message[:100]}")
+        logger.info(f"{_src_tag} Message from session {session_id} (user={user_id}): {message[:100]}")
         
         # 1. Get or create session
         session_manager = get_session_manager()
-        session = await session_manager.get_or_create_session(request.session_id)
+        session = await session_manager.get_or_create_session(session_id)
         
         # 2. Load all projects from DB
         with get_db() as conn:
@@ -264,9 +273,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         logger.debug(f"[AI-CHAT] Loaded {len(projects)} projects")
         
         # 3. Normalize active_project to string (CRITICAL)
-        active_project_value = None
-        if request.active_project is not None:
-            active_project_value = str(request.active_project)
+        active_project_value = active_project_override
         
         logger.info(f"[AI-CHAT] Resolving active_project: request={active_project_value}, "
                     f"session={session.get('active_project_id')}, projects_count={len(projects)}")
@@ -367,9 +374,9 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 logger.debug(f"[AI-CHAT] History context: {msg['role']} = {msg['content'][:60]}...")
         
         # Finally, add the current user message
-        messages.append({"role": "user", "content": request.message})
+        messages.append({"role": "user", "content": message})
         
-        logger.debug(f"[AI-CHAT] Sending {len(messages)} messages to GLM (system + {len(messages)-2} history + current)")
+        logger.debug(f"{_src_tag} Sending {len(messages)} messages to GLM (system + {len(messages)-2} history + current)")
         
         # 5. Call GLM with tools
         glm_client = get_glm_client()
@@ -383,14 +390,14 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         _switch_keywords = ["switch project", "change project", "select project",
                            "clear project", "switch to", "change to", "use project",
                            "clear active project", "clear active"]
-        _is_switch_msg = any(kw in request.message.strip().lower() for kw in _switch_keywords)
+        _is_switch_msg = any(kw in message.strip().lower() for kw in _switch_keywords)
         
         if _active_domain and not _is_switch_msg:
             chat_repo.add_message(
                 user_id=user_id,
                 project_domain=_active_domain,
                 role="user",
-                content=request.message,
+                content=message,
             )
         
         # ── Helper: persist assistant response then return ────────────
@@ -415,7 +422,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         # the LLM entirely. Saves ~3-20s per request for the most common
         # chat operations (switch, clear, current project).
         import re
-        _msg_lower = request.message.strip().lower()
+        _msg_lower = message.strip().lower()
         
         # "switch to {domain}" → set_active_project directly
         _switch_match = re.match(r'^(?:switch to|use|change to|set active project(?: to)?)\s+(.+)$', _msg_lower)
@@ -432,25 +439,25 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 result = await _executor.execute(
                     "set_active_project",
                     {"project_id": _matched_project["domain"]},
-                    session_key=request.session_id,
+                    session_key=session_id,
                     user_id=user_id,
                 )
-                await session_manager.update_last_used(request.session_id)
+                await session_manager.update_last_used(session_id)
                 return _finalize(text_response(
                     result.get("message", f"Switched to {_matched_project['name']} ✅")
                 ))
         
         # "clear project" / "forget project" → clear_active_project directly
         if _msg_lower in ("clear project", "forget project", "clear active project", "clear active"):
-            logger.info("[AI-CHAT] ⚡ Fast-path: clearing active project (no LLM call)")
+            logger.info(f"{_src_tag} ⚡ Fast-path: clearing active project (no LLM call)")
             _executor = get_tool_executor()
             result = await _executor.execute(
                 "clear_active_project",
                 {},
-                session_key=request.session_id,
+                session_key=session_id,
                 user_id=user_id,
             )
-            await session_manager.update_last_used(request.session_id)
+            await session_manager.update_last_used(session_id)
             return _finalize(text_response(
                 result.get("message", "Cleared active project. ✅")
             ))
@@ -458,8 +465,8 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         # "which project am I using" / "current project" → get_active_project directly
         if _msg_lower in ("which project am i using", "current project", "which project", "what project am i using"):
             if active_project:
-                logger.info("[AI-CHAT] ⚡ Fast-path: returning active project info (no LLM call)")
-                await session_manager.update_last_used(request.session_id)
+                logger.info(f"{_src_tag} ⚡ Fast-path: returning active project info (no LLM call)")
+                await session_manager.update_last_used(session_id)
                 return _finalize(text_response(
                     f"You are currently working with **{active_project['name']}** "
                     f"(domain: `{active_project['domain']}`)."
@@ -484,7 +491,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
             # No tool calls - return text response
             text = glm_client.get_text_response(response)
             logger.info(f"[AI-CHAT] Text response: {text[:100]}")
-            await session_manager.update_last_used(request.session_id)
+            await session_manager.update_last_used(session_id)
             return _finalize(text_response(text))
         
         # 7. Process tool calls
@@ -503,14 +510,14 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         # 8. Check if disabled
         if is_disabled(tool_name):
             logger.warning(f"[AI-CHAT] Tool is disabled: {tool_name}")
-            await session_manager.update_last_used(request.session_id)
+            await session_manager.update_last_used(session_id)
             return _finalize(error_response(f"Tool '{tool_name}' is disabled and cannot be executed"))
         
         # 9. Validate args
         is_valid, error_msg = validate_tool_args(tool_name, args)
         if not is_valid:
             logger.warning(f"[AI-CHAT] Invalid args: {error_msg}")
-            await session_manager.update_last_used(request.session_id)
+            await session_manager.update_last_used(session_id)
             return _finalize(error_response(error_msg))
         
         # 10. Resolve project if needed
@@ -530,7 +537,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
             
             resolver = get_project_resolver()
             resolution = resolver.resolve(
-                user_text=request.message,
+                user_text=message,
                 projects=projects,
                 active_project=active_project if use_active_as_fallback else None,
                 explicit_project_id=project_id
@@ -541,7 +548,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 # Ensure candidates exist and have at least one item
                 if not resolution.candidates or len(resolution.candidates) == 0:
                     logger.warning(f"[AI-CHAT] Selection status but no candidates provided")
-                    await session_manager.update_last_used(request.session_id)
+                    await session_manager.update_last_used(session_id)
                     return _finalize(error_response("No projects available for selection"))
                 
                 options = [
@@ -551,7 +558,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 
                 logger.info(f"[AI-CHAT] Returning selection with {len(options)} options")
                 
-                await session_manager.update_last_used(request.session_id)
+                await session_manager.update_last_used(session_id)
                 return _finalize(selection_response(
                     message=resolution.message,
                     options=options,
@@ -559,7 +566,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 ))
             
             elif resolution.status == "not_found":
-                await session_manager.update_last_used(request.session_id)
+                await session_manager.update_last_used(session_id)
                 return _finalize(error_response(resolution.message))
             
             # Resolved - update args
@@ -567,19 +574,19 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         
         # 11. Execute tool
         executor = get_tool_executor()
-        result = await executor.execute(tool_name, args, session_key=request.session_id, user_id=user_id)
+        result = await executor.execute(tool_name, args, session_key=session_id, user_id=user_id)
         
         # 12. Handle result
         # SELECTION RESPONSE: Return immediately, bypass LLM summarization
         if result.get("type") == "selection" or result.get("status") == "selection":
             logger.info(f"[AI-CHAT] Selection response, returning structured data")
-            await session_manager.update_last_used(request.session_id)
+            await session_manager.update_last_used(session_id)
             return _finalize(result)
         
         if result["status"] == "confirmation_required":
             # Store pending intent in session
-            await session_manager.set_pending_intent(request.session_id, result["intent"])
-            await session_manager.update_last_used(request.session_id)
+            await session_manager.set_pending_intent(session_id, result["intent"])
+            await session_manager.update_last_used(session_id)
             return _finalize(confirmation_response(
                 message=f"Do you want to {tool_name.replace('_', ' ')}?",
                 intent=result["intent"]
@@ -609,14 +616,14 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
             
             if tool_name in _fast_text_tools:
                 logger.info(f"[AI-CHAT] ⚡ Fast-path: returning {tool_name} result without LLM summarization")
-                await session_manager.update_last_used(request.session_id)
+                await session_manager.update_last_used(session_id)
                 return _finalize(text_response(
                     result.get("message", "Done.")
                 ))
             
             if tool_name in _fast_action_tools:
                 logger.info(f"[AI-CHAT] ⚡ Fast-path: returning {tool_name} result without LLM summarization")
-                await session_manager.update_last_used(request.session_id)
+                await session_manager.update_last_used(session_id)
                 return _finalize(execution_response(
                     progress=[result],
                     text=result.get("message", f"{tool_name} completed."),
@@ -659,7 +666,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 final_text = glm_client.get_text_response(final_response)
                 logger.info(f"[AI-CHAT] LLM summarized response: {final_text[:100]}")
                 
-                await session_manager.update_last_used(request.session_id)
+                await session_manager.update_last_used(session_id)
                 
                 # Determine response type based on tool category
                 action_tools = ["start_project", "stop_project", "restart_project", "delete_project", "clear_active_project"]
@@ -677,7 +684,7 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
             except Exception as e:
                 logger.error(f"[AI-CHAT] LLM summarization failed: {e}")
                 # Fallback: return tool message directly (should not happen)
-                await session_manager.update_last_used(request.session_id)
+                await session_manager.update_last_used(session_id)
                 return _finalize(text_response(result.get("message", "Operation completed successfully")))
         
         else:
@@ -712,17 +719,37 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
                 )
                 
                 final_text = glm_client.get_text_response(final_response)
-                await session_manager.update_last_used(request.session_id)
+                await session_manager.update_last_used(session_id)
                 return _finalize(text_response(final_text))
                 
             except Exception as e:
                 logger.error(f"[AI-CHAT] Error summarization failed: {e}")
-                await session_manager.update_last_used(request.session_id)
+                await session_manager.update_last_used(session_id)
                 return _finalize(error_response(result.get("message", "Tool execution failed"), result))
     
     except Exception as e:
         logger.error(f"[AI-CHAT] Unexpected error: {e}", exc_info=True)
         return error_response(f"Internal error: {str(e)}")
+
+
+# ============================================================================
+# HTTP Endpoint — thin wrapper around process_message()
+# ============================================================================
+
+@router.post("/chat", response_model=AIChatResponse)
+async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(None)):
+    """
+    Main AI chat endpoint (HTTP).
+    Delegates to process_message() so web and Telegram share the same engine.
+    """
+    user_id = get_user_id_from_token(authorization)
+    return await process_message(
+        user_id=user_id,
+        message=request.message,
+        session_id=request.session_id,
+        active_project_override=str(request.active_project) if request.active_project is not None else None,
+        source="web",
+    )
 
 
 # ============================================================================

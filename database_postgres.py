@@ -233,6 +233,19 @@ def init_schema():
                 logger.info("✓ Added active_project column to users")
             _run_migration(migrate_active_project)
 
+            # Telegram account linking columns
+            def migrate_telegram_chat_id():
+                cur.execute("ALTER TABLE users ADD COLUMN telegram_chat_id BIGINT")
+            _run_migration(migrate_telegram_chat_id)
+
+            def migrate_telegram_link_code():
+                cur.execute("ALTER TABLE users ADD COLUMN telegram_link_code VARCHAR(6)")
+            _run_migration(migrate_telegram_link_code)
+
+            def migrate_telegram_link_expires():
+                cur.execute("ALTER TABLE users ADD COLUMN telegram_link_expires_at TIMESTAMP")
+            _run_migration(migrate_telegram_link_expires)
+
             # Ensure existing users have correct defaults
             try:
                 cur.execute(

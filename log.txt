@@ -1,30 +1,88 @@
-what you can do
-
-17:44
-I'm here to help you manage your projects. Here's what I can do:
-🔧 Project Management
-Start / Stop / Restart your projects
-Check Status — see if services are running
-View Logs — see frontend and backend logs
-Create Projects — build websites, bots, schedulers, etc.
-Delete Projects — remove projects you no longer need
-🧩 For Website Projects
-See your site's details and configuration
-Manage PM2 services and logs
-Monitor uptime and health
-🤖 For Telegram & Discord Bots
-Start, stop, and restart your bots
-View logs to debug issues
-Check bot status and health
-⏰ For Trading & Scheduler Projects
-Run scheduled tasks
-View job schedules and execution history
-Edit, pause, or resume jobs
-What would you like to do? For example:
-
-"Start my project"
-"Create a new bot"
-"Show logs"
-"Switch to another project"
-
-
+root@srv1285345:~/clawd-backend# pm2 logs clawd-backend --lines 500
+[TAILING] Tailing last 500 lines for [clawd-backend] process (change the value with --lines option)
+/root/clawd-backend/logs/backend-out.log last 500 lines:
+/root/clawd-backend/logs/backend-error.log last 500 lines:
+1|clawd-backend  | 2026-06-27 07:33:46 +00:00: INFO:     106.222.110.198:0 - "GET /api/ai/active-project HTTP/1.1" 401 Unauthorized
+1|clawd-backend  | 2026-06-27 07:33:49 +00:00: INFO:     106.222.110.198:0 - "OPTIONS /auth/login HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:50 +00:00: INFO:     106.222.110.198:0 - "POST /auth/login HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:50 +00:00: INFO:     106.222.110.198:0 - "OPTIONS /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:51 +00:00: INFO:dashboard_service:Dashboard assembled in 365.4ms for user 24
+1|clawd-backend  | 2026-06-27 07:33:51 +00:00: INFO:     106.222.110.198:0 - "GET /dashboard/home?project_limit=50 HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:56 +00:00: INFO:     106.222.110.198:0 - "OPTIONS /project-types HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:56 +00:00: INFO:     106.222.110.198:0 - "OPTIONS /projects HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:56 +00:00: INFO:     106.222.110.198:0 - "OPTIONS /templates/my-templates HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:56 +00:00: INFO:     106.222.110.198:0 - "OPTIONS /gallery/my-published HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:56 +00:00: INFO:     106.222.110.198:0 - "GET /project-types HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:56 +00:00: INFO:template_selector:Template selector: Groq service initialized
+1|clawd-backend  | 2026-06-27 07:33:56 +00:00: INFO:template_selector:Template selector: Loaded 8 templates
+1|clawd-backend  | 2026-06-27 07:33:57 +00:00: INFO:     106.222.110.198:0 - "GET /projects HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:57 +00:00: INFO:     106.222.110.198:0 - "GET /gallery/my-published HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:33:57 +00:00: INFO:     106.222.110.198:0 - "GET /templates/my-templates HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:34:06 +00:00: INFO:     106.222.110.198:0 - "GET /api/ai/active-project HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:34:06 +00:00: INFO:     106.222.110.198:0 - "GET /api/ai/messages?project=jurassicgenesis-0x7yop HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:34:24 +00:00: INFO:     106.222.110.198:0 - "OPTIONS /api/ai/chat HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:34:25 +00:00: INFO:api.ai_chat:[AI-CHAT] Message from session 353f1bbf-91c8-408e-97f3-93bc871b97b7 (user=24): explain project detail
+1|clawd-backend  | 2026-06-27 07:34:25 +00:00: INFO:api.ai_chat:[AI-CHAT] Resolving active_project: request=jurassicgenesis-0x7yop, session=jurassicgenesis-0x7yop, projects_count=4
+1|clawd-backend  | 2026-06-27 07:34:25 +00:00: INFO:api.ai_chat:[AI-CHAT] Available project domains: ['telebot-eabhq7', 'dirsord-cdvxx9', 'jurassicgenesis-0x7yop', 'flow-c776g1']
+1|clawd-backend  | 2026-06-27 07:34:25 +00:00: INFO:api.ai_chat:[AI-CHAT] ✓ Matched by domain: jurassicgenesis-0x7yop
+1|clawd-backend  | 2026-06-27 07:34:25 +00:00: INFO:api.ai_chat:[AI-CHAT] Active project type='website' → 12 tools
+1|clawd-backend  | 2026-06-27 07:34:44 +00:00: INFO:httpx:HTTP Request: POST https://api.z.ai/api/coding/paas/v4/chat/completions "HTTP/1.1 200 OK"
+1|clawd-backend  | 2026-06-27 07:34:44 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Response has tool_calls: False
+1|clawd-backend  | 2026-06-27 07:34:44 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Parsed 0 tool calls
+1|clawd-backend  | 2026-06-27 07:34:44 +00:00: INFO:api.ai_chat:[AI-CHAT] Text response: Here are the details for the JurassicGenesis project:
+1|clawd-backend  | 2026-06-27 07:34:44 +00:00: 
+1|clawd-backend  | 2026-06-27 07:34:44 +00:00: ### Project Overview
+1|clawd-backend  | 2026-06-27 07:34:44 +00:00: - **Domain**: jurassicge
+1|clawd-backend  | 2026-06-27 07:34:44 +00:00: INFO:     106.222.110.198:0 - "POST /api/ai/chat HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:34:56 +00:00: INFO:api.ai_chat:[AI-CHAT] Message from session 353f1bbf-91c8-408e-97f3-93bc871b97b7 (user=24): get log
+1|clawd-backend  | 2026-06-27 07:34:56 +00:00: INFO:api.ai_chat:[AI-CHAT] Resolving active_project: request=jurassicgenesis-0x7yop, session=jurassicgenesis-0x7yop, projects_count=4
+1|clawd-backend  | 2026-06-27 07:34:56 +00:00: INFO:api.ai_chat:[AI-CHAT] Available project domains: ['telebot-eabhq7', 'dirsord-cdvxx9', 'jurassicgenesis-0x7yop', 'flow-c776g1']
+1|clawd-backend  | 2026-06-27 07:34:56 +00:00: INFO:api.ai_chat:[AI-CHAT] ✓ Matched by domain: jurassicgenesis-0x7yop
+1|clawd-backend  | 2026-06-27 07:34:56 +00:00: INFO:api.ai_chat:[AI-CHAT] Active project type='website' → 12 tools
+1|clawd-backend  | 2026-06-27 07:35:03 +00:00: INFO:httpx:HTTP Request: POST https://api.z.ai/api/coding/paas/v4/chat/completions "HTTP/1.1 200 OK"
+1|clawd-backend  | 2026-06-27 07:35:03 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Response has tool_calls: False
+1|clawd-backend  | 2026-06-27 07:35:03 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Parsed 0 tool calls
+1|clawd-backend  | 2026-06-27 07:35:03 +00:00: INFO:api.ai_chat:[AI-CHAT] Text response: Here are the recent logs for JurassicGenesis:
+1|clawd-backend  | 2026-06-27 07:35:03 +00:00: 
+1|clawd-backend  | 2026-06-27 07:35:03 +00:00: ### Frontend
+1|clawd-backend  | 2026-06-27 07:35:03 +00:00: The frontend recently restarted (about 5
+1|clawd-backend  | 2026-06-27 07:35:03 +00:00: INFO:     106.222.110.198:0 - "POST /api/ai/chat HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:35:27 +00:00: INFO:api.ai_chat:[AI-CHAT] Message from session 353f1bbf-91c8-408e-97f3-93bc871b97b7 (user=24): stop
+1|clawd-backend  | 2026-06-27 07:35:27 +00:00: INFO:api.ai_chat:[AI-CHAT] Resolving active_project: request=jurassicgenesis-0x7yop, session=jurassicgenesis-0x7yop, projects_count=4
+1|clawd-backend  | 2026-06-27 07:35:27 +00:00: INFO:api.ai_chat:[AI-CHAT] Available project domains: ['telebot-eabhq7', 'dirsord-cdvxx9', 'jurassicgenesis-0x7yop', 'flow-c776g1']
+1|clawd-backend  | 2026-06-27 07:35:27 +00:00: INFO:api.ai_chat:[AI-CHAT] ✓ Matched by domain: jurassicgenesis-0x7yop
+1|clawd-backend  | 2026-06-27 07:35:27 +00:00: INFO:api.ai_chat:[AI-CHAT] Active project type='website' → 12 tools
+1|clawd-backend  | 2026-06-27 07:35:29 +00:00: INFO:httpx:HTTP Request: POST https://api.z.ai/api/coding/paas/v4/chat/completions "HTTP/1.1 200 OK"
+1|clawd-backend  | 2026-06-27 07:35:29 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Response has tool_calls: True
+1|clawd-backend  | 2026-06-27 07:35:29 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Parsed 1 tool calls
+1|clawd-backend  | 2026-06-27 07:35:29 +00:00: INFO:api.ai_chat:[AI-CHAT] Tool call: stop_project with args: {'project_id': 'jurassicgenesis-0x7yop'}
+1|clawd-backend  | 2026-06-27 07:35:29 +00:00: INFO:services.ai.project_resolver:[PROJECT-RESOLVER] Found project by explicit ID: jurassicgenesis-0x7yop
+1|clawd-backend  | 2026-06-27 07:35:29 +00:00: INFO:services.ai.tool_executor:[TOOL-EXECUTOR] Executing tool: stop_project with args: {'project_id': 'jurassicgenesis-0x7yop'}
+1|clawd-backend  | 2026-06-27 07:35:30 +00:00: INFO:api.ai_chat:[AI-CHAT] ⚡ Fast-path: returning stop_project result without LLM summarization
+1|clawd-backend  | 2026-06-27 07:35:30 +00:00: INFO:     106.222.110.198:0 - "POST /api/ai/chat HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:35:41 +00:00: INFO:api.ai_chat:[AI-CHAT] Message from session 353f1bbf-91c8-408e-97f3-93bc871b97b7 (user=24): start the project
+1|clawd-backend  | 2026-06-27 07:35:41 +00:00: INFO:api.ai_chat:[AI-CHAT] Resolving active_project: request=jurassicgenesis-0x7yop, session=jurassicgenesis-0x7yop, projects_count=4
+1|clawd-backend  | 2026-06-27 07:35:41 +00:00: INFO:api.ai_chat:[AI-CHAT] Available project domains: ['telebot-eabhq7', 'dirsord-cdvxx9', 'jurassicgenesis-0x7yop', 'flow-c776g1']
+1|clawd-backend  | 2026-06-27 07:35:41 +00:00: INFO:api.ai_chat:[AI-CHAT] ✓ Matched by domain: jurassicgenesis-0x7yop
+1|clawd-backend  | 2026-06-27 07:35:41 +00:00: INFO:api.ai_chat:[AI-CHAT] Active project type='website' → 12 tools
+1|clawd-backend  | 2026-06-27 07:35:43 +00:00: INFO:httpx:HTTP Request: POST https://api.z.ai/api/coding/paas/v4/chat/completions "HTTP/1.1 200 OK"
+1|clawd-backend  | 2026-06-27 07:35:43 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Response has tool_calls: True
+1|clawd-backend  | 2026-06-27 07:35:43 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Parsed 1 tool calls
+1|clawd-backend  | 2026-06-27 07:35:43 +00:00: INFO:api.ai_chat:[AI-CHAT] Tool call: start_project with args: {'project_id': 'jurassicgenesis-0x7yop'}
+1|clawd-backend  | 2026-06-27 07:35:43 +00:00: INFO:services.ai.project_resolver:[PROJECT-RESOLVER] Found project by explicit ID: jurassicgenesis-0x7yop
+1|clawd-backend  | 2026-06-27 07:35:43 +00:00: INFO:services.ai.tool_executor:[TOOL-EXECUTOR] Executing tool: start_project with args: {'project_id': 'jurassicgenesis-0x7yop'}
+1|clawd-backend  | 2026-06-27 07:36:03 +00:00: INFO:api.ai_chat:[AI-CHAT] ⚡ Fast-path: returning start_project result without LLM summarization
+1|clawd-backend  | 2026-06-27 07:36:03 +00:00: INFO:     106.222.110.198:0 - "POST /api/ai/chat HTTP/1.1" 200 OK
+1|clawd-backend  | 2026-06-27 07:36:19 +00:00: INFO:api.ai_chat:[AI-CHAT] Message from session 353f1bbf-91c8-408e-97f3-93bc871b97b7 (user=24): what you can do
+1|clawd-backend  | 2026-06-27 07:36:19 +00:00: INFO:api.ai_chat:[AI-CHAT] Resolving active_project: request=jurassicgenesis-0x7yop, session=jurassicgenesis-0x7yop, projects_count=4
+1|clawd-backend  | 2026-06-27 07:36:19 +00:00: INFO:api.ai_chat:[AI-CHAT] Available project domains: ['telebot-eabhq7', 'dirsord-cdvxx9', 'jurassicgenesis-0x7yop', 'flow-c776g1']
+1|clawd-backend  | 2026-06-27 07:36:19 +00:00: INFO:api.ai_chat:[AI-CHAT] ✓ Matched by domain: jurassicgenesis-0x7yop
+1|clawd-backend  | 2026-06-27 07:36:19 +00:00: INFO:api.ai_chat:[AI-CHAT] Active project type='website' → 12 tools
+1|clawd-backend  | 2026-06-27 07:36:23 +00:00: INFO:httpx:HTTP Request: POST https://api.z.ai/api/coding/paas/v4/chat/completions "HTTP/1.1 200 OK"
+1|clawd-backend  | 2026-06-27 07:36:23 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Response has tool_calls: False
+1|clawd-backend  | 2026-06-27 07:36:23 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Parsed 0 tool calls
+1|clawd-backend  | 2026-06-27 07:36:23 +00:00: INFO:api.ai_chat:[AI-CHAT] Text response: Here's what I can do for your project:
+1|clawd-backend  | 2026-06-27 07:36:23 +00:00: 
+1|clawd-backend  | 2026-06-27 07:36:23 +00:00: **Project Management**
+1|clawd-backend  | 2026-06-27 07:36:23 +00:00: - **Start / Stop / Restart** the webs
+1|clawd-backend  | 2026-06-27 07:36:23 +00:00: INFO:     106.222.110.198:0 - "POST /api/ai/chat HTTP/1.1" 200 OK
