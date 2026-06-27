@@ -224,33 +224,38 @@ async def _handle_callback(callback: dict):
     chat_id = msg.get("chat", {}).get("id")
     message_id = msg.get("message_id")
     
-    logger.info(f"[TELEGRAM] Callback: data={data[:60]} from chat_id={chat_id}")
+    logger.info(f"[TELEGRAM] _handle_callback START: callback_id={callback_id}, data={data[:80]}, chat_id={chat_id}, msg_id={message_id}")
     
     # Always answer the callback first to remove the loading spinner
-    await answer_callback_query(callback_id)
+    _answered = await answer_callback_query(callback_id)
+    logger.info(f"[TELEGRAM] answer_callback_query result: {_answered}")
     
     if not chat_id:
+        logger.warning("[TELEGRAM] _handle_callback: no chat_id, aborting")
         return
     
     # Parse callback data
     if data.startswith("switch:"):
-        # Project selection button
         project_domain = data[len("switch:"):]
+        logger.info(f"[TELEGRAM] Switch button tapped: project_domain={project_domain}")
         
         user_id = _lookup_user_by_chat_id(chat_id)
+        logger.info(f"[TELEGRAM] Lookup user by chat_id={chat_id}: user_id={user_id}")
         if not user_id:
+            logger.warning(f"[TELEGRAM] No user linked to chat_id={chat_id}")
             await send_message(chat_id, "🔒 Your Telegram is not linked.")
             return
         
         session_id = f"tg_{chat_id}"
         await send_chat_action(chat_id, "typing")
         
-        # Update the original message to show selection
+        logger.info(f"[TELEGRAM] Editing original message {message_id}...")
         await edit_message_text(
             chat_id, message_id,
             f"✅ Switching to `{project_domain}`...",
         )
         
+        logger.info(f"[TELEGRAM] Calling process_message: switch to {project_domain}")
         try:
             resp = await process_message(
                 user_id=user_id,
@@ -258,16 +263,19 @@ async def _handle_callback(callback: dict):
                 session_id=session_id,
                 source="telegram",
             )
+            logger.info(f"[TELEGRAM] process_message returned: type={resp.get('type')}, keys={list(resp.keys())}")
             
             reply_text = _format_for_telegram(resp)
             reply_markup = _build_keyboard(resp)
             
-            await send_message(
+            logger.info(f"[TELEGRAM] Sending reply ({len(reply_text)} chars) to chat_id={chat_id}")
+            _sent = await send_message(
                 chat_id, reply_text,
                 reply_markup=reply_markup,
             )
+            logger.info(f"[TELEGRAM] send_message result: {_sent}")
         except Exception as e:
-            logger.error(f"[TELEGRAM] Callback error: {e}", exc_info=True)
+            logger.error(f"[TELEGRAM] !!! Callback switch error: {e}", exc_info=True)
             await send_message(chat_id, "❌ Failed to switch project. Please try again.")
     
     elif data.startswith("confirm:"):
@@ -318,14 +326,23 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
     
     update = await request.json()
     
+    # Log EVERY incoming update to see what Telegram sends
+    _update_keys = list(update.keys())
+    logger.info(f"[TELEGRAM] Webhook received update. Keys: {_update_keys}")
+    
     # ── Handle callback queries (button taps) ──────────────
     callback = update.get("callback_query")
     if callback:
-        await _handle_callback(callback)
+        logger.info(f"[TELEGRAM] >>> CALLBACK QUERY detected: id={callback.get('id')}, data={callback.get('data', '')[:80]}")
+        try:
+            await _handle_callback(callback)
+        except Exception as e:
+            logger.error(f"[TELEGRAM] !!! _handle_callback crashed: {e}", exc_info=True)
         return {"ok": True}
     
     chat_id, text, message_id = _extract_message(update)
     if chat_id is None or text is None:
+        logger.info(f"[TELEGRAM] Non-text update ignored. Keys: {_update_keys}")
         return {"ok": True}  # Not a text message — ignore silently
     
     text = text.strip()
