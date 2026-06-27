@@ -447,6 +447,36 @@ async def process_message(
                     result.get("message", f"Switched to {_matched_project['name']} ✅")
                 ))
         
+        # ── Selection reply detection ─────────────────────────────
+        # When no active project is set and user sends a short message
+        # that matches a project name/domain, treat it as a selection
+        # reply. This handles the common flow:
+        #   AI: "Pick a project: 1. telebot 2. discord..."
+        #   User: "telebot"  ← needs to switch, not go through LLM
+        if not active_project and len(message.split()) <= 3:
+            _reply_lower = _msg_lower
+            for p in projects:
+                _pname = p["name"].lower()
+                _pdomain = p["domain"].lower()
+                # Match: exact name, name substring, or domain match
+                if (_reply_lower == _pname
+                    or _reply_lower == _pdomain
+                    or _pname.startswith(_reply_lower)
+                    or _pdomain.startswith(_reply_lower)
+                    or _reply_lower in _pname):
+                    logger.info(f"[AI-CHAT] ⚡ Fast-path: project selection reply → '{p['name']}' (no LLM call)")
+                    _executor = get_tool_executor()
+                    result = await _executor.execute(
+                        "set_active_project",
+                        {"project_id": p["domain"]},
+                        session_key=session_id,
+                        user_id=user_id,
+                    )
+                    await session_manager.update_last_used(session_id)
+                    return _finalize(text_response(
+                        result.get("message", f"Switched to {p['name']} ✅ Now what would you like to do?")
+                    ))
+        
         # "clear project" / "forget project" → clear_active_project directly
         if _msg_lower in ("clear project", "forget project", "clear active project", "clear active"):
             logger.info(f"{_src_tag} ⚡ Fast-path: clearing active project (no LLM call)")

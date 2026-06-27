@@ -1,37 +1,13 @@
-/start
-
-👋 Welcome to DreamAgent Bot!
-
-Control your projects from Telegram.
-
-To get started, link your account:
-1. Open your DreamAgent dashboard
-2. Go to Settings → Connect Telegram
-3. Copy the 6-character code
-4. Send it here: /link YOURCODE
-
-Once linked, try: status, stop, start, restart, logs
-/link BTDZ56
-
-✅ Account linked successfully!
-
-You can now send me commands to manage your projects. Try:
-• status — check project status
-• stop / start / restart
-• logs — view recent logs
-• switch to {project} — change project
-status
-
-
-I need to select a project first. Please use 'switch project' to choose a project, then I can check its status for you.
 /switch project
 
+I found 4 active projects. Please select one by telling me its name or domain:
 
-I found 4 active projects. Please select one by specifying its name:
+1.  telebot (Telegram Bot)
+2.  dirsord (Discord Bot)
+3.  JurassicGenesis (Website)
+4.  flow (Scheduler)
+telebot
 
-1. telebot (Telegram Bot)
-2. dirsord (Discord Bot)
-3. JurassicGenesis (Website)
-4. flow (Scheduler)
+I don't have an active project selected yet. Please select a project first using "switch project" and then let me know what you'd like to do with it.
 
-Type the name of the project you want to use (e.g., "telebot").
+If you'd like to see what projects are available, I can show you the list.
