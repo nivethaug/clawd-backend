@@ -115,7 +115,7 @@ def create_checkout_url(
 
     try:
         resp = httpx.post(
-            f"{LEMONSQUEEZY_API_BASE}/checkouts",
+            f"https://api.lemonsqueezy.com/v1/checkouts",
             headers={
                 "Accept": "application/vnd.api+json",
                 "Authorization": f"Bearer {api_key}",

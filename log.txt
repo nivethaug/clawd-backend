@@ -1,6 +1,5 @@
-1|clawd-ba | 2026-06-28 14:40:38 +00:00: INFO:services.lemonsqueezy_service:[LEMONSQUEEZY] Creating checkout: api_key=1033 chars, store_id=419675
-1|clawd-ba | 2026-06-28 14:40:39 +00:00: INFO:httpx:HTTP Request: POST https://api.lemonsqueezy.com/v1/checkouts "HTTP/1.1 422 Unprocessable Entity"
-1|clawd-ba | 2026-06-28 14:40:39 +00:00: ERROR:services.lemonsqueezy_service:[LEMONSQUEZY] Checkout creation failed: Client error '422 Unprocessable Entity' for url 'https://api.lemonsqueezy.com/v1/checkouts'
-1|clawd-ba | 2026-06-28 14:40:39 +00:00: For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+1|clawd-ba | 2026-06-28 14:51:12 +00:00: INFO:dashboard_service:Dashboard assembled in 314.7ms for user 24
+1|clawd-ba | 2026-06-28 14:51:18 +00:00: INFO:api.billing:[LEMONSQUEZY] Plan checkout requested: plan=pro, variant_id=1846169, API_KEY=set (1033 chars), STORE_ID=419675, is_configured=True
+1|clawd-ba | 2026-06-28 14:51:18 +00:00: INFO:services.lemonsqueezy_service:[LEMONSQUEEZY] Creating checkout: api_key=1033 chars, store_id=419675
+1|clawd-ba | 2026-06-28 14:51:18 +00:00: ERROR:services.lemonsqueezy_service:[LEMONSQUEZY] Checkout creation failed: name 'LEMONSQUEEZY_API_BASE' is not defined
 
-r
