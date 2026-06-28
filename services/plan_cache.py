@@ -56,7 +56,7 @@ class _PlanCache:
             with get_db() as conn:
                 # Plans
                 rows = conn.execute(
-                    "SELECT * FROM plans WHERE active = true ORDER BY sort_order"
+                    "SELECT * FROM billing_plans WHERE active = true ORDER BY sort_order"
                 ).fetchall()
                 self._plans = {}
                 self._plans_by_id = {}

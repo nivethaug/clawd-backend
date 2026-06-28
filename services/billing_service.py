@@ -87,7 +87,7 @@ def get_total_available(balance: Dict[str, Any]) -> int:
 def _get_user_plan(conn, user_id: int) -> Optional[Dict[str, Any]]:
     """Look up the user's plan from users.plan_id (FK → plans)."""
     row = conn.execute(
-        """SELECT p.* FROM users u JOIN plans p ON u.plan_id = p.id
+        """SELECT p.* FROM users u JOIN billing_plans p ON u.plan_id = p.id
            WHERE u.id = %s""",
         (user_id,),
     ).fetchone()

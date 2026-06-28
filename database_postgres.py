@@ -954,8 +954,10 @@ def init_schema():
             # requires ONLY INSERTs — no schema changes.
             # ================================================================
 
-            # --- plans table (non-credit plan configuration) ---
-            cur.execute("""CREATE TABLE IF NOT EXISTS plans (
+            # --- billing_plans table (non-credit plan configuration) ---
+            # NOTE: named billing_plans to avoid collision with the pre-existing
+            # session/file plans table (line ~476) which has different columns.
+            cur.execute("""CREATE TABLE IF NOT EXISTS billing_plans (
                 id SERIAL PRIMARY KEY,
                 slug VARCHAR(30) UNIQUE NOT NULL,
                 name VARCHAR(50) NOT NULL,
@@ -975,12 +977,12 @@ def init_schema():
                 updated_at TIMESTAMP DEFAULT NOW()
             )""")
             conn.commit()
-            logger.info("✓ Added plans table")
+            logger.info("✓ Added billing_plans table")
 
             # --- plan_credit_grants (per-plan × per-credit-type limits) ---
             cur.execute("""CREATE TABLE IF NOT EXISTS plan_credit_grants (
                 id SERIAL PRIMARY KEY,
-                plan_id INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+                plan_id INTEGER NOT NULL REFERENCES billing_plans(id) ON DELETE CASCADE,
                 credit_type VARCHAR(30) NOT NULL,
                 monthly_limit BIGINT DEFAULT 0,
                 created_at TIMESTAMP DEFAULT NOW(),
@@ -1078,7 +1080,7 @@ def init_schema():
             cur.execute("""CREATE TABLE IF NOT EXISTS subscriptions (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                plan_id INTEGER REFERENCES plans(id),
+                plan_id INTEGER REFERENCES billing_plans(id),
                 lemonsqueezy_subscription_id VARCHAR(100) UNIQUE,
                 lemonsqueezy_order_id VARCHAR(100),
                 status VARCHAR(30) NOT NULL DEFAULT 'active',
@@ -1111,7 +1113,7 @@ def init_schema():
 
             # users.plan_id (nullable; backfilled below)
             def migrate_users_plan_id():
-                cur.execute("ALTER TABLE users ADD COLUMN plan_id INTEGER REFERENCES plans(id)")
+                cur.execute("ALTER TABLE users ADD COLUMN plan_id INTEGER REFERENCES billing_plans(id)")
             _run_migration(migrate_users_plan_id)
 
             # project_types.ai_operation_id (nullable; backfilled below)
@@ -1165,7 +1167,7 @@ def init_schema():
             ]
             for slug, name, price, max_proj, stor, bw, dep, dom, prio, sort, premium, sort_o, feats in seed_plans:
                 cur.execute(
-                    """INSERT INTO plans (slug, name, price_monthly_cents, max_active_projects,
+                    """INSERT INTO billing_plans (slug, name, price_monthly_cents, max_active_projects,
                         storage_mb, bandwidth_gb, deployment_limit, custom_domains,
                         priority_queue, premium_models, sort_order, features)
                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -1173,10 +1175,10 @@ def init_schema():
                     (slug, name, price, max_proj, stor, bw, dep, dom, prio, premium, sort_o, feats)
                 )
             conn.commit()
-            logger.info("✓ Seeded plans")
+            logger.info("✓ Seeded billing_plans")
 
             # Seed plan_credit_grants
-            cur.execute("SELECT id, slug FROM plans")
+            cur.execute("SELECT id, slug FROM billing_plans")
             plan_map = {row["slug"]: row["id"] for row in cur.fetchall()}
             seed_grants = [
                 ('free', 'project_ai', 50),
@@ -1277,7 +1279,7 @@ def init_schema():
             try:
                 cur.execute(
                     """UPDATE users SET plan_id = (
-                           SELECT p.id FROM plans p WHERE p.slug = users.subscription_tier
+                           SELECT p.id FROM billing_plans p WHERE p.slug = users.subscription_tier
                        ) WHERE plan_id IS NULL"""
                 )
                 conn.commit()
@@ -1295,7 +1297,7 @@ def init_schema():
                        SELECT u.id, g.credit_type, g.monthly_limit, 0, 0,
                               (DATE_TRUNC('month', NOW()) + INTERVAL '1 month')::date
                        FROM users u
-                       JOIN plans p ON u.plan_id = p.id
+                       JOIN billing_plans p ON u.plan_id = p.id
                        JOIN plan_credit_grants g ON g.plan_id = p.id
                        WHERE NOT EXISTS (
                            SELECT 1 FROM user_credit_balances b

@@ -254,7 +254,7 @@ async def admin_list_user_billing(
             """SELECT u.id, u.email, u.name, u.subscription_tier, p.slug as plan_slug,
                       p.name as plan_name
                FROM users u
-               LEFT JOIN plans p ON u.plan_id = p.id
+               LEFT JOIN billing_plans p ON u.plan_id = p.id
                ORDER BY u.id
                LIMIT %s OFFSET %s""",
             (limit, offset),
@@ -412,7 +412,7 @@ async def admin_billing_stats(authorization: Optional[str] = Header(None)):
         # Users by plan
         plan_rows = conn.execute(
             """SELECT p.slug, p.name, COUNT(u.id) as user_count
-               FROM plans p
+               FROM billing_plans p
                LEFT JOIN users u ON u.plan_id = p.id
                GROUP BY p.slug, p.name
                ORDER BY p.sort_order"""
