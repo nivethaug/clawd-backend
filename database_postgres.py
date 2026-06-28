@@ -1,4 +1,5 @@
 import os
+import json
 import psycopg2
 from psycopg2 import pool, sql
 from contextlib import contextmanager
@@ -944,6 +945,368 @@ def init_schema():
             )
             conn.commit()
             logger.info("✓ Added custom_domains table with indexes")
+
+            # ================================================================
+            # BILLING SYSTEM (v4) — Generic Credit Model
+            # Plans, plan_credit_grants, user_credit_balances, ai_operations,
+            # credit_transactions, credit_packs, subscriptions, billing_config.
+            # Designed so adding future credit types (image/video/voice/api)
+            # requires ONLY INSERTs — no schema changes.
+            # ================================================================
+
+            # --- plans table (non-credit plan configuration) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS plans (
+                id SERIAL PRIMARY KEY,
+                slug VARCHAR(30) UNIQUE NOT NULL,
+                name VARCHAR(50) NOT NULL,
+                price_monthly_cents INTEGER DEFAULT 0,
+                max_active_projects INTEGER DEFAULT 0,
+                storage_mb INTEGER DEFAULT 0,
+                bandwidth_gb INTEGER DEFAULT 0,
+                deployment_limit INTEGER DEFAULT 0,
+                custom_domains INTEGER DEFAULT 0,
+                priority_queue INTEGER DEFAULT 0,
+                premium_models BOOLEAN DEFAULT false,
+                lemonsqueezy_variant_id VARCHAR(100),
+                features JSONB DEFAULT '[]'::jsonb,
+                active BOOLEAN DEFAULT true,
+                sort_order INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+            logger.info("✓ Added plans table")
+
+            # --- plan_credit_grants (per-plan × per-credit-type limits) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS plan_credit_grants (
+                id SERIAL PRIMARY KEY,
+                plan_id INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+                credit_type VARCHAR(30) NOT NULL,
+                monthly_limit BIGINT DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(plan_id, credit_type)
+            )""")
+            conn.commit()
+            logger.info("✓ Added plan_credit_grants table")
+
+            # --- user_credit_balances (one row per user × credit_type) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS user_credit_balances (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                credit_type VARCHAR(30) NOT NULL,
+                monthly_limit BIGINT DEFAULT 0,
+                used BIGINT DEFAULT 0,
+                purchased BIGINT DEFAULT 0,
+                reset_date DATE NOT NULL DEFAULT (DATE_TRUNC('month', NOW()) + INTERVAL '1 month')::date,
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(user_id, credit_type)
+            )""")
+            conn.commit()
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ucb_lookup "
+                "ON user_credit_balances(user_id, credit_type)"
+            )
+            conn.commit()
+            logger.info("✓ Added user_credit_balances table with index")
+
+            # --- ai_operations (configurable credit costs) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS ai_operations (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(50) UNIQUE NOT NULL,
+                name VARCHAR(100) NOT NULL,
+                description TEXT,
+                credit_cost INTEGER NOT NULL DEFAULT 1,
+                category VARCHAR(20) NOT NULL DEFAULT 'edit',
+                credit_type VARCHAR(30) NOT NULL DEFAULT 'project_ai',
+                enabled BOOLEAN DEFAULT true,
+                sort_order INTEGER DEFAULT 0
+            )""")
+            conn.commit()
+            logger.info("✓ Added ai_operations table")
+
+            # --- credit_transactions (audit ledger) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS credit_transactions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                operation_id INTEGER REFERENCES ai_operations(id),
+                credit_type VARCHAR(30) NOT NULL,
+                project_id INTEGER,
+                session_id INTEGER,
+                credits INTEGER NOT NULL,
+                source VARCHAR(20) NOT NULL DEFAULT 'monthly',
+                status VARCHAR(20) NOT NULL DEFAULT 'reserved',
+                cost_usd NUMERIC(12,6) DEFAULT 0,
+                model VARCHAR(100),
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                duration_ms INTEGER DEFAULT 0,
+                provider VARCHAR(50),
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ct_user "
+                "ON credit_transactions(user_id, created_at DESC)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ct_status "
+                "ON credit_transactions(status)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ct_project "
+                "ON credit_transactions(project_id, created_at DESC)"
+            )
+            conn.commit()
+            logger.info("✓ Added credit_transactions table with indexes")
+
+            # --- credit_packs (purchasable) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS credit_packs (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                credits INTEGER NOT NULL,
+                credit_type VARCHAR(30) NOT NULL DEFAULT 'project_ai',
+                price_cents INTEGER NOT NULL,
+                lemonsqueezy_variant_id VARCHAR(100),
+                active BOOLEAN DEFAULT true,
+                sort_order INTEGER DEFAULT 0
+            )""")
+            conn.commit()
+            logger.info("✓ Added credit_packs table")
+
+            # --- subscriptions (LemonSqueezy state) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS subscriptions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plan_id INTEGER REFERENCES plans(id),
+                lemonsqueezy_subscription_id VARCHAR(100) UNIQUE,
+                lemonsqueezy_order_id VARCHAR(100),
+                status VARCHAR(30) NOT NULL DEFAULT 'active',
+                current_period_end TIMESTAMP,
+                cancel_at_period_end BOOLEAN DEFAULT false,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_subs_user "
+                "ON subscriptions(user_id, status)"
+            )
+            conn.commit()
+            logger.info("✓ Added subscriptions table with index")
+
+            # --- billing_config (EARLY_ACCESS_MODE etc.) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS billing_config (
+                key VARCHAR(50) PRIMARY KEY,
+                value JSONB NOT NULL,
+                updated_by INTEGER REFERENCES users(id),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+            logger.info("✓ Added billing_config table")
+
+            # ----------------------------------------------------------------
+            # BILLING: migrations on existing tables
+            # ----------------------------------------------------------------
+
+            # users.plan_id (nullable; backfilled below)
+            def migrate_users_plan_id():
+                cur.execute("ALTER TABLE users ADD COLUMN plan_id INTEGER REFERENCES plans(id)")
+            _run_migration(migrate_users_plan_id)
+
+            # project_types.ai_operation_id (nullable; backfilled below)
+            def migrate_project_type_operation():
+                cur.execute(
+                    "ALTER TABLE project_types ADD COLUMN ai_operation_id INTEGER REFERENCES ai_operations(id)"
+                )
+            _run_migration(migrate_project_type_operation)
+
+            # token_usage: add cost_usd, provider, operation, credits_charged, duration_ms
+            # NOTE: admin SQL at app.py queries cost_usd which previously didn't exist (silent NULL).
+            def migrate_token_usage_cost_usd():
+                cur.execute("ALTER TABLE token_usage ADD COLUMN cost_usd NUMERIC(12,6) DEFAULT 0")
+            _run_migration(migrate_token_usage_cost_usd)
+
+            def migrate_token_usage_provider():
+                cur.execute("ALTER TABLE token_usage ADD COLUMN provider VARCHAR(50)")
+            _run_migration(migrate_token_usage_provider)
+
+            def migrate_token_usage_operation():
+                cur.execute("ALTER TABLE token_usage ADD COLUMN operation VARCHAR(50)")
+            _run_migration(migrate_token_usage_operation)
+
+            def migrate_token_usage_credits():
+                cur.execute("ALTER TABLE token_usage ADD COLUMN credits_charged INTEGER DEFAULT 0")
+            _run_migration(migrate_token_usage_credits)
+
+            def migrate_token_usage_duration():
+                cur.execute("ALTER TABLE token_usage ADD COLUMN duration_ms INTEGER DEFAULT 0")
+            _run_migration(migrate_token_usage_duration)
+            logger.info("✓ Added billing columns to token_usage")
+
+            # ----------------------------------------------------------------
+            # BILLING: seed data (defaults only — admin-editable)
+            # ----------------------------------------------------------------
+
+            # Seed plans
+            seed_plans = [
+                ('free', 'Free', 0, 3, 0, 0, 0, 0, 0, 0, False, 0,
+                 json.dumps(["Unlimited Prompt Assistant", "Unlimited DevOps Assistant",
+                             "Community Templates", "Community Gallery", "GitHub Export", "ZIP Download"])),
+                ('pro', 'Pro', 3900, 30, 0, 0, 0, 0, 1, 1, True, 10,
+                 json.dumps(["Premium Models", "Priority Queue", "Premium Templates",
+                             "Unlimited Deployments", "Custom Domains", "Premium Support"])),
+                ('dream', 'Dream', 9900, 100, 0, 0, 0, 0, 2, 2, True, 20,
+                 json.dumps(["Premium Models", "Fastest Queue", "Premium Support",
+                             "Custom Domains", "Unlimited Deployments"])),
+                ('enterprise', 'Enterprise', 0, 0, 0, 0, 0, 0, 3, 3, True, 30,
+                 json.dumps(["Unlimited Active Projects", "Dedicated VPS", "Self Hosted",
+                             "Team Workspace", "White Label", "Dedicated Infrastructure", "Contact Sales"])),
+            ]
+            for slug, name, price, max_proj, stor, bw, dep, dom, prio, sort, premium, sort_o, feats in seed_plans:
+                cur.execute(
+                    """INSERT INTO plans (slug, name, price_monthly_cents, max_active_projects,
+                        storage_mb, bandwidth_gb, deployment_limit, custom_domains,
+                        priority_queue, premium_models, sort_order, features)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (slug) DO NOTHING""",
+                    (slug, name, price, max_proj, stor, bw, dep, dom, prio, premium, sort_o, feats)
+                )
+            conn.commit()
+            logger.info("✓ Seeded plans")
+
+            # Seed plan_credit_grants
+            cur.execute("SELECT id, slug FROM plans")
+            plan_map = {row["slug"]: row["id"] for row in cur.fetchall()}
+            seed_grants = [
+                ('free', 'project_ai', 50),
+                ('free', 'edit_token', 2000000),
+                ('pro', 'project_ai', 1000),
+                ('pro', 'edit_token', 25000000),
+                ('dream', 'project_ai', 5000),
+                ('dream', 'edit_token', 100000000),
+                ('enterprise', 'project_ai', 0),
+                ('enterprise', 'edit_token', 0),
+            ]
+            for slug, ctype, limit in seed_grants:
+                pid = plan_map.get(slug)
+                if pid:
+                    cur.execute(
+                        """INSERT INTO plan_credit_grants (plan_id, credit_type, monthly_limit)
+                           VALUES (%s, %s, %s)
+                           ON CONFLICT (plan_id, credit_type) DO NOTHING""",
+                        (pid, ctype, limit)
+                    )
+            conn.commit()
+            logger.info("✓ Seeded plan_credit_grants")
+
+            # Seed ai_operations
+            seed_ops = [
+                ('WEBSITE', 'Website Creation', 'Generate a complete website', 10, 'creation', 'project_ai', 1),
+                ('LANDING_PAGE', 'Landing Page', 'Generate a landing page', 10, 'creation', 'project_ai', 2),
+                ('DASHBOARD', 'Dashboard', 'Generate a dashboard application', 8, 'creation', 'project_ai', 3),
+                ('DISCORD_BOT', 'Discord Bot', 'Generate a Discord bot', 8, 'creation', 'project_ai', 4),
+                ('TELEGRAM_BOT', 'Telegram Bot', 'Generate a Telegram bot', 8, 'creation', 'project_ai', 5),
+                ('AUTOMATION', 'Automation Project', 'Generate an automation/scheduler project', 6, 'creation', 'project_ai', 6),
+                ('SCHEDULER', 'Scheduler', 'Generate a scheduler project', 6, 'creation', 'project_ai', 7),
+                ('API_GENERATION', 'API Generation', 'Generate an API', 5, 'creation', 'project_ai', 8),
+                ('LARGE_REFACTOR', 'Large Refactor', 'Large-scale refactoring', 5, 'edit', 'project_ai', 20),
+                ('REFACTOR', 'Refactor', 'Refactor existing code', 3, 'edit', 'project_ai', 21),
+                ('ADD_FEATURE', 'Add Feature', 'Add a new feature', 2, 'edit', 'project_ai', 22),
+                ('BUG_FIX', 'Bug Fix', 'Fix a bug', 1, 'edit', 'project_ai', 23),
+                ('UI_EDIT', 'UI Edit', 'Edit UI components', 1, 'edit', 'project_ai', 24),
+            ]
+            for code, name, desc, cost, cat, ctype, sort in seed_ops:
+                cur.execute(
+                    """INSERT INTO ai_operations (code, name, description, credit_cost, category, credit_type, sort_order)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (code) DO NOTHING""",
+                    (code, name, desc, cost, cat, ctype, sort)
+                )
+            conn.commit()
+            logger.info("✓ Seeded ai_operations")
+
+            # Seed credit_packs
+            seed_packs = [
+                ('100 AI Credits', 100, 'project_ai', 500, 1),
+                ('500 AI Credits', 500, 'project_ai', 2000, 2),
+                ('1000 AI Credits', 1000, 'project_ai', 3500, 3),
+            ]
+            for name, credits, ctype, price, sort in seed_packs:
+                cur.execute(
+                    """INSERT INTO credit_packs (name, credits, credit_type, price_cents, sort_order)
+                       VALUES (%s, %s, %s, %s, %s)
+                       ON CONFLICT DO NOTHING""",
+                    (name, credits, ctype, price, sort)
+                )
+            conn.commit()
+            logger.info("✓ Seeded credit_packs")
+
+            # Seed billing_config
+            cur.execute(
+                """INSERT INTO billing_config (key, value)
+                   VALUES ('EARLY_ACCESS_MODE', 'true'::jsonb)
+                   ON CONFLICT (key) DO NOTHING"""
+            )
+            conn.commit()
+            logger.info("✓ Seeded billing_config (EARLY_ACCESS_MODE)")
+
+            # Backfill project_types.ai_operation_id
+            type_to_op = {
+                'website': 'WEBSITE',
+                'telegrambot': 'TELEGRAM_BOT',
+                'discordbot': 'DISCORD_BOT',
+                'scheduler': 'AUTOMATION',
+                'tradingbot': 'WEBSITE',
+                'custom': 'WEBSITE',
+            }
+            cur.execute("SELECT id, code FROM ai_operations")
+            op_map = {row["code"]: row["id"] for row in cur.fetchall()}
+            for type_slug, op_code in type_to_op.items():
+                op_id = op_map.get(op_code)
+                if op_id:
+                    cur.execute(
+                        """UPDATE project_types SET ai_operation_id = %s
+                           WHERE type = %s AND ai_operation_id IS NULL""",
+                        (op_id, type_slug)
+                    )
+            conn.commit()
+            logger.info("✓ Backfilled project_types.ai_operation_id")
+
+            # Backfill users.plan_id (slug join — zero remapping)
+            try:
+                cur.execute(
+                    """UPDATE users SET plan_id = (
+                           SELECT p.id FROM plans p WHERE p.slug = users.subscription_tier
+                       ) WHERE plan_id IS NULL"""
+                )
+                conn.commit()
+                logger.info("✓ Backfilled users.plan_id from subscription_tier")
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"users.plan_id backfill skipped: {e}")
+
+            # Backfill user_credit_balances for existing users
+            try:
+                # Create project_ai + edit_token balance rows for every user,
+                # copying monthly_limit from their plan's grants.
+                cur.execute(
+                    """INSERT INTO user_credit_balances (user_id, credit_type, monthly_limit, used, purchased, reset_date)
+                       SELECT u.id, g.credit_type, g.monthly_limit, 0, 0,
+                              (DATE_TRUNC('month', NOW()) + INTERVAL '1 month')::date
+                       FROM users u
+                       JOIN plans p ON u.plan_id = p.id
+                       JOIN plan_credit_grants g ON g.plan_id = p.id
+                       WHERE NOT EXISTS (
+                           SELECT 1 FROM user_credit_balances b
+                           WHERE b.user_id = u.id AND b.credit_type = g.credit_type
+                       )"""
+                )
+                conn.commit()
+                logger.info("✓ Backfilled user_credit_balances for existing users")
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"user_credit_balances backfill skipped: {e}")
 
             logger.info("✓ Database schema initialized")
     finally:

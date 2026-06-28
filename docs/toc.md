@@ -124,6 +124,19 @@
 | `/api/scheduler/jobs/{id}/run` | POST | `api/scheduler_router.py:199-205` | [scheduler.md](./scheduler.md) |
 | `/api/scheduler/jobs/{id}/logs` | GET | `api/scheduler_router.py:215-230` | [scheduler.md](./scheduler.md) |
 
+### Billing & Subscriptions
+
+| Endpoint | Method | File:Lines | Docs |
+|----------|--------|------------|------|
+| `/api/billing/plans` | GET | `api/billing_router.py:65` | [billing.md](./billing.md) |
+| `/api/billing/summary` | GET | `api/billing_router.py:87` | [billing.md](./billing.md) |
+| `/api/billing/balances` | GET | `api/billing_router.py:96` | [billing.md](./billing.md) |
+| `/api/billing/transactions` | GET | `api/billing_router.py:119` | [billing.md](./billing.md) |
+| `/api/billing/checkout/plan/{slug}` | POST | `api/billing_router.py:157` | [billing.md](./billing.md) |
+| `/api/billing/checkout/credits` | POST | `api/billing_router.py:196` | [billing.md](./billing.md) |
+| `/api/billing/admin/*` | Various | `api/billing_router.py:242-405` | [billing.md](./billing.md) |
+| `/webhooks/lemonsqueezy` | POST | `api/lemonsqueezy_webhook.py:22` | [billing.md](./billing.md) |
+
 ### System
 
 | Endpoint | Method | File:Lines | Docs |
@@ -151,6 +164,7 @@
 | [publish_frontend.md](./publish_frontend.md) | Frontend build & publish |
 | [publish_backend.md](./publish_backend.md) | Backend build & publish |
 | [scheduler.md](./scheduler.md) | Centralized job scheduling daemon + REST API |
+| [billing.md](./billing.md) | AI Credits billing system, LemonSqueezy, monthly cron, frontend |
 | [context_api_wrapper_claude_code.md](./context_api_wrapper_claude_code.md) | Context wrapper architecture + Dream Agent create/edit support gap analysis |
 3. **Find the exact file and line numbers** for the code you need
 4. **Make targeted changes** using the line references
@@ -230,6 +244,15 @@
 2. **Connection:** `database_postgres.py:1-100`
 3. **Adapter:** `database_adapter.py:1-100`
 4. **Schema:** `projects_schema.sql:1-50`
+
+### "I want to understand billing"
+
+1. **Main reference:** `docs/billing.md`
+2. **Core logic:** `services/billing_service.py:140` (`can_afford`, cascade)
+3. **Cache layer:** `services/plan_cache.py:22`
+4. **Monthly cron:** `services/billing_cron.py:142`
+5. **API endpoints:** `api/billing_router.py:65-405`
+6. **Frontend:** `src/pages/Billing.tsx` + `CreditIndicator.tsx`
 
 ---
 

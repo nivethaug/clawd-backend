@@ -46,6 +46,11 @@ def record_usage(
     session_id: Optional[int] = None,
     description: Optional[str] = None,
     model: Optional[str] = None,
+    provider: Optional[str] = None,
+    cost_usd: float = 0.0,
+    duration_ms: int = 0,
+    operation: Optional[str] = None,
+    credits_charged: int = 0,
 ) -> bool:
     """
     Record a token usage event.
@@ -60,6 +65,11 @@ def record_usage(
         session_id: Associated chat session (nullable)
         description: Human-readable description
         model: AI model used
+        provider: AI provider (e.g. 'glm', 'openai')
+        cost_usd: Estimated cost in USD
+        duration_ms: Request duration in milliseconds
+        operation: Billing operation code (e.g. 'ADD_FEATURE', 'WEBSITE')
+        credits_charged: Credits deducted for this request
 
     Returns:
         True if recorded successfully, False otherwise
@@ -84,8 +94,9 @@ def record_usage(
             conn.execute(
                 """INSERT INTO token_usage
                    (user_id, project_id, session_id, usage_type, description,
-                    input_tokens, output_tokens, total_tokens, model)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    input_tokens, output_tokens, total_tokens, model,
+                    provider, cost_usd, operation, credits_charged, duration_ms)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     user_id,
                     project_id,
@@ -96,6 +107,11 @@ def record_usage(
                     output_tokens,
                     total_tokens,
                     model,
+                    provider,
+                    cost_usd,
+                    operation,
+                    credits_charged,
+                    duration_ms,
                 ),
             )
             conn.commit()
@@ -149,6 +165,11 @@ def record_from_token_usage_json(
             or (input_t + output_t)
         )
         model_name = token_usage_json.get("model")
+        provider = token_usage_json.get("provider")
+        cost_usd = float(token_usage_json.get("cost_usd", 0) or 0)
+        duration_ms = int(token_usage_json.get("duration_ms", 0) or 0)
+        operation = token_usage_json.get("operation")
+        credits_charged = int(token_usage_json.get("credits_charged", 0) or 0)
 
         return record_usage(
             user_id=user_id,
@@ -160,6 +181,11 @@ def record_from_token_usage_json(
             session_id=session_id,
             description=description,
             model=model_name,
+            provider=provider,
+            cost_usd=cost_usd,
+            duration_ms=duration_ms,
+            operation=operation,
+            credits_charged=credits_charged,
         )
 
     except Exception as e:

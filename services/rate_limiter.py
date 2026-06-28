@@ -77,6 +77,33 @@ VALID_ROLES = ["user", "admin"]
 VALID_LIMIT_TYPES = ["general_api", "ai_chat", "project_create", "max_projects"]
 
 
+def _get_tier_config(tier_name: str) -> TierLimits:
+    """Get tier config, enriched with plan_cache data if available.
+
+    Falls back to hardcoded TIERS dict if plan_cache is unavailable.
+    Overrides max_projects from plans.max_active_projects when available.
+    """
+    tier_config = TIERS.get(tier_name, TIERS[DEFAULT_TIER])
+
+    try:
+        from services.plan_cache import get_plan
+        plan = get_plan(tier_name)
+        if plan:
+            # Override max_projects from DB-driven plan
+            max_proj = int(plan.get("max_active_projects", 0))
+            tier_config = TierLimits(
+                name=plan.get("name", tier_config.name),
+                general_api=tier_config.general_api,
+                ai_chat=tier_config.ai_chat,
+                project_create=tier_config.project_create,
+                max_projects=max_proj,
+            )
+    except Exception as e:
+        logger.debug(f"plan_cache unavailable, using hardcoded tier: {e}")
+
+    return tier_config
+
+
 # ============================================================================
 # Per-User Limit Overrides (in-memory, persists until restart)
 # ============================================================================
@@ -258,7 +285,7 @@ def check_rate_limit(user_id: int, limit_type: str = "general_api") -> Dict[str,
     if role == "admin":
         return {"allowed": True, "tier": tier_name, "role": role, "bypass": True}
 
-    tier_config = TIERS.get(tier_name, TIERS[DEFAULT_TIER])
+    tier_config = _get_tier_config(tier_name)
     # Use per-user override if set, otherwise tier default
     limit: RateLimit = _get_effective_limit(user_id, limit_type, tier_config)
 
@@ -340,7 +367,7 @@ def check_project_limit(user_id: int) -> Dict[str, any]:
     if role == "admin":
         return {"allowed": True, "current": 0, "max": 0, "tier": tier_name, "role": role, "bypass": True}
 
-    tier_config = TIERS.get(tier_name, TIERS[DEFAULT_TIER])
+    tier_config = _get_tier_config(tier_name)
     max_projects = _get_effective_max_projects(user_id, tier_config)
 
     if max_projects == 0:
@@ -349,8 +376,9 @@ def check_project_limit(user_id: int) -> Dict[str, any]:
     from database_adapter import get_db
     try:
         with get_db() as conn:
+            # Count only ACTIVE projects (exclude failed/deleted)
             row = conn.execute(
-                "SELECT COUNT(*) as cnt FROM projects WHERE user_id = %s",
+                "SELECT COUNT(*) as cnt FROM projects WHERE user_id = %s AND status NOT IN ('failed')",
                 (user_id,)
             ).fetchone()
         current = row["cnt"] if isinstance(row, dict) else row[0]
@@ -375,7 +403,7 @@ def get_user_limits(user_id: int) -> Dict[str, any]:
     info = get_user_tier_and_role(user_id)
     tier_name = info["tier"]
     role = info["role"]
-    tier_config = TIERS.get(tier_name, TIERS[DEFAULT_TIER])
+    tier_config = _get_tier_config(tier_name)
 
     limits = {}
     for limit_type in ["general_api", "ai_chat", "project_create"]:
