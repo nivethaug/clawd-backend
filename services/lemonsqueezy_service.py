@@ -61,13 +61,19 @@ def create_checkout_url(
     Returns:
         {"url": str, "checkout_id": str} or {"error": str}
     """
-    if not is_configured():
-        logger.warning("[LEMONSQUEZY] Not configured — checkout URL unavailable")
+    # Read env vars fresh at call time (don't trust module-level caching)
+    api_key = os.getenv("LEMONSQUEEZY_API_KEY", "")
+    store_id = os.getenv("LEMONSQUEEZY_STORE_ID", "")
+
+    if not api_key or not store_id:
+        logger.warning(f"[LEMONSQUEEZY] Not configured — api_key={len(api_key)} chars, store_id={store_id or 'EMPTY'}")
         return {
             "error": "Payment provider not configured",
             "url": None,
             "dev_mode": True,
         }
+
+    logger.info(f"[LEMONSQUEEZY] Creating checkout: api_key={len(api_key)} chars, store_id={store_id}")
 
     try:
         import httpx
@@ -101,7 +107,7 @@ def create_checkout_url(
             f"{LEMONSQUEZY_API_BASE}/checkouts",
             headers={
                 "Accept": "application/json",
-                "Authorization": f"Bearer {_get_api_key()}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json=payload,

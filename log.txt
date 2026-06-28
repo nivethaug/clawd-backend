@@ -1,6 +1,5 @@
-
-https://api.dreamagent.cloud/api/billing/checkout/plan/pro
-Request Method
-POST
-Status Code
-503 Service Unavailable
+root@srv1285345:~/clawd-backend# pm2 logs 1 --lines 500 --nostream | grep LEMON
+1|clawd-ba | 2026-06-28 14:33:47 +00:00: INFO:api.billing:[LEMONSQUEZY] Plan checkout requested: plan=pro, variant_id=1846169, API_KEY=set, STORE_ID=set, WEBHOOK_SECRET=set, is_configured=False
+1|clawd-ba | 2026-06-28 14:33:47 +00:00: INFO:api.billing:[LEMONSQUEZY] Service module file: /root/clawd-backend/services/lemonsqueezy_service.py
+1|clawd-ba | 2026-06-28 14:33:47 +00:00: INFO:api.billing:[LEMONSQUEEZY] _get_api_key()=0 chars, _get_store_id()=EMPTY
+root@srv1285345:~/clawd-backend# 
