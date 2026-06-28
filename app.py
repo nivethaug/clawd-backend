@@ -465,6 +465,10 @@ app.include_router(scheduler_router, prefix="/api/scheduler", tags=["scheduler"]
 from api.validate_router import router as validate_router
 app.include_router(validate_router, prefix="/api/validate", tags=["validation"])
 
+# Register Billing API router
+from api.billing_router import router as billing_router
+app.include_router(billing_router, prefix="/api/billing", tags=["billing"])
+
 
 @app.get("/projects", response_model=list[ProjectResponse])
 async def get_projects(authorization: Optional[str] = Header(None)):
