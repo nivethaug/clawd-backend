@@ -149,7 +149,7 @@ def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
     Uses HMAC-SHA256 with the webhook secret.
     In dev mode (no secret), returns True (INSECURE — never use in production).
     """
-    webhook_secret = _get_webhook_secret()
+    webhook_secret = os.getenv("LEMONSQUEEZY_WEBHOOK_SECRET", "")
     if not webhook_secret:
         logger.warning("[LEMONSQUEZY] No webhook secret set — skipping verification (DEV ONLY)")
         return True

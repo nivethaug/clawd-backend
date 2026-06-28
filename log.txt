@@ -1,5 +1,25 @@
-1|clawd-ba | 2026-06-28 14:51:12 +00:00: INFO:dashboard_service:Dashboard assembled in 314.7ms for user 24
-1|clawd-ba | 2026-06-28 14:51:18 +00:00: INFO:api.billing:[LEMONSQUEZY] Plan checkout requested: plan=pro, variant_id=1846169, API_KEY=set (1033 chars), STORE_ID=419675, is_configured=True
-1|clawd-ba | 2026-06-28 14:51:18 +00:00: INFO:services.lemonsqueezy_service:[LEMONSQUEEZY] Creating checkout: api_key=1033 chars, store_id=419675
-1|clawd-ba | 2026-06-28 14:51:18 +00:00: ERROR:services.lemonsqueezy_service:[LEMONSQUEZY] Checkout creation failed: name 'LEMONSQUEEZY_API_BASE' is not defined
+|clawd-ba | 2026-06-28 15:01:36 +00:00: INFO:dashboard_service:Dashboard assembled in 315.1ms for user 24
+1|clawd-ba | 2026-06-28 15:01:40 +00:00: INFO:api.billing:[LEMONSQUEZY] Plan checkout requested: plan=pro, variant_id=1846169, API_KEY=set (1033 chars), STORE_ID=419675, is_configured=True
+1|clawd-ba | 2026-06-28 15:01:40 +00:00: INFO:services.lemonsqueezy_service:[LEMONSQUEEZY] Creating checkout: api_key=1033 chars, store_id=419675
+1|clawd-ba | 2026-06-28 15:01:40 +00:00: INFO:httpx:HTTP Request: POST https://api.lemonsqueezy.com/v1/checkouts "HTTP/1.1 201 Created"
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: WARNING:services.lemonsqueezy_service:[LEMONSQUEZY] No webhook secret set — skipping verification (DEV ONLY)
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: INFO:api.webhook.lemonsqueezy:[WEBHOOK-LM] Received event: order_created
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: WARNING:services.lemonsqueezy_service:[LEMONSQUEZY] No credit pack for variant_id=1846169
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: INFO:api.webhook.lemonsqueezy:[WEBHOOK-LM] Event order_created processed: {'handled': False, 'reason': 'no matching credit pack'}
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: WARNING:services.lemonsqueezy_service:[LEMONSQUEZY] No webhook secret set — skipping verification (DEV ONLY)
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: INFO:api.webhook.lemonsqueezy:[WEBHOOK-LM] Received event: subscription_created
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: INFO:services.plan_cache:[PLAN-CACHE] Invalidated scope='plans'
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: INFO:services.billing_service:[BILLING] Synced balances for user 24 to plan 2
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: INFO:services.plan_cache:[PLAN-CACHE] Invalidated scope='all'
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: INFO:services.lemonsqueezy_service:[LEMONSQUEZY] Assigned plan pro to user 24
+1|clawd-ba | 2026-06-28 15:02:46 +00:00: INFO:api.webhook.lemonsqueezy:[WEBHOOK-LM] Event subscription_created processed: {'handled': True, 'action': 'plan_assigned', 'plan': 'pro'}
+1|clawd-ba | 2026-06-28 15:03:16 +00:00: WARNING:services.lemonsqueezy_service:[LEMONSQUEZY] No webhook secret set — skipping verification (DEV ONLY)
+1|clawd-ba | 2026-06-28 15:03:16 +00:00: INFO:api.webhook.lemonsqueezy:[WEBHOOK-LM] Received event: subscription_updated
+1|clawd-ba | 2026-06-28 15:03:16 +00:00: INFO:services.plan_cache:[PLAN-CACHE] Invalidated scope='plans'
+1|clawd-ba | 2026-06-28 15:03:16 +00:00: INFO:services.billing_service:[BILLING] Synced balances for user 24 to plan 2
+1|clawd-ba | 2026-06-28 15:03:16 +00:00: INFO:services.plan_cache:[PLAN-CACHE] Invalidated scope='all'
+1|clawd-ba | 2026-06-28 15:03:16 +00:00: INFO:services.lemonsqueezy_service:[LEMONSQUEZY] Assigned plan pro to user 24
+1|clawd-ba | 2026-06-28 15:03:16 +00:00: INFO:api.webhook.lemonsqueezy:[WEBHOOK-LM] Event subscription_updated processed: {'handled': True, 'action': 'plan_assigned', 'plan': 'pro'}
+1|clawd-ba | 2026-06-28 15:03:34 +00:00: INFO:dashboard_service:Dashboard assembled in 303.8ms for user 24
 
+/root/clawd-backe

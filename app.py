@@ -17,26 +17,6 @@ from urllib.parse import quote
 # Load environment variables from .env file
 load_dotenv()
 
-# --- DEBUG: Dump LemonSqueezy env status at startup ---
-import sys as _sys
-_print = print
-_print("=" * 60, file=_sys.stderr)
-_print("[ENV-DEBUG] LemonSqueezy env check at startup:", file=_sys.stderr)
-_print(f"  LEMONSQUEEZY_API_KEY={'set (' + str(len(os.getenv('LEMONSQUEEZY_API_KEY',''))) + ' chars)' if os.getenv('LEMONSQUEEZY_API_KEY') else 'MISSING'}", file=_sys.stderr)
-_print(f"  LEMONSQUEEZY_STORE_ID={'set (' + os.getenv('LEMONSQUEEZY_STORE_ID','') + ')' if os.getenv('LEMONSQUEEZY_STORE_ID') else 'MISSING'}", file=_sys.stderr)
-_print(f"  LEMONSQUEEZY_WEBHOOK_SECRET={'set' if os.getenv('LEMONSQUEEZY_WEBHOOK_SECRET') else 'MISSING'}", file=_sys.stderr)
-_print(f"  Z_AI_API_KEY={'set (' + str(len(os.getenv('Z_AI_API_KEY',''))) + ' chars)' if os.getenv('Z_AI_API_KEY') else 'MISSING'}", file=_sys.stderr)
-_print(f"  USE_POSTGRES={os.getenv('USE_POSTGRES','MISSING')}", file=_sys.stderr)
-_print(f"  DB_HOST={os.getenv('DB_HOST','MISSING')}", file=_sys.stderr)
-# Dump ALL env keys that contain LEMON or ZAI
-_all_env = {k: (v[:8] + '...' if len(v) > 12 else v) for k, v in os.environ.items() if 'LEMON' in k.upper() or 'ZAI' in k.upper() or 'Z_AI' in k.upper()}
-_print(f"  [ALL matching env keys]: {_all_env}", file=_sys.stderr)
-_print(f"  cwd={os.getcwd()}", file=_sys.stderr)
-_print(f"  .env exists={os.path.exists('.env')}", file=_sys.stderr)
-_print(f"  .env.postgres exists={os.path.exists('.env.postgres')}", file=_sys.stderr)
-_print("=" * 60, file=_sys.stderr)
-# --- END DEBUG ---
-
 from fastapi import FastAPI, HTTPException, Request, Body, Header, UploadFile, File, Response
 from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
