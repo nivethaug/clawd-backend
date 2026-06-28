@@ -359,6 +359,7 @@ def charge_token_usage(
     session_id: Optional[int] = None,
     model: Optional[str] = None,
     precharged_amount: int = 0,
+    cache_read_tokens: int = 0,
 ) -> Dict[str, Any]:
     """Deduct actual tokens consumed AFTER an AI operation completes.
 
@@ -366,10 +367,17 @@ def charge_token_usage(
     function reconciles the difference by deducting the real token count
     from the edit_token balance (and cascading to project_ai if needed).
 
+    Cache-read tokens are excluded from billing because they are re-reads
+    of previously cached context that cost a fraction to process.  Charging
+    them at full rate massively overcharges users (typically 70%+ of
+    total_tokens are cache reads in multi-turn sessions).
+
+    Billable = total_tokens - cache_read_tokens
+
     Args:
-        total_tokens: actual tokens consumed (input + output).
-        precharged_amount: credits already deducted by the pre-charge, so we
-            don't double-count.  The net deduction is total_tokens - precharged.
+        total_tokens: raw total tokens (input + output, includes cache reads).
+        precharged_amount: credits already deducted by the pre-charge.
+        cache_read_tokens: tokens from cache reads (excluded from charge).
 
     Returns:
         {"success": bool, "charged": [...], "net_tokens": int}
@@ -377,9 +385,13 @@ def charge_token_usage(
     if total_tokens <= 0:
         return {"success": True, "charged": [], "net_tokens": 0}
 
+    # Exclude cache-read tokens — they're cheap re-reads, not new processing.
+    # Also guard against cache reads > total (shouldn't happen, but be safe).
+    billable_tokens = max(0, total_tokens - cache_read_tokens)
+
     # Subtract what was already pre-charged (flat credits) so we don't
     # double-deduct.  The pre-charge covers the first N tokens.
-    net_tokens = max(0, total_tokens - precharged_amount)
+    net_tokens = max(0, billable_tokens - precharged_amount)
     if net_tokens == 0:
         return {"success": True, "charged": [], "net_tokens": 0}
 
@@ -416,8 +428,9 @@ def charge_token_usage(
         )
 
     logger.info(
-        f"[BILLING] Token charge for user {user_id}: {total_tokens} tokens "
-        f"(pre-charged {precharged_amount}, net {net_tokens}), charged={charged}"
+        f"[BILLING] Token charge for user {user_id}: {total_tokens} total tokens "
+        f"(cache_read={cache_read_tokens}, billable={billable_tokens}, "
+        f"pre-charged {precharged_amount}, net {net_tokens}), charged={charged}"
     )
 
     return {

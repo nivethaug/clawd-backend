@@ -4965,6 +4965,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                                         if _total_toks > 0:
                                             try:
                                                 from services.billing_service import charge_token_usage
+                                                _cache_read = int(usage_data.get("cache_read_input_tokens", 0) or 0)
                                                 charge_result = charge_token_usage(
                                                     conn=tconn,
                                                     user_id=tuid,
@@ -4974,6 +4975,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                                                     session_id=session_id,
                                                     model=usage_data.get("model"),
                                                     precharged_amount=_precharged,
+                                                    cache_read_tokens=_cache_read,
                                                 )
                                                 tconn.commit()
                                                 logger.info(f"[BILLING] Post-edit token charge: {charge_result}")
@@ -5561,6 +5563,7 @@ async def chat_endpoint(request: ChatRequest):
                             if _total_toks > 0:
                                 try:
                                     from services.billing_service import charge_token_usage
+                                    _cache_read = int(usage_data.get("cache_read_input_tokens", 0) or 0)
                                     charge_result = charge_token_usage(
                                         conn=tconn,
                                         user_id=tuid,
@@ -5570,6 +5573,7 @@ async def chat_endpoint(request: ChatRequest):
                                         session_id=session_id,
                                         model=usage_data.get("model"),
                                         precharged_amount=0,
+                                        cache_read_tokens=_cache_read,
                                     )
                                     tconn.commit()
                                     logger.info(f"[BILLING] Post-edit token charge (non-streaming): {charge_result}")
