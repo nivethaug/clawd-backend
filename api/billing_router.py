@@ -251,6 +251,24 @@ async def create_credits_checkout(
 # Admin Endpoints
 # ============================================================================
 
+@router.get("/debug-env")
+async def debug_env():
+    """DEBUG: Show all LemonSqueezy/ZAI env vars. Remove in production."""
+    import os as _os
+    return {
+        "LEMONSQUEEZY_API_KEY": f"set ({len(_os.getenv('LEMONSQUEEZY_API_KEY',''))} chars)" if _os.getenv('LEMONSQUEEZY_API_KEY') else "MISSING",
+        "LEMONSQUEEZY_STORE_ID": f"set ({_os.getenv('LEMONSQUEEZY_STORE_ID','')})" if _os.getenv('LEMONSQUEEZY_STORE_ID') else "MISSING",
+        "LEMONSQUEEZY_WEBHOOK_SECRET": "set" if _os.getenv('LEMONSQUEEZY_WEBHOOK_SECRET') else "MISSING",
+        "Z_AI_API_KEY": f"set ({len(_os.getenv('Z_AI_API_KEY',''))} chars)" if _os.getenv('Z_AI_API_KEY') else "MISSING",
+        "USE_POSTGRES": _os.getenv('USE_POSTGRES', 'MISSING'),
+        "DB_HOST": _os.getenv('DB_HOST', 'MISSING'),
+        "all_lemon_keys": {k: _os.environ[k][:8] + "..." for k in _os.environ if "LEMON" in k.upper()},
+        "all_zai_keys": {k: _os.environ[k][:8] + "..." for k in _os.environ if "ZAI" in k.upper() or "Z_AI" in k.upper()},
+        "total_env_keys": len(_os.environ),
+        "cwd": _os.getcwd(),
+    }
+
+
 @router.get("/admin/users")
 async def admin_list_user_billing(
     authorization: Optional[str] = Header(None),
