@@ -27,6 +27,12 @@ LEMONSQUEZY_API_BASE = "https://api.lemonsqueezy.com/v1"
 
 IS_CONFIGURED = bool(LEMONSQUEZY_API_KEY and LEMONSQUEZY_STORE_ID)
 
+# Log configuration status at import time for debugging
+logger.info(f"[LEMONSQUEZY] Config status: API_KEY={'set' if LEMONSQUEZY_API_KEY else 'MISSING'}, "
+            f"STORE_ID={'set' if LEMONSQUEZY_STORE_ID else 'MISSING'}, "
+            f"WEBHOOK_SECRET={'set' if LEMONSQUEZY_WEBHOOK_SECRET else 'MISSING'}, "
+            f"IS_CONFIGURED={IS_CONFIGURED}")
+
 
 def is_configured() -> bool:
     """Check if LemonSqueezy is fully configured."""
