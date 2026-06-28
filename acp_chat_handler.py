@@ -2881,14 +2881,14 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         
         async def on_chunk(text: str):
             """Callback for streaming chunks."""
-            logger.info(f"[ACP-CHAT] on_chunk called: {text[:80]}...")
+            logger.debug(f"[ACP-CHAT] on_chunk called: {text[:80]}...")
             all_chunks.append(text)
             self._last_query_chunks = all_chunks  # Keep live reference for /chat/chunks polling
             
             # Get friendly progress message from keyword mapper
             friendly = self.progress_mapper.get_friendly_message(text)
             if friendly:
-                logger.info(f"[ACP-CHAT] Progress mapped: {friendly}")
+                logger.debug(f"[ACP-CHAT] Progress mapped: {friendly}")
                 try:
                     await chunk_queue.put(f"PROGRESS:{friendly}")
                 except Exception as e:
@@ -3007,9 +3007,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                     chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.5)
                     if chunk.strip():
                         chunk_count += 1
-                        logger.info(f"[ACP-CHAT] Yielding chunk #{chunk_count}: {chunk[:60]}...")
+                        logger.debug(f"[ACP-CHAT] Yielding chunk #{chunk_count}: {chunk[:60]}...")
                         yield chunk
-                        logger.info(f"[ACP-CHAT] Chunk #{chunk_count} yielded")
+                        logger.debug(f"[ACP-CHAT] Chunk #{chunk_count} yielded")
                 except asyncio.TimeoutError:
                     # No chunk available, check if query is done
                     logger.debug(f"[ACP-CHAT] Yield loop timeout, queue empty: {chunk_queue.empty()}, complete: {query_complete.is_set()}")
