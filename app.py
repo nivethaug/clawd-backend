@@ -17,6 +17,11 @@ from urllib.parse import quote
 # Load environment variables from .env file
 load_dotenv()
 
+# Also load .env.postgres if it exists (explicitly, since PM2 env block can override)
+_postgres_env = "/root/clawd-backend/.env.postgres"
+if os.path.exists(_postgres_env):
+    load_dotenv(_postgres_env, override=True)
+
 from fastapi import FastAPI, HTTPException, Request, Body, Header, UploadFile, File, Response
 from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
