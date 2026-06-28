@@ -1147,6 +1147,48 @@ def init_schema():
             logger.info("✓ Added billing columns to token_usage")
 
             # ----------------------------------------------------------------
+            # BILLING: fix stale FK constraints that point to old 'plans'
+            # table instead of 'billing_plans' (table already existed from
+            # prior runs when CREATE TABLE IF NOT EXISTS was a no-op)
+            # ----------------------------------------------------------------
+            def fix_fk_plan_credit_grants():
+                cur.execute(
+                    "ALTER TABLE plan_credit_grants "
+                    "DROP CONSTRAINT IF EXISTS plan_credit_grants_plan_id_fkey"
+                )
+                cur.execute(
+                    "ALTER TABLE plan_credit_grants "
+                    "ADD CONSTRAINT plan_credit_grants_plan_id_fkey "
+                    "FOREIGN KEY (plan_id) REFERENCES billing_plans(id) ON DELETE CASCADE"
+                )
+            _run_migration(fix_fk_plan_credit_grants)
+
+            def fix_fk_subscriptions():
+                cur.execute(
+                    "ALTER TABLE subscriptions "
+                    "DROP CONSTRAINT IF EXISTS subscriptions_plan_id_fkey"
+                )
+                cur.execute(
+                    "ALTER TABLE subscriptions "
+                    "ADD CONSTRAINT subscriptions_plan_id_fkey "
+                    "FOREIGN KEY (plan_id) REFERENCES billing_plans(id)"
+                )
+            _run_migration(fix_fk_subscriptions)
+
+            def fix_fk_users_plan_id():
+                cur.execute(
+                    "ALTER TABLE users "
+                    "DROP CONSTRAINT IF EXISTS users_plan_id_fkey"
+                )
+                cur.execute(
+                    "ALTER TABLE users "
+                    "ADD CONSTRAINT users_plan_id_fkey "
+                    "FOREIGN KEY (plan_id) REFERENCES billing_plans(id)"
+                )
+            _run_migration(fix_fk_users_plan_id)
+            logger.info("✓ Fixed billing FK constraints to reference billing_plans")
+
+            # ----------------------------------------------------------------
             # BILLING: seed data (defaults only — admin-editable)
             # ----------------------------------------------------------------
 
