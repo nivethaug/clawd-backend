@@ -4713,6 +4713,39 @@ async def chat_stream_endpoint(request: ChatRequest):
     state.session_id = session_id
     logger.info(f"[STREAM ENDPOINT] Starting streaming response for session {session_id}")
 
+    # ── BILLING: Reserve AI credits before processing (ACP mode only) ──────
+    _chat_charged = []
+    _chat_user_id = None
+    if request.acp_mode:
+        try:
+            from services.billing_service import reserve_credits
+            with get_db() as bconn:
+                # Get user_id from project
+                prow = bconn.execute(
+                    "SELECT user_id FROM projects WHERE id = %s", (project_id,)
+                ).fetchone()
+                if prow:
+                    _chat_user_id = prow["user_id"] if isinstance(prow, dict) else prow[0]
+                if _chat_user_id:
+                    result = reserve_credits(bconn, _chat_user_id, "ADD_FEATURE", amount=1)
+                    bconn.commit()
+                    if not result.get("success"):
+                        raise HTTPException(
+                            status_code=402,
+                            detail={
+                                "error": "insufficient_credits",
+                                "message": "You don't have enough AI credits for this request.",
+                                "cost": result.get("cost"),
+                                "available": result.get("total_available", 0),
+                            },
+                        )
+                    _chat_charged = result.get("charged", [])
+                    logger.info(f"[BILLING] Reserved chat credits for user {_chat_user_id}: {_chat_charged}")
+        except HTTPException:
+            raise
+        except Exception as bill_err:
+            logger.warning(f"[BILLING] Chat credit reservation failed (allowing request): {bill_err}")
+
     # Handle ACP mode - route to ACPX for frontend editing with file access
     if request.acp_mode:
         logger.info(f"[ACP-STREAM] === ACP MODE STARTED ===")
@@ -5118,6 +5151,18 @@ async def chat_stream_endpoint(request: ChatRequest):
             )
         except Exception as e:
             logger.error(f"[STREAM ENDPOINT] ACP mode error: {e}")
+
+            # Refund AI credits (chat failed)
+            if _chat_charged and _chat_user_id:
+                try:
+                    from services.billing_service import refund_credits
+                    with get_db() as rconn:
+                        refund_credits(rconn, _chat_user_id, "ADD_FEATURE", _chat_charged)
+                        rconn.commit()
+                    logger.info(f"[BILLING] Refunded chat credits for user {_chat_user_id}")
+                except Exception as refund_err:
+                    logger.warning(f"[BILLING] Refund failed: {refund_err}")
+
             error_content = f"Error: ACP chat failed - {str(e)}"
             state.content = error_content
             save_stream_to_db(state)
