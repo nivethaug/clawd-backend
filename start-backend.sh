@@ -4,6 +4,10 @@
 
 cd /root/clawd-backend
 
+# Clear stale Python bytecode cache (prevents old .pyc from shadowing new .py)
+find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null
+find . -name "*.pyc" -delete 2>/dev/null
+
 # Activate virtual environment
 source venv/bin/activate
 

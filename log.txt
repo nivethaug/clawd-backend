@@ -1,52 +1,6 @@
-1|clawd-backend  | 2026-06-27 15:20:09 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Webhook received update. Keys: ['update_id', 'message']
-1|clawd-backend  | 2026-06-27 15:20:09 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Message from chat_id=2048754634: hi
-1|clawd-backend  | 2026-06-27 15:20:10 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/sendChatAction "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-27 15:20:10 +00:00: INFO:api.ai_chat:[AI-CHAT:TELEGRAM] Message from session tg_2048754634 (user=22): hi
-1|clawd-backend  | 2026-06-27 15:20:10 +00:00: INFO:api.ai_chat:[AI-CHAT] Resolving active_project: request=None, session=jurassicgenesis-0x7yop, projects_count=4
-1|clawd-backend  | 2026-06-27 15:20:10 +00:00: INFO:api.ai_chat:[AI-CHAT] Available project domains: ['telebot-eabhq7', 'dirsord-cdvxx9', 'jurassicgenesis-0x7yop', 'flow-c776g1']
-1|clawd-backend  | 2026-06-27 15:20:10 +00:00: INFO:api.ai_chat:[AI-CHAT] ✓ Matched from session: jurassicgenesis-0x7yop
-1|clawd-backend  | 2026-06-27 15:20:10 +00:00: INFO:api.ai_chat:[AI-CHAT] Active project type='website' → 12 tools
-1|clawd-backend  | 2026-06-27 15:20:12 +00:00: INFO:httpx:HTTP Request: POST https://api.z.ai/api/coding/paas/v4/chat/completions "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-27 15:20:12 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Response has tool_calls: False
-1|clawd-backend  | 2026-06-27 15:20:12 +00:00: INFO:services.ai.glm_client:[GLM-CLIENT] Parsed 0 tool calls
-1|clawd-backend  | 2026-06-27 15:20:12 +00:00: INFO:api.ai_chat:[AI-CHAT] Text response: Hi there! 👋
-1|clawd-backend  | 2026-06-27 15:20:12 +00:00: 
-1|clawd-backend  | 2026-06-27 15:20:12 +00:00: I see you're working with **JurassicGenesis** (jurassicgenesis-0x7yop) - a website proj
-1|clawd-backend  | 2026-06-27 15:20:12 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/sendMessage "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-27 15:20:12 +00:00: INFO:     91.108.5.47:0 - "POST /bot/telegram/webhook HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-27 15:20:24 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Webhook received update. Keys: ['update_id', 'message']
-1|clawd-backend  | 2026-06-27 15:20:24 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Message from chat_id=2048754634: /switch project
-1|clawd-backend  | 2026-06-27 15:20:24 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/sendChatAction "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-27 15:20:24 +00:00: INFO:api.ai_chat:[AI-CHAT:TELEGRAM] Message from session tg_2048754634 (user=22): switch project
-1|clawd-backend  | 2026-06-27 15:20:24 +00:00: INFO:api.ai_chat:[AI-CHAT] Resolving active_project: request=None, session=jurassicgenesis-0x7yop, projects_count=4
-1|clawd-backend  | 2026-06-27 15:20:24 +00:00: INFO:api.ai_chat:[AI-CHAT] Available project domains: ['telebot-eabhq7', 'dirsord-cdvxx9', 'jurassicgenesis-0x7yop', 'flow-c776g1']
-1|clawd-backend  | 2026-06-27 15:20:24 +00:00: INFO:api.ai_chat:[AI-CHAT] ✓ Matched from session: jurassicgenesis-0x7yop
-1|clawd-backend  | 2026-06-27 15:20:24 +00:00: INFO:api.ai_chat:[AI-CHAT] Active project type='website' → 12 tools
-1|clawd-backend  | 2026-06-27 15:20:24 +00:00: INFO:api.ai_chat:[AI-CHAT] ⚡ Fast-path: project selection (4 projects, no LLM call)
-1|clawd-backend  | 2026-06-27 15:20:25 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/sendMessage "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-27 15:20:25 +00:00: INFO:     91.108.5.47:0 - "POST /bot/telegram/webhook HTTP/1.1" 200 OK
-1|clawd-backend  | 2026-06-27 15:20:32 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Webhook received update. Keys: ['update_id', 'callback_query']
-1|clawd-backend  | 2026-06-27 15:20:32 +00:00: INFO:api.telegram_webhook:[TELEGRAM] >>> CALLBACK QUERY detected: id=8799334150853488783, data=switch:telebot-eabhq7
-1|clawd-backend  | 2026-06-27 15:20:32 +00:00: INFO:api.telegram_webhook:[TELEGRAM] _handle_callback START: callback_id=8799334150853488783, data=switch:telebot-eabhq7, chat_id=2048754634, msg_id=53
-1|clawd-backend  | 2026-06-27 15:20:32 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/answerCallbackQuery "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-27 15:20:32 +00:00: INFO:api.telegram_webhook:[TELEGRAM] answer_callback_query result: True
-1|clawd-backend  | 2026-06-27 15:20:32 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Switch button tapped: project_domain=telebot-eabhq7
-1|clawd-backend  | 2026-06-27 15:20:32 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Lookup user by chat_id=2048754634: user_id=22
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/sendChatAction "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Editing original message 53...
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/editMessageText "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Calling process_message: switch to telebot-eabhq7
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.ai_chat:[AI-CHAT:TELEGRAM] Message from session tg_2048754634 (user=22): switch to telebot-eabhq7
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.ai_chat:[AI-CHAT] Resolving active_project: request=None, session=jurassicgenesis-0x7yop, projects_count=4
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.ai_chat:[AI-CHAT] Available project domains: ['telebot-eabhq7', 'dirsord-cdvxx9', 'jurassicgenesis-0x7yop', 'flow-c776g1']
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.ai_chat:[AI-CHAT] ✓ Matched from session: jurassicgenesis-0x7yop
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.ai_chat:[AI-CHAT] Active project type='website' → 12 tools
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.ai_chat:[AI-CHAT] ⚡ Fast-path: switching to telebot-eabhq7 (no LLM call)
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:services.ai.tool_executor:[TOOL-EXECUTOR] Executing tool: set_active_project with args: {'project_id': 'telebot-eabhq7'}
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:utils.ai_session_manager:[AI-SESSION] Set active project 'telebot-eabhq7' for session tg_2048754634
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:utils.project_chat_repo:[PROJECT-CHAT] Set active_project=telebot-eabhq7 for user 22
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.telegram_webhook:[TELEGRAM] process_message returned: type=text, keys=['type', 'text']
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.telegram_webhook:[TELEGRAM] Sending reply (29 chars) to chat_id=2048754634
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8974158309:AAECACxh9N3w26OJYUH1qIdcvrt-D17jhLM/sendMessage "HTTP/1.1 200 OK"
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:api.telegram_webhook:[TELEGRAM] send_message result: True
-1|clawd-backend  | 2026-06-27 15:20:33 +00:00: INFO:     91.108.5.47:0 - "POST /bot/telegram/webhook HTTP/1.1" 200 OK
+
+https://api.dreamagent.cloud/api/billing/checkout/plan/pro
+Request Method
+POST
+Status Code
+503 Service Unavailable
