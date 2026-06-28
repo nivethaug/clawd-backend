@@ -177,6 +177,12 @@ async def create_plan_checkout(
         email = (dict(row) if row and not isinstance(row, dict) else row or {}).get("email", "")
 
     from services.lemonsqueezy_service import create_checkout_url, is_configured
+    import os as _os
+    logger.info(f"[LEMONSQUEZY] Plan checkout requested: plan={plan_slug}, variant_id={variant_id}, "
+                f"API_KEY={'set' if _os.getenv('LEMONSQUEZY_API_KEY') else 'MISSING'}, "
+                f"STORE_ID={'set' if _os.getenv('LEMONSQUEZY_STORE_ID') else 'MISSING'}, "
+                f"WEBHOOK_SECRET={'set' if _os.getenv('LEMONSQUEZY_WEBHOOK_SECRET') else 'MISSING'}, "
+                f"is_configured={is_configured()}")
     if not is_configured():
         raise HTTPException(status_code=503, detail="Payment provider not configured")
 
@@ -219,6 +225,12 @@ async def create_credits_checkout(
     email = (dict(email_row) if email_row and not isinstance(email_row, dict) else email_row or {}).get("email", "")
 
     from services.lemonsqueezy_service import create_checkout_url, is_configured
+    import os as _os
+    logger.info(f"[LEMONSQUEZY] Credit checkout requested: pack={pack.get('name')}, variant_id={variant_id}, "
+                f"API_KEY={'set' if _os.getenv('LEMONSQUEZY_API_KEY') else 'MISSING'}, "
+                f"STORE_ID={'set' if _os.getenv('LEMONSQUEZY_STORE_ID') else 'MISSING'}, "
+                f"WEBHOOK_SECRET={'set' if _os.getenv('LEMONSQUEZY_WEBHOOK_SECRET') else 'MISSING'}, "
+                f"is_configured={is_configured()}")
     if not is_configured():
         raise HTTPException(status_code=503, detail="Payment provider not configured")
 
