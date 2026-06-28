@@ -11,8 +11,10 @@ source venv/bin/activate
 POSTGRES_ENV_FILE="/root/clawd-backend/.env.postgres"
 
 if [ -f "$POSTGRES_ENV_FILE" ]; then
-    # Load PostgreSQL environment variables
+    # Load PostgreSQL environment variables (export so child processes see them)
+    set -a
     source "$POSTGRES_ENV_FILE"
+    set +a
     
     # Set PostgreSQL mode
     export USE_POSTGRES=true
