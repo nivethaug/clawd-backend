@@ -952,18 +952,13 @@ class ClaudeCodeAgent:
                     # Timeout - send progress update via on_progress (NOT on_text - not persisted to DB)
                     elapsed = (datetime.now() - query_start_time).total_seconds()
                     progress_msg = self._get_progress_message(elapsed)
-                    logger.info(f"[CLAUDE-AGENT] Progress: {progress_msg}")
                     
                     # Use on_progress callback for UI-only updates (not persisted to database)
                     if self.on_progress:
-                        logger.info(f"[CLAUDE-AGENT] Calling on_progress callback")
                         if asyncio.iscoroutinefunction(self.on_progress):
                             await self.on_progress(progress_msg)
                         else:
                             self.on_progress(progress_msg)
-                        logger.info(f"[CLAUDE-AGENT] on_progress callback returned")
-                    else:
-                        logger.debug(f"[CLAUDE-AGENT] No on_progress callback - progress not sent to UI")
                     
                     # Continue reading
                     continue

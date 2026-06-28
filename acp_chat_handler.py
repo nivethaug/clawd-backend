@@ -2491,8 +2491,6 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             async def on_text_callback(text: str):
                 """Callback for text chunks - generates friendly progress messages."""
                 friendly = self.progress_mapper.get_friendly_message(text)
-                if friendly:
-                    logger.info(f"[CLAUDE-AGENT] Progress: {friendly}")
             
             # Use ClaudeCodeAgent with project_path for MCP config lookup
             async with ClaudeCodeAgent(
@@ -2912,7 +2910,6 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 if not any(skip_patterns):
                     try:
                         await chunk_queue.put(f"TEXT:{text}")
-                        logger.info(f"[ACP-CHAT] Text queued, size: {chunk_queue.qsize()}")
                     except Exception as e:
                         logger.error(f"[ACP-CHAT] on_chunk error: {e}")
         
@@ -2920,7 +2917,6 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             """Callback for phase-based progress (timeout updates)."""
             elapsed = (datetime.now() - query_start_time).total_seconds()
             friendly = self.progress_mapper.get_phase_message(elapsed)
-            logger.info(f"[ACP-CHAT] Phase progress ({elapsed:.0f}s): {friendly}")
             try:
                 await chunk_queue.put(f"PROGRESS:{friendly}")
             except Exception as e:

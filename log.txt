@@ -1,17 +1,9 @@
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] Wrapper usage (session=qry_d9c792733cbf4015): input=508759, output=22975, cache_read=367360, reasoning=13547, cost=$0.460156, requests=17, has_writes=True
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Query complete: 74 chars (extracted answer)
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Token usage captured: {'input_tokens': 508759, 'output_tokens': 22975, 'cache_read_input_tokens': 367360, 'cache_creation_input_tokens': 0, 'reasoning_tokens': 13547, 'cost_usd': 0.460156, 'model': 'glm-5.2', 'has_writes': True}
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Stored full response from chunks: 1441 chars
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:claude_code_agent:Agent stopped
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:acp_chat_handler:[ACP-CHAT] run_query task done, setting complete flag
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Yield loop done, total chunks: 41
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:acp_chat_handler:[ACP-CHAT] No new chrome PIDs to clean up
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Query completed normally
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:app:[ACP-STREAM] Saved assistant message (1441 chars, token_usage=yes)
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:services.token_tracker:[TOKEN] Recorded ai_chat: 531734 tokens for user 24 project=1617 model=glm-5.2
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:services.billing_service:[BILLING] Token charge for user 24: 531734 tokens (pre-charged 2, net 531732), charged=[{'credit_type': 'edit_token', 'source': 'monthly', 'amount': 531732}]
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:app:[BILLING] Post-edit token charge: {'success': True, 'charged': [{'credit_type': 'edit_token', 'source': 'monthly', 'amount': 531732}], 'net_tokens': 531732, 'remaining_uncharged': 0}
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:app:[AUTO-COMMIT] Writes detected — committing project 1617, session 150
-1|clawd-ba | 2026-06-28 16:10:21 +00:00: INFO:github_service:[GITHUB] gh CLI authenticated
-1|clawd-ba | 2026-06-28 16:10:22 +00:00: INFO:app:[AUTO-COMMIT] Reconstructed repo_url from domain 'universe-jealds': https://github.com/nivethaug/universe-jealds
-1|clawd-ba | 
+1|clawd-backend  | 2026-06-28 16:27:13 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] Progress: ✨ Working on your changes...
+1|clawd-backend  | 2026-06-28 16:27:13 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] Calling on_progress callback
+1|clawd-backend  | 2026-06-28 16:27:13 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Phase progress (78s): ✨ Working on your changes...
+1|clawd-backend  | 2026-06-28 16:27:13 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] on_progress callback returned
+1|clawd-backend  | 2026-06-28 16:27:16 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Text queued, size: 1
+1|clawd-backend  | 2026-06-28 16:27:46 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] Progress: ✨ Working on your changes...
+1|clawd-backend  | 2026-06-28 16:27:46 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] Calling on_progress callback
+1|clawd-backend  | 2026-06-28 16:27:46 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Phase progress (111s): ✨ Working on your changes...
+1|clawd-backend  | 2026-06-28 16:27:46 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] on_progress callback returned
