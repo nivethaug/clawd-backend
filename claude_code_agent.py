@@ -884,7 +884,6 @@ class ClaudeCodeAgent:
                                 block_type = block.get("type", "")
                                 if block_type == "tool_use":
                                     tool_name = block.get("name", "")
-                                    logger.debug(f"[CLAUDE-AGENT] Tool call: {tool_name}")
                                 elif block_type == "text":
                                     text_content = block.get("text", "").strip()
 
@@ -901,7 +900,6 @@ class ClaudeCodeAgent:
 
                             # Extract token usage from result message
                             token_usage = self._extract_token_usage(data)
-                            logger.debug(f"[CLAUDE-AGENT] Raw result message: {json.dumps({k: v for k, v in data.items() if k != 'result'}, ensure_ascii=False)[:500]}")
                             if token_usage:
                                 self._last_token_usage = token_usage
                                 cost = token_usage.get('cost_usd') or 0
@@ -936,7 +934,6 @@ class ClaudeCodeAgent:
 
                     # Send tool name to on_text for keyword mapping
                     if tool_name and self.on_text:
-                        logger.debug(f"[CLAUDE-AGENT] Sending tool to on_text: {tool_name}")
                         if asyncio.iscoroutinefunction(self.on_text):
                             await self.on_text(f"TOOL:{tool_name}")
                         else:
@@ -944,7 +941,6 @@ class ClaudeCodeAgent:
 
                     # Send text content to on_text
                     if text_content and self.on_text:
-                        logger.debug(f"[CLAUDE-AGENT] Sending text to on_text: {text_content[:80]}")
                         if asyncio.iscoroutinefunction(self.on_text):
                             await self.on_text(text_content)
                         else:

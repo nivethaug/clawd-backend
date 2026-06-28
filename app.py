@@ -5024,7 +5024,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                         full_response.append(chunk)
                         event_data = json.dumps({'choices': [{'delta': {'content': chunk + "\n"}}]})
                         yield f"data: {event_data}\n\n"
-                        logger.debug(f"[ACP-STREAM] Yielded chunk: {len(chunk)} chars")
                     
                     # Filter out PROGRESS: messages, keep TEXT: and unprefixed
                     real_chunks = [c for c in full_response if not c.startswith('PROGRESS:')]
