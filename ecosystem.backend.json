@@ -8,6 +8,9 @@
   "watch": false,
   "env": {
     "DB_PATH": "/root/clawd-backend/clawdbot_adapter.db",
-    "PYTHONUNBUFFERED": "1"
+    "PYTHONUNBUFFERED": "1",
+    "LEMONSQUEEZY_API_KEY": "",
+    "LEMONSQUEEZY_STORE_ID": "",
+    "LEMONSQUEEZY_WEBHOOK_SECRET": ""
   }
 }
