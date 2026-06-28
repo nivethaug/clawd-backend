@@ -85,9 +85,6 @@ def create_checkout_url(
         "data": {
             "type": "checkouts",
             "attributes": {
-                "product_options": {
-                    "variant_id": int(variant_id),
-                },
                 "checkout_options": {
                     "embed": False,
                 },
@@ -98,22 +95,39 @@ def create_checkout_url(
                         **(custom_data or {}),
                     },
                 },
-            }
+            },
+            "relationships": {
+                "store": {
+                    "data": {
+                        "type": "stores",
+                        "id": store_id,
+                    }
+                },
+                "variant": {
+                    "data": {
+                        "type": "variants",
+                        "id": str(variant_id),
+                    }
+                },
+            },
         }
     }
 
     try:
         resp = httpx.post(
-            f"{LEMONSQUEZY_API_BASE}/checkouts",
+            f"{LEMONSQUEEZY_API_BASE}/checkouts",
             headers={
-                "Accept": "application/json",
+                "Accept": "application/vnd.api+json",
                 "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
+                "Content-Type": "application/vnd.api+json",
             },
             json=payload,
             timeout=15.0,
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            error_body = resp.text
+            logger.error(f"[LEMONSQUEEZY] API error {resp.status_code}: {error_body}")
+            return {"error": f"LemonSqueezy API error {resp.status_code}: {error_body[:200]}"}
         data = resp.json()
         attrs = data.get("data", {}).get("attributes", {})
         return {
