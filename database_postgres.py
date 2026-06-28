@@ -1074,6 +1074,12 @@ def init_schema():
                 sort_order INTEGER DEFAULT 0
             )""")
             conn.commit()
+            # Deduplicate existing rows before adding unique constraint
+            cur.execute(
+                "DELETE FROM credit_packs WHERE id NOT IN "
+                "(SELECT MIN(id) FROM credit_packs GROUP BY credits, credit_type)"
+            )
+            conn.commit()
             # Add unique constraint to prevent duplicate packs on re-seed
             def add_credit_packs_unique():
                 cur.execute(
