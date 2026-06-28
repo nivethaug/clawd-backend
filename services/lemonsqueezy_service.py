@@ -19,24 +19,25 @@ from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
-# --- Configuration ---
-LEMONSQUEZY_API_KEY = os.getenv("LEMONSQUEZY_API_KEY", "")
-LEMONSQUEZY_STORE_ID = os.getenv("LEMONSQUEZY_STORE_ID", "")
-LEMONSQUEZY_WEBHOOK_SECRET = os.getenv("LEMONSQUEZY_WEBHOOK_SECRET", "")
+# --- Configuration (read dynamically so load_dotenv / PM2 restart picks up) ---
 LEMONSQUEZY_API_BASE = "https://api.lemonsqueezy.com/v1"
 
-IS_CONFIGURED = bool(LEMONSQUEZY_API_KEY and LEMONSQUEZY_STORE_ID)
 
-# Log configuration status at import time for debugging
-logger.info(f"[LEMONSQUEZY] Config status: API_KEY={'set' if LEMONSQUEZY_API_KEY else 'MISSING'}, "
-            f"STORE_ID={'set' if LEMONSQUEZY_STORE_ID else 'MISSING'}, "
-            f"WEBHOOK_SECRET={'set' if LEMONSQUEZY_WEBHOOK_SECRET else 'MISSING'}, "
-            f"IS_CONFIGURED={IS_CONFIGURED}")
+def _get_api_key():
+    return os.getenv("LEMONSQUEZY_API_KEY", "")
+
+
+def _get_store_id():
+    return os.getenv("LEMONSQUEZY_STORE_ID", "")
+
+
+def _get_webhook_secret():
+    return os.getenv("LEMONSQUEZY_WEBHOOK_SECRET", "")
 
 
 def is_configured() -> bool:
-    """Check if LemonSqueezy is fully configured."""
-    return IS_CONFIGURED
+    """Check if LemonSqueezy is fully configured (reads env dynamically)."""
+    return bool(_get_api_key() and _get_store_id())
 
 
 # ======================================================================
@@ -60,7 +61,7 @@ def create_checkout_url(
     Returns:
         {"url": str, "checkout_id": str} or {"error": str}
     """
-    if not IS_CONFIGURED:
+    if not is_configured():
         logger.warning("[LEMONSQUEZY] Not configured — checkout URL unavailable")
         return {
             "error": "Payment provider not configured",
@@ -100,7 +101,7 @@ def create_checkout_url(
             f"{LEMONSQUEZY_API_BASE}/checkouts",
             headers={
                 "Accept": "application/json",
-                "Authorization": f"Bearer {LEMONSQUEZY_API_KEY}",
+                "Authorization": f"Bearer {_get_api_key()}",
                 "Content-Type": "application/json",
             },
             json=payload,
@@ -128,12 +129,13 @@ def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
     Uses HMAC-SHA256 with the webhook secret.
     In dev mode (no secret), returns True (INSECURE — never use in production).
     """
-    if not LEMONSQUEZY_WEBHOOK_SECRET:
+    webhook_secret = _get_webhook_secret()
+    if not webhook_secret:
         logger.warning("[LEMONSQUEZY] No webhook secret set — skipping verification (DEV ONLY)")
         return True
 
     expected = hmac.new(
-        LEMONSQUEZY_WEBHOOK_SECRET.encode(),
+        webhook_secret.encode(),
         raw_body,
         hashlib.sha256,
     ).hexdigest()
@@ -271,7 +273,7 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
 
 def get_customer_portal_url(user_email: str) -> Optional[str]:
     """Get the LemonSqueezy customer portal URL for managing subscriptions."""
-    if not IS_CONFIGURED:
+    if not is_configured():
         return None
     # LemonSqueezy customer portal is a configured URL per store
     return os.getenv("LEMONSQUEZY_CUSTOMER_PORTAL_URL")
