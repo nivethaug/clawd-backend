@@ -347,6 +347,88 @@ def refund_credits(conn, user_id: int, operation_code: str, charged: List[Dict[s
 
 
 # ======================================================================
+# High-level: token-based charge (post-edit reconciliation)
+# ======================================================================
+
+def charge_token_usage(
+    conn,
+    user_id: int,
+    total_tokens: int,
+    operation_code: str = "ADD_FEATURE",
+    project_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    model: Optional[str] = None,
+    precharged_amount: int = 0,
+) -> Dict[str, Any]:
+    """Deduct actual tokens consumed AFTER an AI operation completes.
+
+    The pre-charge (reserve_credits) deducts a flat admission cost.  This
+    function reconciles the difference by deducting the real token count
+    from the edit_token balance (and cascading to project_ai if needed).
+
+    Args:
+        total_tokens: actual tokens consumed (input + output).
+        precharged_amount: credits already deducted by the pre-charge, so we
+            don't double-count.  The net deduction is total_tokens - precharged.
+
+    Returns:
+        {"success": bool, "charged": [...], "net_tokens": int}
+    """
+    if total_tokens <= 0:
+        return {"success": True, "charged": [], "net_tokens": 0}
+
+    # Subtract what was already pre-charged (flat credits) so we don't
+    # double-deduct.  The pre-charge covers the first N tokens.
+    net_tokens = max(0, total_tokens - precharged_amount)
+    if net_tokens == 0:
+        return {"success": True, "charged": [], "net_tokens": 0}
+
+    from services.plan_cache import get_operation
+
+    op = get_operation(operation_code)
+    op_id = op.get("id") if op else None
+
+    # Determine cascade: edit_token → project_ai(monthly) → project_ai(purchased)
+    cascade = _cascade_order(op or {"category": "edit"})
+
+    remaining = net_tokens
+    charged = []
+
+    for tier in cascade:
+        if remaining <= 0:
+            break
+        tier_type, tier_source = tier[0], tier[1]
+        deduct = _charge_tier(conn, user_id, tier_type, tier_source, remaining)
+        if deduct > 0:
+            charged.append({
+                "credit_type": tier_type,
+                "source": tier_source,
+                "amount": deduct,
+            })
+            remaining -= deduct
+
+    # Record audit transactions
+    for c in charged:
+        _record_transaction(
+            conn, user_id, c["credit_type"], op_id, -c["amount"], c["source"],
+            status="charged", project_id=project_id, session_id=session_id,
+            model=model, total_tokens=total_tokens,
+        )
+
+    logger.info(
+        f"[BILLING] Token charge for user {user_id}: {total_tokens} tokens "
+        f"(pre-charged {precharged_amount}, net {net_tokens}), charged={charged}"
+    )
+
+    return {
+        "success": True,
+        "charged": charged,
+        "net_tokens": net_tokens,
+        "remaining_uncharged": remaining,  # >0 means user exhausted all tiers
+    }
+
+
+# ======================================================================
 # High-level: project creation charge
 # ======================================================================
 

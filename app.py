@@ -465,28 +465,6 @@ app.include_router(scheduler_router, prefix="/api/scheduler", tags=["scheduler"]
 from api.validate_router import router as validate_router
 app.include_router(validate_router, prefix="/api/validate", tags=["validation"])
 
-# Register Telegram bot routers
-from api.bot_link import router as bot_link_router
-app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])
-
-from api.telegram_webhook import router as telegram_webhook_router
-app.include_router(telegram_webhook_router, tags=["telegram"])
-
-# Register Billing API router
-from api.billing_router import router as billing_router
-app.include_router(billing_router, prefix="/api/billing", tags=["billing"])
-
-# Register LemonSqueezy webhook router
-from api.lemonsqueezy_webhook import router as lemonsqueezy_webhook_router
-app.include_router(lemonsqueezy_webhook_router, prefix="/webhooks", tags=["webhooks"])
-
-# Start billing monthly-reset cron daemon (idempotent — safe to call)
-try:
-    from services.billing_cron import start_billing_cron
-    start_billing_cron()
-except Exception as _billing_cron_err:
-    logger.warning(f"Billing cron not started: {_billing_cron_err}")
-
 
 @app.get("/projects", response_model=list[ProjectResponse])
 async def get_projects(authorization: Optional[str] = Header(None)):
@@ -545,28 +523,6 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             status_code=403,
             detail=f"Project limit reached ({current_p}/{max_p}) for {proj_limit.get('tier', 'free')} tier. Upgrade to create more projects."
         )
-
-    # Determine project type_id for billing operation lookup
-    _billing_type_id = None
-    if request.type_id is not None:
-        _billing_type_id = request.type_id
-
-    # Charge AI credits for project creation
-    from services.billing_service import charge_project_creation
-    with get_db() as conn:
-        charge_result = charge_project_creation(conn, user_id, _billing_type_id)
-        conn.commit()
-    if not charge_result.get("success"):
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "error": "insufficient_credits",
-                "message": "You don't have enough AI credits to create a project.",
-                "cost": charge_result.get("cost"),
-                "available": charge_result.get("total_available", 0),
-            },
-        )
-    _billing_charged = charge_result.get("charged", [])
 
     # Get GitHub service for repo name sanitization
     github = get_github_service()
@@ -668,12 +624,6 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
     subprocess.run(["chown", "-R", "dreampilot:dreampilot", project_folder_path], check=False)
     subprocess.run(["chmod", "-R", "755", project_folder_path], check=False)
     if not folder_success:
-        # Refund AI credits (project creation failed)
-        from services.billing_service import refund_credits
-        with get_db() as conn:
-            refund_credits(conn, user_id, "project_create", _billing_charged)
-            conn.commit()
-
         # Rollback: Delete project from database
         with get_db() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
@@ -4759,39 +4709,6 @@ async def chat_stream_endpoint(request: ChatRequest):
     state.session_id = session_id
     logger.info(f"[STREAM ENDPOINT] Starting streaming response for session {session_id}")
 
-    # ── BILLING: Reserve AI credits before processing (ACP mode only) ──────
-    _chat_charged = []
-    _chat_user_id = None
-    if request.acp_mode:
-        try:
-            from services.billing_service import reserve_credits
-            with get_db() as bconn:
-                # Get user_id from project
-                prow = bconn.execute(
-                    "SELECT user_id FROM projects WHERE id = %s", (project_id,)
-                ).fetchone()
-                if prow:
-                    _chat_user_id = prow["user_id"] if isinstance(prow, dict) else prow[0]
-                if _chat_user_id:
-                    result = reserve_credits(bconn, _chat_user_id, "ADD_FEATURE", amount=1)
-                    bconn.commit()
-                    if not result.get("success"):
-                        raise HTTPException(
-                            status_code=402,
-                            detail={
-                                "error": "insufficient_credits",
-                                "message": "You don't have enough AI credits for this request.",
-                                "cost": result.get("cost"),
-                                "available": result.get("total_available", 0),
-                            },
-                        )
-                    _chat_charged = result.get("charged", [])
-                    logger.info(f"[BILLING] Reserved chat credits for user {_chat_user_id}: {_chat_charged}")
-        except HTTPException:
-            raise
-        except Exception as bill_err:
-            logger.warning(f"[BILLING] Chat credit reservation failed (allowing request): {bill_err}")
-
     # Handle ACP mode - route to ACPX for frontend editing with file access
     if request.acp_mode:
         logger.info(f"[ACP-STREAM] === ACP MODE STARTED ===")
@@ -4976,15 +4893,25 @@ async def chat_stream_endpoint(request: ChatRequest):
                         try:
                             usage_data = handler.get_last_token_usage() if hasattr(handler, 'get_last_token_usage') else None
                             if usage_data:
-                                # Enrich with billing metadata
-                                _total_charged = sum(abs(c.get("amount", 0)) for c in _chat_charged)
-                                if _total_charged:
-                                    usage_data["operation"] = "ADD_FEATURE"
-                                    usage_data["credits_charged"] = _total_charged
                                 with get_db() as tconn:
                                     prow = tconn.execute("SELECT user_id FROM projects WHERE id = %s", (project_id,)).fetchone()
                                     if prow:
                                         tuid = prow["user_id"] if isinstance(prow, dict) else prow[0]
+
+                                        # Calculate actual tokens consumed
+                                        _total_toks = int(
+                                            usage_data.get("total_tokens", 0)
+                                            or usage_data.get("totalTokens", 0)
+                                            or (usage_data.get("input_tokens", 0) + usage_data.get("output_tokens", 0))
+                                            or (usage_data.get("inputTokens", 0) + usage_data.get("outputTokens", 0))
+                                        )
+
+                                        # Pre-charged flat credits from reserve_credits (avoid double count)
+                                        _precharged = sum(abs(c.get("amount", 0)) for c in _chat_charged) if _chat_charged else 0
+                                        if _precharged:
+                                            usage_data["operation"] = "ADD_FEATURE"
+                                            usage_data["credits_charged"] = _precharged + max(0, _total_toks - _precharged)
+
                                         record_from_token_usage_json(
                                             user_id=tuid,
                                             token_usage_json=usage_data,
@@ -4993,6 +4920,28 @@ async def chat_stream_endpoint(request: ChatRequest):
                                             session_id=session_id,
                                             description="ACP streaming chat",
                                         )
+
+                                        # ── POST-EDIT TOKEN CHARGE ──────────────────────
+                                        # The pre-charge only deducted a flat admission cost.
+                                        # Now deduct the ACTUAL tokens consumed from edit_token
+                                        # (cascading to project_ai if needed).
+                                        if _total_toks > 0:
+                                            try:
+                                                from services.billing_service import charge_token_usage
+                                                charge_result = charge_token_usage(
+                                                    conn=tconn,
+                                                    user_id=tuid,
+                                                    total_tokens=_total_toks,
+                                                    operation_code="ADD_FEATURE",
+                                                    project_id=project_id,
+                                                    session_id=session_id,
+                                                    model=usage_data.get("model"),
+                                                    precharged_amount=_precharged,
+                                                )
+                                                tconn.commit()
+                                                logger.info(f"[BILLING] Post-edit token charge: {charge_result}")
+                                            except Exception as ch_err:
+                                                logger.warning(f"[BILLING] Post-edit token charge failed: {ch_err}")
                         except Exception as track_err:
                             logger.debug(f"[TOKEN] Tracking failed: {track_err}")
                     except Exception as save_err:
@@ -5165,18 +5114,6 @@ async def chat_stream_endpoint(request: ChatRequest):
             )
         except Exception as e:
             logger.error(f"[STREAM ENDPOINT] ACP mode error: {e}")
-
-            # Refund AI credits (chat failed)
-            if _chat_charged and _chat_user_id:
-                try:
-                    from services.billing_service import refund_credits
-                    with get_db() as rconn:
-                        refund_credits(rconn, _chat_user_id, "ADD_FEATURE", _chat_charged)
-                        rconn.commit()
-                    logger.info(f"[BILLING] Refunded chat credits for user {_chat_user_id}")
-                except Exception as refund_err:
-                    logger.warning(f"[BILLING] Refund failed: {refund_err}")
-
             error_content = f"Error: ACP chat failed - {str(e)}"
             state.content = error_content
             save_stream_to_db(state)
@@ -5552,6 +5489,15 @@ async def chat_endpoint(request: ChatRequest):
                         prow = tconn.execute("SELECT user_id FROM projects WHERE id = %s", (project_id,)).fetchone()
                         if prow:
                             tuid = prow["user_id"] if isinstance(prow, dict) else prow[0]
+
+                            # Calculate actual tokens consumed
+                            _total_toks = int(
+                                usage_data.get("total_tokens", 0)
+                                or usage_data.get("totalTokens", 0)
+                                or (usage_data.get("input_tokens", 0) + usage_data.get("output_tokens", 0))
+                                or (usage_data.get("inputTokens", 0) + usage_data.get("outputTokens", 0))
+                            )
+
                             record_from_token_usage_json(
                                 user_id=tuid,
                                 token_usage_json=usage_data,
@@ -5560,6 +5506,27 @@ async def chat_endpoint(request: ChatRequest):
                                 session_id=session_id,
                                 description="ACP non-streaming chat",
                             )
+
+                            # ── POST-EDIT TOKEN CHARGE ──────────────────────
+                            # Non-streaming endpoint has no pre-charge, so all
+                            # tokens are charged here.
+                            if _total_toks > 0:
+                                try:
+                                    from services.billing_service import charge_token_usage
+                                    charge_result = charge_token_usage(
+                                        conn=tconn,
+                                        user_id=tuid,
+                                        total_tokens=_total_toks,
+                                        operation_code="ADD_FEATURE",
+                                        project_id=project_id,
+                                        session_id=session_id,
+                                        model=usage_data.get("model"),
+                                        precharged_amount=0,
+                                    )
+                                    tconn.commit()
+                                    logger.info(f"[BILLING] Post-edit token charge (non-streaming): {charge_result}")
+                                except Exception as ch_err:
+                                    logger.warning(f"[BILLING] Post-edit token charge failed (non-streaming): {ch_err}")
             except Exception as track_err:
                 logger.debug(f"[TOKEN] Non-streaming tracking failed: {track_err}")
 
