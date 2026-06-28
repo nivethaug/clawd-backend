@@ -1074,6 +1074,13 @@ def init_schema():
                 sort_order INTEGER DEFAULT 0
             )""")
             conn.commit()
+            # Add unique constraint to prevent duplicate packs on re-seed
+            def add_credit_packs_unique():
+                cur.execute(
+                    "ALTER TABLE credit_packs "
+                    "ADD CONSTRAINT credit_packs_name_ctype_key UNIQUE (name, credit_type)"
+                )
+            _run_migration(add_credit_packs_unique)
             logger.info("✓ Added credit_packs table")
 
             # --- subscriptions (LemonSqueezy state) ---
@@ -1280,7 +1287,7 @@ def init_schema():
                 cur.execute(
                     """INSERT INTO credit_packs (name, credits, credit_type, price_cents, sort_order)
                        VALUES (%s, %s, %s, %s, %s)
-                       ON CONFLICT DO NOTHING""",
+                       ON CONFLICT (name, credit_type) DO NOTHING""",
                     (name, credits, ctype, price, sort)
                 )
             conn.commit()
