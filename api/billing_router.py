@@ -135,7 +135,29 @@ async def get_transactions(
                LIMIT %s OFFSET %s""",
             (user_id, limit, offset),
         ).fetchall()
-    transactions = [dict(r) if not isinstance(r, dict) else r for r in rows]
+
+    transactions = []
+    for r in rows:
+        t = dict(r) if not isinstance(r, dict) else r
+        amount = int(t.get("amount", 0))
+        status = t.get("status", "charged")
+        op_name = t.get("operation_name", "")
+        credit_type = t.get("credit_type", "")
+        source = t.get("source", "")
+        model_name = t.get("model", "")
+
+        # Build a human-readable description
+        if amount > 0:
+            desc = f"Credit purchase (+{amount} {credit_type})"
+        else:
+            verb = {"reserved": "reserved", "refunded": "refunded", "charged": "deducted"}.get(status, "deducted")
+            extra = f" from {source}" if source else ""
+            extra += f" via {model_name}" if model_name else ""
+            desc = f"{op_name or 'AI operation'} — {verb} {abs(amount)} {credit_type}{extra}"
+
+        t["description"] = desc
+        transactions.append(t)
+
     return {"transactions": transactions, "limit": limit, "offset": offset}
 
 

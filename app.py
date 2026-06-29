@@ -5029,6 +5029,15 @@ async def chat_stream_endpoint(request: ChatRequest):
                                                 logger.info(f"[BILLING] Post-edit token charge: {charge_result}")
                                             except Exception as ch_err:
                                                 logger.warning(f"[BILLING] Post-edit token charge failed: {ch_err}")
+                                        elif _precharged and _chat_charged:
+                                            # Edit produced 0 tokens but pre-charge was held — refund it
+                                            try:
+                                                from services.billing_service import refund_credits
+                                                refund_credits(tconn, _chat_user_id, "ADD_FEATURE", _chat_charged)
+                                                tconn.commit()
+                                                logger.info(f"[BILLING] Refunded pre-charge (0 tokens consumed) for user {_chat_user_id}")
+                                            except Exception as rf_err:
+                                                logger.warning(f"[BILLING] 0-token refund failed: {rf_err}")
                         except Exception as track_err:
                             logger.debug(f"[TOKEN] Tracking failed: {track_err}")
                     except Exception as save_err:

@@ -116,24 +116,24 @@ def _cascade_order(op: Dict[str, Any]) -> List[str]:
 
     Returns a list of (credit_type, source) pairs to try in order.
 
-    If the operation has a fixed credit_type (e.g., 'edit_token'), only that
-    type is used (no cascade). Otherwise, cascade applies.
+    Edit operations (category='edit') ALWAYS try edit_token first, then fall
+    back to project_ai monthly → project_ai purchased.  This is unconditional
+    (not gated by EARLY_ACCESS_MODE) so edits always consume edit tokens first.
+
+    Creation operations use project_ai monthly → project_ai purchased.
     """
     credit_type = op.get("credit_type", "project_ai")
     op_category = op.get("category", "creation")
 
-    # If operation explicitly targets edit_token, only use edit_token
-    if credit_type == "edit_token":
-        return [("edit_token", "monthly"), ("project_ai", "monthly"), ("project_ai", "purchased")]
-
-    # Standard project_ai cascade
-    if is_early_access_enabled() and op_category == "edit":
+    # Edit operations: edit_token → project_ai(monthly) → project_ai(purchased)
+    if op_category == "edit":
         return [
             ("edit_token", "monthly"),
             ("project_ai", "monthly"),
             ("project_ai", "purchased"),
         ]
-    # Creation op or early_access off
+
+    # Creation op
     return [("project_ai", "monthly"), ("project_ai", "purchased")]
 
 
@@ -249,7 +249,12 @@ def _record_transaction(
 
 
 def reserve_credits(conn, user_id: int, operation_code: str, amount: int = 1) -> Dict[str, Any]:
-    """Check + charge credits atomically in cascade order.
+    """Check + reserve credits atomically in cascade order.
+
+    This is a temporary hold.  After the AI operation completes, call
+    charge_token_usage() with precharged_amount to reconcile.  If the
+    operation fails or consumes fewer tokens than reserved, refund_credits()
+    reverses this hold.
 
     If insufficient, returns {"success": False, ...} WITHOUT modifying balances.
     If sufficient, deducts immediately and returns success.
@@ -308,11 +313,11 @@ def reserve_credits(conn, user_id: int, operation_code: str, amount: int = 1) ->
             "operation": op,
         }
 
-    # Record transactions
+    # Record transactions as "reserved" (temporary hold — reconciled later)
     for c in charged:
         _record_transaction(
             conn, user_id, c["credit_type"], op.get("id"), -c["amount"], c["source"],
-            status="charged",
+            status="reserved",
         )
 
     return {
@@ -327,7 +332,13 @@ def refund_credits(conn, user_id: int, operation_code: str, charged: List[Dict[s
     """Refund credits from a previous charge (reverses the cascade).
 
     `charged` is the list returned by reserve_credits()["charged"].
+    Records a 'refunded' transaction row for auditability.
     """
+    from services.plan_cache import get_operation
+
+    op = get_operation(operation_code)
+    op_id = op.get("id") if op else None
+
     for c in reversed(charged):
         bal = get_or_create_balance(conn, user_id, c["credit_type"])
         balance_id = bal["id"]
@@ -342,6 +353,12 @@ def refund_credits(conn, user_id: int, operation_code: str, charged: List[Dict[s
                 "UPDATE user_credit_balances SET purchased = purchased + %s, updated_at = NOW() WHERE id = %s",
                 (c["amount"], balance_id),
             )
+
+        # Record refund transaction for audit trail
+        _record_transaction(
+            conn, user_id, c["credit_type"], op_id, +c["amount"], c["source"],
+            status="refunded",
+        )
 
 
 
@@ -363,27 +380,37 @@ def charge_token_usage(
 ) -> Dict[str, Any]:
     """Deduct actual tokens consumed AFTER an AI operation completes.
 
-    The pre-charge (reserve_credits) deducts a flat admission cost.  This
-    function reconciles the difference by deducting the real token count
-    from the edit_token balance (and cascading to project_ai if needed).
+    This reconciles the temporary pre-charge hold:
+      - If actual billable tokens > pre-charged: charge the difference.
+      - If actual billable tokens < pre-charged: the excess remains charged
+        (the flat admission cost covers it). No additional charge.
+      - If actual billable tokens == 0: no charge (pre-charge remains as-is).
 
     Cache-read tokens are excluded from billing because they are re-reads
-    of previously cached context that cost a fraction to process.  Charging
-    them at full rate massively overcharges users (typically 70%+ of
-    total_tokens are cache reads in multi-turn sessions).
+    of previously cached context that cost a fraction to process.
 
     Billable = total_tokens - cache_read_tokens
+    Net charge = max(0, billable - precharged_amount)
 
     Args:
         total_tokens: raw total tokens (input + output, includes cache reads).
-        precharged_amount: credits already deducted by the pre-charge.
+        precharged_amount: credits already deducted by the pre-charge hold.
         cache_read_tokens: tokens from cache reads (excluded from charge).
 
     Returns:
-        {"success": bool, "charged": [...], "net_tokens": int}
+        {"success": bool, "charged": [...], "net_tokens": int,
+         "precharged": int, "billable": int, "total_tokens": int}
     """
+    from services.plan_cache import get_operation
+
+    op = get_operation(operation_code)
+    op_id = op.get("id") if op else None
+
     if total_tokens <= 0:
-        return {"success": True, "charged": [], "net_tokens": 0}
+        return {
+            "success": True, "charged": [], "net_tokens": 0,
+            "precharged": precharged_amount, "billable": 0, "total_tokens": 0,
+        }
 
     # Exclude cache-read tokens — they're cheap re-reads, not new processing.
     # Also guard against cache reads > total (shouldn't happen, but be safe).
@@ -392,13 +419,20 @@ def charge_token_usage(
     # Subtract what was already pre-charged (flat credits) so we don't
     # double-deduct.  The pre-charge covers the first N tokens.
     net_tokens = max(0, billable_tokens - precharged_amount)
+
+    logger.info(
+        f"[BILLING] Token reconciliation for user {user_id}: "
+        f"total={total_tokens}, cache_read={cache_read_tokens}, "
+        f"billable={billable_tokens}, pre-charged={precharged_amount}, "
+        f"net_to_charge={net_tokens}"
+    )
+
     if net_tokens == 0:
-        return {"success": True, "charged": [], "net_tokens": 0}
-
-    from services.plan_cache import get_operation
-
-    op = get_operation(operation_code)
-    op_id = op.get("id") if op else None
+        return {
+            "success": True, "charged": [], "net_tokens": 0,
+            "precharged": precharged_amount, "billable": billable_tokens,
+            "total_tokens": total_tokens,
+        }
 
     # Determine cascade: edit_token → project_ai(monthly) → project_ai(purchased)
     cascade = _cascade_order(op or {"category": "edit"})
@@ -428,15 +462,18 @@ def charge_token_usage(
         )
 
     logger.info(
-        f"[BILLING] Token charge for user {user_id}: {total_tokens} total tokens "
-        f"(cache_read={cache_read_tokens}, billable={billable_tokens}, "
-        f"pre-charged {precharged_amount}, net {net_tokens}), charged={charged}"
+        f"[BILLING] Token charge applied for user {user_id}: "
+        f"net_tokens={net_tokens}, charged={charged}, "
+        f"remaining_uncharged={remaining}"
     )
 
     return {
         "success": True,
         "charged": charged,
         "net_tokens": net_tokens,
+        "precharged": precharged_amount,
+        "billable": billable_tokens,
+        "total_tokens": total_tokens,
         "remaining_uncharged": remaining,  # >0 means user exhausted all tiers
     }
 
