@@ -604,6 +604,32 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             if website_type:
                 type_id = website_type['id']
 
+    # ── BILLING: Charge credits for project creation ─────────────────────
+    _project_charged = []
+    try:
+        from services.billing_service import charge_project_creation, refund_credits
+        with get_db() as bconn:
+            result = charge_project_creation(bconn, user_id, project_type_id=type_id)
+            bconn.commit()
+            if not result.get("success"):
+                _cost = result.get("cost", "?")
+                _avail = result.get("total_available", 0)
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "error": "insufficient_credits",
+                        "message": f"You don't have enough AI credits to create this project (needs {_cost}, have {_avail}).",
+                        "cost": _cost,
+                        "available": _avail,
+                    },
+                )
+            _project_charged = result.get("charged", [])
+            logger.info(f"[BILLING] Charged project creation for user {user_id}: {_project_charged}")
+    except HTTPException:
+        raise
+    except Exception as bill_err:
+        logger.warning(f"[BILLING] Project creation charge failed (allowing): {bill_err}")
+
     # Step 1: Get project_id first to use in folder naming
     logger.info("[PROJECT] inserting project into database")
     with get_db() as conn:
@@ -643,6 +669,17 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         with get_db() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             conn.commit()
+
+        # Refund the project creation credits
+        if _project_charged:
+            try:
+                from services.billing_service import refund_credits
+                with get_db() as rconn:
+                    refund_credits(rconn, user_id, "WEBSITE", _project_charged)
+                    rconn.commit()
+                    logger.info(f"[BILLING] Refunded project creation credits for user {user_id}")
+            except Exception as refund_err:
+                logger.warning(f"[BILLING] Refund failed: {refund_err}")
 
         # Abort: Raise error to client
         raise HTTPException(
