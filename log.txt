@@ -1,9 +1,8 @@
-1|clawd-backend  | 2026-06-28 16:27:13 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] Progress: ✨ Working on your changes...
-1|clawd-backend  | 2026-06-28 16:27:13 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] Calling on_progress callback
-1|clawd-backend  | 2026-06-28 16:27:13 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Phase progress (78s): ✨ Working on your changes...
-1|clawd-backend  | 2026-06-28 16:27:13 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] on_progress callback returned
-1|clawd-backend  | 2026-06-28 16:27:16 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Text queued, size: 1
-1|clawd-backend  | 2026-06-28 16:27:46 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] Progress: ✨ Working on your changes...
-1|clawd-backend  | 2026-06-28 16:27:46 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] Calling on_progress callback
-1|clawd-backend  | 2026-06-28 16:27:46 +00:00: INFO:acp_chat_handler:[ACP-CHAT] Phase progress (111s): ✨ Working on your changes...
-1|clawd-backend  | 2026-06-28 16:27:46 +00:00: INFO:claude_code_agent:[CLAUDE-AGENT] on_progress callback returned
+
+1|clawd-ba | 2026-06-29 12:40:52 +00:00: INFO:app:[ACP-STREAM] Delayed cleanup: handler removed from registry
+1|clawd-ba | 2026-06-29 12:44:43 +00:00: INFO:app:[ACP-STREAM] Delayed cleanup: handler removed from registry
+1|clawd-ba | 2026-06-29 12:50:44 +00:00: INFO:api.billing:[LEMONSQUEZY] Credit checkout requested: pack=100 AI Credits, variant_id=1846192, API_KEY=set (1033 chars), STORE_ID=419675, is_configured=True
+1|clawd-ba | 2026-06-29 12:50:44 +00:00: INFO:services.lemonsqueezy_service:[LEMONSQUEEZY] Creating checkout: api_key=1033 chars, store_id=419675
+1|clawd-ba | 2026-06-29 12:50:45 +00:00: INFO:httpx:HTTP Request: POST https://api.lemonsqueezy.com/v1/checkouts "HTTP/1.1 201 Created"
+1|clawd-ba | 2026-06-29 12:52:38 +00:00: INFO:dashboard_service:Dashboard assembled in 304.8ms for user 24
+1|clawd-ba | 2026-06-29 12:52:44 +00:00: INFO:dashboard_service:Dashboard assembled in 306.6ms for user 24

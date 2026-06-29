@@ -476,6 +476,10 @@ app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])
 from api.telegram_webhook import router as telegram_webhook_router
 app.include_router(telegram_webhook_router, tags=["telegram"])
 
+# Register LemonSqueezy webhook (payment events → credit fulfillment)
+from api.lemonsqueezy_webhook import router as lemonsqueezy_webhook_router
+app.include_router(lemonsqueezy_webhook_router, prefix="/webhooks", tags=["webhooks"])
+
 
 @app.get("/projects", response_model=list[ProjectResponse])
 async def get_projects(authorization: Optional[str] = Header(None)):

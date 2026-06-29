@@ -264,23 +264,44 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
 
     # --- Order created (one-time purchase: credit pack) ---
     if event_name == "order_created":
-        variant_id = str(attrs.get("first_order_item", {}).get("variant_id", ""))
-        # Look up credit pack by variant
+        # Variant ID may be in first_order_item, or at top-level attributes
+        variant_id = ""
+        first_item = attrs.get("first_order_item", {})
+        if isinstance(first_item, dict):
+            variant_id = str(first_item.get("variant_id", ""))
+        if not variant_id:
+            variant_id = str(attrs.get("variant_id", ""))
+
+        # Fallback: custom_data may contain pack_id from the checkout request
+        pack_id = custom_data.get("pack_id")
+
         with get_db() as conn:
-            row = conn.execute(
-                "SELECT credits, credit_type FROM credit_packs WHERE lemonsqueezy_variant_id = %s AND active = true",
-                (variant_id,),
-            ).fetchone()
+            row = None
+            if variant_id:
+                row = conn.execute(
+                    "SELECT credits, credit_type FROM credit_packs WHERE lemonsqueezy_variant_id = %s AND active = true",
+                    (variant_id,),
+                ).fetchone()
+            if not row and pack_id:
+                # Match by pack_id from checkout custom_data
+                row = conn.execute(
+                    "SELECT credits, credit_type FROM credit_packs WHERE id = %s AND active = true",
+                    (int(pack_id),),
+                ).fetchone()
             if not row:
-                logger.warning(f"[LEMONSQUEZY] No credit pack for variant_id={variant_id}")
-                return {"handled": False, "reason": "no matching credit pack"}
+                logger.warning(
+                    f"[LEMONSQUEEZY] No credit pack for variant_id={variant_id}, "
+                    f"pack_id={pack_id} (user {user_id})"
+                )
+                return {"handled": False, "reason": "no matching credit pack",
+                        "variant_id": variant_id, "pack_id": pack_id}
 
             d = dict(row) if not isinstance(row, dict) else row
             add_purchased_credits(conn, user_id, d["credit_type"], int(d["credits"]))
             conn.commit()
 
         invalidate("all")
-        logger.info(f"[LEMONSQUEZY] Added {d['credits']} {d['credit_type']} credits to user {user_id}")
+        logger.info(f"[LEMONSQUEEZY] Added {d['credits']} {d['credit_type']} credits to user {user_id}")
         return {"handled": True, "action": "credits_added", "credits": int(d["credits"])}
 
     logger.info(f"[LEMONSQUEZY] Unhandled event: {event_name}")
