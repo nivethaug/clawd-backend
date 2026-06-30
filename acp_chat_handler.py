@@ -37,8 +37,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Module-level Claude session cache: project_path -> claude session_id
-# Survives across handler instances so session resume works between messages
+# Module-level Claude session cache: "project_path:chat_session_id" -> claude session_id
+# Keyed by BOTH project_path AND the Dreampilot chat session ID so that:
+#   - Within the same chat, --resume preserves multi-turn context
+#   - A NEW chat in the same project starts fresh (no history replay / token bloat)
 _claude_session_ids: Dict[str, str] = {}
 
 # Configuration
@@ -2932,17 +2934,25 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 # Note: File operations use absolute paths, so cwd doesn't affect them
                 repo_path = str(self.project_path)
                 logger.info(f"[ACP-CHAT] Using repo_path={repo_path} for MCP config lookup")
+
+                # Scope Claude CLI --resume to the SAME Dreampilot chat session only.
+                # Previously keyed by repo_path alone, which meant a new chat in the
+                # same project inherited the old Claude session and replayed 20K+ tokens
+                # of history.  Now: each chat gets its own Claude CLI session.
+                resume_key = f"{repo_path}:{self.session_id}"
+                prev_sid = _claude_session_ids.get(resume_key)
+                logger.info(f"[ACP-CHAT] resume_key={resume_key} has_prev_session={'yes' if prev_sid else 'no (fresh)'}")
                 async with ClaudeCodeAgent(
                     repo_path,
                     on_text=on_chunk,
                     on_progress=on_progress,
-                    resume_session_id=_claude_session_ids.get(repo_path),
+                    resume_session_id=prev_sid,
                 ) as agent:
                     self._active_agent = agent  # Track for cancellation
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     response = await agent.query(prompt)
                     if agent.last_session_id:
-                        _claude_session_ids[repo_path] = agent.last_session_id
+                        _claude_session_ids[resume_key] = agent.last_session_id
                     logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars (extracted answer)")
 
                     # Capture token usage from the agent
