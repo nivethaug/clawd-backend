@@ -6528,7 +6528,7 @@ def _gallery_row_to_dict(row):
 @app.get("/landing")
 async def landing_data():
     """Single public endpoint returning everything the landing page needs:
-    stats, gallery (latest 6 featured), templates (latest 6 active).
+    stats, gallery (latest 3 featured), templates (latest 3 active).
     No auth required. If any individual query fails, that key is omitted.
     """
     result: dict = {}
@@ -6568,7 +6568,7 @@ async def landing_data():
     if stats:
         result["stats"] = stats
 
-    # --- Gallery (latest 6 featured/public) ---
+    # --- Gallery (latest 3 featured/public) ---
     gallery_items: list = []
     try:
         with get_db() as conn:
@@ -6583,7 +6583,7 @@ async def landing_data():
                    WHERE gp.status = 'public'
                    ORDER BY gp.is_featured DESC, gp.published_at DESC, gp.created_at DESC
                    LIMIT %s""",
-                (6,),
+                (3,),
             ).fetchall()
         for row in rows:
             item = _gallery_row_to_dict(row)
@@ -6596,7 +6596,7 @@ async def landing_data():
         pass
     result["gallery"] = gallery_items
 
-    # --- Templates (latest 6 active) ---
+    # --- Templates (latest 3 active) ---
     template_items: list = []
     try:
         with get_db() as conn:
@@ -6611,7 +6611,7 @@ async def landing_data():
                    WHERE t.status = 'active'
                    ORDER BY t.is_featured DESC, t.published_at DESC, t.created_at DESC
                    LIMIT %s""",
-                (6,),
+                (3,),
             ).fetchall()
         for row in rows:
             item = _template_row_to_dict(row)
