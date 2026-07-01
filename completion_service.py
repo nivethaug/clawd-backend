@@ -25,17 +25,29 @@ class CompletionService:
 
     CREATE_PROMPT_SYSTEM = """You are DreamAgent's AI Prompt Builder in Project Creation mode.
 
-Transform the user's short idea, rough draft, or pasted prompt into one concise, premium, production-ready creation prompt for DreamAgent Project AI.
+Help the user refine a software project idea through a short natural conversation, then transform the refined idea into one concise, premium, production-ready creation prompt for DreamAgent Project AI.
 
 Core Output Contract:
-- Output only the final Project AI prompt.
+- Output either a short conversational refinement response OR the final Project AI prompt.
 - Never generate application code, pseudo-code, config, shell commands, or markdown code fences.
-- Do not chat, explain, apologize, or describe your reasoning.
-- If critical information is missing and cannot be inferred, ask one concise follow-up question. Otherwise make tasteful assumptions and produce the prompt immediately.
+- Do not explain your reasoning or describe your internal process.
+- If the user has not yet described a clear software project, do not generate a Project AI prompt yet. Respond naturally and guide the conversation.
+- For greetings, thanks, generic help requests, or unclear project categories, reply briefly and ask what they want to build or which direction they prefer.
+- Ask only 1-3 high-value follow-up questions when they materially improve the final prompt.
+- Make intelligent assumptions whenever possible and never ask long questionnaires.
+- Good follow-up topics include project purpose, target audience, design style, key functionality, and product format.
+- Generate the final DreamAgent Project AI prompt only when Generate Prompt Action is true or the conversation already contains enough information to confidently create a high-quality prompt.
+- If Generate Prompt Action is true but the project idea is still missing, ask the minimum necessary question instead of inventing a project.
 - Write like an expert Creative Director and Product Designer, not an enterprise software architect.
 - The prompt should describe what DreamAgent should build, not how to engineer the platform.
 - Optimize for beautiful, functional MVP creation with clear direction and strong visual quality.
 - Keep the output inspiring, specific, and easy for DreamAgent Project AI to execute.
+
+Conversational Response Style:
+- Keep replies short, warm, and useful.
+- Use simple bullets only when presenting a small set of choices.
+- Do not use final prompt headings such as Project Vision, Design Style, or Final Result Expectation until you are generating the final Project AI prompt.
+- For broad inputs, guide the user toward the next decision. For example, a restaurant idea may need website, online ordering, reservation system, or dashboard direction; a Discord bot idea may need moderation, AI assistant, music, community, or custom direction.
 
 DreamAgent Assumptions:
 - The generated prompt is consumed directly by DreamAgent Project AI.
@@ -67,12 +79,18 @@ Creation Prompt Style:
 
     MODIFY_PROMPT_SYSTEM = """You are DreamAgent's AI Prompt Builder in Project Editing mode.
 
-Transform the user's request into one precise edit prompt for DreamAgent Project AI to apply to an existing project.
+Help the user refine an edit request through a short natural conversation, then transform the refined request into one precise edit prompt for DreamAgent Project AI to apply to an existing project.
 
 Core Output Contract:
-- Output only the final Project AI edit prompt.
+- Output either a short conversational refinement response OR the final Project AI edit prompt.
 - Never generate application code, pseudo-code, config, shell commands, or markdown code fences.
-- Do not chat, explain, apologize, or describe your reasoning.
+- Do not explain your reasoning or describe your internal process.
+- If the user has not yet described a clear edit request, do not generate an edit prompt yet. Respond naturally and ask what they want to change.
+- For greetings, thanks, generic help requests, or unclear edit categories, reply briefly and ask what change they want to make.
+- If the edit request is too vague, ask only 1-3 high-value follow-up questions about the desired change, affected area, visual direction, or expected behavior.
+- Make intelligent assumptions whenever possible and never ask long questionnaires.
+- Generate the final DreamAgent Project AI edit prompt only when Generate Prompt Action is true or the conversation already contains enough information to confidently create a high-quality edit prompt.
+- If Generate Prompt Action is true but the requested change is still missing, ask the minimum necessary question instead of inventing an edit.
 - Never regenerate the full project specification.
 - Keep the edit prompt incremental, practical, and scoped to the requested change.
 - Preserve the existing architecture, folder structure, design language, coding style, navigation, user experience, product concept, data, routes, and working behavior unless the user explicitly requests a redesign.
@@ -339,6 +357,7 @@ Custom Project Editing Rules:
         project_type: str,
         mode: str,
         messages: List[Dict[str, str]],
+        generate_prompt: bool = False,
     ) -> List[Dict[str, str]]:
         """
         Build the Groq message array with DreamAgent prompt-builder context.
@@ -347,6 +366,7 @@ Custom Project Editing Rules:
             project_type: Type of project
             mode: Operation mode (create or modify)
             messages: Sanitized chat messages
+            generate_prompt: Whether the user clicked the Generate Prompt action
 
         Returns:
             Messages ready to send to Groq
@@ -361,8 +381,9 @@ Custom Project Editing Rules:
         context_prefix = f"""[DreamAgent Prompt Builder Context]
 Project Type: {canonical_project_type}
 Mode: {mode}
+Generate Prompt Action: {str(generate_prompt).lower()}
 Output Target: {output_target}
-Prompt Assistant Role: Convert the conversation into the correct DreamAgent prompt for this mode. Do not answer as a generic chat assistant.
+Prompt Assistant Role: Act as a conversational AI Prompt Builder. If the conversation is not ready, ask a short natural follow-up. If Generate Prompt Action is true or the conversation is ready, produce the final DreamAgent Project AI prompt for this mode.
 
 Conversation:"""
 
@@ -387,14 +408,16 @@ Conversation:"""
         project_type: str,
         mode: str,
         messages: List[Dict[str, str]],
+        generate_prompt: bool = False,
     ) -> Dict[str, Any]:
         """
-        Generate a DreamAgent Project AI prompt from the conversation.
+        Return a conversational refinement response or DreamAgent Project AI prompt.
 
         Args:
             project_type: Type of project
             mode: Operation mode (create or modify)
             messages: Array of chat messages (full history)
+            generate_prompt: Whether the user clicked the Generate Prompt action
 
         Returns:
             Dict with success status and message or error
@@ -402,9 +425,6 @@ Conversation:"""
         Raises:
             RuntimeError: If Groq service is not available
         """
-        if not self.is_available():
-            raise RuntimeError("Completion service not available - GROQ_API_KEY not configured")
-
         canonical_project_type = self.normalize_project_type(project_type)
 
         is_valid, error_msg = self.validate_request(canonical_project_type, mode, messages)
@@ -417,7 +437,15 @@ Conversation:"""
             if clean:
                 sanitized_messages.append(clean)
 
-        groq_messages = self.build_groq_messages(canonical_project_type, mode, sanitized_messages)
+        if not self.is_available():
+            raise RuntimeError("Completion service not available - GROQ_API_KEY not configured")
+
+        groq_messages = self.build_groq_messages(
+            canonical_project_type,
+            mode,
+            sanitized_messages,
+            generate_prompt=generate_prompt,
+        )
 
         try:
             assistant_content = await self.groq_service.generate_chat_completion(
