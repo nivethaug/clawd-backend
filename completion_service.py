@@ -1,8 +1,8 @@
 """
-Multi-turn Chat Completion Service
+DreamAgent Prompt Builder Completion Service.
 
-Handles stateless multi-turn chat conversations using Groq LLM.
-Accepts full conversation history and returns next AI response.
+Turns short user ideas or rough prompts into production-ready software
+specifications that can be sent directly to DreamAgent Project AI.
 """
 
 import logging
@@ -14,50 +14,176 @@ logger = logging.getLogger(__name__)
 
 
 class CompletionService:
-    """Service for multi-turn chat completions."""
+    """Service for DreamAgent Project AI prompt generation."""
 
-    # Maximum number of messages to prevent abuse
+    # Maximum number of messages to prevent abuse.
     MAX_MESSAGES = 50
 
-    # Internal system prompt (never sent from client)
-    SYSTEM_PROMPT = """You are a senior AI software architect and product strategist. The user is building AI-powered automation projects inside a structured platform.
+    # Prompt generation needs enough room for a complete but concise spec.
+    COMPLETION_TEMPERATURE = 0.35
+    COMPLETION_MAX_TOKENS = 2400
 
-Project Types:
-website: - Full-stack web apps - SaaS dashboards - APIs + frontend - Auth + DB aware
-telegrambot: - Telegram Bot API - Commands + webhook/polling - Event-driven
-discordbot: - Slash commands - Moderation + automation - Event-driven
-tradingbot: - Exchange API integrations - Strategy execution - Risk management mandatory - API rate limits awareness
-scheduler: - Cron-job based systems - Recurring automation - Web scraping - Web search integrations - Time-triggered execution
-custom: - Hybrid systems - Multi-service orchestration - Advanced automation
+    CREATE_PROMPT_SYSTEM = """You are DreamAgent's AI Prompt Builder in Project Creation mode.
 
-Mode Rules:
-If mode = create: Structure final output as:
-1. Project Objective
-2. Core Features
-3. Architecture Overview
-4. Required Integrations
-5. Data & Storage Considerations
-6. Execution Constraints
+Transform the user's short idea, rough draft, or pasted prompt into one concise, premium, production-ready creation prompt for DreamAgent Project AI.
 
-If mode = modify: Structure final output as:
-1. Change Summary
-2. Impacted Components
-3. Implementation Strategy
-4. Risk & Side Effects
+Core Output Contract:
+- Output only the final Project AI prompt.
+- Never generate application code, pseudo-code, config, shell commands, or markdown code fences.
+- Do not chat, explain, apologize, or describe your reasoning.
+- If critical information is missing and cannot be inferred, ask one concise follow-up question. Otherwise make tasteful assumptions and produce the prompt immediately.
+- Write like an expert Creative Director and Product Designer, not an enterprise software architect.
+- The prompt should describe what DreamAgent should build, not how to engineer the platform.
+- Optimize for beautiful, functional MVP creation with clear direction and strong visual quality.
+- Keep the output inspiring, specific, and easy for DreamAgent Project AI to execute.
 
-General Behavior Rules:
-- Use entire conversation context.
-- Maintain conversation continuity.
-- Ask clarifying questions if needed.
-- Do NOT generate code.
-- Do NOT execute.
-- Keep structured output.
-- Tailor response to projectType.
-- tradingbot → emphasize risk controls.
-- scheduler → emphasize cron reliability.
-- bots → emphasize event-driven design.
-- website → emphasize frontend/backend separation.
-- custom → infer intelligently."""
+DreamAgent Assumptions:
+- The generated prompt is consumed directly by DreamAgent Project AI.
+- Project AI already understands React, TypeScript, Tailwind CSS, the existing project structure, backend scaffold, base APIs, deployment pipeline, and development environment.
+- Do not waste prompt space repeating these implementation details unless the user explicitly requests a specific technology decision.
+- Spend tokens on product vision, user experience, visual quality, user journey, layout, features, animations, interactions, and the expected final experience.
+- The Prompt Builder should primarily focus on the frontend experience, user experience, visual quality, interactions, and requested functionality.
+- Only describe backend functionality when the user explicitly requests it.
+- Do not focus on authentication, RBAC, API architecture, enterprise deployment, CI/CD, folder structure, infrastructure, security architecture, or testing strategy unless the user explicitly asks for them.
+
+Creation Prompt Style:
+- Use clean markdown headings and compact bullets.
+- Prefer concrete creative direction over long requirement-document language.
+- Expand simple ideas into a complete MVP vision with enough specificity to build.
+- Generate a concise but complete specification. Expand naturally based on the complexity of the user's request.
+- Scale depth intelligently: simple landing pages should be short; portfolios and business websites should use medium detail; e-commerce, large SaaS, and complex tools can be more structured; cinematic 3D or interactive storytelling experiences can receive richer visual direction.
+- Optimize for beautiful UI, premium UX, modern layouts, mobile-first polish, and fast MVP creation.
+- Avoid enterprise complexity unless the user explicitly requests it.
+- Keep prompts visually focused, implementation-friendly, and concise.
+- Match the creative direction to the user's intent instead of using one default style for every project.
+- If the user does not specify a design style, infer the best fit: simple website = clean modern marketing; business = professional and trustworthy; portfolio = elegant premium showcase; AI startup = futuristic and premium; luxury brand = high-end cinematic sophistication; gaming = interactive and immersive; entertainment = bold and animated; 3D experience = cinematic Three.js only when requested or clearly useful; internal tool or CRM = clean professional dashboard.
+- Infer domain style naturally: restaurant = warm and inviting; travel = immersive and visual; real estate = premium and luxurious; healthcare = clean and trustworthy; education = friendly and modern; finance = professional and minimal; AI = futuristic; portfolio = elegant and minimal; creative agency = bold and experimental.
+- Do not automatically generate cinematic Three.js experiences for every website.
+- Do not automatically generate dashboard layouts unless the user requests a dashboard, CRM, admin, analytics, ERP, internal tool, finance, or operations product.
+- When useful, reference inspiration qualities similar to Apple, Linear, Stripe, Vercel, Notion, Raycast, Arc Browser, or Awwwards: minimalism, premium spacing, elegant typography, modern layouts, smooth interactions, luxury visual design, and professional polish.
+- Inspiration references are only references. Never copy existing products, and only include them when they improve the requested project.
+- Preserve the user's intent when rewriting an existing prompt, but make it more polished, visual, and actionable.
+- End with a clear final result expectation."""
+
+    MODIFY_PROMPT_SYSTEM = """You are DreamAgent's AI Prompt Builder in Project Editing mode.
+
+Transform the user's request into one precise edit prompt for DreamAgent Project AI to apply to an existing project.
+
+Core Output Contract:
+- Output only the final Project AI edit prompt.
+- Never generate application code, pseudo-code, config, shell commands, or markdown code fences.
+- Do not chat, explain, apologize, or describe your reasoning.
+- Never regenerate the full project specification.
+- Keep the edit prompt incremental, practical, and scoped to the requested change.
+- Preserve the existing architecture, folder structure, design language, coding style, navigation, user experience, product concept, data, routes, and working behavior unless the user explicitly requests a redesign.
+- Editing should always be incremental. Avoid unnecessary rewrites.
+- If the request is ambiguous but still actionable, make a small reasonable assumption and state it in the edit prompt.
+- Ask a follow-up question only when the edit cannot be safely inferred.
+
+Editing Prompt Must Include Only Relevant Items:
+- Requested changes
+- Files/components likely affected
+- UI changes
+- Feature additions
+- Bug fixes
+- Compatibility requirements
+- Constraints
+- Expected final behavior
+
+Editing Prompt Style:
+- Use short markdown headings and compact bullets.
+- Be direct and implementation-ready without becoming a full requirements document.
+- Focus on what to change, what to preserve, and what the final result should feel like."""
+
+    CREATE_PROJECT_TYPE_PROMPTS = {
+        "website": """Selected Project Type: Website
+
+Website Creation Rules:
+- Always include: Project Vision, Design Style, Maximum 4 Pages, Page Names, Hero Experience, Core Features, UI Components, Animations, Mobile Experience, Performance, Final Result Expectation.
+- Maximum 4 pages. Always name the pages.
+- Only recommend Three.js or React Three Fiber when advanced 3D genuinely improves the requested experience, such as cinematic websites, product showcases, gaming, interactive storytelling, or visualizations.
+- For cinematic, brand, product, portfolio, entertainment, or imaginative ideas, favor immersive marketing/product websites.
+- Only generate dashboard/admin requirements if the user explicitly requests dashboard, CRM, admin, analytics, ERP, internal tool, finance, or operations.""",
+        "telegrambot": """Selected Project Type: Telegram Bot
+
+Telegram Bot Creation Rules:
+- Default to a maximum of 5 commands. Only generate additional commands if the user explicitly requests more.
+- Always include: Bot Purpose, Commands, User Flow, Optional AI Features, Integrations only if needed, Deployment Notes, Final Expectations.
+- Keep bot specifications practical and MVP-focused.""",
+        "discordbot": """Selected Project Type: Discord Bot
+
+Discord Bot Creation Rules:
+- Default to a maximum of 5 slash commands. Only generate additional slash commands if the user explicitly requests more.
+- Include: Bot Purpose, Slash Commands, Events, Permissions, Optional AI Features, Final Expectations.
+- Keep Discord bot specifications practical and MVP-focused.""",
+        "tradingbot": """Selected Project Type: Trading Bot
+
+Trading Bot Creation Rules:
+- Always include: Strategy, Indicators, Risk Management, Stop Loss, Take Profit, Position Sizing, Exchange, Final Expectations.
+- Risk management is mandatory.
+- Never imply guaranteed profit.""",
+        "scheduler": """Selected Project Type: Scheduler
+
+Scheduler Creation Rules:
+- Keep the prompt focused on: Jobs, Schedule, Retry, Notifications, Monitoring.
+- Describe the recurring workflows clearly.""",
+        "custom": """Selected Project Type: Custom
+
+Custom Project Creation Rules:
+- Infer the most suitable lightweight MVP shape from the user's idea.
+- Focus on the core workflow, key features, and visual/interface direction when relevant.""",
+    }
+
+    MODIFY_PROJECT_TYPE_PROMPTS = {
+        "website": """Selected Project Type: Website
+
+Website Editing Rules:
+- Include only relevant UI/component/page changes, likely affected files or components, interactions/animations to adjust, mobile behavior, constraints, and expected final behavior.
+- Do not regenerate the full website specification.
+- Do not add authentication, APIs, databases, SEO, accessibility, testing, or deployment unless the user explicitly asks.
+- Preserve the existing design language unless the requested edit changes it.""",
+        "telegrambot": """Selected Project Type: Telegram Bot
+
+Telegram Bot Editing Rules:
+- Include affected commands, message handlers, user flow changes, integrations if needed, constraints, and final behavior.
+- Default to a maximum of 5 commands. Only include additional commands if the user explicitly requests more.""",
+        "discordbot": """Selected Project Type: Discord Bot
+
+Discord Bot Editing Rules:
+- Include affected slash commands, events, permission behavior, optional AI behavior, constraints, and final behavior.
+- Default to a maximum of 5 slash commands. Only include additional slash commands if the user explicitly requests more.""",
+        "tradingbot": """Selected Project Type: Trading Bot
+
+Trading Bot Editing Rules:
+- Include affected strategy logic, indicators, exchange behavior, risk management, stop loss, take profit, position sizing, constraints, and final behavior.
+- Preserve or improve risk controls. Never remove risk management unless the user explicitly asks and the prompt warns against it.""",
+        "scheduler": """Selected Project Type: Scheduler
+
+Scheduler Editing Rules:
+- Include affected jobs, schedule, retry behavior, notifications, monitoring, constraints, and final behavior.
+- Preserve existing active jobs unless the user explicitly asks to replace them.""",
+        "custom": """Selected Project Type: Custom
+
+Custom Project Editing Rules:
+- Include likely affected interface, workflow, feature, integration, or background behavior only when relevant.
+- Preserve the existing project direction and avoid regenerating the full specification.""",
+    }
+
+    PROJECT_TYPE_ALIASES = {
+        "web": "website",
+        "telegram": "telegrambot",
+        "telegram_bot": "telegrambot",
+        "telegram-bot": "telegrambot",
+        "telegram bot": "telegrambot",
+        "discord": "discordbot",
+        "discord_bot": "discordbot",
+        "discord-bot": "discordbot",
+        "discord bot": "discordbot",
+        "trading": "tradingbot",
+        "trading_bot": "tradingbot",
+        "trading-bot": "tradingbot",
+        "trading bot": "tradingbot",
+    }
 
     def __init__(self):
         """Initialize completion service."""
@@ -89,6 +215,19 @@ General Behavior Rules:
         """
         return self.groq_service is not None
 
+    def normalize_project_type(self, project_type: str) -> str:
+        """
+        Normalize project type names from the UI or older callers.
+
+        Args:
+            project_type: Raw project type value from the request
+
+        Returns:
+            Canonical project type key used by the prompt maps
+        """
+        normalized = str(project_type or "").strip().lower()
+        return self.PROJECT_TYPE_ALIASES.get(normalized, normalized)
+
     def sanitize_message(self, msg: Dict[str, str]) -> Optional[Dict[str, str]]:
         """
         Sanitize a single message - reject system role, validate structure.
@@ -99,19 +238,23 @@ General Behavior Rules:
         Returns:
             Sanitized message dict or None if invalid
         """
-        role = msg.get("role", "").lower()
-        content = msg.get("content", "").strip()
+        role = str(msg.get("role", "")).lower()
+        raw_content = msg.get("content", "")
+        if raw_content is None:
+            return None
 
-        # Reject system role from client
+        content = str(raw_content).strip()
+
+        # Reject system role from client.
         if role == "system":
             logger.warning("Client attempted to send system role")
             return None
 
-        # Only allow user and assistant roles
+        # Only allow user and assistant roles.
         if role not in ["user", "assistant"]:
             return None
 
-        # Content must be non-empty
+        # Content must be non-empty.
         if not content:
             return None
 
@@ -134,47 +277,110 @@ General Behavior Rules:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        # Validate project_type
-        valid_project_types = [
-            "website",
-            "telegrambot",
-            "discordbot",
-            "tradingbot",
-            "scheduler",
-            "custom",
-        ]
-        if project_type not in valid_project_types:
+        canonical_project_type = self.normalize_project_type(project_type)
+        valid_project_types = list(self.CREATE_PROJECT_TYPE_PROMPTS.keys())
+        if canonical_project_type not in valid_project_types:
             return (
                 False,
                 f"Invalid projectType '{project_type}'. Must be one of: "
                 f"{', '.join(valid_project_types)}",
             )
 
-        # Validate mode
         if mode not in ["create", "modify"]:
             return False, f"Invalid mode '{mode}'. Must be either 'create' or 'modify'"
 
-        # Validate messages array
         if not messages or len(messages) == 0:
             return False, "messages array is required and cannot be empty"
 
-        # Check message count limit
         if len(messages) > self.MAX_MESSAGES:
             return False, f"messages array too large (max {self.MAX_MESSAGES})"
 
-        # Sanitize all messages
         sanitized = []
         for msg in messages:
             clean = self.sanitize_message(msg)
             if clean:
                 sanitized.append(clean)
 
-        # Must have at least one user message after sanitization
         has_user = any(m["role"] == "user" for m in sanitized)
         if not has_user:
             return False, "messages array must contain at least one user message"
 
         return True, None
+
+    def get_system_prompt(self, project_type: str, mode: str) -> str:
+        """
+        Compose the system prompt for the selected mode and project type.
+
+        Args:
+            project_type: Valid project type selected by the client
+            mode: Operation mode (create or modify)
+
+        Returns:
+            Mode-specific system prompt plus one project-specific block
+        """
+        canonical_project_type = self.normalize_project_type(project_type)
+        if mode == "modify":
+            system_prompt = self.MODIFY_PROMPT_SYSTEM
+            project_type_prompt = self.MODIFY_PROJECT_TYPE_PROMPTS.get(
+                canonical_project_type,
+                self.MODIFY_PROJECT_TYPE_PROMPTS["custom"],
+            )
+        else:
+            system_prompt = self.CREATE_PROMPT_SYSTEM
+            project_type_prompt = self.CREATE_PROJECT_TYPE_PROMPTS.get(
+                canonical_project_type,
+                self.CREATE_PROJECT_TYPE_PROMPTS["custom"],
+            )
+
+        return f"{system_prompt}\n\n{project_type_prompt}"
+
+    def build_groq_messages(
+        self,
+        project_type: str,
+        mode: str,
+        messages: List[Dict[str, str]],
+    ) -> List[Dict[str, str]]:
+        """
+        Build the Groq message array with DreamAgent prompt-builder context.
+
+        Args:
+            project_type: Type of project
+            mode: Operation mode (create or modify)
+            messages: Sanitized chat messages
+
+        Returns:
+            Messages ready to send to Groq
+        """
+        canonical_project_type = self.normalize_project_type(project_type)
+        output_target = (
+            "A concise, premium project creation prompt for DreamAgent Project AI."
+            if mode == "create"
+            else "A precise incremental edit prompt for DreamAgent Project AI."
+        )
+
+        context_prefix = f"""[DreamAgent Prompt Builder Context]
+Project Type: {canonical_project_type}
+Mode: {mode}
+Output Target: {output_target}
+Prompt Assistant Role: Convert the conversation into the correct DreamAgent prompt for this mode. Do not answer as a generic chat assistant.
+
+Conversation:"""
+
+        groq_messages = [
+            {"role": "system", "content": self.get_system_prompt(canonical_project_type, mode)},
+        ]
+        copied_messages = [dict(message) for message in messages]
+
+        if copied_messages and copied_messages[0]["role"] == "user":
+            copied_messages[0]["content"] = (
+                f"{context_prefix}\n\n{copied_messages[0]['content']}"
+            )
+            groq_messages.extend(copied_messages)
+        else:
+            groq_messages.append({"role": "user", "content": context_prefix})
+            groq_messages.extend(copied_messages)
+
+        return groq_messages
 
     async def complete(
         self,
@@ -183,7 +389,7 @@ General Behavior Rules:
         messages: List[Dict[str, str]],
     ) -> Dict[str, Any]:
         """
-        Generate a multi-turn chat completion.
+        Generate a DreamAgent Project AI prompt from the conversation.
 
         Args:
             project_type: Type of project
@@ -199,47 +405,25 @@ General Behavior Rules:
         if not self.is_available():
             raise RuntimeError("Completion service not available - GROQ_API_KEY not configured")
 
-        # Validate request
-        is_valid, error_msg = self.validate_request(project_type, mode, messages)
+        canonical_project_type = self.normalize_project_type(project_type)
+
+        is_valid, error_msg = self.validate_request(canonical_project_type, mode, messages)
         if not is_valid:
             return {"success": False, "error": error_msg}
 
-        # Sanitize messages (reject system role, validate structure)
         sanitized_messages = []
         for msg in messages:
             clean = self.sanitize_message(msg)
             if clean:
                 sanitized_messages.append(clean)
 
-        # Build messages array for Groq
-        # First: system prompt
-        # Then: sanitized client messages
-        groq_messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-        ]
-
-        # Add project context to the first user message
-        # This helps Groq understand the context from the start
-        context_prefix = f"""[Project Context]
-Type: {project_type}
-Mode: {mode}
-
-Conversation:"""
-
-        # Inject context into first user message or add as first message
-        if sanitized_messages and sanitized_messages[0]["role"] == "user":
-            first_user_msg = sanitized_messages[0]
-            first_user_msg["content"] = f"{context_prefix}\n\n{first_user_msg['content']}"
-            groq_messages.extend(sanitized_messages)
-        else:
-            # Add context as separate message if first is assistant
-            groq_messages.append({"role": "user", "content": context_prefix})
-            groq_messages.extend(sanitized_messages)
+        groq_messages = self.build_groq_messages(canonical_project_type, mode, sanitized_messages)
 
         try:
-            # Call Groq API with full message history
             assistant_content = await self.groq_service.generate_chat_completion(
                 messages=groq_messages,
+                temperature=self.COMPLETION_TEMPERATURE,
+                max_tokens=self.COMPLETION_MAX_TOKENS,
             )
 
             return {

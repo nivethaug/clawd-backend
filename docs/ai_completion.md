@@ -1,6 +1,6 @@
-# AI Completion - Complete Reference
+# AI Prompt Builder - Complete Reference
 
-> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
+> [TOC](toc.md) | Updated: 2026-07-01
 
 ---
 
@@ -8,15 +8,17 @@
 
 | Endpoint | Method | File | Lines | Description |
 |----------|--------|------|-------|-------------|
-| `/ai/completion` | POST | `app.py` | 2420-2480 | AI completion for project tasks |
+| `/ai/completion` | POST | `app.py` | 7717-7788 | DreamAgent prompt builder for Project AI |
 
 ---
 
 ## POST /ai/completion
 
-**File:** `app.py:2420-2480`
+**File:** `app.py:7717-7788`
 
-Get AI completion for project-related tasks.
+Transform a short idea, draft prompt, or multi-turn conversation into one final
+DreamAgent Project AI prompt. `mode=create` builds a premium MVP creation prompt;
+`mode=modify` builds a scoped edit prompt for an existing project.
 
 **Request:**
 ```json
@@ -24,7 +26,7 @@ Get AI completion for project-related tasks.
   "projectType": "website",
   "mode": "create",
   "messages": [
-    {"role": "user", "content": "Create a landing page"}
+    {"role": "user", "content": "Jurassic website"}
   ]
 }
 ```
@@ -35,15 +37,35 @@ Get AI completion for project-related tasks.
 |-------|------|-------------|
 | `projectType` | string | Type: `website`, `telegrambot`, `discordbot`, `tradingbot`, `scheduler`, `custom` |
 | `mode` | string | Mode: `create` or `modify` |
-| `messages` | array | Array of chat messages (conversation history) |
+| `messages` | array | Array of user/assistant messages. Client system messages are rejected. |
+
+Canonical `projectType` values match the project type table and Prompt Assistant dropdown payloads: `website`, `telegrambot`, `discordbot`, `tradingbot`, `scheduler`, `custom`.
+
+**Behavior:**
+
+- Returns only the final Project AI prompt, not generic chat assistance.
+- Does not generate code, execute work, or provide implementation narration.
+- Uses independent system prompts for `create` and `modify`.
+- Sends only the selected `projectType` guidance in the system prompt.
+- For `create`, expands rough ideas into concise, visual-first MVP prompts.
+- For `modify`, produces incremental edit instructions and never regenerates the full project brief.
+- Scales prompt depth to the request: simple ideas stay short, complex products get more structure.
+- Matches visual style to user intent instead of defaulting every website to cinematic, 3D, or dashboard layouts.
+- Infers sensible design direction when unspecified, such as warm restaurant sites, premium real estate, clean healthcare, futuristic AI, or bold creative agency experiences.
+- Assumes DreamAgent Project AI already understands React, TypeScript, Tailwind CSS, existing structure, backend scaffold, routing, base APIs, deployment pipeline, and development environment.
+- Avoids repeating routine implementation details and spends tokens on product vision, UX, visual quality, user journey, layout, features, animations, interactions, and final experience.
+- May use inspiration qualities from Apple, Linear, Stripe, Vercel, Notion, Raycast, Arc Browser, or Awwwards when helpful, without copying existing products.
+- Focuses on frontend experience, UX, visual quality, interactions, and requested functionality unless backend work is explicitly requested.
+- Preserves pasted prompt intent while improving specificity and execution quality.
+- Asks a follow-up question only when critical information cannot be inferred.
 
 **Response:**
 ```json
 {
   "success": true,
   "message": {
-    "content": "I'll help you create a landing page...",
-    "suggestions": [...]
+    "role": "assistant",
+    "content": "Build a cinematic Jurassic website..."
   },
   "error": null
 }
@@ -64,12 +86,12 @@ Get AI completion for project-related tasks.
 
 | Type | Description |
 |------|-------------|
-| `website` | Web application with frontend/backend |
-| `telegrambot` | Telegram bot |
-| `discordbot` | Discord bot |
-| `tradingbot` | Trading automation |
-| `scheduler` | Scheduled task runner |
-| `custom` | Custom project type |
+| `website` | Web application with frontend/backend; max 4 pages and explicit page names |
+| `telegrambot` | Telegram bot that defaults to 5 commands unless more are requested |
+| `discordbot` | Discord bot that defaults to 5 slash commands unless more are requested |
+| `tradingbot` | Trading automation with mandatory risk management |
+| `scheduler` | Scheduled task runner with retries, monitoring, and recovery |
+| `custom` | Custom project type with inferred architecture |
 
 ---
 
@@ -77,8 +99,8 @@ Get AI completion for project-related tasks.
 
 | Mode | Description |
 |------|-------------|
-| `create` | Creating new features |
-| `modify` | Modifying existing code |
+| `create` | Create a concise, premium, visual-first MVP prompt |
+| `modify` | Create a precise incremental edit prompt for an existing project |
 
 ---
 

@@ -384,6 +384,6 @@ handler = get_acp_chat_handler(
 ## Related
 
 - [Chat Stream](chat_stream.md)
-- [AI Completion](ai_completion.md)
+- [AI Prompt Builder](ai_completion.md)
 - [Project Sessions](project_sessions.md)
 - [Message Persistence Guarantee](message-persistence-guarantee.md)

@@ -7717,14 +7717,15 @@ async def get_session_details(key: str):
 @app.post("/ai/completion", response_model=CompletionResponse)
 async def completion(request: CompletionRequest):
     """
-    AI Multi-turn Chat Completion - Stateful conversation support.
+    DreamAgent AI Prompt Builder.
 
-    This endpoint acts as a chatbot, accepting the full conversation history
-    and returning the next AI response. It maintains conversation context
-    across multiple turns.
+    This endpoint accepts the full conversation history and returns one final
+    Project AI prompt. mode=create uses a visual-first MVP creation prompt;
+    mode=modify uses a precise incremental edit prompt. It maintains
+    conversation context across multiple turns, but it is not a generic chatbot.
 
-    It does NOT generate code or execute anything - it only prepares
-    structured prompts for project creation or modification.
+    It does NOT generate code or execute anything - it only prepares prompts
+    for DreamAgent Project AI.
 
     Request:
         projectType: Type of project (website, telegrambot, discordbot,
@@ -7736,7 +7737,7 @@ async def completion(request: CompletionRequest):
 
     Response:
         success: Whether the operation succeeded
-        message: Chat message with role "assistant" and AI response
+        message: Chat message with role "assistant" and final Project AI prompt
         error: Error message (if failed)
 
     This endpoint is stateless - no database storage of history.

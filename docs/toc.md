@@ -87,11 +87,11 @@
 | `/api/ai/selection` | POST | `api/ai_selection.py:1-100` | [ai_chat.md](./ai_chat.md) |
 | `/api/ai/confirm` | POST | `api/ai_confirm.py:1-180` | [ai_chat.md](./ai_chat.md) |
 
-### AI Completion
+### AI Prompt Builder
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/ai/completion` | POST | `app.py:2420-2480` | [ai_completion.md](./ai_completion.md) |
+| `/ai/completion` | POST | `app.py:7717-7788` | [ai_completion.md](./ai_completion.md) |
 
 ### Project Files
 
@@ -160,7 +160,7 @@
 | [ai_chat.md](./ai_chat.md) | LLM-powered DevOps chat system |
 | [ai_chat_architecture.md](./ai_chat_architecture.md) | AI chat system architecture |
 | [session_locking.md](./session_locking.md) | Session locking (single active session per project) |
-| [ai_completion.md](./ai_completion.md) | AI completion endpoint |
+| [ai_completion.md](./ai_completion.md) | DreamAgent prompt builder endpoint |
 | [publish_frontend.md](./publish_frontend.md) | Frontend build & publish |
 | [publish_backend.md](./publish_backend.md) | Backend build & publish |
 | [scheduler.md](./scheduler.md) | Centralized job scheduling daemon + REST API |

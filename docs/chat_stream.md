@@ -493,6 +493,6 @@ while (true) {
 ## Related
 
 - [Chat (Non-Streaming)](chat.md)
-- [AI Completion](ai_completion.md)
+- [AI Prompt Builder](ai_completion.md)
 - [Project Sessions](project_sessions.md)
 - [Message Persistence Guarantee](message-persistence-guarantee.md)
