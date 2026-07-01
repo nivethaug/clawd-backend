@@ -604,32 +604,6 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             if website_type:
                 type_id = website_type['id']
 
-    # ── BILLING: Charge credits for project creation ─────────────────────
-    _project_charged = []
-    try:
-        from services.billing_service import charge_project_creation, refund_credits
-        with get_db() as bconn:
-            result = charge_project_creation(bconn, user_id, project_type_id=type_id)
-            bconn.commit()
-            if not result.get("success"):
-                _cost = result.get("cost", "?")
-                _avail = result.get("total_available", 0)
-                raise HTTPException(
-                    status_code=402,
-                    detail={
-                        "error": "insufficient_credits",
-                        "message": f"You don't have enough AI credits to create this project (needs {_cost}, have {_avail}).",
-                        "cost": _cost,
-                        "available": _avail,
-                    },
-                )
-            _project_charged = result.get("charged", [])
-            logger.info(f"[BILLING] Charged project creation for user {user_id}: {_project_charged}")
-    except HTTPException:
-        raise
-    except Exception as bill_err:
-        logger.warning(f"[BILLING] Project creation charge failed (allowing): {bill_err}")
-
     # Step 1: Get project_id first to use in folder naming
     logger.info("[PROJECT] inserting project into database")
     with get_db() as conn:
@@ -669,17 +643,6 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         with get_db() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             conn.commit()
-
-        # Refund the project creation credits
-        if _project_charged:
-            try:
-                from services.billing_service import refund_credits
-                with get_db() as rconn:
-                    refund_credits(rconn, user_id, "WEBSITE", _project_charged)
-                    rconn.commit()
-                    logger.info(f"[BILLING] Refunded project creation credits for user {user_id}")
-            except Exception as refund_err:
-                logger.warning(f"[BILLING] Refund failed: {refund_err}")
 
         # Abort: Raise error to client
         raise HTTPException(
@@ -5029,15 +4992,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                                                 logger.info(f"[BILLING] Post-edit token charge: {charge_result}")
                                             except Exception as ch_err:
                                                 logger.warning(f"[BILLING] Post-edit token charge failed: {ch_err}")
-                                        elif _precharged and _chat_charged:
-                                            # Edit produced 0 tokens but pre-charge was held — refund it
-                                            try:
-                                                from services.billing_service import refund_credits
-                                                refund_credits(tconn, _chat_user_id, "ADD_FEATURE", _chat_charged)
-                                                tconn.commit()
-                                                logger.info(f"[BILLING] Refunded pre-charge (0 tokens consumed) for user {_chat_user_id}")
-                                            except Exception as rf_err:
-                                                logger.warning(f"[BILLING] 0-token refund failed: {rf_err}")
                         except Exception as track_err:
                             logger.debug(f"[TOKEN] Tracking failed: {track_err}")
                     except Exception as save_err:
@@ -6569,6 +6523,108 @@ def _gallery_row_to_dict(row):
         "published_at": row[13],
         "status": row[14] if len(row) > 14 else "public",
     }
+
+
+@app.get("/landing")
+async def landing_data():
+    """Single public endpoint returning everything the landing page needs:
+    stats, gallery (latest 6 featured), templates (latest 6 active).
+    No auth required. If any individual query fails, that key is omitted.
+    """
+    result: dict = {}
+
+    # --- Stats ---
+    stats: dict = {}
+    try:
+        with get_db() as conn:
+            try:
+                row = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()
+                stats["users"] = row["cnt"] if isinstance(row, dict) else row[0]
+            except Exception:
+                pass
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM projects WHERE status != 'deleted'"
+                ).fetchone()
+                stats["projects"] = row["cnt"] if isinstance(row, dict) else row[0]
+            except Exception:
+                pass
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM gallery_projects WHERE status = 'public'"
+                ).fetchone()
+                stats["gallery_projects"] = row["cnt"] if isinstance(row, dict) else row[0]
+            except Exception:
+                pass
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM templates WHERE status = 'active'"
+                ).fetchone()
+                stats["templates"] = row["cnt"] if isinstance(row, dict) else row[0]
+            except Exception:
+                pass
+    except Exception:
+        pass
+    if stats:
+        result["stats"] = stats
+
+    # --- Gallery (latest 6 featured/public) ---
+    gallery_items: list = []
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """SELECT gp.id, gp.project_id, gp.user_id, gp.title, gp.description,
+                          gp.frontend_url, gp.project_type, gp.thumbnail_url, gp.is_featured,
+                          gp.view_count, gp.clone_count, gp.created_at, gp.updated_at,
+                          gp.published_at, gp.status,
+                          u.name as author_name
+                   FROM gallery_projects gp
+                   LEFT JOIN users u ON gp.user_id = u.id
+                   WHERE gp.status = 'public'
+                   ORDER BY gp.is_featured DESC, gp.published_at DESC, gp.created_at DESC
+                   LIMIT %s""",
+                (6,),
+            ).fetchall()
+        for row in rows:
+            item = _gallery_row_to_dict(row)
+            if isinstance(row, dict):
+                item["author_name"] = row.get("author_name")
+            else:
+                item["author_name"] = row[15] if len(row) > 15 else None
+            gallery_items.append(item)
+    except Exception:
+        pass
+    result["gallery"] = gallery_items
+
+    # --- Templates (latest 6 active) ---
+    template_items: list = []
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """SELECT t.id, t.project_id, t.user_id, t.title, t.description,
+                          t.category, t.frontend_url, t.project_type, t.thumbnail_url,
+                          t.is_featured, t.use_count, t.view_count,
+                          t.created_at, t.updated_at, t.published_at, t.status,
+                          u.name as author_name
+                   FROM templates t
+                   LEFT JOIN users u ON t.user_id = u.id
+                   WHERE t.status = 'active'
+                   ORDER BY t.is_featured DESC, t.published_at DESC, t.created_at DESC
+                   LIMIT %s""",
+                (6,),
+            ).fetchall()
+        for row in rows:
+            item = _template_row_to_dict(row)
+            if isinstance(row, dict):
+                item["author_name"] = row.get("author_name")
+            else:
+                item["author_name"] = row[16] if len(row) > 16 else None
+            template_items.append(item)
+    except Exception:
+        pass
+    result["templates"] = template_items
+
+    return result
 
 
 @app.get("/gallery")
