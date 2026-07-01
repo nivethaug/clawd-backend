@@ -32,7 +32,7 @@ from file_utils import FileUtils
 from completion_service import CompletionService
 from claude_code_worker import run_claude_code_background
 from github_service import get_github_service
-from domain_config import BASE_DOMAIN
+from domain_config import BASE_DOMAIN, CONTROL_API_HOST
 import github_oauth_service
 import github_export_service
 import export_service
@@ -207,7 +207,7 @@ CLAWDBOT_SESSIONS_PATH = os.path.expanduser("~/.clawdbot/agents/main/sessions/se
 IMAGES_DIR = "/root/clawd/public/images"
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
-IMAGES_BASE_URL = "http://195.200.14.37:8002/images"
+IMAGES_BASE_URL = f"https://{CONTROL_API_HOST}/images"
 
 # ============================================================================
 # Initialize Schema
