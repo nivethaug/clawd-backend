@@ -8,11 +8,12 @@ import base64
 import httpx
 from datetime import datetime
 from context_injector import ContextInjector
+from domain_config import CONTROL_API_HOST
 
 # Configuration
 IMAGES_DIR = "/root/clawd/public/images"
 WORKSPACE_IMAGES_DIR = "/root/.openclaw/workspace/clawd-images"
-IMAGES_BASE_URL = "http://195.200.14.37:8002/images"
+IMAGES_BASE_URL = f"https://{CONTROL_API_HOST}/images"
 CHAT_COMPLETION_API_URL = "http://localhost:18789"
 CHAT_COMPLETION_TOKEN = "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a"
 
