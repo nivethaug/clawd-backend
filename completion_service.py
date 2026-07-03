@@ -8,7 +8,10 @@ specifications that can be sent directly to DreamAgent Project AI.
 import logging
 from typing import Optional, List, Dict, Any
 
-from services.ai.glm_client import GLMClient, get_glm_client
+from services.ai.prompt_assistant_glm_client import (
+    PromptAssistantGLMClient,
+    get_prompt_assistant_glm_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -273,13 +276,13 @@ Custom Project Editing Rules:
 
     def __init__(self):
         """Initialize completion service."""
-        self.glm_client: Optional[GLMClient] = None
+        self.glm_client: Optional[PromptAssistantGLMClient] = None
         self._initialize_glm()
 
     def _initialize_glm(self) -> None:
-        """Initialize GLM service using the shared GLM client."""
+        """Initialize GLM service using the Prompt Assistant GLM client."""
         try:
-            self.glm_client = get_glm_client()
+            self.glm_client = get_prompt_assistant_glm_client()
             if self.is_available():
                 logger.info(
                     "GLM completion service initialized successfully "
