@@ -1,6 +1,6 @@
 # Billing & Subscription System Documentation
 
-> **Last Updated:** 2026-06-28  
+> **Last Updated:** 2026-07-03  
 > **Purpose:** Complete reference for the AI Credits billing architecture, database schema, service layer, API endpoints, frontend components, and monthly reset cron.
 
 ---
@@ -13,9 +13,11 @@ The billing system uses an **AI Credits architecture** designed for scalability 
 
 - **Generic Credit Model**: One row per `(user_id, credit_type)` in `user_credit_balances`
 - **Credit Types**: `project_ai`, `edit_token` (future: `image`, `video`, `voice`, `api`, `marketplace`)
-- **Cascade Logic** (when `EARLY_ACCESS_MODE=true`):
-  - Edit operations: `edit_token(monthly)` → `project_ai(monthly)` → `project_ai(purchased)`
-  - Creation operations: `project_ai(monthly)` → `project_ai(purchased)`
+- **Cascade Logic** (unconditional — not gated by `EARLY_ACCESS_MODE`):
+  - Edit operations (category=`edit`): `edit_token(monthly)` → `project_ai(monthly)` → `project_ai(purchased)`
+  - Creation operations (category=`creation`): `project_ai(monthly)` → `project_ai(purchased)`
+- **Two-Phase Billing** for AI edits: temporary hold → reconciliation → refund excess
+- **Cache-Read Exclusion**: `cache_read_input_tokens` excluded from billing (cheap re-reads, not new processing)
 - **Never blocks** while any balance remains
 - **LemonSqueezy** integration for plans and credit packs with graceful fallback
 - **Monthly auto-reset** via dedicated daemon thread (`billing_cron.py`)
@@ -43,6 +45,7 @@ All tables are defined in `database_postgres.py:948-~1150` with migrations, seed
 
 **`credit_transactions`** (`database_postgres.py:1015`)
 - `id`, `user_id`, `operation_id`, `credit_type`, `credits`, `status`, `cost_usd`, `model`, `input_tokens`, `output_tokens`, `total_tokens`, `duration_ms`, `provider`, `project_id`, `session_id`
+- **`status` values**: `reserved` (temporary hold), `charged` (final deduction), `refunded` (reversed)
 
 **`credit_packs`**, **`subscriptions`**, **`billing_config`** (JSONB key/value store)
 
@@ -77,19 +80,32 @@ All changes use `_run_migration()` pattern in `database_postgres.py`.
 **Key Functions** (line ranges):
 
 - `get_or_create_balance()`:35
-- `can_afford()`:140 — returns cascade breakdown
-- `reserve_credits()`:251 — pre-check + charge
-- `refund_credits()`:326 — reverses cascade
-- `charge_project_creation()`:353 — looks up operation by `project_type_id`
-- `add_purchased_credits()`:374
-- `sync_balances_to_plan()`:394
-- `assign_plan()`:425
-- `get_user_billing_summary()`:446
-- `reset_monthly_credits()`:494 — used by cron + admin
+- `_cascade_order()`:114 — edit ops always try `edit_token` first (unconditional)
+- `can_afford()`:140 — returns cascade breakdown, sums across all tiers
+- `_charge_tier()`:190 — deducts from a single tier, returns amount actually deducted
+- `reserve_credits()`:251 — temporary hold, records `status="reserved"`
+- `refund_credits()`:331 — reverses cascade, records `status="refunded"` audit rows
+- `charge_token_usage()`:370 — **reconciliation**: charges net = max(0, billable − precharged)
+- `charge_project_creation()`:485 — looks up operation by `project_type_id`
+- `add_purchased_credits()`:506
+- `sync_balances_to_plan()`:526
+- `assign_plan()`:557
+- `get_user_billing_summary()`:578
+- `reset_monthly_credits()`:626 — used by cron + admin
 
 **Critical Schema Alignment**:
 - Uses `credit_cost` (not `cost_credits`)
 - Transaction uses `operation_id`, `credits`, `status` (not `operation_code`/`delta`/`balance_after`)
+
+**Two-Phase Billing Flow** (for AI edits):
+
+1. **Pre-charge** (`reserve_credits`): Deducts flat `credit_cost` (e.g., 2 for `ADD_FEATURE`) as a `status="reserved"` temporary hold. Returns `charged[]` list.
+2. **Post-charge** (`charge_token_usage`): After edit completes, deducts actual tokens (minus cache reads). Passes `precharged_amount` so it doesn't double-charge. Net = `max(0, billable_tokens − precharged_amount)`.
+3. **Refund** (`refund_credits`): If edit fails or produces 0 tokens, reverses the hold with `status="refunded"`.
+
+**Cache-Read Exclusion**: `charge_token_usage()` accepts `cache_read_tokens` param. Billable = `max(0, total_tokens − cache_read_tokens)`. Typically reduces charges by ~70%.
+
+**Cascade Guarantee**: `_cascade_order()` for edit operations (category=`edit`) always returns `[edit_token(monthly), project_ai(monthly), project_ai(purchased)]` regardless of `EARLY_ACCESS_MODE`. Creation ops use `[project_ai(monthly), project_ai(purchased)]`.
 
 ### 3. `services/billing_cron.py:142` — Monthly Reset Daemon
 
@@ -122,7 +138,7 @@ All changes use `_run_migration()` pattern in `database_postgres.py`.
 |----------|--------|---------|-------|
 | `/summary` | GET | Full billing summary (plan + balances + recent tx) | 87 |
 | `/balances` | GET | Current credit balances | 96 |
-| `/transactions` | GET | Paginated transaction history | 119 |
+| `/transactions` | GET | Paginated history with `description` field | 120 |
 | `/checkout/plan/{slug}` | POST | LemonSqueezy checkout for plan | 157 |
 | `/checkout/credits` | POST | LemonSqueezy checkout for credit pack | 196 |
 
@@ -143,19 +159,27 @@ All changes use `_run_migration()` pattern in `database_postgres.py`.
 **Webhook**
 
 - `POST /webhooks/lemonsqueezy` (`api/lemonsqueezy_webhook.py:22`) — processes subscription & order events
+  - Registered in `app.py` via `app.include_router(lemonsqueezy_webhook_router, prefix="/webhooks")`
+  - `order_created` → `add_purchased_credits()` — triple fallback for variant ID lookup (`first_order_item.variant_id` → `attrs.variant_id` → `custom_data.pack_id`)
 
 ---
 
 ## Integration Points in `app.py`
 
-**Project Creation** (`app.py:549-575`):
-- After project limit check, calls `charge_project_creation()`
-- On failure: `refund_credits(..., "project_create", charged)`
+**Project Creation** (`app.py:605-635`):
+- After project limit check + type resolution, calls `charge_project_creation()`
+- Operation code mapped from `project_type_id` (e.g., Website→`WEBSITE`, Telegram→`TELEGRAM_BOT`)
+- Credits read from `ai_operations` table — no hardcoded costs
+- On folder creation failure: `refund_credits(..., "WEBSITE", charged)`
 
-**Chat Streaming** (`app.py:4767-5180`):
-- `reserve_credits(..., "ADD_FEATURE")` before ACP streaming
-- `refund_credits(...)` on errors
-- Enhanced `token_tracker.record_usage()` with `credits_charged`
+**Chat Streaming** (`app.py:4769-5220`):
+- **Pre-charge**: `reserve_credits(..., "ADD_FEATURE")` → `status="reserved"` hold (2 credits)
+- **Post-charge**: `charge_token_usage()` with `precharged_amount` + `cache_read_tokens` — reconciles hold against actual usage
+- **Error refund**: `refund_credits(...)` on exceptions
+- **0-token refund**: if edit completes with 0 billable tokens, hold is refunded
+
+**Chat Non-Streaming** (`app.py:5610-5635`):
+- No pre-charge; `charge_token_usage()` with `precharged_amount=0` charges full actual usage post-edit
 
 **Startup** (`app.py:483-488`):
 - Starts `billing_cron.start_billing_cron()` (idempotent)
@@ -199,7 +223,7 @@ All changes use `_run_migration()` pattern in `database_postgres.py`.
 
 Stored as JSONB. Key values:
 
-- `EARLY_ACCESS_MODE`: boolean — enables cascade to project_ai credits for edits
+- `EARLY_ACCESS_MODE`: boolean — historical; cascade is now unconditional for edits. Still gates some legacy features.
 - `MONTHLY_RESET_DAY`: int (default: 1)
 - `MONTHLY_RESET_LAST_RUN`: ISO date (managed by cron)
 
