@@ -91,7 +91,7 @@
 
 | Endpoint | Method | File:Lines | Docs |
 |----------|--------|------------|------|
-| `/ai/completion` | POST | `app.py:7717-7788` | [ai_completion.md](./ai_completion.md) |
+| `/ai/completion` | POST | `app.py:7718-7803` | [ai_completion.md](./ai_completion.md) |
 
 ### Project Files
 

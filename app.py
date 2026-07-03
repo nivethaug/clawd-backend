@@ -382,6 +382,7 @@ class CompletionRequest(BaseModel):
     projectType: str = Field(..., description="Type of project (website, telegrambot, discordbot, tradingbot, scheduler, custom)")
     mode: str = Field(..., description="Operation mode (create or modify)")
     messages: list[ChatMessage] = Field(..., description="Array of chat messages (conversation history)")
+    generatePrompt: bool = Field(False, description="Force final DreamAgent prompt generation after conversational refinement")
 
 class CompletionResponse(BaseModel):
     success: bool
@@ -604,6 +605,32 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             if website_type:
                 type_id = website_type['id']
 
+    # ── BILLING: Charge credits for project creation ─────────────────────
+    _project_charged = []
+    try:
+        from services.billing_service import charge_project_creation, refund_credits
+        with get_db() as bconn:
+            result = charge_project_creation(bconn, user_id, project_type_id=type_id)
+            bconn.commit()
+            if not result.get("success"):
+                _cost = result.get("cost", "?")
+                _avail = result.get("total_available", 0)
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "error": "insufficient_credits",
+                        "message": f"You don't have enough AI credits to create this project (needs {_cost}, have {_avail}).",
+                        "cost": _cost,
+                        "available": _avail,
+                    },
+                )
+            _project_charged = result.get("charged", [])
+            logger.info(f"[BILLING] Charged project creation for user {user_id}: {_project_charged}")
+    except HTTPException:
+        raise
+    except Exception as bill_err:
+        logger.warning(f"[BILLING] Project creation charge failed (allowing): {bill_err}")
+
     # Step 1: Get project_id first to use in folder naming
     logger.info("[PROJECT] inserting project into database")
     with get_db() as conn:
@@ -643,6 +670,17 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         with get_db() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             conn.commit()
+
+        # Refund the project creation credits
+        if _project_charged:
+            try:
+                from services.billing_service import refund_credits
+                with get_db() as rconn:
+                    refund_credits(rconn, user_id, "WEBSITE", _project_charged)
+                    rconn.commit()
+                    logger.info(f"[BILLING] Refunded project creation credits for user {user_id}")
+            except Exception as refund_err:
+                logger.warning(f"[BILLING] Refund failed: {refund_err}")
 
         # Abort: Raise error to client
         raise HTTPException(
@@ -4992,6 +5030,15 @@ async def chat_stream_endpoint(request: ChatRequest):
                                                 logger.info(f"[BILLING] Post-edit token charge: {charge_result}")
                                             except Exception as ch_err:
                                                 logger.warning(f"[BILLING] Post-edit token charge failed: {ch_err}")
+                                        elif _precharged and _chat_charged:
+                                            # Edit produced 0 tokens but pre-charge was held — refund it
+                                            try:
+                                                from services.billing_service import refund_credits
+                                                refund_credits(tconn, _chat_user_id, "ADD_FEATURE", _chat_charged)
+                                                tconn.commit()
+                                                logger.info(f"[BILLING] Refunded pre-charge (0 tokens consumed) for user {_chat_user_id}")
+                                            except Exception as rf_err:
+                                                logger.warning(f"[BILLING] 0-token refund failed: {rf_err}")
                         except Exception as track_err:
                             logger.debug(f"[TOKEN] Tracking failed: {track_err}")
                     except Exception as save_err:
@@ -7717,15 +7764,14 @@ async def get_session_details(key: str):
 @app.post("/ai/completion", response_model=CompletionResponse)
 async def completion(request: CompletionRequest):
     """
-    DreamAgent AI Prompt Builder.
+    AI Multi-turn Chat Completion - Stateful conversation support.
 
-    This endpoint accepts the full conversation history and returns one final
-    Project AI prompt. mode=create uses a visual-first MVP creation prompt;
-    mode=modify uses a precise incremental edit prompt. It maintains
-    conversation context across multiple turns, but it is not a generic chatbot.
+    This endpoint acts as a chatbot, accepting the full conversation history
+    and returning the next AI response. It maintains conversation context
+    across multiple turns.
 
-    It does NOT generate code or execute anything - it only prepares prompts
-    for DreamAgent Project AI.
+    It does NOT generate code or execute anything - it only prepares
+    structured prompts for project creation or modification.
 
     Request:
         projectType: Type of project (website, telegrambot, discordbot,
@@ -7734,10 +7780,12 @@ async def completion(request: CompletionRequest):
         messages: Array of chat messages (full conversation history)
                 Must contain at least one user message
                 Only allows 'user' and 'assistant' roles (no 'system')
+        generatePrompt: Whether to force final prompt generation from the
+                    current conversation context
 
     Response:
         success: Whether the operation succeeded
-        message: Chat message with role "assistant" and final Project AI prompt
+        message: Chat message with role "assistant" and AI response
         error: Error message (if failed)
 
     This endpoint is stateless - no database storage of history.
@@ -7756,6 +7804,7 @@ async def completion(request: CompletionRequest):
             project_type=request.projectType,
             mode=request.mode,
             messages=messages_dict,
+            generate_prompt=request.generatePrompt,
         )
 
         # If validation failed, return 400

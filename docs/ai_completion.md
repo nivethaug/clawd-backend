@@ -8,23 +8,25 @@
 
 | Endpoint | Method | File | Lines | Description |
 |----------|--------|------|-------|-------------|
-| `/ai/completion` | POST | `app.py` | 7717-7788 | DreamAgent prompt builder for Project AI |
+| `/ai/completion` | POST | `app.py` | 7718-7803 | DreamAgent prompt builder for Project AI |
 
 ---
 
 ## POST /ai/completion
 
-**File:** `app.py:7717-7788`
+**File:** `app.py:7718-7803`
 
-Transform a short idea, draft prompt, or multi-turn conversation into one final
-DreamAgent Project AI prompt. `mode=create` builds a premium MVP creation prompt;
-`mode=modify` builds a scoped edit prompt for an existing project.
+Guide the user through a short Prompt Assistant conversation, then transform the
+refined idea into one final DreamAgent Project AI prompt. `mode=create` builds a
+premium MVP creation prompt; `mode=modify` builds a scoped edit prompt for an
+existing project.
 
 **Request:**
 ```json
 {
   "projectType": "website",
   "mode": "create",
+  "generatePrompt": false,
   "messages": [
     {"role": "user", "content": "Jurassic website"}
   ]
@@ -37,13 +39,18 @@ DreamAgent Project AI prompt. `mode=create` builds a premium MVP creation prompt
 |-------|------|-------------|
 | `projectType` | string | Type: `website`, `telegrambot`, `discordbot`, `tradingbot`, `scheduler`, `custom` |
 | `mode` | string | Mode: `create` or `modify` |
+| `generatePrompt` | boolean | Optional. When `true`, requests final Project AI prompt generation from the current conversation context. Defaults to `false`. |
 | `messages` | array | Array of user/assistant messages. Client system messages are rejected. |
 
 Canonical `projectType` values match the project type table and Prompt Assistant dropdown payloads: `website`, `telegrambot`, `discordbot`, `tradingbot`, `scheduler`, `custom`.
 
 **Behavior:**
 
-- Returns only the final Project AI prompt, not generic chat assistance.
+- Behaves conversationally before final generation instead of immediately producing a full prompt for every message.
+- Greetings, thanks, and generic help requests receive a short friendly response asking what the user wants to build or change.
+- For vague ideas, asks only 1-3 high-value follow-up questions about purpose, audience, design style, or key functionality.
+- Generates the final Project AI prompt automatically when the request is specific enough.
+- `generatePrompt=true` lets the UI's Generate Prompt action request final generation after refinement.
 - Does not generate code, execute work, or provide implementation narration.
 - Uses independent system prompts for `create` and `modify`.
 - Sends only the selected `projectType` guidance in the system prompt.
