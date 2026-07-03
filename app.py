@@ -7814,14 +7814,17 @@ async def completion(request: CompletionRequest):
         # Track AI completion usage (estimate tokens from response length)
         try:
             msg_content = result.get("message", {})
+            usage = result.get("usage") if isinstance(result, dict) else None
+            usage_tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
             content_len = len(msg_content.get("content", "")) if isinstance(msg_content, dict) else 0
-            if content_len > 0:
-                # Rough estimate: ~4 chars per token
-                est_tokens = max(1, content_len // 4)
+            if usage_tokens or content_len > 0:
+                # Prefer provider usage when available; otherwise keep the
+                # existing rough estimate of ~4 chars per token.
+                total_tokens = int(usage_tokens) if usage_tokens else max(1, content_len // 4)
                 record_usage(
                     user_id=0,  # Completion endpoint has no auth — anonymous
                     usage_type="ai_completion",
-                    total_tokens=est_tokens,
+                    total_tokens=total_tokens,
                     description=f"AI completion: {request.projectType} {request.mode}",
                 )
         except Exception:
@@ -7833,11 +7836,11 @@ async def completion(request: CompletionRequest):
         raise  # Re-raise HTTP exceptions as-is
 
     except RuntimeError as e:
-        # Service unavailable (e.g., Groq not configured)
+        # Service unavailable (e.g., GLM not configured)
         if "not available" in str(e).lower() or "not configured" in str(e).lower():
             return CompletionResponse(
                 success=False,
-                error="Completion service not available - GROQ_API_KEY not configured"
+                error="Completion service not available - Z_AI_API_KEY not configured"
             )
         raise HTTPException(status_code=502, detail=str(e))
 

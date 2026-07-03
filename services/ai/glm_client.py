@@ -1,6 +1,6 @@
 """
 GLM API Client
-Direct API calls to GLM-4.6 with tool support
+Direct API calls to GLM with tool support
 """
 
 import os
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 Z_AI_API_KEY = os.getenv("Z_AI_API_KEY", "")
 Z_AI_API_BASE = os.getenv("Z_AI_API_BASE", "https://api.z.ai/api/coding/paas/v4")
-Z_AI_MODEL = os.getenv("Z_AI_MODEL", "glm-4.7-flashx")  # GLM-4.7-FlashX: high rate limits, strong tool calling, near-free pricing
+Z_AI_MODEL = os.getenv("Z_AI_MODEL", "GLM-4.7-FlashX")  # GLM-4.7-FlashX: high rate limits, strong tool calling, near-free pricing
 DEFAULT_TIMEOUT = 30.0
 RETRY_TIMEOUT = 60.0
 
@@ -32,7 +32,7 @@ class GLMClient:
         
         Args:
             api_key: GLM API key (defaults to Z_AI_API_KEY env var)
-            model: Model name (defaults to Z_AI_MODEL env var or GLM-4.5-Air)
+            model: Model name (defaults to Z_AI_MODEL env var or GLM-4.7-FlashX)
         """
         self.api_key = api_key or Z_AI_API_KEY
         self.model = model or Z_AI_MODEL

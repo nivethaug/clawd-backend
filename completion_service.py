@@ -8,7 +8,7 @@ specifications that can be sent directly to DreamAgent Project AI.
 import logging
 from typing import Optional, List, Dict, Any
 
-from groq_service import GroqService
+from services.ai.glm_client import GLMClient, get_glm_client
 
 logger = logging.getLogger(__name__)
 
@@ -273,33 +273,32 @@ Custom Project Editing Rules:
 
     def __init__(self):
         """Initialize completion service."""
-        self.groq_service: Optional[GroqService] = None
-        self._initialize_groq()
+        self.glm_client: Optional[GLMClient] = None
+        self._initialize_glm()
 
-    def _initialize_groq(self) -> None:
-        """Initialize Groq service if configured."""
+    def _initialize_glm(self) -> None:
+        """Initialize GLM service using the shared GLM client."""
         try:
-            self.groq_service = GroqService()
-            if self.groq_service.is_configured():
-                logger.info("Groq completion service initialized successfully")
+            self.glm_client = get_glm_client()
+            if self.is_available():
+                logger.info(
+                    "GLM completion service initialized successfully "
+                    f"(model={self.glm_client.model})"
+                )
             else:
-                logger.warning("Groq completion service not properly configured")
-                self.groq_service = None
-        except ValueError:
-            logger.warning("GROQ_API_KEY not configured, completion service unavailable")
-            self.groq_service = None
+                logger.warning("Z_AI_API_KEY not configured, completion service unavailable")
         except Exception as e:
-            logger.error(f"Failed to initialize Groq completion service: {e}")
-            self.groq_service = None
+            logger.error(f"Failed to initialize GLM completion service: {e}")
+            self.glm_client = None
 
     def is_available(self) -> bool:
         """
         Check if completion service is available.
 
         Returns:
-            True if Groq service is configured and ready
+            True if GLM service is configured and ready
         """
-        return self.groq_service is not None
+        return bool(self.glm_client and self.glm_client.api_key)
 
     def normalize_project_type(self, project_type: str) -> str:
         """
@@ -435,7 +434,7 @@ Custom Project Editing Rules:
 
         return f"{system_prompt}\n\n{self.CONVERSATION_WORKFLOW_PROMPT}\n\n{project_type_prompt}"
 
-    def build_groq_messages(
+    def build_llm_messages(
         self,
         project_type: str,
         mode: str,
@@ -443,7 +442,7 @@ Custom Project Editing Rules:
         generate_prompt: bool = False,
     ) -> List[Dict[str, str]]:
         """
-        Build the Groq message array with DreamAgent prompt-builder context.
+        Build the LLM message array with DreamAgent prompt-builder context.
 
         Args:
             project_type: Type of project
@@ -452,7 +451,7 @@ Custom Project Editing Rules:
             generate_prompt: Whether the user clicked the Generate Prompt action
 
         Returns:
-            Messages ready to send to Groq
+            Messages ready to send to the configured LLM
         """
         canonical_project_type = self.normalize_project_type(project_type)
         canonical_mode = self.normalize_mode(mode)
@@ -471,7 +470,7 @@ Prompt Assistant Role: Act as a confident conversational AI Prompt Builder. Bias
 
 Conversation:"""
 
-        groq_messages = [
+        llm_messages = [
             {"role": "system", "content": self.get_system_prompt(canonical_project_type, canonical_mode)},
         ]
         copied_messages = [dict(message) for message in messages]
@@ -480,12 +479,12 @@ Conversation:"""
             copied_messages[0]["content"] = (
                 f"{context_prefix}\n\n{copied_messages[0]['content']}"
             )
-            groq_messages.extend(copied_messages)
+            llm_messages.extend(copied_messages)
         else:
-            groq_messages.append({"role": "user", "content": context_prefix})
-            groq_messages.extend(copied_messages)
+            llm_messages.append({"role": "user", "content": context_prefix})
+            llm_messages.extend(copied_messages)
 
-        return groq_messages
+        return llm_messages
 
     async def complete(
         self,
@@ -507,7 +506,7 @@ Conversation:"""
             Dict with success status and message or error
 
         Raises:
-            RuntimeError: If Groq service is not available
+            RuntimeError: If GLM service is not available
         """
         canonical_project_type = self.normalize_project_type(project_type)
         canonical_mode = self.normalize_mode(mode)
@@ -523,9 +522,9 @@ Conversation:"""
                 sanitized_messages.append(clean)
 
         if not self.is_available():
-            raise RuntimeError("Completion service not available - GROQ_API_KEY not configured")
+            raise RuntimeError("Completion service not available - Z_AI_API_KEY not configured")
 
-        groq_messages = self.build_groq_messages(
+        llm_messages = self.build_llm_messages(
             canonical_project_type,
             canonical_mode,
             sanitized_messages,
@@ -533,11 +532,17 @@ Conversation:"""
         )
 
         try:
-            assistant_content = await self.groq_service.generate_chat_completion(
-                messages=groq_messages,
+            response = await self.glm_client.chat_with_tools(
+                messages=llm_messages,
+                tools=[],
+                tool_choice="none",
                 temperature=self.COMPLETION_TEMPERATURE,
                 max_tokens=self.COMPLETION_MAX_TOKENS,
             )
+            assistant_content = self.glm_client.get_text_response(response).strip()
+            if not assistant_content:
+                logger.warning("GLM completion returned an empty response")
+                raise RuntimeError("GLM API returned empty completion")
 
             return {
                 "success": True,
@@ -545,6 +550,7 @@ Conversation:"""
                     "role": "assistant",
                     "content": assistant_content,
                 },
+                "usage": response.get("usage"),
             }
 
         except Exception as e:
