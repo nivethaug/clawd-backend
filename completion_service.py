@@ -265,6 +265,12 @@ Custom Project Editing Rules:
         "trading bot": "tradingbot",
     }
 
+    MODE_ALIASES = {
+        "edit": "modify",
+        "refactor": "modify",
+        "debug": "modify",
+    }
+
     def __init__(self):
         """Initialize completion service."""
         self.groq_service: Optional[GroqService] = None
@@ -307,6 +313,19 @@ Custom Project Editing Rules:
         """
         normalized = str(project_type or "").strip().lower()
         return self.PROJECT_TYPE_ALIASES.get(normalized, normalized)
+
+    def normalize_mode(self, mode: str) -> str:
+        """
+        Normalize completion mode names from the UI or older callers.
+
+        Args:
+            mode: Raw mode value from the request
+
+        Returns:
+            Canonical mode key used by the prompt builder
+        """
+        normalized = str(mode or "").strip().lower()
+        return self.MODE_ALIASES.get(normalized, normalized)
 
     def sanitize_message(self, msg: Dict[str, str]) -> Optional[Dict[str, str]]:
         """
@@ -366,8 +385,9 @@ Custom Project Editing Rules:
                 f"{', '.join(valid_project_types)}",
             )
 
-        if mode not in ["create", "modify"]:
-            return False, f"Invalid mode '{mode}'. Must be either 'create' or 'modify'"
+        canonical_mode = self.normalize_mode(mode)
+        if canonical_mode not in ["create", "modify"]:
+            return False, f"Invalid mode '{mode}'. Must be one of: create, modify, edit"
 
         if not messages or len(messages) == 0:
             return False, "messages array is required and cannot be empty"
@@ -399,7 +419,8 @@ Custom Project Editing Rules:
             Mode-specific system prompt plus one project-specific block
         """
         canonical_project_type = self.normalize_project_type(project_type)
-        if mode == "modify":
+        canonical_mode = self.normalize_mode(mode)
+        if canonical_mode == "modify":
             system_prompt = self.MODIFY_PROMPT_SYSTEM
             project_type_prompt = self.MODIFY_PROJECT_TYPE_PROMPTS.get(
                 canonical_project_type,
@@ -434,15 +455,16 @@ Custom Project Editing Rules:
             Messages ready to send to Groq
         """
         canonical_project_type = self.normalize_project_type(project_type)
+        canonical_mode = self.normalize_mode(mode)
         output_target = (
             "A concise, premium project creation prompt for DreamAgent Project AI."
-            if mode == "create"
+            if canonical_mode == "create"
             else "A precise incremental edit prompt for DreamAgent Project AI."
         )
 
         context_prefix = f"""[DreamAgent Prompt Builder Context]
 Project Type: {canonical_project_type}
-Mode: {mode}
+Mode: {canonical_mode}
 Generate Prompt Action: {str(generate_prompt).lower()}
 Output Target: {output_target}
 Prompt Assistant Role: Act as a confident conversational AI Prompt Builder. Bias toward creating, infer tasteful defaults, and never wait for perfect information. Ask at most two follow-up rounds. When the conversation has enough MVP direction but is not confirmed, show a 4-8 bullet recommendation summary and ask once for confirmation. If Generate Prompt Action is true or the user has confirmed/given an explicit generate instruction, produce the final DreamAgent Project AI prompt for this mode.
@@ -450,7 +472,7 @@ Prompt Assistant Role: Act as a confident conversational AI Prompt Builder. Bias
 Conversation:"""
 
         groq_messages = [
-            {"role": "system", "content": self.get_system_prompt(canonical_project_type, mode)},
+            {"role": "system", "content": self.get_system_prompt(canonical_project_type, canonical_mode)},
         ]
         copied_messages = [dict(message) for message in messages]
 
@@ -488,8 +510,9 @@ Conversation:"""
             RuntimeError: If Groq service is not available
         """
         canonical_project_type = self.normalize_project_type(project_type)
+        canonical_mode = self.normalize_mode(mode)
 
-        is_valid, error_msg = self.validate_request(canonical_project_type, mode, messages)
+        is_valid, error_msg = self.validate_request(canonical_project_type, canonical_mode, messages)
         if not is_valid:
             return {"success": False, "error": error_msg}
 
@@ -504,7 +527,7 @@ Conversation:"""
 
         groq_messages = self.build_groq_messages(
             canonical_project_type,
-            mode,
+            canonical_mode,
             sanitized_messages,
             generate_prompt=generate_prompt,
         )

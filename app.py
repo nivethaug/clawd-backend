@@ -380,7 +380,7 @@ class ChatMessage(BaseModel):
 
 class CompletionRequest(BaseModel):
     projectType: str = Field(..., description="Type of project (website, telegrambot, discordbot, tradingbot, scheduler, custom)")
-    mode: str = Field(..., description="Operation mode (create or modify)")
+    mode: str = Field(..., description="Operation mode (create, modify, or edit alias)")
     messages: list[ChatMessage] = Field(..., description="Array of chat messages (conversation history)")
     generatePrompt: bool = Field(False, description="Force final DreamAgent prompt generation after conversational refinement")
 
