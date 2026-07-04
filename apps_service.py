@@ -443,6 +443,167 @@ def get_apps_list(user_id: int) -> Dict[str, List[Dict[str, Any]]]:
 # PM2 Control Actions
 # ============================================================================
 
+def _normalize_domain(project_domain: str) -> str:
+    """Return the subdomain used in PM2 process names."""
+    if project_domain and "." in project_domain:
+        return project_domain.split(".")[0]
+    return project_domain or ""
+
+
+def _get_project_for_runtime_action(project_domain: str) -> Optional[Dict[str, Any]]:
+    """Resolve a project by domain/name for backwards-compatible app actions."""
+    normalized = _normalize_domain(project_domain)
+    if not normalized:
+        return None
+
+    try:
+        with get_db() as cur:
+            cur.execute("""
+                SELECT id, name, domain, type_id, project_path
+                FROM projects
+                WHERE domain = %s OR name = %s
+                ORDER BY id DESC
+                LIMIT 1
+            """, (normalized, normalized))
+            row = cur.fetchone()
+            return dict(row) if row and not isinstance(row, dict) else row
+    except Exception as e:
+        logger.warning(f"Failed to resolve project for runtime action: {e}")
+        return None
+
+
+def _update_project_runtime_status(project_id: int, status: str) -> None:
+    """Persist the project lifecycle status after a runtime action."""
+    with get_db() as cur:
+        cur.execute("UPDATE projects SET status = %s WHERE id = %s", (status, project_id))
+        conn = cur._connection
+        conn.commit()
+
+
+def _run_pm2_action(process_names: List[str], action: str) -> Dict[str, Any]:
+    """Execute a PM2 lifecycle command against one or more process names."""
+    action_map = {
+        "start": "start",
+        "stop": "stop",
+        "restart": "restart",
+        "pause": "stop",
+    }
+
+    pm2_cmd = action_map.get(action)
+    if not pm2_cmd:
+        return {"success": False, "error": f"Unknown action: {action}"}
+
+    results = []
+    for proc_name in dict.fromkeys([name for name in process_names if name]):
+        try:
+            result = subprocess.run(
+                ["pm2", pm2_cmd, proc_name],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                results.append({"process": proc_name, "success": True})
+            else:
+                results.append({
+                    "process": proc_name,
+                    "success": False,
+                    "error": result.stderr or result.stdout
+                })
+        except subprocess.TimeoutExpired:
+            results.append({"process": proc_name, "success": False, "error": "Timeout"})
+        except Exception as e:
+            results.append({"process": proc_name, "success": False, "error": str(e)})
+
+    successes = [r for r in results if r.get("success")]
+    if successes:
+        global _pm2_cache
+        _pm2_cache = {"data": None, "timestamp": 0}
+
+        return {
+            "success": True,
+            "message": f"{action.capitalize()} successful for {len(successes)} process(es)",
+            "details": results
+        }
+
+    return {
+        "success": False,
+        "error": f"Failed to {action} any processes",
+        "details": results
+    }
+
+
+def _get_process_names_for_project(project: Dict[str, Any], fallback_domain: str) -> List[str]:
+    """Return the PM2 process names for a project type."""
+    project_id = project.get("id")
+    type_id = project.get("type_id")
+    domain = _normalize_domain(project.get("domain") or fallback_domain)
+
+    if type_id == 1:
+        return [f"{domain}-frontend", f"{domain}-backend"]
+    if type_id == 2:
+        return [f"{domain}-bot", f"tg-bot-{project_id}"]
+    if type_id == 3:
+        return [f"dc-bot-{project_id}"]
+    if type_id == 4:
+        return [f"tg-bot-{project_id}"]
+    if type_id == 6:
+        return [f"{domain}-backend"]
+
+    if domain:
+        return [f"{domain}-frontend", f"{domain}-backend", f"{domain}-bot", f"{domain}-backend"]
+    return [f"tg-bot-{project_id}"]
+
+
+def _scheduler_project_action(project_id: int, action: str) -> Dict[str, Any]:
+    """
+    Pause/resume a scheduler project without stopping the shared clawd-scheduler PM2 process.
+
+    Scheduler projects are served by one centralized worker, so pausing the project
+    means pausing that project's jobs in the database.
+    """
+    try:
+        if action in ("pause", "stop"):
+            with get_db() as cur:
+                cur.execute("""
+                    UPDATE scheduler_jobs
+                    SET status = 'paused'
+                    WHERE project_id = %s AND status = 'active'
+                """, (project_id,))
+                paused_count = cur._cursor.rowcount
+                conn = cur._connection
+                conn.commit()
+
+            _update_project_runtime_status(project_id, "stopped")
+            return {
+                "success": True,
+                "message": f"Paused {paused_count} scheduler job(s)",
+                "details": [{"project_id": project_id, "paused_jobs": paused_count}]
+            }
+
+        if action in ("start", "restart"):
+            from services.scheduler.jobs import list_jobs, resume_job
+
+            resumed_count = 0
+            for job in list_jobs(project_id):
+                if job.get("status") == "paused":
+                    resume_job(int(job["id"]))
+                    resumed_count += 1
+
+            _update_project_runtime_status(project_id, "ready")
+            return {
+                "success": True,
+                "message": f"Resumed {resumed_count} scheduler job(s)",
+                "details": [{"project_id": project_id, "resumed_jobs": resumed_count}]
+            }
+
+        return {"success": False, "error": f"Unsupported scheduler action: {action}"}
+    except Exception as e:
+        logger.error(f"Scheduler project action failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
 def pm2_action(project_domain: str, action: str) -> Dict[str, Any]:
     """
     Execute a PM2 action on a project.
@@ -454,67 +615,28 @@ def pm2_action(project_domain: str, action: str) -> Dict[str, Any]:
     Returns:
         Dict with success status and message
     """
-    # Extract subdomain from full domain if needed
-    if project_domain and "." in project_domain:
-        project_domain = project_domain.split(".")[0]
-    
-    # Map action to PM2 command
-    action_map = {
-        "start": "start",
-        "stop": "stop", 
-        "restart": "restart",
-        "pause": "stop"  # pause = stop
-    }
-    
-    pm2_cmd = action_map.get(action)
-    if not pm2_cmd:
-        return {"success": False, "error": f"Unknown action: {action}"}
-    
-    # Build process names using domain
-    process_names = [
-        f"{project_domain}-frontend",
-        f"{project_domain}-backend"
-    ]
-    
-    results = []
-    for proc_name in process_names:
-        try:
-            result = subprocess.run(
-                ["pm2", pm2_cmd, proc_name],
-                capture_output=True,
-                text=True,
-                timeout=30  # Increased from 10s to allow graceful shutdowns
-            )
-            
-            if result.returncode == 0:
-                results.append({"process": proc_name, "success": True})
-            else:
-                results.append({"process": proc_name, "success": False, "error": result.stderr})
-                
-        except subprocess.TimeoutExpired:
-            results.append({"process": proc_name, "success": False, "error": "Timeout"})
-        except Exception as e:
-            results.append({"process": proc_name, "success": False, "error": str(e)})
-    
-    # Check if any succeeded
-    successes = [r for r in results if r.get("success")]
-    
-    if successes:
-        # Clear PM2 cache to force refresh
-        global _pm2_cache
-        _pm2_cache = {"data": None, "timestamp": 0}
-        
-        return {
-            "success": True,
-            "message": f"{action.capitalize()} successful for {len(successes)} process(es)",
-            "details": results
-        }
+    project = _get_project_for_runtime_action(project_domain)
+
+    if project and project.get("type_id") == 5:
+        return _scheduler_project_action(int(project["id"]), action)
+
+    if project:
+        process_names = _get_process_names_for_project(project, project_domain)
     else:
-        return {
-            "success": False,
-            "error": f"Failed to {action} any processes",
-            "details": results
-        }
+        normalized = _normalize_domain(project_domain)
+        process_names = [f"{normalized}-frontend", f"{normalized}-backend"]
+
+    result = _run_pm2_action(process_names, action)
+
+    if result.get("success") and project:
+        next_status = "stopped" if action in ("pause", "stop") else "ready"
+        try:
+            _update_project_runtime_status(int(project["id"]), next_status)
+        except Exception as e:
+            logger.warning(f"PM2 action succeeded but status update failed: {e}")
+            result["status_warning"] = str(e)
+
+    return result
 
 
 # ============================================================================
