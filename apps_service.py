@@ -223,6 +223,12 @@ STATUS_MAP = {
     "failed": "needs_fix",
     "stopped": "stopped",
     "creating": "creating",
+    "scaffolded": "creating",
+    "initializing": "creating",
+    "building": "creating",
+    "deploying": "creating",
+    "verifying": "creating",
+    "provisioning": "creating",
     "infrastructure_provisioning": "creating",
     "ai_provisioning": "creating",
 }
@@ -523,7 +529,7 @@ class AppItem(BaseModel):
     project_id: int = Field(..., description="Project ID")
     name: str = Field(..., description="Project name")
     type: str = Field(..., description="Project type (website, telegrambot, etc.)")
-    status: str = Field(..., description="UI status (running, needs_fix, stopped)")
+    status: str = Field(..., description="UI status (running, needs_fix, stopped, creating)")
     uptime: int = Field(0, description="Uptime in seconds")
     uptime_label: str = Field(..., description="Human-readable uptime")
     domain: Optional[str] = Field(None, description="Project URL")

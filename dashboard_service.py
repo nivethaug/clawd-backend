@@ -98,6 +98,12 @@ STATUS_MAP = {
     "failed": ("needs_fix", "Needs Fix"),
     "stopped": ("stopped", "Stopped"),
     "creating": ("creating", "Setting up..."),
+    "scaffolded": ("creating", "Preparing workspace..."),
+    "initializing": ("creating", "Initializing..."),
+    "building": ("creating", "Building..."),
+    "deploying": ("creating", "Deploying..."),
+    "verifying": ("creating", "Verifying..."),
+    "provisioning": ("creating", "Provisioning..."),
     "infrastructure_provisioning": ("creating", "Provisioning..."),
     "ai_provisioning": ("creating", "AI customizing..."),
 }
@@ -105,6 +111,12 @@ STATUS_MAP = {
 # Status to progress mapping
 PROGRESS_MAP = {
     "creating": 1,
+    "scaffolded": 2,
+    "initializing": 3,
+    "building": 5,
+    "deploying": 6,
+    "verifying": 8,
+    "provisioning": 4,
     "infrastructure_provisioning": 4,
     "ai_provisioning": 8,
     "ready": 9,
@@ -120,6 +132,12 @@ ACTIONS_MAP = {
     "failed": ["fix", "code", "delete"],
     "stopped": ["start", "code", "delete"],
     "creating": [],
+    "scaffolded": [],
+    "initializing": [],
+    "building": [],
+    "deploying": [],
+    "verifying": [],
+    "provisioning": [],
     "infrastructure_provisioning": [],
     "ai_provisioning": [],
 }
@@ -194,7 +212,7 @@ def get_project_stats(user_id: int) -> Dict[str, int]:
         COUNT(*) FILTER (WHERE status = 'ready') AS running,
         COUNT(*) FILTER (WHERE status IN ('error', 'failed')) AS needs_fix,
         COUNT(*) FILTER (WHERE status = 'stopped') AS stopped,
-        COUNT(*) FILTER (WHERE status IN ('creating', 'infrastructure_provisioning', 'ai_provisioning')) AS creating
+        COUNT(*) FILTER (WHERE status IN ('creating', 'scaffolded', 'initializing', 'building', 'deploying', 'verifying', 'provisioning', 'infrastructure_provisioning', 'ai_provisioning')) AS creating
     FROM projects
     WHERE user_id = %s;
     """
