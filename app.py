@@ -7836,11 +7836,11 @@ async def completion(request: CompletionRequest):
         raise  # Re-raise HTTP exceptions as-is
 
     except RuntimeError as e:
-        # Service unavailable (e.g., GLM not configured)
+        # Service unavailable (e.g., OpenRouter not configured)
         if "not available" in str(e).lower() or "not configured" in str(e).lower():
             return CompletionResponse(
                 success=False,
-                error="Completion service not available - Z_AI_API_KEY not configured"
+                error="Completion service not available - OPENROUTER_API_KEY not configured"
             )
         raise HTTPException(status_code=502, detail=str(e))
 

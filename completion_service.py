@@ -8,10 +8,7 @@ specifications that can be sent directly to DreamAgent Project AI.
 import logging
 from typing import Optional, List, Dict, Any
 
-from services.ai.prompt_assistant_glm_client import (
-    PromptAssistantGLMClient,
-    get_prompt_assistant_glm_client,
-)
+from services.ai.openrouter_client import OpenRouterClient, get_openrouter_client
 
 logger = logging.getLogger(__name__)
 
@@ -276,32 +273,33 @@ Custom Project Editing Rules:
 
     def __init__(self):
         """Initialize completion service."""
-        self.glm_client: Optional[PromptAssistantGLMClient] = None
-        self._initialize_glm()
+        self.openrouter_client: Optional[OpenRouterClient] = None
+        self._initialize_openrouter()
 
-    def _initialize_glm(self) -> None:
-        """Initialize GLM service using the Prompt Assistant GLM client."""
+    def _initialize_openrouter(self) -> None:
+        """Initialize OpenRouter service for Prompt Assistant completions."""
         try:
-            self.glm_client = get_prompt_assistant_glm_client()
+            self.openrouter_client = get_openrouter_client()
             if self.is_available():
                 logger.info(
-                    "GLM completion service initialized successfully "
-                    f"(model={self.glm_client.model})"
+                    "OpenRouter completion service initialized successfully "
+                    f"(model={self.openrouter_client.model}, "
+                    f"provider={self.openrouter_client.provider_strategy})"
                 )
             else:
-                logger.warning("Z_AI_API_KEY not configured, completion service unavailable")
+                logger.warning("OPENROUTER_API_KEY not configured, completion service unavailable")
         except Exception as e:
-            logger.error(f"Failed to initialize GLM completion service: {e}")
-            self.glm_client = None
+            logger.error(f"Failed to initialize OpenRouter completion service: {e}")
+            self.openrouter_client = None
 
     def is_available(self) -> bool:
         """
         Check if completion service is available.
 
         Returns:
-            True if GLM service is configured and ready
+            True if OpenRouter service is configured and ready
         """
-        return bool(self.glm_client and self.glm_client.api_key)
+        return bool(self.openrouter_client and self.openrouter_client.api_key)
 
     def normalize_project_type(self, project_type: str) -> str:
         """
@@ -509,7 +507,7 @@ Conversation:"""
             Dict with success status and message or error
 
         Raises:
-            RuntimeError: If GLM service is not available
+            RuntimeError: If OpenRouter service is not available
         """
         canonical_project_type = self.normalize_project_type(project_type)
         canonical_mode = self.normalize_mode(mode)
@@ -525,7 +523,7 @@ Conversation:"""
                 sanitized_messages.append(clean)
 
         if not self.is_available():
-            raise RuntimeError("Completion service not available - Z_AI_API_KEY not configured")
+            raise RuntimeError("Completion service not available - OPENROUTER_API_KEY not configured")
 
         llm_messages = self.build_llm_messages(
             canonical_project_type,
@@ -535,17 +533,15 @@ Conversation:"""
         )
 
         try:
-            response = await self.glm_client.chat_with_tools(
+            response = await self.openrouter_client.chat_completion(
                 messages=llm_messages,
-                tools=[],
-                tool_choice="none",
                 temperature=self.COMPLETION_TEMPERATURE,
                 max_tokens=self.COMPLETION_MAX_TOKENS,
             )
-            assistant_content = self.glm_client.get_text_response(response).strip()
+            assistant_content = self.openrouter_client.get_text_response(response).strip()
             if not assistant_content:
-                logger.warning("GLM completion returned an empty response")
-                raise RuntimeError("GLM API returned empty completion")
+                logger.warning("OpenRouter completion returned an empty response")
+                raise RuntimeError("OpenRouter API returned empty completion")
 
             return {
                 "success": True,
@@ -553,7 +549,7 @@ Conversation:"""
                     "role": "assistant",
                     "content": assistant_content,
                 },
-                "usage": response.get("usage"),
+                "usage": self.openrouter_client.get_usage(response),
             }
 
         except Exception as e:

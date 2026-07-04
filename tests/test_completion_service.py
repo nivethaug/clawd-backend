@@ -5,7 +5,7 @@ from completion_service import CompletionService
 
 def make_service():
     service = CompletionService.__new__(CompletionService)
-    service.groq_service = None
+    service.openrouter_client = None
     return service
 
 
@@ -268,61 +268,61 @@ def test_project_type_aliases_resolve_to_canonical_prompt(
 ):
     service = make_service()
 
-    groq_messages = service.build_groq_messages(
+    llm_messages = service.build_llm_messages(
         raw_project_type,
         "create",
         [{"role": "user", "content": "hi"}],
     )
 
     assert service.normalize_project_type(raw_project_type) == canonical_project_type
-    assert expected_heading in groq_messages[0]["content"]
-    assert f"Project Type: {canonical_project_type}" in groq_messages[1]["content"]
+    assert expected_heading in llm_messages[0]["content"]
+    assert f"Project Type: {canonical_project_type}" in llm_messages[1]["content"]
 
 
-def test_build_groq_messages_injects_mode_specific_context_without_mutating_input():
+def test_build_llm_messages_injects_mode_specific_context_without_mutating_input():
     service = make_service()
     messages = [{"role": "user", "content": "Jurassic website"}]
 
-    groq_messages = service.build_groq_messages("website", "create", messages)
+    llm_messages = service.build_llm_messages("website", "create", messages)
 
-    assert groq_messages[0]["role"] == "system"
-    assert "Project Creation mode" in groq_messages[0]["content"]
-    assert "Website Creation Rules" in groq_messages[0]["content"]
-    assert "Telegram Bot Creation Rules" not in groq_messages[0]["content"]
-    assert "DreamAgent Prompt Builder Context" in groq_messages[1]["content"]
-    assert "Project Type: website" in groq_messages[1]["content"]
-    assert "Mode: create" in groq_messages[1]["content"]
-    assert "Generate Prompt Action: false" in groq_messages[1]["content"]
-    assert "Jurassic website" in groq_messages[1]["content"]
+    assert llm_messages[0]["role"] == "system"
+    assert "Project Creation mode" in llm_messages[0]["content"]
+    assert "Website Creation Rules" in llm_messages[0]["content"]
+    assert "Telegram Bot Creation Rules" not in llm_messages[0]["content"]
+    assert "DreamAgent Prompt Builder Context" in llm_messages[1]["content"]
+    assert "Project Type: website" in llm_messages[1]["content"]
+    assert "Mode: create" in llm_messages[1]["content"]
+    assert "Generate Prompt Action: false" in llm_messages[1]["content"]
+    assert "Jurassic website" in llm_messages[1]["content"]
     assert messages[0]["content"] == "Jurassic website"
 
 
-def test_build_groq_messages_marks_generate_prompt_action():
+def test_build_llm_messages_marks_generate_prompt_action():
     service = make_service()
 
-    groq_messages = service.build_groq_messages(
+    llm_messages = service.build_llm_messages(
         "website",
         "create",
         [{"role": "user", "content": "Generate the final prompt now"}],
         generate_prompt=True,
     )
 
-    assert "Generate Prompt Action: true" in groq_messages[1]["content"]
+    assert "Generate Prompt Action: true" in llm_messages[1]["content"]
 
 
-def test_build_groq_messages_uses_modify_prompt_for_modify_mode():
+def test_build_llm_messages_uses_modify_prompt_for_modify_mode():
     service = make_service()
 
-    groq_messages = service.build_groq_messages(
+    llm_messages = service.build_llm_messages(
         "website",
         "modify",
         [{"role": "user", "content": "Make the hero more premium"}],
     )
 
-    assert "Project Editing mode" in groq_messages[0]["content"]
-    assert "Website Editing Rules" in groq_messages[0]["content"]
-    assert "Website Creation Rules" not in groq_messages[0]["content"]
-    assert "Mode: modify" in groq_messages[1]["content"]
+    assert "Project Editing mode" in llm_messages[0]["content"]
+    assert "Website Editing Rules" in llm_messages[0]["content"]
+    assert "Website Creation Rules" not in llm_messages[0]["content"]
+    assert "Mode: modify" in llm_messages[1]["content"]
 
 
 def test_sanitize_message_rejects_client_system_role():
@@ -344,15 +344,26 @@ async def test_complete_uses_llm_for_greeting_instead_of_hardcoded_response():
 
 
 @pytest.mark.asyncio
-async def test_complete_sends_greeting_to_groq_when_generate_prompt_is_forced():
-    class FakeGroq:
-        async def generate_chat_completion(self, messages, temperature=None, max_tokens=None):
+async def test_complete_sends_greeting_to_openrouter_when_generate_prompt_is_forced():
+    class FakeOpenRouter:
+        api_key = "test-key"
+
+        async def chat_completion(self, messages, temperature=None, max_tokens=None):
             self.messages = messages
-            return "Final DreamAgent Project AI prompt."
+            return {
+                "choices": [{"message": {"content": "Final DreamAgent Project AI prompt."}}],
+                "usage": {"total_tokens": 12},
+            }
+
+        def get_text_response(self, response):
+            return response["choices"][0]["message"]["content"]
+
+        def get_usage(self, response):
+            return response.get("usage", {})
 
     service = make_service()
-    fake_groq = FakeGroq()
-    service.groq_service = fake_groq
+    fake_openrouter = FakeOpenRouter()
+    service.openrouter_client = fake_openrouter
 
     result = await service.complete(
         project_type="website",
@@ -363,21 +374,33 @@ async def test_complete_sends_greeting_to_groq_when_generate_prompt_is_forced():
 
     assert result["success"] is True
     assert result["message"]["content"] == "Final DreamAgent Project AI prompt."
-    assert "Generate Prompt Action: true" in fake_groq.messages[1]["content"]
+    assert result["usage"]["total_tokens"] == 12
+    assert "Generate Prompt Action: true" in fake_openrouter.messages[1]["content"]
 
 
 @pytest.mark.asyncio
-async def test_complete_passes_prompt_builder_settings_to_groq():
-    class FakeGroq:
-        async def generate_chat_completion(self, messages, temperature=None, max_tokens=None):
+async def test_complete_passes_prompt_builder_settings_to_openrouter():
+    class FakeOpenRouter:
+        api_key = "test-key"
+
+        async def chat_completion(self, messages, temperature=None, max_tokens=None):
             self.messages = messages
             self.temperature = temperature
             self.max_tokens = max_tokens
-            return "Build a cinematic Jurassic website prompt."
+            return {
+                "choices": [{"message": {"content": "Build a cinematic Jurassic website prompt."}}],
+                "usage": {"total_tokens": 24},
+            }
+
+        def get_text_response(self, response):
+            return response["choices"][0]["message"]["content"]
+
+        def get_usage(self, response):
+            return response.get("usage", {})
 
     service = make_service()
-    fake_groq = FakeGroq()
-    service.groq_service = fake_groq
+    fake_openrouter = FakeOpenRouter()
+    service.openrouter_client = fake_openrouter
 
     result = await service.complete(
         project_type="website",
@@ -387,9 +410,9 @@ async def test_complete_passes_prompt_builder_settings_to_groq():
 
     assert result["success"] is True
     assert result["message"]["role"] == "assistant"
-    assert fake_groq.temperature == CompletionService.COMPLETION_TEMPERATURE
-    assert fake_groq.max_tokens == CompletionService.COMPLETION_MAX_TOKENS
-    assert "Project Creation mode" in fake_groq.messages[0]["content"]
-    assert "Website Creation Rules" in fake_groq.messages[0]["content"]
-    assert "Telegram Bot Creation Rules" not in fake_groq.messages[0]["content"]
-    assert "DreamAgent Prompt Builder Context" in fake_groq.messages[1]["content"]
+    assert fake_openrouter.temperature == CompletionService.COMPLETION_TEMPERATURE
+    assert fake_openrouter.max_tokens == CompletionService.COMPLETION_MAX_TOKENS
+    assert "Project Creation mode" in fake_openrouter.messages[0]["content"]
+    assert "Website Creation Rules" in fake_openrouter.messages[0]["content"]
+    assert "Telegram Bot Creation Rules" not in fake_openrouter.messages[0]["content"]
+    assert "DreamAgent Prompt Builder Context" in fake_openrouter.messages[1]["content"]
