@@ -5827,6 +5827,76 @@ async def save_file_content(
         raise HTTPException(status_code=403, detail="Permission denied")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+
+@app.post("/projects/{project_id}/editor/build-publish", response_model=BuildPublishResponse)
+async def build_publish_from_editor(project_id: int):
+    """
+    Build and publish a project from the code editor.
+
+    Reuses the same rebuild flow that rollback uses so code edits are published
+    consistently across websites, bots, and scheduler projects.
+    """
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, name, project_path FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    project_path = project["project_path"]
+    project_name = project["name"]
+    if not project_path:
+        raise HTTPException(status_code=400, detail="Project has no file system path")
+
+    if not Path(project_path).exists():
+        raise HTTPException(status_code=400, detail=f"Project directory not found: {project_path}")
+
+    logger.info(f"[EDITOR] Starting build and publish for project {project_id}")
+
+    try:
+        rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
+
+        if rebuild_status.get("type") == "scheduler":
+            success = not rebuild_status.get("error")
+        elif "restarted" in rebuild_status:
+            success = bool(rebuild_status.get("restarted")) and not rebuild_status.get("error")
+        else:
+            steps = [
+                step for step in (
+                    rebuild_status.get("frontend"),
+                    rebuild_status.get("backend"),
+                )
+                if isinstance(step, dict)
+            ]
+            success = bool(steps) and all(step.get("success") and not step.get("error") for step in steps)
+
+        message = (
+            "Code editor build and publish completed successfully"
+            if success
+            else "Code editor build and publish completed with errors"
+        )
+
+        if success:
+            logger.info(f"[EDITOR] Build and publish completed for project {project_id}")
+        else:
+            logger.error(f"[EDITOR] Build and publish failed for project {project_id}: {rebuild_status}")
+
+        return BuildPublishResponse(
+            success=success,
+            message=message,
+            output=json.dumps(rebuild_status, indent=2),
+            error=None if success else "One or more publish steps failed"
+        )
+    except Exception as e:
+        logger.error(f"[EDITOR] Build and publish error for project {project_id}: {e}")
+        return BuildPublishResponse(
+            success=False,
+            message="Code editor build and publish failed",
+            error=str(e)
+        )
 # ============================================================================
 # Authentication API
 # ============================================================================
