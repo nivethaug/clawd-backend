@@ -78,6 +78,16 @@ def record_usage(
         logger.warning(f"Invalid usage_type '{usage_type}', skipping token tracking")
         return False
 
+    # Guard: token_usage.user_id has a FK to users(id).
+    # Unauthenticated flows (e.g. Prompt Assistant) may pass user_id=0 or
+    # None. Skip gracefully rather than triggering a FK violation.
+    if not user_id or user_id <= 0:
+        logger.debug(
+            f"[TOKEN] Skipping record_usage ({usage_type}, {total_tokens} tokens) — "
+            f"no valid user_id ({user_id})"
+        )
+        return False
+
     # If total_tokens not provided but input+output are, calculate
     if total_tokens == 0 and (input_tokens > 0 or output_tokens > 0):
         total_tokens = input_tokens + output_tokens
