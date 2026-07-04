@@ -7511,10 +7511,78 @@ def _get_pm2_log_specs(project_row) -> list[dict]:
         return [_log_spec("Application", f"tg-bot-{project_id}")]
 
 
+def _format_scheduler_log_line(log_row: dict) -> str:
+    """Format one scheduler execution log entry for the project log viewer."""
+    created_at = log_row.get("created_at") or ""
+    task_type = log_row.get("task_type") or "unknown"
+    schedule_value = log_row.get("schedule_value") or "-"
+    job_id = log_row.get("job_id")
+    status = log_row.get("status") or "unknown"
+    message = log_row.get("message") or ""
+
+    return (
+        f"[{created_at}] job={job_id} task={task_type} "
+        f"schedule={schedule_value} status={status}\n{message}"
+    ).strip()
+
+
+def _build_scheduler_project_logs(project_row, num_lines: int) -> dict:
+    """Build project-specific scheduler execution logs from scheduler_logs."""
+    d = dict(project_row) if not isinstance(project_row, dict) else project_row
+    project_id = d.get("id")
+
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT sl.id, sl.job_id, sj.task_type, sj.schedule_value,
+                   sl.status, sl.message, sl.created_at
+            FROM scheduler_logs sl
+            JOIN scheduler_jobs sj ON sj.id = sl.job_id
+            WHERE sj.project_id = %s
+            ORDER BY sl.created_at DESC
+            LIMIT %s
+            """,
+            (project_id, num_lines),
+        ).fetchall()
+
+    stdout_lines = []
+    stderr_lines = []
+    for row in rows:
+        entry = dict(row) if not isinstance(row, dict) else row
+        line = _format_scheduler_log_line(entry)
+        status = (entry.get("status") or "").lower()
+        if status in {"failed", "error"}:
+            stderr_lines.append(line)
+        else:
+            stdout_lines.append(line)
+
+    stdout_content = "\n\n".join(stdout_lines)
+    stderr_content = "\n\n".join(stderr_lines)
+
+    return {
+        "project_id": project_id,
+        "project_name": d.get("name"),
+        "type_id": d.get("type_id"),
+        "log_groups": [{
+            "label": "Job Executions",
+            "process_name": f"scheduler-project-{project_id}",
+            "process_names": [f"scheduler-project-{project_id}", "clawd-scheduler"],
+            "stdout": stdout_content,
+            "stderr": stderr_content,
+            "stdout_lines": stdout_content.count("\n") + 1 if stdout_content else 0,
+            "stderr_lines": stderr_content.count("\n") + 1 if stderr_content else 0,
+            "exists": bool(rows),
+        }],
+    }
+
+
 def _build_project_logs(project_row, num_lines: int) -> dict:
     """Build the log_groups response for a project."""
-    specs = _get_pm2_log_specs(project_row)
     d = dict(project_row) if not isinstance(project_row, dict) else project_row
+    if d.get("type_id") == 5:
+        return _build_scheduler_project_logs(d, num_lines)
+
+    specs = _get_pm2_log_specs(project_row)
 
     log_groups = []
     for spec in specs:
