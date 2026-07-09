@@ -24,6 +24,10 @@ from workflow_prompt_meta import build_workflow_meta_block
 # Import centralized domain configuration
 from domain_config import BASE_DOMAIN, frontend_domain as _frontend_domain, backend_domain as _backend_domain, DEFAULT_BOT_EMAIL
 
+# Import env var managers for external integration metadata injection
+import env_manager
+import env_registry_service
+
 # Try to import ClaudeCodeAgent (preferred backend)
 try:
     from claude_code_agent import ClaudeCodeAgent
@@ -37,8 +41,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Module-level Claude session cache: project_path -> claude session_id
-# Survives across handler instances so session resume works between messages
+# Module-level Claude session cache: "project_path:chat_session_id" -> claude session_id
+# Keyed by BOTH project_path AND the Dreampilot chat session ID so that:
+#   - Within the same chat, --resume preserves multi-turn context
+#   - A NEW chat in the same project starts fresh (no history replay / token bloat)
 _claude_session_ids: Dict[str, str] = {}
 
 # Configuration
@@ -378,6 +384,7 @@ class ACPChatHandler:
 
 ---
 """
+        integrations_section = self._build_external_integrations_block()
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="scheduler_chat_edit")}
 You are a friendly AI assistant helping a user with their **{self.project_name}** scheduler project.
@@ -780,11 +787,101 @@ Before making any code changes, follow this process:
 ---
 
 {context_section}
-
+{integrations_section}
 ## USER REQUEST
 
 {user_message}
 """
+
+    # ------------------------------------------------------------------
+    # External integrations metadata block
+    # ------------------------------------------------------------------
+
+    # Extra exclusion keys that are user-managed but not useful as
+    # "external integrations" in the prompt (JWT_SECRET is seeded in the
+    # registry as an integration, but it's infra for auth, not an API).
+    _INTEGRATION_EXCLUDE_KEYS: frozenset = frozenset({"JWT_SECRET"})
+    _INTEGRATION_EXCLUDE_PREFIXES: tuple = ("INTERNAL_", "SYSTEM_")
+
+    def _build_external_integrations_block(self) -> str:
+        """
+        Build a markdown section listing the project's configured external
+        integrations (from .env), enriched with registry metadata.
+
+        - Metadata only: key NAMES are shown, never values.
+        - Returns "" if nothing is configured or on any error so chat never
+          breaks.
+        - Derived dynamically from .env + env_variable_registry — no
+          hardcoded provider list.
+        """
+        if not getattr(self, "project_id", None):
+            return ""
+
+        try:
+            env_path, _type, _domain, _name = env_manager.get_project_env_info(
+                self.project_id
+            )
+            vars_list = env_manager.read_env_file(env_path)
+            if not vars_list:
+                return ""
+
+            # Apply additional exclusions beyond SYSTEM_KEYS
+            rows = []
+            keys_to_lookup = []
+            for v in vars_list:
+                key = v["key"]
+                if key in self._INTEGRATION_EXCLUDE_KEYS:
+                    continue
+                if any(key.startswith(p) for p in self._INTEGRATION_EXCLUDE_PREFIXES):
+                    continue
+                rows.append(key)
+                keys_to_lookup.append(key)
+
+            if not rows:
+                return ""
+
+            meta = env_registry_service.lookup_many(keys_to_lookup)
+
+            # Build table rows
+            lines = []
+            for key in rows:
+                m = meta.get(key)
+                if m:
+                    provider = m.get("title") or key
+                    desc = m.get("description") or "Configured"
+                    docs = m.get("docs_url") or "—"
+                else:
+                    provider = key
+                    desc = "Configured (no metadata registered)"
+                    docs = "—"
+                lines.append(f"| {provider} | `{key}` | {desc} | {docs} |")
+
+            table = "\n".join(lines)
+
+            return f"""
+## 🔌 AVAILABLE EXTERNAL INTEGRATIONS (already configured)
+
+The following external services are configured for this project. Reuse them — do NOT ask the user to re-provide credentials.
+
+| Provider | Env Var | Description | Docs |
+|---|---|---|---|
+{table}
+
+**Rules:**
+- These are already set in the environment. Reference by env var name; never request their values.
+- If you need an integration NOT listed here, ask the user to add it and share the docs URL.
+- If you encounter an API with no known integration, ask the user for documentation before using it.
+
+---
+"""
+
+        except Exception as e:
+            logger.warning(f"[ACP-CHAT] Failed to build integrations block: {e}")
+            return ""
+
+    # ------------------------------------------------------------------
+    # Prompt builders
+    # ------------------------------------------------------------------
 
     def _build_chat_prompt(self, user_message: str, session_context: str = "") -> str:
         """
@@ -806,6 +903,7 @@ Before making any code changes, follow this process:
 
 ---
 """
+        integrations_section = self._build_external_integrations_block()
         
         return  f"""{self._workflow_meta_block(operation="edit", prompt_kind="website_chat_edit")}
 You are a friendly AI assistant helping a user build their **{self.project_name}** web application.
@@ -1557,7 +1655,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow, with m
 ---
 
 {context_section}
-
+{integrations_section}
 ## USER'S REQUEST
 
 {user_message}
@@ -1583,6 +1681,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow, with m
 
 ---
 """
+        integrations_section = self._build_external_integrations_block()
         
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="telegram_chat_edit")}
 You are a friendly AI assistant helping a user modify their **{self.project_name}** Telegram bot.
@@ -1967,7 +2066,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 ---
 
 {context_section}
-
+{integrations_section}
 ## USER'S REQUEST
 
 {user_message}
@@ -1995,6 +2094,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 
 ---
 """
+        integrations_section = self._build_external_integrations_block()
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="discord_chat_edit")}
 You are a friendly AI assistant helping a user modify their **{self.project_name}** Discord bot.
@@ -2283,7 +2383,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
 ---
 
 {context_section}
-
+{integrations_section}
 ## USER'S REQUEST
 
 {user_message}
@@ -2932,17 +3032,25 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 # Note: File operations use absolute paths, so cwd doesn't affect them
                 repo_path = str(self.project_path)
                 logger.info(f"[ACP-CHAT] Using repo_path={repo_path} for MCP config lookup")
+
+                # Scope Claude CLI --resume to the SAME Dreampilot chat session only.
+                # Previously keyed by repo_path alone, which meant a new chat in the
+                # same project inherited the old Claude session and replayed 20K+ tokens
+                # of history.  Now: each chat gets its own Claude CLI session.
+                resume_key = f"{repo_path}:{self.session_id}"
+                prev_sid = _claude_session_ids.get(resume_key)
+                logger.info(f"[ACP-CHAT] resume_key={resume_key} has_prev_session={'yes' if prev_sid else 'no (fresh)'}")
                 async with ClaudeCodeAgent(
                     repo_path,
                     on_text=on_chunk,
                     on_progress=on_progress,
-                    resume_session_id=_claude_session_ids.get(repo_path),
+                    resume_session_id=prev_sid,
                 ) as agent:
                     self._active_agent = agent  # Track for cancellation
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     response = await agent.query(prompt)
                     if agent.last_session_id:
-                        _claude_session_ids[repo_path] = agent.last_session_id
+                        _claude_session_ids[resume_key] = agent.last_session_id
                     logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars (extracted answer)")
 
                     # Capture token usage from the agent
