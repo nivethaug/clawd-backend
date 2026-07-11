@@ -4963,10 +4963,16 @@ async def chat_stream_endpoint(
 
         # Save user message to database and commit
         msg_mode = getattr(request, 'mode', 'dream')
-        conn.execute(
-            "INSERT INTO messages (session_id, role, content, mode) VALUES (?, ?, ?, ?)",
-            (session_id, 'user', user_content, msg_mode)
-        )
+        if request.image:
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content, image, mode) VALUES (?, ?, ?, ?, ?)",
+                (session_id, 'user', user_content, request.image, msg_mode)
+            )
+        else:
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content, mode) VALUES (?, ?, ?, ?)",
+                (session_id, 'user', user_content, msg_mode)
+            )
         conn.commit()
         logger.info(f"[STREAM ENDPOINT] User message saved for session {session_id}")
 
