@@ -651,6 +651,9 @@ class ClaudeCodeAgent:
         except asyncio.TimeoutError:
             elapsed = (datetime.now() - start_time).total_seconds()
             logger.error(f"Query timed out after {elapsed:.2f}s (limit: {timeout}s)")
+            # Fetch partial usage so tokens consumed before timeout aren't lost.
+            # Without this, timed-out queries record zero tokens and zero cost.
+            await self._fetch_usage_session(_session_id)
             raise
 
     @staticmethod
