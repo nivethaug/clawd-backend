@@ -7,6 +7,7 @@ import logging
 import subprocess
 import tempfile
 import zipfile
+import base64
 from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator, Any, Optional, Dict, List
@@ -208,6 +209,44 @@ IMAGES_DIR = "/root/clawd/public/images"
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
 IMAGES_BASE_URL = "http://195.200.14.37:8002/images"
+
+IMAGE_MIME_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+
+def decode_chat_image_payload(payload: str) -> tuple[bytes, str]:
+    """
+    Decode an uploaded chat image.
+
+    The frontend sends browser data URLs (data:image/...;base64,...). ACP/MCP
+    needs an actual image file path, so strip the data URL header before
+    decoding and preserve a useful extension for the temp file.
+    """
+    if not payload:
+        raise ValueError("Empty image payload")
+
+    image_payload = payload.strip()
+    extension = ".png"
+
+    if image_payload.startswith("data:"):
+        header, separator, encoded = image_payload.partition(",")
+        if not separator:
+            raise ValueError("Invalid image data URL")
+
+        mime_type = header[5:].split(";", 1)[0].lower()
+        extension = IMAGE_MIME_EXTENSIONS.get(mime_type, extension)
+        image_payload = encoded
+
+    compact_payload = re.sub(r"\s+", "", image_payload)
+    try:
+        return base64.b64decode(compact_payload, validate=True), extension
+    except Exception as exc:
+        raise ValueError("Invalid base64 image payload") from exc
 
 # ============================================================================
 # Initialize Schema
@@ -5018,16 +5057,15 @@ async def chat_stream_endpoint(
             if request.image:
                 logger.info(f"[ACP-STREAM] Image detected, saving to temp file...")
                 # Save image to temp file for ACPX to access
-                import base64
                 import uuid
                 temp_dir = "/tmp/acp_images"
                 os.makedirs(temp_dir, exist_ok=True)
-                image_filename = f"{session_id}_{uuid.uuid4().hex[:8]}.png"
-                image_path = os.path.join(temp_dir, image_filename)
                 
                 try:
                     # Decode and save image
-                    image_data = base64.b64decode(request.image)
+                    image_data, image_extension = decode_chat_image_payload(request.image)
+                    image_filename = f"{session_id}_{uuid.uuid4().hex[:8]}{image_extension}"
+                    image_path = os.path.join(temp_dir, image_filename)
                     with open(image_path, 'wb') as f:
                         f.write(image_data)
                     image_path_for_context = image_path
@@ -5653,7 +5691,6 @@ async def chat_endpoint(
             
             from acp_chat_handler import get_acp_chat_handler
             import asyncio
-            import base64
             import uuid
             
             # Get ACP handler (validates project path)
@@ -5676,12 +5713,12 @@ async def chat_endpoint(
                     # Save image to temp file for ACPX to access
                     temp_dir = "/tmp/acp_images"
                     os.makedirs(temp_dir, exist_ok=True)
-                    image_filename = f"{session_id}_{uuid.uuid4().hex[:8]}.png"
-                    image_path = os.path.join(temp_dir, image_filename)
                     
                     try:
                         # Decode and save image
-                        image_data = base64.b64decode(request.image)
+                        image_data, image_extension = decode_chat_image_payload(request.image)
+                        image_filename = f"{session_id}_{uuid.uuid4().hex[:8]}{image_extension}"
+                        image_path = os.path.join(temp_dir, image_filename)
                         with open(image_path, 'wb') as f:
                             f.write(image_data)
                         image_path_for_context = image_path
