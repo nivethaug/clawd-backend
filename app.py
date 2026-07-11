@@ -32,7 +32,7 @@ from file_utils import FileUtils
 from completion_service import CompletionService
 from claude_code_worker import run_claude_code_background
 from github_service import get_github_service
-from domain_config import BASE_DOMAIN, CONTROL_API_HOST
+from domain_config import BASE_DOMAIN
 import github_oauth_service
 import github_export_service
 import export_service
@@ -207,7 +207,7 @@ CLAWDBOT_SESSIONS_PATH = os.path.expanduser("~/.clawdbot/agents/main/sessions/se
 IMAGES_DIR = "/root/clawd/public/images"
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
-IMAGES_BASE_URL = f"https://{CONTROL_API_HOST}/images"
+IMAGES_BASE_URL = "http://195.200.14.37:8002/images"
 
 # ============================================================================
 # Initialize Schema
@@ -282,6 +282,115 @@ class CreateProjectRequest(BaseModel):
     discord_webhook_url: Optional[str] = None  # Discord webhook URL
     email_to: Optional[str] = None  # Default email recipient (SMTP is shared)
     api_endpoint: Optional[str] = None  # Default API endpoint URL
+
+
+PROJECT_CREATION_IN_PROGRESS_STATUSES = (
+    "creating",
+    "scaffolded",
+    "initializing",
+    "building",
+    "deploying",
+    "verifying",
+    "provisioning",
+    "infrastructure_provisioning",
+    "ai_provisioning",
+)
+
+
+def _get_active_project_creation(user_id: int):
+    """Return the user's newest project that is still in the creation lifecycle."""
+    placeholders = ", ".join("?" for _ in PROJECT_CREATION_IN_PROGRESS_STATUSES)
+    with get_db() as conn:
+        return conn.execute(
+            f"""
+            SELECT id, name, status
+            FROM projects
+            WHERE user_id = ?
+              AND status IN ({placeholders})
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (user_id, *PROJECT_CREATION_IN_PROGRESS_STATUSES),
+        ).fetchone()
+
+
+def _creation_project_field(row, key: str, index: int):
+    if isinstance(row, dict):
+        return row.get(key)
+    return row[index] if row and len(row) > index else None
+
+
+def _require_project_owner(project_id: int, authorization: Optional[str]) -> int:
+    """Require the authenticated user to own a project."""
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, user_id FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project with id {project_id} not found")
+
+    owner_id = project["user_id"] if isinstance(project, dict) else project[1]
+    if str(owner_id) != str(user_id):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+    return user_id
+
+
+def _require_session_owner(session_id: int, authorization: Optional[str]) -> int:
+    """Require the authenticated user to own the project for a session."""
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT s.id, p.user_id
+            FROM sessions s
+            JOIN projects p ON p.id = s.project_id
+            WHERE s.id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    owner_id = row["user_id"] if isinstance(row, dict) else row[1]
+    if str(owner_id) != str(user_id):
+        raise HTTPException(status_code=403, detail="You do not have access to this session")
+
+    return user_id
+
+
+def _require_session_key_owner(session_key: str, authorization: Optional[str]) -> int:
+    """Require the authenticated user to own the project for a session key."""
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT s.id, p.user_id
+            FROM sessions s
+            JOIN projects p ON p.id = s.project_id
+            WHERE s.session_key = ? AND s.archived = 0
+            """,
+            (session_key,),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    owner_id = row["user_id"] if isinstance(row, dict) else row[1]
+    if str(owner_id) != str(user_id):
+        raise HTTPException(status_code=403, detail="You do not have access to this session")
+
+    return user_id
+
+
+def _require_admin_from_authorization(authorization: Optional[str]) -> int:
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+    return user_id
 
 
 class CloneProjectRequest(BaseModel):
@@ -380,9 +489,8 @@ class ChatMessage(BaseModel):
 
 class CompletionRequest(BaseModel):
     projectType: str = Field(..., description="Type of project (website, telegrambot, discordbot, tradingbot, scheduler, custom)")
-    mode: str = Field(..., description="Operation mode (create, modify, or edit alias)")
+    mode: str = Field(..., description="Operation mode (create or modify)")
     messages: list[ChatMessage] = Field(..., description="Array of chat messages (conversation history)")
-    generatePrompt: bool = Field(False, description="Force final DreamAgent prompt generation after conversational refinement")
 
 class CompletionResponse(BaseModel):
     success: bool
@@ -477,10 +585,6 @@ app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])
 from api.telegram_webhook import router as telegram_webhook_router
 app.include_router(telegram_webhook_router, tags=["telegram"])
 
-# Register LemonSqueezy webhook (payment events → credit fulfillment)
-from api.lemonsqueezy_webhook import router as lemonsqueezy_webhook_router
-app.include_router(lemonsqueezy_webhook_router, prefix="/webhooks", tags=["webhooks"])
-
 
 @app.get("/projects", response_model=list[ProjectResponse])
 async def get_projects(authorization: Optional[str] = Header(None)):
@@ -529,6 +633,18 @@ async def get_projects(authorization: Optional[str] = Header(None)):
 async def create_project(request: CreateProjectRequest, authorization: Optional[str] = Header(None)):
     # Get user_id from auth token (not request body)
     user_id = get_user_id_from_token(authorization)
+
+    active_creation = _get_active_project_creation(user_id)
+    if active_creation:
+        active_project_name = _creation_project_field(active_creation, "name", 1) or "another project"
+        active_project_status = _creation_project_field(active_creation, "status", 2) or "creating"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Project creation is already in progress for '{active_project_name}' "
+                f"({active_project_status}). Please wait until it finishes before creating another project."
+            ),
+        )
 
     # Check project count limit for user's tier
     proj_limit = check_project_limit(user_id)
@@ -605,32 +721,6 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             if website_type:
                 type_id = website_type['id']
 
-    # ── BILLING: Charge credits for project creation ─────────────────────
-    _project_charged = []
-    try:
-        from services.billing_service import charge_project_creation, refund_credits
-        with get_db() as bconn:
-            result = charge_project_creation(bconn, user_id, project_type_id=type_id)
-            bconn.commit()
-            if not result.get("success"):
-                _cost = result.get("cost", "?")
-                _avail = result.get("total_available", 0)
-                raise HTTPException(
-                    status_code=402,
-                    detail={
-                        "error": "insufficient_credits",
-                        "message": f"You don't have enough AI credits to create this project (needs {_cost}, have {_avail}).",
-                        "cost": _cost,
-                        "available": _avail,
-                    },
-                )
-            _project_charged = result.get("charged", [])
-            logger.info(f"[BILLING] Charged project creation for user {user_id}: {_project_charged}")
-    except HTTPException:
-        raise
-    except Exception as bill_err:
-        logger.warning(f"[BILLING] Project creation charge failed (allowing): {bill_err}")
-
     # Step 1: Get project_id first to use in folder naming
     logger.info("[PROJECT] inserting project into database")
     with get_db() as conn:
@@ -670,17 +760,6 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         with get_db() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             conn.commit()
-
-        # Refund the project creation credits
-        if _project_charged:
-            try:
-                from services.billing_service import refund_credits
-                with get_db() as rconn:
-                    refund_credits(rconn, user_id, "WEBSITE", _project_charged)
-                    rconn.commit()
-                    logger.info(f"[BILLING] Refunded project creation credits for user {user_id}")
-            except Exception as refund_err:
-                logger.warning(f"[BILLING] Refund failed: {refund_err}")
 
         # Abort: Raise error to client
         raise HTTPException(
@@ -2801,7 +2880,11 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
 
 
 @app.delete("/projects/{project_id}")
-async def delete_project(project_id: int, force: bool = False):
+async def delete_project(
+    project_id: int,
+    force: bool = False,
+    authorization: Optional[str] = Header(None),
+):
     """
     Delete a project with infrastructure cleanup and master DB protection.
     
@@ -2812,6 +2895,8 @@ async def delete_project(project_id: int, force: bool = False):
     Returns:
         Deletion status with cleanup results
     """
+    _require_project_owner(project_id, authorization)
+
     # Security: Log force deletion attempts
     if force:
         logger.warning(f"⚠️ FORCE deletion requested for project {project_id}")
@@ -2985,8 +3070,13 @@ class ProjectStatusResponse(BaseModel):
     status: str  # "creating", "ready", or "failed"
 
 @app.put("/projects/{project_id}", response_model=ProjectResponse, status_code=200)
-async def update_project(project_id: int, request: UpdateProjectRequest):
+async def update_project(
+    project_id: int,
+    request: UpdateProjectRequest,
+    authorization: Optional[str] = Header(None),
+):
     """Update project name and description only. type_id and domain cannot be modified."""
+    _require_project_owner(project_id, authorization)
 
     # Validate that project exists
     with get_db() as conn:
@@ -3228,7 +3318,11 @@ class VerifyDomainResponse(BaseModel):
 
 
 @app.post("/projects/{project_id}/publish/frontend", response_model=BuildPublishResponse)
-async def publish_frontend(project_id: int, request: BuildPublishRequest):
+async def publish_frontend(
+    project_id: int,
+    request: BuildPublishRequest,
+    authorization: Optional[str] = Header(None),
+):
     """
     Build and publish frontend for a project.
     
@@ -3250,6 +3344,7 @@ async def publish_frontend(project_id: int, request: BuildPublishRequest):
         Build status and output
     """
     import threading
+    _require_project_owner(project_id, authorization)
     
     # Validate project exists
     with get_db() as conn:
@@ -3326,7 +3421,11 @@ async def publish_frontend(project_id: int, request: BuildPublishRequest):
 
 
 @app.post("/projects/{project_id}/publish/backend", response_model=BuildPublishResponse)
-async def publish_backend(project_id: int, request: BuildPublishRequest):
+async def publish_backend(
+    project_id: int,
+    request: BuildPublishRequest,
+    authorization: Optional[str] = Header(None),
+):
     """
     Build and publish backend for a project.
     
@@ -3343,6 +3442,8 @@ async def publish_backend(project_id: int, request: BuildPublishRequest):
     Returns:
         Build status and output
     """
+    _require_project_owner(project_id, authorization)
+
     # Validate project exists and get domain
     with get_db() as conn:
         project = conn.execute(
@@ -4188,7 +4289,10 @@ async def admin_delete_env_registry(
 
 
 @app.get("/projects/{project_id}/status", response_model=ProjectStatusResponse)
-async def get_project_status(project_id: int):
+async def get_project_status(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """
     Get project creation status.
 
@@ -4206,6 +4310,8 @@ async def get_project_status(project_id: int):
     Raises:
         404: If project not found
     """
+    _require_project_owner(project_id, authorization)
+
     with get_db() as conn:
         project = conn.execute(
             "SELECT status FROM projects WHERE id = ?",
@@ -4221,7 +4327,10 @@ async def get_project_status(project_id: int):
     return ProjectStatusResponse(status=project["status"])
 
 @app.get("/projects/{project_id}/ai-status", response_model=Dict[str, Any])
-async def get_ai_status(project_id: int):
+async def get_ai_status(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """
     Get AI refinement status for a project.
 
@@ -4242,6 +4351,8 @@ async def get_ai_status(project_id: int):
         404: If project not found
     """
     import time
+
+    _require_project_owner(project_id, authorization)
 
     # Get project info
     with get_db() as conn:
@@ -4383,7 +4494,10 @@ async def get_ai_status(project_id: int):
     return ai_status
 
 @app.get("/projects/{project_id}/claude-session")
-async def get_claude_session(project_id: int):
+async def get_claude_session(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """
     Get Claude Code session details for a project.
 
@@ -4398,6 +4512,8 @@ async def get_claude_session(project_id: int):
     Raises:
         404: If project not found or has no session
     """
+    _require_project_owner(project_id, authorization)
+
     with get_db() as conn:
         project = conn.execute(
             "SELECT id, claude_code_session_name, status FROM projects WHERE id = ?",
@@ -4454,7 +4570,10 @@ class ActiveSessionResponse(BaseModel):
     session_name: Optional[str] = None
 
 @app.get("/projects/{project_id}/active-session", response_model=ActiveSessionResponse)
-async def get_active_session(project_id: int):
+async def get_active_session(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """
     Get the active (locked) session for a project.
     
@@ -4467,6 +4586,7 @@ async def get_active_session(project_id: int):
     Returns:
         Active session ID and name, or null if unlocked
     """
+    _require_project_owner(project_id, authorization)
     result = SessionLockService.get_active_session(project_id)
     return ActiveSessionResponse(
         active_session_id=result["active_session_id"],
@@ -4474,7 +4594,10 @@ async def get_active_session(project_id: int):
     )
 
 @app.delete("/projects/{project_id}/lock")
-async def force_release_project_lock(project_id: int):
+async def force_release_project_lock(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """
     Force release any lock on a project (admin override).
     
@@ -4487,6 +4610,7 @@ async def force_release_project_lock(project_id: int):
     Returns:
         Released session ID if a lock was held
     """
+    _require_project_owner(project_id, authorization)
     result = SessionLockService.force_release_lock(project_id)
     
     if result["released_session_id"]:
@@ -4504,7 +4628,10 @@ async def force_release_project_lock(project_id: int):
         }
 
 @app.post("/sessions/{session_id}/release-lock")
-async def release_session_lock(session_id: int):
+async def release_session_lock(
+    session_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """
     Explicitly release lock held by a session.
     
@@ -4517,6 +4644,8 @@ async def release_session_lock(session_id: int):
     Returns:
         Success status
     """
+    _require_session_owner(session_id, authorization)
+
     # Get project_id from session
     with get_db() as conn:
         session = conn.execute(
@@ -4541,7 +4670,11 @@ async def release_session_lock(session_id: int):
 # ============================================================================
 
 @app.get("/projects/{project_id}/sessions", response_model=list[SessionResponse])
-async def get_sessions(project_id: int):
+async def get_sessions(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    _require_project_owner(project_id, authorization)
     with get_db() as conn:
         sessions = conn.execute(
             "SELECT * FROM sessions WHERE project_id = ? AND archived = 0 ORDER BY created_at DESC",
@@ -4562,7 +4695,12 @@ async def get_sessions(project_id: int):
     return session_responses
 
 @app.post("/projects/{project_id}/sessions", response_model=SessionResponse, status_code=201)
-async def create_session(project_id: int, request: CreateSessionRequest):
+async def create_session(
+    project_id: int,
+    request: CreateSessionRequest,
+    authorization: Optional[str] = Header(None),
+):
+    _require_project_owner(project_id, authorization)
     session_key = str(uuid.uuid4())
     with get_db() as conn:
         conn.execute(
@@ -4607,7 +4745,12 @@ async def create_session(project_id: int, request: CreateSessionRequest):
         return SessionResponse(**session_data)
 
 @app.delete("/sessions/{session_id}")
-async def delete_session(session_id: int):
+async def delete_session(
+    session_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    _require_session_owner(session_id, authorization)
+
     # Get project_id before deletion to release lock
     with get_db() as conn:
         session_info = conn.execute(
@@ -4627,8 +4770,15 @@ async def delete_session(session_id: int):
     return {"status": "deleted", "message": "Session deleted"}
 
 @app.delete("/projects/{project_id}/sessions/{session_id}")
-async def delete_project_session(project_id: int, session_id: int):
+async def delete_project_session(
+    project_id: int,
+    session_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """Delete a specific session within a project."""
+    _require_project_owner(project_id, authorization)
+    _require_session_owner(session_id, authorization)
+
     # Release lock if held by this session
     SessionLockService.release_lock(project_id, session_id)
     
@@ -4692,7 +4842,12 @@ async def delete_project_session(project_id: int, session_id: int):
     return {"status": "deleted", "message": "Session deleted"}
 
 @app.get("/sessions/{session_id}/messages", response_model=list[MessageResponse])
-async def get_session_messages(session_id: int):
+async def get_session_messages(
+    session_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    _require_session_owner(session_id, authorization)
+
     with get_db() as conn:
         messages = conn.execute(
             "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC",
@@ -4711,12 +4866,16 @@ async def get_session_messages(session_id: int):
     return message_responses
 
 @app.post("/chat/stream")
-async def chat_stream_endpoint(request: ChatRequest):
+async def chat_stream_endpoint(
+    request: ChatRequest,
+    authorization: Optional[str] = Header(None),
+):
     """Handle streaming chat requests using extracted chat handlers."""
     import asyncio
     from chat_handlers import StreamState, save_stream_to_db, generate_sse_stream_with_db_save
 
     logger.info(f"[STREAM ENDPOINT] Called with session_key={request.session_key}, stream={request.stream}")
+    _require_session_key_owner(request.session_key, authorization)
 
     with get_db() as conn:
         session = conn.execute(
@@ -5030,15 +5189,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                                                 logger.info(f"[BILLING] Post-edit token charge: {charge_result}")
                                             except Exception as ch_err:
                                                 logger.warning(f"[BILLING] Post-edit token charge failed: {ch_err}")
-                                        elif _precharged and _chat_charged:
-                                            # Edit produced 0 tokens but pre-charge was held — refund it
-                                            try:
-                                                from services.billing_service import refund_credits
-                                                refund_credits(tconn, _chat_user_id, "ADD_FEATURE", _chat_charged)
-                                                tconn.commit()
-                                                logger.info(f"[BILLING] Refunded pre-charge (0 tokens consumed) for user {_chat_user_id}")
-                                            except Exception as rf_err:
-                                                logger.warning(f"[BILLING] 0-token refund failed: {rf_err}")
                         except Exception as track_err:
                             logger.debug(f"[TOKEN] Tracking failed: {track_err}")
                     except Exception as save_err:
@@ -5335,13 +5485,18 @@ class CancelChatRequest(BaseModel):
     session_key: str
 
 @app.post("/chat/cancel")
-async def cancel_chat(request: CancelChatRequest):
+async def cancel_chat(
+    request: CancelChatRequest,
+    authorization: Optional[str] = Header(None),
+):
     """
     Cancel a running chat query for a session.
 
     Kills the Claude subprocess and removes the handler from the active registry.
     Used by the frontend Stop button.
     """
+    _require_session_key_owner(request.session_key, authorization)
+
     logger.info(f"[CANCEL] Cancel requested for session_key: {request.session_key[:16]}...")
     logger.info(f"[CANCEL] Active handlers in registry: {list(active_handlers.keys())}")
 
@@ -5363,13 +5518,17 @@ async def cancel_chat(request: CancelChatRequest):
 
 
 @app.get("/chat/status")
-async def chat_status(session_key: str):
+async def chat_status(
+    session_key: str,
+    authorization: Optional[str] = Header(None),
+):
     """
     Check if a chat query is currently running for a session.
 
     Used by frontend on page reload to detect if a background query is still active.
     Returns the handler's running state so the UI can show Stop button.
     """
+    _require_session_key_owner(session_key, authorization)
     handler = active_handlers.get(session_key)
     if handler and handler.is_query_running():
         return {"active": True, "session_key": session_key}
@@ -5377,13 +5536,18 @@ async def chat_status(session_key: str):
 
 
 @app.get("/chat/chunks")
-async def chat_chunks(session_key: str, after: int = 0):
+async def chat_chunks(
+    session_key: str,
+    after: int = 0,
+    authorization: Optional[str] = Header(None),
+):
     """
     Get accumulated chunks for a running background query since index `after`.
 
     Used by frontend on reload to resume displaying the response in real-time.
     Returns chunks and the total count so the frontend knows what index to poll from next.
     """
+    _require_session_key_owner(session_key, authorization)
     handler = active_handlers.get(session_key)
     if not handler:
         return {"chunks": [], "total": 0, "active": False}
@@ -5409,12 +5573,16 @@ async def chat_chunks(session_key: str, after: int = 0):
 
 
 @app.post("/chat")
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(
+    request: ChatRequest,
+    authorization: Optional[str] = Header(None),
+):
     """Handle both streaming and non-streaming chat requests."""
+    _require_session_key_owner(request.session_key, authorization)
 
     # Handle streaming request by delegating to stream endpoint
     if request.stream:
-        return await chat_stream_endpoint(request)
+        return await chat_stream_endpoint(request, authorization)
 
     # Handle non-streaming request
     with get_db() as conn:
@@ -5691,16 +5859,25 @@ async def chat_endpoint(request: ChatRequest):
 # ============================================================================
 
 @app.get("/plans/{project_id}")
-async def get_plans(project_id: int):
+async def get_plans(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """Get all plans for a project."""
+    _require_project_owner(project_id, authorization)
     from plan_manager import PlanManager
     plans = PlanManager.get_plans_for_project(project_id)
     return {"plans": plans}
 
 
 @app.get("/plans/{project_id}/{plan_id}/content")
-async def get_plan_content(project_id: int, plan_id: int):
+async def get_plan_content(
+    project_id: int,
+    plan_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """Get plan file content."""
+    _require_project_owner(project_id, authorization)
     from plan_manager import PlanManager
     content = PlanManager.get_plan_content(plan_id)
     if content is None:
@@ -5713,7 +5890,10 @@ async def get_plan_content(project_id: int, plan_id: int):
 # ============================================================================
 
 @app.get("/projects/{project_id}/files", response_model=list[FileNode])
-async def get_project_files(project_id: int):
+async def get_project_files(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """
     Get file tree for a project.
 
@@ -5723,6 +5903,8 @@ async def get_project_files(project_id: int):
     Returns:
         List of file nodes (files and folders)
     """
+    _require_project_owner(project_id, authorization)
+
     # Get project path from database
     with get_db() as conn:
         project = conn.execute(
@@ -5746,7 +5928,11 @@ async def get_project_files(project_id: int):
 
 
 @app.get("/projects/{project_id}/files/{file_path:path}", response_model=FileContent)
-async def get_file_content(project_id: int, file_path: str):
+async def get_file_content(
+    project_id: int,
+    file_path: str,
+    authorization: Optional[str] = Header(None),
+):
     """
     Get file content for a specific file.
 
@@ -5757,6 +5943,8 @@ async def get_file_content(project_id: int, file_path: str):
     Returns:
         File content and metadata
     """
+    _require_project_owner(project_id, authorization)
+
     # Get project path from database
     with get_db() as conn:
         project = conn.execute(
@@ -5789,7 +5977,8 @@ async def get_file_content(project_id: int, file_path: str):
 async def save_file_content(
     project_id: int,
     file_path: str,
-    request_data: SaveFileRequest
+    request_data: SaveFileRequest,
+    authorization: Optional[str] = Header(None),
 ):
     """
     Save file content.
@@ -5802,6 +5991,7 @@ async def save_file_content(
     Returns:
         Save result
     """
+    _require_project_owner(project_id, authorization)
 
     # Get project path from database
     with get_db() as conn:
@@ -5827,76 +6017,6 @@ async def save_file_content(
         raise HTTPException(status_code=403, detail="Permission denied")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
-
-
-@app.post("/projects/{project_id}/editor/build-publish", response_model=BuildPublishResponse)
-async def build_publish_from_editor(project_id: int):
-    """
-    Build and publish a project from the code editor.
-
-    Reuses the same rebuild flow that rollback uses so code edits are published
-    consistently across websites, bots, and scheduler projects.
-    """
-    with get_db() as conn:
-        project = conn.execute(
-            "SELECT id, name, project_path FROM projects WHERE id = ?",
-            (project_id,)
-        ).fetchone()
-
-    if not project:
-        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
-
-    project_path = project["project_path"]
-    project_name = project["name"]
-    if not project_path:
-        raise HTTPException(status_code=400, detail="Project has no file system path")
-
-    if not Path(project_path).exists():
-        raise HTTPException(status_code=400, detail=f"Project directory not found: {project_path}")
-
-    logger.info(f"[EDITOR] Starting build and publish for project {project_id}")
-
-    try:
-        rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
-
-        if rebuild_status.get("type") == "scheduler":
-            success = not rebuild_status.get("error")
-        elif "restarted" in rebuild_status:
-            success = bool(rebuild_status.get("restarted")) and not rebuild_status.get("error")
-        else:
-            steps = [
-                step for step in (
-                    rebuild_status.get("frontend"),
-                    rebuild_status.get("backend"),
-                )
-                if isinstance(step, dict)
-            ]
-            success = bool(steps) and all(step.get("success") and not step.get("error") for step in steps)
-
-        message = (
-            "Code editor build and publish completed successfully"
-            if success
-            else "Code editor build and publish completed with errors"
-        )
-
-        if success:
-            logger.info(f"[EDITOR] Build and publish completed for project {project_id}")
-        else:
-            logger.error(f"[EDITOR] Build and publish failed for project {project_id}: {rebuild_status}")
-
-        return BuildPublishResponse(
-            success=success,
-            message=message,
-            output=json.dumps(rebuild_status, indent=2),
-            error=None if success else "One or more publish steps failed"
-        )
-    except Exception as e:
-        logger.error(f"[EDITOR] Build and publish error for project {project_id}: {e}")
-        return BuildPublishResponse(
-            success=False,
-            message="Code editor build and publish failed",
-            error=str(e)
-        )
 # ============================================================================
 # Authentication API
 # ============================================================================
@@ -6642,108 +6762,6 @@ def _gallery_row_to_dict(row):
     }
 
 
-@app.get("/landing")
-async def landing_data():
-    """Single public endpoint returning everything the landing page needs:
-    stats, gallery (latest 3 featured), templates (latest 3 active).
-    No auth required. If any individual query fails, that key is omitted.
-    """
-    result: dict = {}
-
-    # --- Stats ---
-    stats: dict = {}
-    try:
-        with get_db() as conn:
-            try:
-                row = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()
-                stats["users"] = row["cnt"] if isinstance(row, dict) else row[0]
-            except Exception:
-                pass
-            try:
-                row = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM projects WHERE status != 'deleted'"
-                ).fetchone()
-                stats["projects"] = row["cnt"] if isinstance(row, dict) else row[0]
-            except Exception:
-                pass
-            try:
-                row = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM gallery_projects WHERE status = 'public'"
-                ).fetchone()
-                stats["gallery_projects"] = row["cnt"] if isinstance(row, dict) else row[0]
-            except Exception:
-                pass
-            try:
-                row = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM templates WHERE status = 'active'"
-                ).fetchone()
-                stats["templates"] = row["cnt"] if isinstance(row, dict) else row[0]
-            except Exception:
-                pass
-    except Exception:
-        pass
-    if stats:
-        result["stats"] = stats
-
-    # --- Gallery (latest 3 featured/public) ---
-    gallery_items: list = []
-    try:
-        with get_db() as conn:
-            rows = conn.execute(
-                """SELECT gp.id, gp.project_id, gp.user_id, gp.title, gp.description,
-                          gp.frontend_url, gp.project_type, gp.thumbnail_url, gp.is_featured,
-                          gp.view_count, gp.clone_count, gp.created_at, gp.updated_at,
-                          gp.published_at, gp.status,
-                          u.name as author_name
-                   FROM gallery_projects gp
-                   LEFT JOIN users u ON gp.user_id = u.id
-                   WHERE gp.status = 'public'
-                   ORDER BY gp.is_featured DESC, gp.published_at DESC, gp.created_at DESC
-                   LIMIT %s""",
-                (3,),
-            ).fetchall()
-        for row in rows:
-            item = _gallery_row_to_dict(row)
-            if isinstance(row, dict):
-                item["author_name"] = row.get("author_name")
-            else:
-                item["author_name"] = row[15] if len(row) > 15 else None
-            gallery_items.append(item)
-    except Exception:
-        pass
-    result["gallery"] = gallery_items
-
-    # --- Templates (latest 3 active) ---
-    template_items: list = []
-    try:
-        with get_db() as conn:
-            rows = conn.execute(
-                """SELECT t.id, t.project_id, t.user_id, t.title, t.description,
-                          t.category, t.frontend_url, t.project_type, t.thumbnail_url,
-                          t.is_featured, t.use_count, t.view_count,
-                          t.created_at, t.updated_at, t.published_at, t.status,
-                          u.name as author_name
-                   FROM templates t
-                   LEFT JOIN users u ON t.user_id = u.id
-                   WHERE t.status = 'active'
-                   ORDER BY t.is_featured DESC, t.published_at DESC, t.created_at DESC
-                   LIMIT %s""",
-                (3,),
-            ).fetchall()
-        for row in rows:
-            item = _template_row_to_dict(row)
-            if isinstance(row, dict):
-                item["author_name"] = row.get("author_name")
-            else:
-                item["author_name"] = row[16] if len(row) > 16 else None
-            template_items.append(item)
-    except Exception:
-        pass
-    result["templates"] = template_items
-
-    return result
-
-
 @app.get("/gallery")
 async def list_gallery_projects(
     limit: int = 50,
@@ -7421,59 +7439,6 @@ def _read_log_tail(file_path: str, num_lines: int) -> tuple[str, bool]:
         return f"[Error reading log: {e}]", True
 
 
-def _pm2_log_files(process_name: str, stream: str) -> list[str]:
-    """Find PM2 log files for a process stream."""
-    import glob
-
-    exact_path = os.path.join(PM2_LOGS_DIR, f"{process_name}-{stream}.log")
-    pattern = os.path.join(PM2_LOGS_DIR, f"{process_name}-{stream}*.log")
-    paths = []
-
-    if os.path.isfile(exact_path):
-        paths.append(exact_path)
-
-    for path in sorted(glob.glob(pattern)):
-        if path not in paths and os.path.isfile(path):
-            paths.append(path)
-
-    return paths
-
-
-def _read_pm2_log_tail(process_name: str, stream: str, num_lines: int) -> tuple[str, bool]:
-    """Read tails from all matching PM2 log files for a process stream."""
-    paths = _pm2_log_files(process_name, stream)
-    if not paths:
-        return "", False
-
-    chunks = []
-    for path in paths:
-        content, exists = _read_log_tail(path, num_lines)
-        if not exists:
-            continue
-        if len(paths) > 1:
-            chunks.append(f"===== {os.path.basename(path)} =====\n{content}")
-        else:
-            chunks.append(content)
-
-    return "\n".join(chunks), True
-
-
-def _process_has_logs(process_name: str) -> bool:
-    """Return True when any stdout/stderr PM2 log exists for a process."""
-    return bool(_pm2_log_files(process_name, "out") or _pm2_log_files(process_name, "error"))
-
-
-def _log_spec(label: str, *process_names: str) -> dict:
-    """Build a log spec and choose the first candidate with real log files."""
-    candidates = [name for name in dict.fromkeys(process_names) if name]
-    selected = next((name for name in candidates if _process_has_logs(name)), candidates[0] if candidates else "")
-    return {
-        "label": label,
-        "process_name": selected,
-        "process_names": candidates,
-    }
-
-
 def _get_pm2_log_specs(project_row) -> list[dict]:
     """Return a list of log group specs for a project based on type_id.
 
@@ -7483,117 +7448,50 @@ def _get_pm2_log_specs(project_row) -> list[dict]:
     d = dict(project_row) if not isinstance(project_row, dict) else project_row
     project_id = d.get("id")
     domain = (d.get("domain") or "").split(".")[0]  # strip subdomain suffix
-    name_slug = (d.get("name") or "").lower().replace(" ", "-")
     type_id = d.get("type_id")
 
     if type_id == 1:
         # Website: separate frontend + backend
         return [
-            _log_spec("Frontend", f"{domain}-frontend", f"{name_slug}-frontend"),
-            _log_spec("Backend", f"{domain}-backend", f"{name_slug}-backend"),
+            {"label": "Frontend", "process_name": f"{domain}-frontend"},
+            {"label": "Backend", "process_name": f"{domain}-backend"},
         ]
     elif type_id == 2:
-        return [_log_spec("Application", f"{domain}-bot", f"tg-bot-{project_id}")]
+        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
     elif type_id == 3:
-        return [_log_spec("Application", f"dc-bot-{project_id}")]
+        return [{"label": "Application", "process_name": f"dc-bot-{project_id}"}]
     elif type_id == 4:
         # Trading bot — reuses telegram PM2 naming
-        return [_log_spec("Application", f"{domain}-bot", f"tg-bot-{project_id}")]
+        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
     elif type_id == 5:
         # Scheduler — central process, not per-project
-        return [_log_spec("Application", "clawd-scheduler")]
+        return [{"label": "Application", "process_name": "clawd-scheduler"}]
     elif type_id == 6:
-        return [_log_spec("Application", f"{domain}-backend", f"{name_slug}-backend")]
+        return [{"label": "Application", "process_name": f"{domain}-backend"}]
     else:
         # Fallback: try domain-backend
         if domain:
-            return [_log_spec("Application", f"{domain}-backend", f"{domain}-bot")]
-        return [_log_spec("Application", f"tg-bot-{project_id}")]
-
-
-def _format_scheduler_log_line(log_row: dict) -> str:
-    """Format one scheduler execution log entry for the project log viewer."""
-    created_at = log_row.get("created_at") or ""
-    task_type = log_row.get("task_type") or "unknown"
-    schedule_value = log_row.get("schedule_value") or "-"
-    job_id = log_row.get("job_id")
-    status = log_row.get("status") or "unknown"
-    message = log_row.get("message") or ""
-
-    return (
-        f"[{created_at}] job={job_id} task={task_type} "
-        f"schedule={schedule_value} status={status}\n{message}"
-    ).strip()
-
-
-def _build_scheduler_project_logs(project_row, num_lines: int) -> dict:
-    """Build project-specific scheduler execution logs from scheduler_logs."""
-    d = dict(project_row) if not isinstance(project_row, dict) else project_row
-    project_id = d.get("id")
-
-    with get_db() as conn:
-        rows = conn.execute(
-            """
-            SELECT sl.id, sl.job_id, sj.task_type, sj.schedule_value,
-                   sl.status, sl.message, sl.created_at
-            FROM scheduler_logs sl
-            JOIN scheduler_jobs sj ON sj.id = sl.job_id
-            WHERE sj.project_id = %s
-            ORDER BY sl.created_at DESC
-            LIMIT %s
-            """,
-            (project_id, num_lines),
-        ).fetchall()
-
-    stdout_lines = []
-    stderr_lines = []
-    for row in rows:
-        entry = dict(row) if not isinstance(row, dict) else row
-        line = _format_scheduler_log_line(entry)
-        status = (entry.get("status") or "").lower()
-        if status in {"failed", "error"}:
-            stderr_lines.append(line)
-        else:
-            stdout_lines.append(line)
-
-    stdout_content = "\n\n".join(stdout_lines)
-    stderr_content = "\n\n".join(stderr_lines)
-
-    return {
-        "project_id": project_id,
-        "project_name": d.get("name"),
-        "type_id": d.get("type_id"),
-        "log_groups": [{
-            "label": "Job Executions",
-            "process_name": f"scheduler-project-{project_id}",
-            "process_names": [f"scheduler-project-{project_id}", "clawd-scheduler"],
-            "stdout": stdout_content,
-            "stderr": stderr_content,
-            "stdout_lines": stdout_content.count("\n") + 1 if stdout_content else 0,
-            "stderr_lines": stderr_content.count("\n") + 1 if stderr_content else 0,
-            "exists": bool(rows),
-        }],
-    }
+            return [{"label": "Application", "process_name": f"{domain}-backend"}]
+        return [{"label": "Application", "process_name": f"tg-bot-{project_id}"}]
 
 
 def _build_project_logs(project_row, num_lines: int) -> dict:
     """Build the log_groups response for a project."""
-    d = dict(project_row) if not isinstance(project_row, dict) else project_row
-    if d.get("type_id") == 5:
-        return _build_scheduler_project_logs(d, num_lines)
-
     specs = _get_pm2_log_specs(project_row)
+    d = dict(project_row) if not isinstance(project_row, dict) else project_row
 
     log_groups = []
     for spec in specs:
         proc = spec["process_name"]
-        stdout_content, out_exists = _read_pm2_log_tail(proc, "out", num_lines)
-        stderr_content, err_exists = _read_pm2_log_tail(proc, "error", num_lines)
+        out_path = os.path.join(PM2_LOGS_DIR, f"{proc}-out.log")
+        err_path = os.path.join(PM2_LOGS_DIR, f"{proc}-error.log")
+
+        stdout_content, out_exists = _read_log_tail(out_path, num_lines)
+        stderr_content, err_exists = _read_log_tail(err_path, num_lines)
 
         log_groups.append({
             "label": spec["label"],
             "process_name": proc,
-            "process_names": spec.get("process_names", [proc]),
             "stdout": stdout_content,
             "stderr": stderr_content,
             "stdout_lines": stdout_content.count("\n") if stdout_content else 0,
@@ -7711,7 +7609,8 @@ async def download_project_logs(
 
 
 @app.get("/health")
-async def health_check():
+async def health_check(authorization: Optional[str] = Header(None)):
+    _require_admin_from_authorization(authorization)
     return {
         "status": "ok",
         "clawdbot_url": CLAWDBOT_BASE_URL,
@@ -7722,7 +7621,11 @@ async def health_check():
     }
 
 @app.post("/test")
-async def test_endpoint(data: dict):
+async def test_endpoint(
+    data: dict,
+    authorization: Optional[str] = Header(None),
+):
+    _require_admin_from_authorization(authorization)
     return {"received": data}
 
 
@@ -7731,13 +7634,14 @@ async def test_endpoint(data: dict):
 # ============================================================================
 
 @app.get("/admin/nginx/orphans")
-async def list_orphaned_nginx_configs():
+async def list_orphaned_nginx_configs(authorization: Optional[str] = Header(None)):
     """
     List nginx configs in sites-available that don't belong to any active project in the database.
     
     Compares /etc/nginx/sites-available/*.conf domains against projects table.
     Returns orphaned configs that can be safely deleted.
     """
+    _require_admin_from_authorization(authorization)
     import glob
     
     nginx_dir = "/etc/nginx/sites-available"
@@ -7794,12 +7698,17 @@ async def list_orphaned_nginx_configs():
 
 
 @app.delete("/admin/nginx/orphans/{config_name}")
-async def delete_orphaned_nginx_config(config_name: str):
+async def delete_orphaned_nginx_config(
+    config_name: str,
+    authorization: Optional[str] = Header(None),
+):
     """
     Delete a specific orphaned nginx config by name.
     
     Removes both sites-available and sites-enabled entries, then reloads nginx.
     """
+    _require_admin_from_authorization(authorization)
+
     # Security: prevent path traversal
     if "/" in config_name or ".." in config_name:
         raise HTTPException(status_code=400, detail="Invalid config name")
@@ -7834,7 +7743,10 @@ class SessionDetailResponse(BaseModel):
 
 
 @app.get("/sessions/details", response_model=SessionDetailResponse)
-async def get_session_details(key: str):
+async def get_session_details(
+    key: str,
+    authorization: Optional[str] = Header(None),
+):
     """
     Get full session details from OpenClaw by database session_key.
 
@@ -7860,6 +7772,8 @@ async def get_session_details(key: str):
     # Validate session_key is not empty
     if not key or key.strip() == "":
         raise HTTPException(status_code=400, detail="session_key (key parameter) cannot be empty")
+
+    _require_session_key_owner(key, authorization)
 
     # OpenClaw sessions file path
     sessions_json_path = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
@@ -7970,8 +7884,6 @@ async def completion(request: CompletionRequest):
         messages: Array of chat messages (full conversation history)
                 Must contain at least one user message
                 Only allows 'user' and 'assistant' roles (no 'system')
-        generatePrompt: Whether to force final prompt generation from the
-                    current conversation context
 
     Response:
         success: Whether the operation succeeded
@@ -7994,7 +7906,6 @@ async def completion(request: CompletionRequest):
             project_type=request.projectType,
             mode=request.mode,
             messages=messages_dict,
-            generate_prompt=request.generatePrompt,
         )
 
         # If validation failed, return 400
@@ -8004,17 +7915,14 @@ async def completion(request: CompletionRequest):
         # Track AI completion usage (estimate tokens from response length)
         try:
             msg_content = result.get("message", {})
-            usage = result.get("usage") if isinstance(result, dict) else None
-            usage_tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
             content_len = len(msg_content.get("content", "")) if isinstance(msg_content, dict) else 0
-            if usage_tokens or content_len > 0:
-                # Prefer provider usage when available; otherwise keep the
-                # existing rough estimate of ~4 chars per token.
-                total_tokens = int(usage_tokens) if usage_tokens else max(1, content_len // 4)
+            if content_len > 0:
+                # Rough estimate: ~4 chars per token
+                est_tokens = max(1, content_len // 4)
                 record_usage(
                     user_id=0,  # Completion endpoint has no auth — anonymous
                     usage_type="ai_completion",
-                    total_tokens=total_tokens,
+                    total_tokens=est_tokens,
                     description=f"AI completion: {request.projectType} {request.mode}",
                 )
         except Exception:
@@ -8026,11 +7934,11 @@ async def completion(request: CompletionRequest):
         raise  # Re-raise HTTP exceptions as-is
 
     except RuntimeError as e:
-        # Service unavailable (e.g., OpenRouter not configured)
+        # Service unavailable (e.g., Groq not configured)
         if "not available" in str(e).lower() or "not configured" in str(e).lower():
             return CompletionResponse(
                 success=False,
-                error="Completion service not available - OPENROUTER_API_KEY not configured"
+                error="Completion service not available - GROQ_API_KEY not configured"
             )
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -8167,6 +8075,7 @@ async def get_project_activity(
         message_limit: Max recent messages to include (default 10, max 50)
     """
     try:
+        _require_project_owner(project_id, authorization)
         message_limit = min(max(message_limit, 1), 50)
         
         result = get_project_activity_detail(
@@ -8577,12 +8486,18 @@ class CommitRequest(BaseModel):
     auto_push: bool = True
 
 @app.post("/projects/{project_id}/commits")
-async def commit_and_push(project_id: int, req: CommitRequest):
+async def commit_and_push(
+    project_id: int,
+    req: CommitRequest,
+    authorization: Optional[str] = Header(None),
+):
     """
     Commit and push changes via backend API.
     Finds the latest assistant message in the session and updates it with commit_hash.
     """
     import traceback
+    _require_project_owner(project_id, authorization)
+    _require_session_owner(req.session_id, authorization)
 
     with get_db() as conn:
         # Get project path
@@ -8696,8 +8611,14 @@ async def commit_and_push(project_id: int, req: CommitRequest):
 
 
 @app.get("/projects/{project_id}/commits")
-async def get_commit_history(project_id: int, limit: int = 20, offset: int = 0):
+async def get_commit_history(
+    project_id: int,
+    limit: int = 20,
+    offset: int = 0,
+    authorization: Optional[str] = Header(None),
+):
     """Get commit history for a project from commit_log (survives session/message deletion)."""
+    _require_project_owner(project_id, authorization)
     with get_db() as conn:
         # Get repo_url for building commit links
         project = conn.execute(
@@ -8741,8 +8662,13 @@ async def get_commit_history(project_id: int, limit: int = 20, offset: int = 0):
 
 
 @app.get("/projects/{project_id}/commits/{message_id}")
-async def get_commit_detail(project_id: int, message_id: int):
+async def get_commit_detail(
+    project_id: int,
+    message_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """Get single commit detail by message_id (legacy — queries messages table)."""
+    _require_project_owner(project_id, authorization)
     with get_db() as conn:
         row = conn.execute(
             "SELECT * FROM messages WHERE id = ? AND commit_hash IS NOT NULL",
@@ -8756,8 +8682,13 @@ async def get_commit_detail(project_id: int, message_id: int):
 
 
 @app.get("/projects/{project_id}/commits/log/{log_id}")
-async def get_commit_log_detail(project_id: int, log_id: int):
+async def get_commit_log_detail(
+    project_id: int,
+    log_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """Get single commit detail from commit_log by log_id."""
+    _require_project_owner(project_id, authorization)
     with get_db() as conn:
         row = conn.execute(
             "SELECT * FROM commit_log WHERE id = ? AND project_id = ?",
@@ -8783,8 +8714,13 @@ async def get_commit_log_detail(project_id: int, log_id: int):
 
 
 @app.get("/projects/{project_id}/commits/log/{log_id}/diff")
-async def get_commit_log_diff(project_id: int, log_id: int):
+async def get_commit_log_diff(
+    project_id: int,
+    log_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """Get diff details for a specific commit log entry."""
+    _require_project_owner(project_id, authorization)
     with get_db() as conn:
         row = conn.execute(
             "SELECT * FROM commit_log WHERE id = ? AND project_id = ?",
@@ -9002,13 +8938,18 @@ def _rebuild_after_rollback(project_id: int, project_path: str, project_name: st
 
 
 @app.post("/projects/{project_id}/commits/{message_id}/rollback")
-async def rollback_commit(project_id: int, message_id: int):
+async def rollback_commit(
+    project_id: int,
+    message_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """
     Rollback a commit by reverting it via git (legacy — by message_id).
     Creates a new message row for the revert with reverted_message_id pointing to the original.
     Also writes to commit_log for persistent history.
     """
     import traceback
+    _require_project_owner(project_id, authorization)
 
     with get_db() as conn:
         original = conn.execute(
@@ -9128,12 +9069,17 @@ async def rollback_commit(project_id: int, message_id: int):
 
 
 @app.post("/projects/{project_id}/commits/log/{log_id}/rollback")
-async def rollback_commit_by_log_id(project_id: int, log_id: int):
+async def rollback_commit_by_log_id(
+    project_id: int,
+    log_id: int,
+    authorization: Optional[str] = Header(None),
+):
     """
     Rollback a commit by commit_log id (works even after session/message deletion).
     Uses commit_log as the source of truth for commit hash.
     """
     import traceback
+    _require_project_owner(project_id, authorization)
 
     with get_db() as conn:
         original = conn.execute(
