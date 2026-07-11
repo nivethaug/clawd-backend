@@ -407,7 +407,48 @@ Custom Project Editing Rules:
 
         return True, None
 
-    def get_system_prompt(self, project_type: str, mode: str) -> str:
+    def format_project_context(self, project_info: Optional[Dict[str, Any]]) -> str:
+        """Format non-sensitive existing-project context for edit prompts."""
+        if not isinstance(project_info, dict):
+            return ""
+
+        allowed_fields = [
+            ("title", "Project Title"),
+            ("name", "Project Name"),
+            ("description", "Project Description"),
+            ("projectType", "Project Type"),
+            ("type", "Project Type"),
+            ("status", "Current Status"),
+            ("domain", "Project Domain"),
+            ("liveUrl", "Live URL"),
+        ]
+        lines = []
+        seen_labels = set()
+        for key, label in allowed_fields:
+            if label in seen_labels:
+                continue
+            value = project_info.get(key)
+            if value is None:
+                continue
+            clean = str(value).strip()
+            if not clean:
+                continue
+            lines.append(f"- {label}: {clean[:500]}")
+            seen_labels.add(label)
+
+        if not lines:
+            return ""
+
+        return """Existing Project Context:
+Use this context to make edit recommendations specific to the current project. Preserve the existing product idea, tone, navigation, design direction, and working behavior unless the user explicitly asks to change them.
+""" + "\n".join(lines)
+
+    def get_system_prompt(
+        self,
+        project_type: str,
+        mode: str,
+        project_info: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """
         Compose the system prompt for the selected mode and project type.
 
@@ -433,7 +474,16 @@ Custom Project Editing Rules:
                 self.CREATE_PROJECT_TYPE_PROMPTS["custom"],
             )
 
-        return f"{system_prompt}\n\n{self.CONVERSATION_WORKFLOW_PROMPT}\n\n{project_type_prompt}"
+        project_context = ""
+        if canonical_mode == "modify":
+            project_context = self.format_project_context(project_info)
+
+        parts = [system_prompt, self.CONVERSATION_WORKFLOW_PROMPT]
+        if project_context:
+            parts.append(project_context)
+        parts.append(project_type_prompt)
+
+        return "\n\n".join(parts)
 
     def build_llm_messages(
         self,
@@ -441,6 +491,7 @@ Custom Project Editing Rules:
         mode: str,
         messages: List[Dict[str, str]],
         generate_prompt: bool = False,
+        project_info: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
         """
         Build the LLM message array with DreamAgent prompt-builder context.
@@ -472,7 +523,14 @@ Prompt Assistant Role: Act as a confident conversational AI Prompt Builder. Bias
 Conversation:"""
 
         llm_messages = [
-            {"role": "system", "content": self.get_system_prompt(canonical_project_type, canonical_mode)},
+            {
+                "role": "system",
+                "content": self.get_system_prompt(
+                    canonical_project_type,
+                    canonical_mode,
+                    project_info=project_info,
+                ),
+            },
         ]
         copied_messages = [dict(message) for message in messages]
 
@@ -493,6 +551,7 @@ Conversation:"""
         mode: str,
         messages: List[Dict[str, str]],
         generate_prompt: bool = False,
+        project_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Return a conversational refinement response or DreamAgent Project AI prompt.
@@ -530,6 +589,7 @@ Conversation:"""
             canonical_mode,
             sanitized_messages,
             generate_prompt=generate_prompt,
+            project_info=project_info,
         )
 
         try:

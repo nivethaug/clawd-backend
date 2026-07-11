@@ -487,10 +487,25 @@ class ChatMessage(BaseModel):
     role: str = Field(..., description="Message role (user or assistant)")
     content: str = Field(..., description="Message content")
 
+class CompletionProjectInfo(BaseModel):
+    projectId: Optional[int] = None
+    sessionId: Optional[str] = None
+    title: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    projectType: Optional[str] = None
+    type: Optional[str] = None
+    status: Optional[str] = None
+    domain: Optional[str] = None
+    liveUrl: Optional[str] = None
+    currentRoute: Optional[str] = None
+
 class CompletionRequest(BaseModel):
     projectType: str = Field(..., description="Type of project (website, telegrambot, discordbot, tradingbot, scheduler, custom)")
     mode: str = Field(..., description="Operation mode (create or modify)")
     messages: list[ChatMessage] = Field(..., description="Array of chat messages (conversation history)")
+    generatePrompt: bool = Field(False, description="Force final DreamAgent prompt generation after conversational refinement")
+    projectInfo: Optional[CompletionProjectInfo] = Field(None, description="Existing project context for edit mode")
 
 class CompletionResponse(BaseModel):
     success: bool
@@ -7906,6 +7921,8 @@ async def completion(request: CompletionRequest):
             project_type=request.projectType,
             mode=request.mode,
             messages=messages_dict,
+            generate_prompt=request.generatePrompt,
+            project_info=request.projectInfo.dict(exclude_none=True) if request.projectInfo else None,
         )
 
         # If validation failed, return 400
