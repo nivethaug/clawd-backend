@@ -596,8 +596,12 @@ def get_user_billing_summary(conn, user_id: int) -> Dict[str, Any]:
 
     # Recent transactions
     tx_rows = conn.execute(
-        """SELECT * FROM credit_transactions WHERE user_id = %s
-           ORDER BY created_at DESC LIMIT 20""",
+        """SELECT ct.*, p.name as project_name, s.label as session_name
+           FROM credit_transactions ct
+           LEFT JOIN projects p ON ct.project_id = p.id
+           LEFT JOIN sessions s ON ct.session_id = s.id
+           WHERE ct.user_id = %s
+           ORDER BY ct.created_at DESC LIMIT 20""",
         (user_id,),
     ).fetchall()
     transactions = [dict(r) if not isinstance(r, dict) else r for r in tx_rows]

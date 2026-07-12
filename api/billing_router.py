@@ -127,9 +127,12 @@ async def get_transactions(
     limit = min(limit, 200)
     with get_db() as conn:
         rows = conn.execute(
-            """SELECT ct.*, o.code as operation_code, o.name as operation_name
+            """SELECT ct.*, o.code as operation_code, o.name as operation_name,
+                      p.name as project_name, s.label as session_name
                FROM credit_transactions ct
                LEFT JOIN ai_operations o ON ct.operation_id = o.id
+               LEFT JOIN projects p ON ct.project_id = p.id
+               LEFT JOIN sessions s ON ct.session_id = s.id
                WHERE ct.user_id = %s
                ORDER BY ct.created_at DESC
                LIMIT %s OFFSET %s""",
