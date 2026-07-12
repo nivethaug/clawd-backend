@@ -1,86 +1,101 @@
-# Project Status - Complete Reference
+# Project Status
 
-> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
+> [TOC](toc.md) | Updated: 2026-07-12
 
----
+## Purpose
 
-## API Endpoints
+Project status endpoints let the UI track creation, deployment, and AI refinement state.
 
-| Endpoint | Method | File | Lines | Description |
-|----------|--------|------|-------|-------------|
-| `/projects/{id}/status` | GET | `app.py` | 1624-1657 | Get pipeline status |
-| `/projects/{id}/ai-status` | GET | `app.py` | 1657-1813 | Get AI refinement status |
-| `/projects/{id}/claude-session` | GET | `app.py` | 1819-1880 | Get Claude session info |
+## Endpoints
 
----
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/projects/{project_id}/status` | Current database status |
+| GET | `/projects/{project_id}/ai-status` | AI/pipeline process details |
+| GET | `/projects/{project_id}/claude-session` | Claude Code session metadata for website projects |
 
-## GET /projects/{id}/status
+All endpoints require project ownership.
 
-**File:** `app.py:1624-1657`
+## Status Values
 
-Get project creation pipeline status.
+Current code treats these as creation/in-progress states:
 
-**Response:**
+```text
+creating, scaffolded, initializing, building, deploying, verifying,
+provisioning, infrastructure_provisioning, ai_provisioning
+```
+
+Other important statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `ready` | Project is built and available |
+| `stopped` | Runtime is stopped |
+| `error` | Website/runtime needs fix |
+| `failed` | Bot/scheduler pipeline or project creation failed |
+
+## GET `/projects/{project_id}/status`
+
+Response:
+
 ```json
 {
-  "status": "creating"
+  "status": "ready"
 }
 ```
 
-**Status Values:**
+## GET `/projects/{project_id}/ai-status`
 
-| Status | Description |
-|--------|-------------|
-| `creating` | OpenClaw pipeline is running |
-| `ready` | Pipeline completed successfully |
-| `failed` | Pipeline failed |
+Response shape:
 
----
-
-## GET /projects/{id}/ai-status
-
-**File:** `app.py:1657-1813`
-
-Get detailed AI refinement status (Phase 8 monitoring).
-
-**Response:**
 ```json
 {
-  "project_id": 123,
-  "project_name": "my-project",
-  "project_path": "/var/www/projects/my-project",
-  "frontend_path": "/var/www/projects/my-project/frontend",
-  "process_running": true,
-  "pid": 12345,
-  "elapsed_seconds": 120,
-  "recent_modifications": [
-    {"file": "src/pages/Home.tsx", "time": "2026-03-15T10:05:00"}
-  ],
-  "status": "running"
+  "project_id": 1624,
+  "project_name": "check",
+  "project_status": "ai_provisioning",
+  "ai_refinement_status": "in_progress",
+  "processes": {
+    "openclaw_wrapper": {
+      "running": true,
+      "pid": 12345,
+      "elapsed": "00:02:10"
+    },
+    "claude_code": {
+      "running": false,
+      "pid": null
+    }
+  },
+  "paths": {
+    "project": "/root/clawd-projects/1624-check",
+    "frontend": "/root/clawd-projects/1624-check/frontend"
+  },
+  "recent_activity": {
+    "files_modified": ["Home.tsx"],
+    "count": 1
+  },
+  "phase_info": {
+    "phase": 8,
+    "phase_name": "AI-Driven Frontend Refinement",
+    "total_phases": 8,
+    "completed_phases": 7
+  }
 }
 ```
 
----
+`ai_refinement_status` is derived from project status:
 
-## GET /projects/{id}/claude-session
+| Project status | AI status |
+| --- | --- |
+| `ai_provisioning` | `in_progress` |
+| `ready` | `completed` |
+| `failed` | `failed` |
+| Anything else | `not_started` |
 
-**File:** `app.py:1819-1880`
+## GET `/projects/{project_id}/claude-session`
 
-Get Claude Code session information.
-
-**Response:**
-```json
-{
-  "session_name": "project-123-session",
-  "session_path": "/root/.claude/projects/project-123",
-  "exists": true,
-  "files": ["CLAUDE.md", "context.json"]
-}
-```
-
----
+Returns Claude Code session information for website projects. If a project has no Claude session, the endpoint returns `404`.
 
 ## Related
 
-- [Project Creation](project_creation.md)
-- [Project Deletion](project_deletion.md)
+- [project_creation.md](./project_creation.md)
+- [dashboard.md](./dashboard.md)

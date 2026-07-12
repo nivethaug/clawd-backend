@@ -1,1275 +1,215 @@
-# Project Creation - Complete Reference
+# Project Creation
 
-> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-04-11
+> [TOC](toc.md) | Updated: 2026-07-12
 
----
+## Purpose
 
-## API Endpoints
+Project creation is the authenticated API flow that creates websites, Telegram bots, Discord bots, and scheduler projects. The API inserts the project record first, creates the project folder with git metadata, and then starts the correct type-specific worker.
 
-| Endpoint | Method | File | Lines | Description |
-|----------|--------|------|-------|-------------|
-| `/projects` | POST | `app.py` | 283-510 | Create new project |
-| `/projects` | GET | `app.py` | 241-280 | List all projects |
-| `/projects/{id}` | GET | `app.py` | 355-380 | Get project details |
-| `/project-types` | GET | `app.py` | 515-528 | List project types |
-| `/templates` | GET | `app.py` | 574-600 | List templates |
-| `/templates/select` | POST | `app.py` | 530-572 | Select template |
-| `/projects/{id}/files` | GET | `app.py` | 2154-2185 | List project files |
-| `/projects/{id}/files/{path}` | GET | `app.py` | 2187-2225 | Get file content |
-| `/projects/{id}/files/{path}` | PUT | `app.py` | 2227-2265 | Save file content |
-| `/api/scheduler/projects/{pid}/jobs` | POST | `api/scheduler_router.py` | 77-95 | Create scheduler job |
-| `/api/scheduler/projects/{pid}/jobs` | GET | `api/scheduler_router.py` | 98-106 | List project jobs |
-| `/api/scheduler/jobs/{jid}` | GET | `api/scheduler_router.py` | 109-115 | Get job details |
-| `/api/scheduler/jobs/{jid}` | PUT | `api/scheduler_router.py` | 118-139 | Update job |
-| `/api/scheduler/jobs/{jid}` | DELETE | `api/scheduler_router.py` | 142-148 | Delete job |
-| `/api/scheduler/jobs/{jid}/pause` | POST | `api/scheduler_router.py` | 151-160 | Pause job |
-| `/api/scheduler/jobs/{jid}/resume` | POST | `api/scheduler_router.py` | 163-170 | Resume job |
-| `/api/scheduler/jobs/{jid}/run` | POST | `api/scheduler_router.py` | 173-180 | Trigger job now |
-| `/api/scheduler/jobs/{jid}/logs` | GET | `api/scheduler_router.py` | 194-211 | Get job logs |
-| `/api/scheduler/projects/{pid}/logs` | GET | `api/scheduler_router.py` | 214-233 | Get project logs |
+## Main Files
 
----
+| File | Responsibility |
+| --- | --- |
+| `app.py` | `/projects`, clone, delete/update/status/session/file routes |
+| `project_manager.py` | Project folder creation and git initialization |
+| `claude_code_worker.py` | Website generation worker |
+| `fast_wrapper.py` | Fast website scaffold |
+| `infrastructure_manager.py` | Website backend/frontend/database/nginx/PM2 infrastructure |
+| `services/telegram/worker.py` | Telegram project pipeline |
+| `services/discord/worker.py` | Discord project pipeline |
+| `services/scheduler/worker.py` | Scheduler project pipeline |
 
-## POST /projects - Create Project
+## Endpoints
 
-**File:** `app.py:283-510`
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/projects` | GET | List authenticated user's projects |
+| `/projects` | POST | Create a project |
+| `/projects/{project_id}/clone` | POST | Clone an existing project into a new project |
+| `/projects/{project_id}` | PUT | Update project metadata |
+| `/projects/{project_id}` | DELETE | Delete project and cleanup infrastructure |
+| `/project-types` | GET | List configured project types |
+| `/template-registry` | GET | Return template registry |
+| `/templates/select` | POST | Select a template |
 
-### Website Project Request (type_id=1):
+See [backend_api_reference.md](./backend_api_reference.md) for the full current route inventory.
+
+## Auth and Ownership
+
+`GET /projects` and `POST /projects` derive `user_id` from the `Authorization` header. The request body `user_id` is retained for compatibility but is not trusted.
+
+Project-specific routes require the authenticated user to own the project, enforced by `_require_project_owner()`.
+
+## Concurrent Creation Guard
+
+Only one project creation can be in progress per user. `POST /projects` checks for the user's newest project in one of these statuses:
+
+```text
+creating, scaffolded, initializing, building, deploying, verifying,
+provisioning, infrastructure_provisioning, ai_provisioning
+```
+
+If one exists, the API returns:
+
 ```json
 {
-  "name": "my-project",
-  "domain": "myproject",
-  "description": "Project description",
-  "user_id": 1,
-  "type_id": 1,
+  "detail": "Project creation is already in progress for 'project-name' (creating). Please wait until it finishes before creating another project."
+}
+```
+
+with status `409`.
+
+## Request
+
+```json
+{
+  "name": "dragon-sanctuary",
+  "domain": "dragon-sanctuary",
+  "description": "Cinematic dragon sanctuary website",
+  "typeId": 1,
   "template_id": "blank-template"
 }
 ```
 
-### Telegram Bot Project Request (type_id=2):
-```json
-{
-  "name": "my-telegram-bot",
-  "description": "AI assistant for customer support",
-  "user_id": 1,
-  "type_id": 2,
-  "bot_token": "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
-}
-```
-
-### Discord Bot Project Request (type_id=3):
-```json
-{
-  "name": "my-discord-bot",
-  "description": "Crypto price tracker for Discord server",
-  "user_id": 1,
-  "type_id": 3,
-  "bot_token": "YOUR_DISCORD_BOT_TOKEN"
-}
-```
-
-### Scheduler Project Request (type_id=5):
-```json
-{
-  "name": "my-scheduler",
-  "description": "Send BTC price via email every 10 minutes",
-  "user_id": 1,
-  "type_id": 5
-}
-```
-
-**Response:**
-```json
-{
-  "id": 1,
-  "user_id": 1,
-  "name": "my-project",
-  "domain": "myproject",
-  "project_path": "/root/clawd-projects/my-project",
-  "status": "creating",
-  "template_id": "blank-template"
-}
-```
-
-### Request Fields
+## Request Fields
 
 | Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Project name (unique) |
-| `domain` | string | No | Subdomain prefix (auto-generated if omitted) |
-| `description` | string | No | Project description |
-| `user_id` | integer | Yes | User ID owning the project |
-| `type_id` | integer | Yes | Project type: 1=Website, 2=Telegram Bot, 3=Discord Bot, 5=Scheduler |
-| `template_id` | string | Conditional | Template ID (required for type_id=1) |
-| `bot_token` | string | Conditional | Bot token (required for type_id=2 Telegram, type_id=3 Discord) |
-
----
-
-## Project Creation Pipeline
-
-### Entry Point Flow (Website Projects - type_id=1)
-
-| Step | File | Lines | Description |
-|------|------|-------|-------------|
-| 1. API Request | `app.py` | 50-70 | Validate project name, template, user_id |
-| 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
-| 3. Template Selection | `app.py` | 96-105 | Call `TemplateSelector.select_template()` |
-| 4. Worker Trigger | `claude_code_worker.py` | 50-80 | Start background worker |
-| 5. Fast Scaffolding | `fast_wrapper.py` | 50-240 | Create project structure |
-
-### Entry Point Flow (Telegram Bot Projects - type_id=2)
-
-| Step | File | Lines | Description |
-|------|------|-------|-------------|
-| 1. API Request | `app.py` | 632-638 | Validate bot_token provided for type_id=2 |
-| 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
-| 3. Worker Trigger | `app.py` | 639-766 | Start background telegram worker thread |
-| 4. Telegram Pipeline | `services/telegram/worker.py` | 18-150 | Execute 11-step pipeline |
-
-### Entry Point Flow (Discord Bot Projects - type_id=3)
-
-| Step | File | Lines | Description |
-|------|------|-------|-------------|
-| 1. API Request | `app.py` | 768-784 | Validate bot_token provided for type_id=3 |
-| 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
-| 3. Worker Trigger | `app.py` | 786-859 | Start background discord worker thread |
-| 4. Discord Pipeline | `services/discord/worker.py` | 90-430 | Execute 12-step pipeline |
-
-### Entry Point Flow (Scheduler Projects - type_id=5)
-
-| Step | File | Lines | Description |
-|------|------|-------|-------------|
-| 1. API Request | `app.py` | 891-895 | No bot_token required, enter scheduler branch |
-| 2. DB Insert | `app.py` | 80-95 | Insert project record with `status='creating'` |
-| 3. Worker Trigger | `app.py` | 896-950 | Start background scheduler worker thread |
-| 4. Scheduler Pipeline | `services/scheduler/worker.py` | 33-151 | Execute 4-step pipeline |
-
----
-
-## Telegram Bot Pipeline (type_id=2)
-
-### Pipeline Overview
-
-**Pattern**: Deploy base first, then enhance (ACPX-inspired)
-**Total Steps**: 11 steps
-**Duration**: ~5 minutes (2 min base + 3 min enhancement)
-
-### Phase 1: Base Deployment (Steps 1-8, ~2 min)
-
-| Step | Function | File | Lines | Description |
-|------|----------|------|-------|-------------|
-| 1 | `validate_telegram_token()` | `services/telegram/validator.py` | 15-40 | Validate token via Telegram API getMe |
-| 2 | `copy_telegram_template()` | `services/telegram/template.py` | 20-60 | Copy template from templates/telegram-bot-template/ |
-| 3 | `inject_bot_token()` | `services/telegram/env_injector.py` | 25-50 | Create .env file with BOT_TOKEN, WEBHOOK_DOMAIN, PORT, PROJECT_ID |
-| 4 | `install_bot_dependencies()` | `services/telegram/installer.py` | 20-50 | Run pip install -r requirements.txt |
-| 5 | `start_bot_pm2()` | `services/telegram/pm2_manager.py` | 50-120 | Start PM2 process: tg-bot-{project_id} ✅ Base works! |
-| 6 | Nginx webhook routing | `infrastructure_manager.py` | 822-1105 | Configure nginx webhook routing |
-| 7 | DNS provisioning | `infrastructure_manager.py` | 1210-1370 | Provision DNS (optional - uses wildcard DNS fallback) |
-| 8 | HTTP verification | `services/telegram/worker.py` | 210-240 | Fast HTTP check of /health endpoint ✅ Base confirmed! |
-
-### Phase 2: AI Enhancement (Steps 9-11, ~3 min)
-
-| Step | Function | File | Lines | Description |
-|------|----------|------|-------|-------------|
-| 9 | `enhance_bot_logic()` | `services/telegram/editor.py` | 100-250 | Claude AI modifies bot logic based on description |
-| 10 | `buildpublish.py` | `templates/telegram-bot-template/buildpublish.py` | 1-145 | Restart PM2 with enhanced code |
-| 11 | Final verification | `services/telegram/worker.py` | 260-340 | HTTP verify enhanced bot + Claude agent retry on critical failure |
-
-### Telegram Bot Configuration
-
-**Port Allocation:**
-- Formula: `bot_port = 8000 + (project_id % 1000)`
-- Range: 8000-8999
-- Unique per project
-
-**PM2 Process Name:** `tg-bot-{project_id}`
-- **Important**: PM2 process name uses `project_id`, NOT `bot_name`
-- Set by: `services/telegram/pm2_manager.py`
-- Restarted by: `templates/telegram-bot-template/buildpublish.py` (reads PROJECT_ID from .env)
-
-**Environment Variables (.env):**
-| Variable | Source | Example |
-|----------|--------|---------|
-| `BOT_TOKEN` | User input | `1234567890:ABCdef...` |
-| `PROJECT_ID` | Injected by worker.py | `123` |
-| `WEBHOOK_DOMAIN` | Auto-generated | `mybot-api.dreamagent.cloud` |
-| `PORT` | Port allocation | `8123` |
-| `BOT_NAME` | Project name | `My Telegram Bot` |
-
-**Webhook URL:** `https://{domain}.dreamagent.cloud/webhook`
-**Health Endpoint:** `https://{domain}.dreamagent.cloud/health`
-
-**Domain:** Extracted from project metadata (e.g., `{project_name}-api.dreamagent.cloud`)
-
-**Status Updates:**
-- Creating → Pipeline running
-- Ready → All 11 steps completed successfully
-- Failed → Pipeline error (token invalid, dependencies failed, etc.)
-
-**Error Handling:**
-- Each step returns success/failure tuple
-- On failure: Rollback changes, update status to 'failed'
-- Logs errors with traceback for debugging
-- Phase 2 failures don't rollback (base still works)
-
-### buildpublish.py Details
-
-**File:** `templates/telegram-bot-template/buildpublish.py`
-
-**Purpose**: Restart PM2 process after AI enhancement
-
-**How it works**:
-1. Reads `PROJECT_ID` from `.env` file (NOT `BOT_NAME`)
-2. Constructs PM2 process name: `tg-bot-{PROJECT_ID}`
-3. Runs: `pm2 restart tg-bot-{PROJECT_ID}`
-4. Uses shared venv: `/root/dreampilot/dreampilotvenv`
-
-**Usage**:
-```bash
-# Automatic (called by worker.py Step 10)
-python3 buildpublish.py
-
-# Manual (for testing)
-python3 buildpublish.py --skip-deps  # Skip pip install
-python3 buildpublish.py --no-restart # Skip PM2 restart
-```
-
-### Verification Strategy
-
-**Step 8 (Base Verification)**:
-- Fast HTTP check (< 1 second)
-- Endpoint: `https://{domain}.dreamagent.cloud/health`
-- Expected: `{"status": "healthy", "service": "telegram-bot"}`
-- On failure: Continue anyway (base may still work)
-
-**Step 11 (Final Verification)**:
-- HTTP check after AI enhancement
-- On success: ✅ Deployment complete!
-- On critical failure:
-  - Claude Code Agent invoked (uses Chrome DevTools MCP)
-  - Max retries: 1 attempt
-  - Claude diagnoses and fixes issues
-  - If Claude fails: Log warning, continue (base still works)
-
-**Critical Failure Examples**:
-- SSL certificate errors
-- PM2 process crashed
-- Port conflicts
-- Nginx misconfiguration
-
-**Non-Critical Issues** (don't trigger Claude retry):
-- Minor bot logic flaws
-- API integration issues
-- Missing features (bot still responds)
-
-### AI Enhancement Details
-
-**Step 9 - Claude Enhancement**:
-
-**File Modified**: `services/ai_logic.py` (in telegram template)
-
-**What Claude Does**:
-1. Reads current bot logic
-2. Checks `services/api_client.py` for existing API functions
-3. Detects if user mentioned specific APIs in description
-4. Adds new API functions to `api_client.py` (if needed)
-5. Enhances `process_user_input()` with new logic
-6. **Self-tests**: Runs `python -m py_compile` and import tests
-7. Fixes any syntax/import errors automatically
-
-**API Strategy**:
-- **Preferred**: Public/free APIs (CoinGecko, OpenWeatherMap, etc.)
-- **User-specified**: If user mentions "Spotify API", use that instead
-- **Error handling**: All API calls have try/except with user-friendly messages
-
-**Example Enhancement**:
-```python
-# Before (template)
-def process_user_input(text: str, user: Optional[User] = None) -> str:
-    if "hello" in text.lower():
-        return "Hello! How can I help?"
-
-# After (enhanced for "crypto price tracker")
-from services.api_client import get_crypto_price
-
-def process_user_input(text: str, user: Optional[User] = None) -> str:
-    text_lower = text.lower().strip()
-    
-    # Crypto price queries
-    if any(kw in text_lower for kw in ["btc", "bitcoin"]):
-        result = get_crypto_price("bitcoin")
-        if result["success"]:
-            return f"💰 Bitcoin: ${result['price']:,.2f}"
-        return f"⚠️ Error: {result['error']}"
-    
-    # ... existing logic ...
-```
-
-**Validation**:
-- Syntax check: `python -m py_compile services/ai_logic.py`
-- Import check: `python -c "from services.ai_logic import process_user_input"`
-- Function signature must not change
-- All imports must be valid
-
----
-
-## Discord Bot Pipeline (type_id=3)
-
-### Pipeline Overview
-
-**Pattern**: Deploy base first, then enhance (same as Telegram)
-**Total Steps**: 12 steps
-**Duration**: ~5 minutes (2 min base + 3 min enhancement)
-**Key Difference**: Discord uses WebSocket gateway (not HTTP webhooks)
-
-### Phase 1: Base Deployment (Steps 1-8, ~2 min)
-
-| Step | Function | File | Lines | Description |
-|------|----------|------|-------|-------------|
-| 1 | `validate_discord_token()` | `services/discord/validator.py` | 18-86 | Validate token via Discord API `/users/@me` |
-| 2 | `copy_discord_template()` | `services/discord/template.py` | 15-102 | Copy template from `templates/discord-bot-template/` to `{project_path}/discord/` |
-| 3 | `inject_bot_token()` | `services/discord/env_injector.py` | 12-181 | Create .env with `DISCORD_TOKEN`, PORT, PROJECT_ID, DATABASE_URL |
-| 4 | `install_bot_dependencies()` | `services/discord/installer.py` | 16-90 | Run pip install (discord.py, requests, etc.) in shared venv |
-| 5 | `start_bot_pm2()` | `services/discord/pm2_manager.py` | 21-153 | Start PM2 process: `dc-bot-{project_id}` |
-| 6 | Nginx routing | `services/discord/worker.py` | 231-256 | Configure nginx for health endpoint |
-| 7 | DNS provisioning | `services/discord/worker.py` | 258-279 | Provision DNS (optional - wildcard fallback) |
-| 8 | HTTP verification | `services/discord/worker.py` | 281-310 | Fast HTTP check of `/health` endpoint |
-
-### Phase 2: AI Enhancement (Steps 9-12, ~3 min)
-
-| Step | Function | File | Lines | Description |
-|------|----------|------|-------|-------------|
-| 9 | Webhook registration | `services/discord/webhook.py` | 14-31 | **No-op** (Discord uses WebSocket gateway) |
-| 10 | `enhance_bot_logic()` | `services/discord/editor.py` | 50-126 | Claude AI modifies bot logic based on description |
-| 11 | `buildpublish.py` | `templates/discord-bot-template/buildpublish.py` | 1-145 | Restart PM2 with enhanced code |
-| 12 | Final verification | `services/discord/worker.py` | 373-404 | HTTP verify enhanced bot |
-
-### Discord Bot Configuration
-
-**Port Allocation:**
-- Formula: `bot_port = 8000 + (project_id % 1000)`
-- Range: 8000-8999
-- Same formula as Telegram (ports shared across bot types)
-
-**PM2 Process Name:** `dc-bot-{project_id}`
-- **Important**: PM2 process name uses `project_id`, NOT `bot_name`
-- Set by: `services/discord/pm2_manager.py`
-- Restarted by: `templates/discord-bot-template/buildpublish.py` (reads PROJECT_ID from .env)
-
-**Environment Variables (.env):**
-| Variable | Source | Example |
-|----------|--------|---------|
-| `DISCORD_TOKEN` | User input | `MTIzNDU2...XXXXXX` |
-| `PROJECT_ID` | Injected by worker.py | `123` |
-| `PORT` | Port allocation | `8123` |
-| `DATABASE_URL` | Shared PostgreSQL | `postgresql://admin:xxx@localhost:5432/dreampilot` |
-| `WEBHOOK_DOMAIN` | Auto-generated | `mybot-api.dreamagent.cloud` |
-
-**Health Endpoint:** `https://{domain}.dreamagent.cloud/health`
-- Runs lightweight HTTP server in background thread
-- Returns: `{"status": "healthy", "service": "discord-bot"}`
-
-**Domain:** `{project_name}-api.dreamagent.cloud`
-
-**Token Validation:**
-- Endpoint: `GET https://discord.com/api/v10/users/@me`
-- Header: `Authorization: Bot {token}`
-- Returns bot info: id, username, global_name
-- Generates invite URL with permissions `277025770560`
-
-**Prerequisites (manual):**
-1. Create Discord Application at https://discord.com/developers/applications/
-2. Enable **Message Content Intent** under Bot > Privileged Gateway Intents
-3. Invite bot using generated URL with `&scope=bot&permissions=277025770560`
-
-**Status Updates:**
-- Creating → Pipeline running
-- Ready → All 12 steps completed successfully
-- Failed → Pipeline error (token invalid, dependencies failed, etc.)
-
-**Error Handling:**
-- Each step returns success/failure tuple
-- On failure: Rollback changes, update status to 'failed'
-- Logs errors with traceback for debugging
-- Phase 2 failures don't rollback (base still works)
-
-### Discord Bot Template Structure
-
-```
-discord/
-├── main.py              # Entry point + health server + structured logging
-├── config.py            # Configuration (DISCORD_TOKEN, DB, PORT, PROJECT_ID)
-├── requirements.txt     # Dependencies
-├── .env.example         # Environment template
-├── buildpublish.py      # Build & publish script (PM2 restart)
-├── commands/            # Discord command handlers (! prefix)
-│   ├── start.py         # !start command (user registration)
-│   ├── help.py          # !help command
-│   ├── ask.py           # !ask <query>
-│   └── status.py        # !status command
-├── services/            # Business logic
-│   ├── ai_logic.py      # Core AI decision engine (primary AI modification target)
-│   ├── api_client.py    # External API calls
-│   └── mock_data.py     # Fallback responses
-├── core/
-│   └── database.py      # PostgreSQL connection + auto-migration
-├── models/
-│   └── user.py          # User model (shared with main backend)
-├── utils/
-│   └── logger.py        # Logging setup
-└── logs/                # PM2 log output
-```
-
-### AI Enhancement Details
-
-**Step 10 - Claude Enhancement**:
-
-**Allowed Files** (AI can modify):
-- `services/ai_logic.py` - Core decision engine
-- `services/api_client.py` - External API calls
-- `commands/start.py` - Welcome message only
-- `commands/ask.py` - Query handling
-
-**Protected Files** (AI cannot modify):
-- `main.py`, `config.py`, `core/database.py`, `models/user.py`, `utils/logger.py`
-
-**Validation:**
-- Syntax check: `python -m py_compile services/ai_logic.py`
-- Import check: `python -c "from services.ai_logic import process_user_input"`
-- Function signature must not change: `process_user_input(text: str) -> str`
-- Backup files created before modification (*.backup)
-- Rollback on validation failure
-
-### Discord vs Telegram Comparison
-
-| Aspect | Telegram (type_id=2) | Discord (type_id=3) |
-|--------|---------------------|---------------------|
-| **Token Validation** | `api.telegram.org/bot{token}/getMe` | `discord.com/api/v10/users/@me` + `Authorization: Bot {token}` |
-| **Env Key** | `BOT_TOKEN` | `DISCORD_TOKEN` |
-| **Subdirectory** | `telegram/` | `discord/` |
-| **Handler Directory** | `handlers/` | `commands/` |
-| **PM2 Naming** | `tg-bot-{project_id}` | `dc-bot-{project_id}` |
-| **Webhook** | Real (Telegram API webhook) | No-op (WebSocket gateway) |
-| **Command Prefix** | `/` (slash commands) | `!` (prefix commands) |
-| **Health Endpoint** | Via webhook server | Background HTTP thread |
-| **User Param** | `process_user_input(text, user)` | `process_user_input(text)` |
-| **Intent System** | N/A | Privileged Gateway Intents required |
-| **Database** | Shared `users` table with `telegram_user_id` | Shared `users` table with `discord_user_id` column (auto-migrated) |
-| **Pipeline Steps** | 11 steps | 12 steps (extra no-op webhook step) |
-
-### Testing with dreamtest CLI
-
-```bash
-# Create and test a Discord bot project
-python scripts/dreamtest.py discord --name "My Bot" --token "YOUR_DISCORD_TOKEN" --desc "A test bot"
-
-# Skip infrastructure verification
-python scripts/dreamtest.py discord --name "My Bot" --token "YOUR_DISCORD_TOKEN" --skip-verify
-
-# JSON output for automation
-python scripts/dreamtest.py discord --name "My Bot" --token "YOUR_DISCORD_TOKEN" --agent
-```
-
----
-
-## Scheduler Pipeline (type_id=5)
-
-### Pipeline Overview
-
-**Pattern**: Copy template → inject env → AI enhance → validate
-**Total Steps**: 4 steps
-**Duration**: ~2-3 minutes (mostly AI enhancement)
-**Key Difference**: No PM2, no nginx, no DNS, no webhook — centralized scheduler runs jobs
-
-### Pipeline Steps
-
-| Step | Function | File | Lines | Description |
-|------|----------|------|-------|-------------|
-| 1 | `copy_scheduler_template()` | `services/scheduler/template.py` | 31-78 | Copy template from `templates/scheduler-template/` to `{project_path}/scheduler/` |
-| 2 | `inject_scheduler_env()` | `services/scheduler/env_injector.py` | 21-99 | Create .env with `PROJECT_ID`, `PROJECT_PATH`, `BACKEND_URL`, task tokens |
-| 3 | `SchedulerEditor.enhance_executor()` | `services/scheduler/editor.py` | 34-84 | Claude AI modifies executor.py + api_client.py based on description |
-| 4 | `validate_scheduler_project()` + metadata save | `services/scheduler/worker.py` | 124-141 | Validate `execute_task()` exists, save `project.json` |
-
-### Scheduler Project Configuration
-
-**No PM2 Process:** Jobs run in the centralized scheduler (no per-project process)
-**No Nginx/DNS:** No webhook routing needed
-**No Port Allocation:** No HTTP server per project
-
-**Environment Variables (.env):**
-| Variable | Source | Example |
-|----------|--------|---------|
-| `PROJECT_ID` | Injected by worker.py | `123` |
-| `PROJECT_PATH` | Injected by worker.py | `/root/clawd-projects/123_my-scheduler/` |
-| `BACKEND_URL` | Auto-generated | `http://localhost:8000` |
-| `TELEGRAM_BOT_TOKEN` | Optional (user input) | `1234567890:ABCdef...` |
-| `DISCORD_BOT_TOKEN` | Optional (user input) | `MTIzNDU2...` |
-| `SMTP_HOST` | Optional (user input) | `smtp.gmail.com` |
-| `SMTP_PORT` | Optional (user input) | `587` |
-| `SMTP_USER` | Optional (user input) | `user@gmail.com` |
-| `SMTP_PASS` | Optional (user input) | `app-password` |
-
-**Job Management:** Via REST API at `/api/scheduler/` (not direct DB access)
-
-### Scheduler Template Structure
-
-```
-scheduler/
-├── executor.py          # Task execution engine (AI modification target)
-├── job_manager.py       # HTTP client for job CRUD (LLM's tool)
-├── __init__.py          # Package init
-├── config.py            # Configuration loader
-├── main.py              # Standalone runner (optional)
-├── requirements.txt     # Dependencies
-├── .env.example         # Environment template
-├── services/
-│   ├── __init__.py
-│   └── api_client.py    # External API helper functions (AI modification target)
-└── llm/categories/      # API catalog for intent detection (17 categories)
-    ├── index.json        # Category index
-    ├── crypto_finance.json
-    ├── weather.json
-    ├── news.json
-    └── ...
-```
-
-### Job Management API
-
-**Router:** `api/scheduler_router.py` (prefix: `/api/scheduler`)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/projects/{project_id}/jobs` | Create a new job |
-| GET | `/projects/{project_id}/jobs` | List project jobs |
-| GET | `/jobs/{job_id}` | Get job details |
-| PUT | `/jobs/{job_id}` | Update job (schedule, payload, status) |
-| DELETE | `/jobs/{job_id}` | Delete a job |
-| POST | `/jobs/{job_id}/pause` | Pause an active job |
-| POST | `/jobs/{job_id}/resume` | Resume a paused job |
-| POST | `/jobs/{job_id}/run` | Trigger job immediately |
-| GET | `/jobs/{job_id}/logs` | Get job execution logs |
-| GET | `/projects/{project_id}/logs` | Get all project logs |
-
-### Job Manager Helper (LLM Tool)
-
-**File:** `templates/scheduler-template/scheduler/job_manager.py`
-
-The LLM uses this Python module during chat to create and manage jobs:
-
-```python
-from scheduler import job_manager
-
-# Create a job
-job_manager.create("interval", "10m", "btc_email", {"to": "user@email.com"})
-
-# List, control, and query jobs
-job_manager.list_jobs()
-job_manager.pause(job_id)
-job_manager.resume(job_id)
-job_manager.run_now(job_id)
-job_manager.delete(job_id)
-job_manager.get_logs(job_id)
-```
-
-### AI Enhancement Details
-
-**Step 3 - Claude Enhancement**:
-
-**Allowed Files** (AI can modify):
-- `scheduler/executor.py` — Add task handlers + FETCH_DATA_REGISTRY entries
-- `services/api_client.py` — Add API helper functions
-
-**Protected Files** (AI cannot modify):
-- `scheduler/job_manager.py`, `config.py`, `main.py`, `requirements.txt`
-
-**What Claude Does**:
-1. Analyzes user description for intent (e.g., "BTC price via email every 10min")
-2. Matches to API category from `llm/categories/index.json`
-3. Adds API helper to `services/api_client.py`
-4. Adds task handler + FETCH_DATA_REGISTRY entry to `executor.py`
-5. Registers route in `execute_task()` function
-6. Validates `execute_task()` and `FETCH_DATA_REGISTRY` still exist
-
-**Dynamic Content System (`{{variable}}`):**
-
-Jobs can use `{{variable}}` placeholders resolved at execution time:
-```python
-job_manager.create("interval", "10m", "btc_email", {
-    "body": "Bitcoin: {{btc_price}}",
-    "fetch": ["btc_price"]  # Resolved before sending
-})
-```
-
-### End-to-End Job Creation Flow
-
-```
-User: "send me BTC price via email every 10 minutes"
-  → acp_chat_handler._build_chat_prompt_scheduler()
-  → Claude Agent modifies:
-     1. services/api_client.py → adds get_crypto_price()
-     2. scheduler/executor.py → adds _btc_email() handler + route
-  → Claude Agent calls job_manager (HTTP → API):
-     job_manager.create("interval", "10m", "btc_email", {...})
-  → API Router → services/scheduler/jobs.create_job()
-  → INSERT INTO scheduler_jobs
-  → Centralized scheduler picks up on next poll → runs executor._btc_email()
-```
-
-### Centralized Scheduler
-
-**File:** `services/scheduler/scheduler.py`
-
-The central scheduler runs as a single process:
-- Polls `scheduler_jobs` table for due jobs
-- Uses `services/scheduler/execution_engine.py` to execute each job
-- Execution engine loads project's `executor.py` and calls `execute_task(job)`
-- Logs results to `scheduler_logs` table
-
-**Status Updates:**
-- Creating → Pipeline running
-- Ready → All 4 steps completed (template copied, env injected, AI enhanced)
-- Failed → Pipeline error (template missing, enhancement failed)
-
-**Error Handling:**
-- Step 1-2 failures: Halt pipeline, mark as failed
-- Step 3 (AI enhancement) failures: Continue with base executor (still functional)
-- Step 4 validation failures: Log warning, continue
-
-### Scheduler vs Bot Comparison
-
-| Aspect | Telegram (type_id=2) | Discord (type_id=3) | Scheduler (type_id=5) |
-|--------|---------------------|---------------------|----------------------|
-| **PM2 Process** | `tg-bot-{id}` | `dc-bot-{id}` | None (centralized) |
-| **Nginx** | Yes (webhook) | Yes (health) | None |
-| **DNS** | Yes | Yes | None |
-| **Port** | `8000 + id%1000` | `8000 + id%1000` | None |
-| **Webhook** | Telegram API | No-op (WebSocket) | None |
-| **Job Execution** | On message | On message | Centralized scheduler poll |
-| **DB Access** | Direct (own DB) | Direct (own DB) | Via API (main DB) |
-| **Template Dir** | `telegram/` | `discord/` | `scheduler/` |
-| **AI Target** | `services/ai_logic.py` | `services/ai_logic.py` | `scheduler/executor.py` + `services/api_client.py` |
-| **Pipeline Steps** | 11 | 12 | 4 |
-| **Cleanup** | PM2+nginx+DNS+DB+dir | PM2+nginx+DNS+DB+dir | Clear jobs + dir |
-
----
-
-## Pipeline Phases
-
-| Phase | Function | File | Lines | Description |
-|-------|----------|------|-------|-------------|
-| 1 | `phase_1_analyze_project()` | `openclaw_wrapper.py` | 322-393 | Confirm project details, template |
-| 2 | `phase_2_template_setup()` | `openclaw_wrapper.py` | 395-439 | Verify frontend/backend directories |
-| 3 | `phase_3_database_provisioning()` | `openclaw_wrapper.py` | 441-464 | Prepare database provisioning |
-| 4 | `phase_4_port_allocation()` | `openclaw_wrapper.py` | 466-488 | Prepare port allocation |
-| 5 | `phase_5_service_setup()` | `openclaw_wrapper.py` | 490-526 | Call InfrastructureManager.provision_all() |
-| 6 | `phase_6_nginx_routing()` | `openclaw_wrapper.py` | 528-542 | Nginx config (via InfrastructureManager) |
-| 7 | `phase_7_verification()` | `openclaw_wrapper.py` | 544-558 | Deployment verification |
-| 8 | `phase_8_frontend_ai_refinement()` | `openclaw_wrapper.py` | 560-692 | CrewAI frontend refinement |
-| 9 | `phase_9_acp_frontend_editor()` | `openclaw_wrapper.py` | 694-850 | ACPX frontend customization |
-
-### Phase Details
-
-| Phase | Purpose | Key Methods | Error Handling |
-|-------|---------|-------------|----------------|
-| 1 | Confirm template selection | `status_tracker.start_phase()`, `complete_phase()` | Returns True (always succeeds) |
-| 2 | Verify directories | Check `frontend/` and `backend/` exist | Returns False if missing, calls `fail_phase()` |
-| 3 | Prepare DB provisioning | Logs delegation to InfrastructureManager | Returns True (preparation only) |
-| 4 | Prepare port allocation | Logs delegation to InfrastructureManager | Returns True (preparation only) |
-| 5 | Run infrastructure | `get_project_domain()`, `infra.provision_all()` | Returns False if infra fails |
-| 6 | Nginx routing | Logs completion (handled in Phase 5) | Returns True (already verified) |
-| 7 | Verification | Logs completion (handled in Phase 5) | Returns True (already verified) |
-| 8 | AI refinement | `_get_project_type_id()`, `_verify_frontend_build()`, `_restart_pm2_service()` | Returns True even on failure (allows completion) |
-| 9 | ACPX customization | `FrontendOptimizer`, `ACPFrontendEditorV2`, `_update_router_and_navigation()` | Returns True even on failure (allows completion) |
-
-**Phase 8-9 Resilience:** These phases return True even on failure to allow project completion despite AI errors
-
----
-
-## Infrastructure Manager (`infrastructure_manager.py`)
-
-### Core Classes
-
-| Class | Lines | Purpose | Key Methods |
-|-------|-------|---------|-------------|
-| `PortAllocator` | 73-152 | Allocate frontend/backend ports | `allocate_frontend_port()`, `allocate_backend_port()`, `release_ports()` |
-| `DatabaseProvisioner` | 160-295 | PostgreSQL DB/user creation | `create_database_and_user()`, `drop_database_and_user()`, `_execute_sql()` |
-| `ServiceManager` | 305-596 | PM2 service management | `create_backend_service()`, `start_backend_service()`, `build_frontend()` |
-| `NginxConfigurator` | 822-1105 | Nginx config generation | `generate_config()`, `install_config()`, `reload_nginx()` |
-| `DeploymentVerifier` | 1115-1200 | Port/health verification | `check_port()`, `check_health_endpoint()`, `verify_deployment()` |
-| `DNSProvisioner` | 1210-1370 | DNS A record provisioning | `create_a_record()`, `provision_project_dns()` |
-| `InfrastructureManager` | 1375-1800+ | Main orchestrator | `provision_all()` - 8-phase pipeline |
-
-### InfrastructureManager.provision_all() Pipeline
-
-| Phase | Description | Key Actions | Failure Mode |
-|-------|-------------|-------------|--------------|
-| 1 | Port allocation | Load used ports from DB, scan active ports, allocate frontend (3010-4000) and backend (8010-9000) | Raises `RuntimeError` if no ports available |
-| 2 | Database provisioning | Create DB `{name}_db`, user `{name}_user`, 32-char password via Docker exec | Raises exception on SQL failure |
-| 3 | Backend environment | Update `.env` with `DATABASE_URL`, `API_PORT`, `PROJECT_NAME` | Continues on file not found |
-| 4 | Service configuration | Create PM2 `ecosystem.config.json` for backend with uvicorn | Returns False on write failure |
-| 5 | Build frontend | Clean Vite caches → `npm install` → `npm run build` → verify `dist/index.html` | Returns False, logs `PHASE_5_BUILD_FAILED` |
-| 6 | Nginx configuration | Generate config with SPA routing, API proxy, SSL support → install → reload nginx | Returns False on nginx reload failure |
-| 7 | Start services | PM2 start frontend (serve dist on port) + backend (uvicorn on port) | Logs failure, continues |
-| 8 | Health verification | Check frontend port, backend port, `/health` endpoint with retry logic | Returns verification results dict |
-
-### Key Configuration Details
-
-**Port Ranges:** Frontend 3010-4000, Backend 8010-9000
-**Database Naming:** `{project_name}_db`, user `{project_name}_user`
-**DNS Records:** `{domain}.dreamagent.cloud`, `{domain}-api.dreamagent.cloud`
-**Nginx Features:** SPA routing, API proxy, SSL/HTTPS, Let's Encrypt
-
----
-
-## ACPX Frontend Editor (`acp_frontend_editor_v2.py`)
-
-### Core Classes
-
-| Class | Lines | Purpose |
-|-------|-------|---------|
-| `ACPPathValidator` | 76-145 | Validate paths (allow src/, forbid node_modules, components/ui) |
-| `FilesystemSnapshot` | 147-212 | SHA1 hash comparison, compute diff (added/removed/modified) |
-| `ACPSnapshotManager` | 213-307 | Create/restore/cleanup snapshots |
-| `ACPBuildGate` | 309-492 | Build verification (clean → install → build → verify dist/) |
-| `ACPFrontendEditorV2` | 494-2000+ | Main editor class |
-
-### ACPFrontendEditorV2 Key Methods
-
-| Method | Lines | Purpose |
-|--------|-------|---------|
-| `apply_changes_via_acpx()` | 524-900 | Main execution - spawn Claude, monitor, validate, build |
-| `_extract_required_pages_from_prompt()` | 1456-1588 | Extract page names from description |
-| `_build_acpx_prompt()` | 1590-1866 | Build ACPX prompt with page specs |
-| `_enforce_page_guardrails()` | 1908-? | Enforce page structure rules |
-
-### Execution Flow
-
-1. **Snapshot:** Capture before state (SHA1 hashes of all files in `src/`, excluding `node_modules`, `.git`, `dist`)
-2. **Extract Pages:** Parse goal description using `_extract_required_pages_from_prompt()` - detects page names via keywords, Groq inference, conjunction stripping
-3. **Build Prompt:** Generate ACPX prompt with page specs, templates, project context, and customization guidelines
-4. **Execute ACPX:** Spawn Claude Code worker process, monitor stdout/stderr streams with watchdog timer (300s max idle)
-5. **Diff Changes:** Compare before/after filesystem hashes using `FilesystemSnapshot.compute_diff()` - returns added/removed/modified lists
-6. **Validate:** Check paths with `ACPPathValidator.is_path_allowed()`, enforce max 50 new files limit
-7. **Build Gate:** Run `ACPBuildGate.run_build()` - clean Vite caches → `npm install` → `npm run build` → verify `dist/index.html` (30-min timeout)
-8. **Rollback if Failed:** Call `ACPSnapshotManager.restore_snapshot()` on build failure or validation failure
-9. **Post-Processing:** Fix duplicate "/" routes, add Layout wrapper, replace `{children}` with `<Outlet />`, remove unused imports
-
-**Watchdog Timer:** Monitors stdout/stderr streams, terminates if idle for 300s (5 minutes)
-**Rollback Strategy:** Full filesystem restore from backup directory `frontend_backup_{timestamp}/`
-
----
-
-## ACP Chat Handler (`acp_chat_handler.py`)
-
-### Project Type Support
-
-The ACP chat handler supports all four project types via prompt dispatching:
-
-| Project Type | type_id | Flag | Prompt Method |
-|-------------|---------|------|---------------|
-| Website | 1 | `is_website` | `_build_chat_prompt_website()` |
-| Telegram Bot | 2 | `is_telegram_bot` | `_build_chat_prompt_telegram()` |
-| Discord Bot | 3 | `is_discord_bot` | `_build_chat_prompt_discord()` |
-| Scheduler | 5 | `is_scheduler` | `_build_chat_prompt_scheduler()` |
-
-**Initialization** (`acp_chat_handler.py:__init__`):
-- `self.project_id` - Project ID (required for bot PM2 commands)
-- `self.domain` - Project domain (from DB, fallback to project_name)
-- `self.is_telegram_bot` - True for type_id=2
-- `self.is_discord_bot` - True for type_id=3
-- `self.is_scheduler` - True for type_id=5
-- `self.is_bot_project` - True for type_id=2, 3, or 5
-
-**Path Validation:**
-- Website projects: `{project_path}/frontend/src/`
-- Bot projects (type_id=2,3): `{project_path}/telegram/` or `{project_path}/discord/`
-- Scheduler projects (type_id=5): `{project_path}/scheduler/`
-
-### Discord Chat Prompt
-
-**Method:** `_build_chat_prompt_discord()` (line 1169)
-
-**Key differences from Telegram prompt:**
-- Command prefix: `!` (not `/`)
-- Handler directory: `commands/` (not `handlers/`)
-- PM2 process: `dc-bot-{project_id}` (not `tg-bot-{project_id}`)
-- No `user` parameter in `process_user_input(text)`
-- References `agent/ai_index/` for code navigation
-- Protected files: main.py, config.py, core/database.py
-
-**Prompt Dispatching:**
-All 6 prompt-dispatching locations in the handler include `elif self.is_scheduler:` branches between discord and website conditions.
-
-### Scheduler Chat Prompt
-
-**Method:** `_build_chat_prompt_scheduler()` (line 198)
-
-**What the prompt covers:**
-- Modify `scheduler/executor.py` — Add task handlers and FETCH_DATA_REGISTRY entries
-- Modify `services/api_client.py` — Add API helper functions
-- Create jobs using `scheduler/job_manager.py` (HTTP client wrapping the REST API)
-- Manage jobs — list, pause, resume, delete via job_manager
-- API selection from `llm/categories/index.json` (17 categories)
-
-**Key differences from Bot prompts:**
-- No PM2 commands (centralized scheduler)
-- No `process_user_input` — uses `execute_task(job)` instead
-- Primary tool is `job_manager.py` (not direct code changes)
-- Two modification targets: `executor.py` + `api_client.py`
-- Dynamic `{{variable}}` system for runtime content resolution
-
----
-
-## Fast Wrapper (`fast_wrapper.py`)
-
-### FastWrapper Methods
-
-| Method | Lines | Purpose |
-|--------|-------|---------|
-| `__init__()` | 53-100 | Initialize wrapper |
-| `update_status()` | 62-100 | Update project status in DB |
-| `git_clone()` / `_copy_blank_template()` | 102-238 | Clone/copy template to frontend/ |
-| `create_backend()` | 240-314 | Create backend/main.py skeleton |
-| `create_database_setup()` | 316-389 | Create backend/init.sql |
-| `create_environment()` | 391-418 | Create backend/.env |
-| `run()` | 420-470 | Execute all tasks |
-
-### Template Strategy
-
-- **Mode:** `EMPTY_TEMPLATE_MODE = True` (always use blank template)
-- **Path:** `templates/blank-template`
-- **Reason:** Clean starting point, AI builds frontend from scratch in Phase 8/9
-- **Fallback:** If blank template not found, logs warning and continues
-
-### Backend Files Created
-
-**`backend/main.py` (240-314):**
-- FastAPI app with CORS middleware
-- Health check endpoint: `GET /health` → `{"status": "healthy"}`
-- Basic API structure ready for extension
-
-**`backend/init.sql` (316-389):**
-- Table creation SQL (users, data tables)
-- Index definitions for performance
-- Seed data placeholders
-
-**`backend/.env` (391-418):**
-- `PROJECT_NAME` - Project name
-- `DATABASE_URL` - Populated in Phase 3 (PostgreSQL connection string)
-- `API_PORT` - Populated in Phase 4 (backend port)
-- `BACKEND_HOST` - Default: `0.0.0.0`
-
-### Task Execution Order
-
-1. **Task 1:** Template already selected via Groq in `app.py` (skip)
-2. **Task 2:** Copy `templates/blank-template` → `project_path/frontend/`
-3. **Task 3:** Create `backend/main.py` with FastAPI skeleton
-4. **Task 4:** Create `backend/init.sql` with table schemas
-5. **Task 5:** Create `backend/.env` with environment variables
-
-**Status Updates:** Calls `update_status("scaffolding")` during execution, `update_status("scaffolded")` on completion
-
----
-
-## Supporting Services
-
-| Service | File | Lines | Purpose | Key Methods |
-|---------|------|-------|---------|-------------|
-| GroqService | `groq_service.py` | 15-100 | AI completions | `complete()`, `infer_template()`, `infer_pages()` |
-| PageManifest | `page_manifest.py` | 1-200 | Track pages | `create_page_manifest()`, `scaffold_pages()` |
-| DeploymentVerifier | `deployment_verifier.py` | 50-200 | Verify deployment | `verify_all()`, `check_build_output()`, `check_http_response()` |
-| DNS Manager | `dns_manager.py` | 1-150 | Hostinger DNS API | `create_a_record()`, `check_subdomain_exists()` |
-| ContextInjector | `context_injector.py` | 1-100 | Inject context | `inject_context()`, `load_project_info()` |
-| FrontendOptimizer | `frontend_optimizer.py` | 1-300 | Rule-based branding | `run()`, `update_package_json()`, `update_index_html()` |
-| Discord Validator | `services/discord/validator.py` | 18-86 | Validate Discord token | `validate_discord_token()` |
-| Discord Template | `services/discord/template.py` | 15-146 | Copy Discord template | `copy_discord_template()`, `verify_template_structure()` |
-| Discord Env Injector | `services/discord/env_injector.py` | 12-227 | Inject DISCORD_TOKEN + env | `inject_bot_token()`, `update_env_variable()` |
-| Discord Installer | `services/discord/installer.py` | 16-125 | Install discord.py deps | `install_bot_dependencies()`, `verify_dependencies()` |
-| Discord PM2 Manager | `services/discord/pm2_manager.py` | 21-264 | PM2 process lifecycle | `start_bot_pm2()`, `stop_bot_pm2()`, `delete_bot_pm2()` |
-| Discord Webhook | `services/discord/webhook.py` | 14-51 | No-op (WebSocket) | `register_discord_interactions_endpoint()` |
-| Discord Editor | `services/discord/editor.py` | 21-447 | AI bot enhancement | `DiscordBotEditor.enhance_bot_logic()` |
-| Discord Worker | `services/discord/worker.py` | 90-477 | 12-step pipeline | `run_discord_bot_pipeline()` |
-| Discord Cleanup | `services/discord/cleanup_infra.py` | 16-184 | Full infra cleanup | `cleanup_discord_bot_infrastructure()` |
-| Scheduler API Router | `api/scheduler_router.py` | 1-234 | Job CRUD REST endpoints | `api_create_job()`, `api_list_jobs()`, `api_get_job_logs()` |
-| Scheduler Jobs | `services/scheduler/jobs.py` | — | Job DB operations | `create_job()`, `update_job()`, `delete_job()`, `list_jobs()`, `clear_jobs()` |
-| Scheduler Core | `services/scheduler/scheduler.py` | — | Centralized poll loop | `run_scheduler()` |
-| Scheduler Execution | `services/scheduler/execution_engine.py` | — | Load & run executor.py | `execute_job()` |
-| Scheduler Parser | `services/scheduler/parser.py` | — | Parse schedule values | parse interval/daily/once |
-| Scheduler Logger | `services/scheduler/logger.py` | — | Job execution logging | `log_job()` |
-| Scheduler Template | `services/scheduler/template.py` | 1-93 | Copy scheduler template | `copy_scheduler_template()`, `verify_template_structure()` |
-| Scheduler Env Injector | `services/scheduler/env_injector.py` | 1-99 | Inject .env for scheduler | `inject_scheduler_env()` |
-| Scheduler Editor | `services/scheduler/editor.py` | 1-209 | AI enhancement of executor | `SchedulerEditor.enhance_executor()` |
-| Scheduler Validator | `services/scheduler/validator.py` | 1-44 | Validate executor.py | `validate_scheduler_project()` |
-| Scheduler Worker | `services/scheduler/worker.py` | 1-181 | 4-step pipeline | `run_scheduler_pipeline()` |
-| Job Manager (template) | `templates/scheduler-template/scheduler/job_manager.py` | 1-68 | LLM tool for job CRUD | `create()`, `list_jobs()`, `pause()`, `resume()` |
-
-### FrontendOptimizer Changes (Phase 9 Step 0)
-
-- **package.json:** Update name, description, version
-- **index.html:** Update title, meta description
-- **App.tsx:** Update hero section, branding
-- **.env:** Update project name, API URL
-
-### DeploymentVerifier Details (`deployment_verifier.py`)
-
-**Retry Logic:**
-- Max retries: 3 attempts
-- Retry delay: 5.0s (exponential backoff: 5s → 10s → 20s)
-- HTTP timeout: 30.0s per request
-
-**Verification Checks:**
-1. **Build output:** Check `dist/index.html` exists and not empty
-2. **Nginx config:** Verify `{domain}.conf` exists in `/etc/nginx/sites-available/`
-3. **DNS resolution:** Resolve `{domain}.dreamagent.cloud` to server IP
-4. **HTTP response:** GET request to frontend, expect 200 OK
-5. **PM2 status:** Check PM2 process running for frontend/backend services
-
-**Result Structure:**
-```python
-{
-  "success": True/False,
-  "checks": {
-    "build_output": VerificationResult(...),
-    "nginx_config": VerificationResult(...),
-    "dns_resolution": VerificationResult(...),
-    "http_response": VerificationResult(...),
-    "pm2_status": VerificationResult(...)
-  },
-  "failed_checks": ["check_name", ...],
-  "total_duration": 12.5
-}
-```
-
-### DNS Manager Details (`dns_manager.py`)
-
-**Hostinger API Integration:**
-- Requires `HOSTINGER_API_TOKEN` environment variable
-- Base URL: `https://developers.hostinger.com/api/dns/v1`
-- Zone ID: `dreamagent.cloud`
-
-**DNS Record Types:**
-- **A Record:** Maps subdomain to IPv4 address (195.200.14.37)
-- **TTL:** Default 14400 seconds (4 hours)
-- **Propagation:** 5-60 minutes for global DNS propagation
-
-**Methods:**
-- `check_subdomain_exists(domain, subdomain)` → Returns `(exists: bool, current_ip: str)`
-- `create_a_record(domain, subdomain, ip, ttl)` → Returns success bool
-- `update_a_record(domain, subdomain, ip)` → Updates existing record
-- `delete_a_record(domain, subdomain)` → Removes record
-
-**Wildcard DNS:** `*.dreamagent.cloud` pre-configured, so manual DNS provisioning often skipped
-
----
-
-## Database Layer
-
-### PostgreSQL Connection (`database_postgres.py`)
-
-**Methods:** `get_connection()`, `execute_query()`, `execute_insert()`, `close_connection()`
-**Settings:** Host: localhost:5432, DB: dreampilot, User: admin
-
-### Database Adapter (`database_adapter.py`)
-
-**Methods:** `get_project()`, `get_project_by_name()`, `update_project_status()`, `delete_project()`
-**Supports:** PostgreSQL (primary), SQLite (fallback)
-
-### Schema (`projects_schema.sql`)
-
-**Tables:** `projects`, `project_types`, `templates`
-
-**Projects Table:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | SERIAL PRIMARY KEY | Auto-increment ID |
-| `user_id` | INTEGER | Foreign key to users table |
-| `name` | VARCHAR(255) | Project name (unique) |
-| `domain` | VARCHAR(255) | Subdomain (e.g., "myproject") |
-| `description` | TEXT | Project description |
-| `project_path` | VARCHAR(500) | Filesystem path to project |
-| `status` | VARCHAR(50) | Current status: creating, scaffolding, ready, error, failed |
-| `template_id` | VARCHAR(100) | Template identifier (e.g., "blank-template") |
-| `frontend_port` | INTEGER | Frontend port (3010-4000) |
-| `backend_port` | INTEGER | Backend port (8010-9000) |
-| `created_at` | TIMESTAMP | Creation timestamp |
-| `updated_at` | TIMESTAMP | Last update timestamp |
-
-**Status Values:**
-- `creating` - Initial state after POST /projects
-- `scaffolding` - Fast wrapper executing
-- `scaffolded` - Fast wrapper completed
-- `provisioning` - Infrastructure manager running
-- `ai_provisioning` - Phase 8/9 AI refinement
-- `ready` - All phases complete
-- `error` - Pipeline failed
-- `failed` - Bot pipeline error (token invalid, dependencies failed, etc.)
-
-### Connection Pooling (`database_postgres.py`)
-
-**Pool Configuration:**
-- Min connections: 2
-- Max connections: 10
-- Connection timeout: 30s
-- Idle timeout: 300s (5 minutes)
-
-**Methods:**
-- `get_connection()` - Get connection from pool, blocks if pool exhausted
-- `execute_query(query, params)` - Execute SELECT, returns list of rows
-- `execute_insert(query, params)` - Execute INSERT, returns new row ID
-- `close_connection(conn)` - Return connection to pool (not actual close)
-
----
-
-## Backend Database Connection Details
-
-### Database Creation Flow
-
-| Step | File | Lines | Description |
-|------|------|-------|-------------|
-| 1 | `infrastructure_manager.py` | 220-278 | `DatabaseProvisioner.create_database_and_user()` |
-| 2 | `infrastructure_manager.py` | 171-200 | `_execute_sql()` via Docker exec |
-| 3 | `infrastructure_manager.py` | 440-470 | Pass DATABASE_URL to ecosystem config |
-| 4 | Backend `core/config.py` | 1-40 | Read DATABASE_URL from environment |
-
-### Database Naming Convention
-
-```
-Project Name: "LearningGrid"
-├── Database: learninggrid_db (lowercase, - replaced with _)
-├── Username: learninggrid_user
-└── Password: 32-char alphanumeric (no special chars for URL safety)
-```
-
-**Important:** All database names are forced to lowercase to avoid PostgreSQL case-sensitivity issues.
-
-### DATABASE_URL Construction
-
-**Format:**
-```
-postgresql://{username}:{password}@{host}:{port}/{database}
-```
-
-**Example:**
-```
-postgresql://learninggrid_user:AbC123XyZ456@postgres:5432/learninggrid_db
-```
-
-**Components:**
-| Component | Source | Example |
-|-----------|--------|---------|
-| `username` | `{project_name}_user` (lowercase) | `learninggrid_user` |
-| `password` | 32-char alphanumeric | `AbC123XyZ456...` |
-| `host` | `POSTGRES_HOST` env var | `postgres` (Docker) or `localhost` |
-| `port` | `POSTGRES_PORT` env var | `5432` |
-| `database` | `{project_name}_db` (lowercase) | `learninggrid_db` |
-
-### Environment Variables Passed to Backend
-
-The following environment variables are set in the PM2 ecosystem config:
+| --- | --- | --- | --- |
+| `name` | string | yes | Project name |
+| `domain` | string | no | Subdomain prefix. Auto-generated if omitted. |
+| `description` | string | no | Prompt/project description |
+| `typeId` / `type_id` | integer | no | Project type. Defaults to website if omitted. |
+| `template_id` | string | no | Optional website template ID |
+| `bot_token` | string | type-specific | Telegram or Discord bot token |
+| `telegram_bot_token` | string | scheduler optional | Scheduler Telegram channel token |
+| `telegram_chat_id` | string | scheduler optional | Scheduler Telegram chat target |
+| `discord_webhook_url` | string | scheduler optional | Scheduler Discord notification target |
+| `email_to` | string | scheduler optional | Scheduler email notification target |
+| `api_endpoint` | string | scheduler optional | Scheduler default API endpoint |
+
+## Response
 
 ```json
 {
-  "PORT": "8010",
-  "BACKEND_HOST": "0.0.0.0",
-  "BACKEND_PORT": "8010",
-  "PROJECT_NAME": "LearningGrid",
-  "DATABASE_URL": "postgresql://learninggrid_user:xxx@postgres:5432/learninggrid_db"
+  "id": 1625,
+  "user_id": 1,
+  "name": "dragon-sanctuary",
+  "domain": "dragon-sanctuary-a1b2c3",
+  "description": "Cinematic dragon sanctuary website",
+  "project_path": "/root/clawd-projects/1625-dragon-sanctuary",
+  "type_id": 1,
+  "status": "creating",
+  "claude_code_session_name": null,
+  "template_id": "blank-template",
+  "frontend": null,
+  "created_at": "2026-07-12 10:00:00"
 }
 ```
 
-### Backend Configuration (Template)
+## Domain Handling
 
-**File:** `templates/blank-template/backend/core/config.py`
+- If `domain` is omitted, the backend sanitizes the project name and appends a random suffix.
+- If `domain` is supplied, it must be 3-50 lowercase letters/numbers/hyphens, start with a letter, and be globally unique.
+- Domain/repo sanitization is delegated to the GitHub service helper.
 
-```python
-class Settings:
-    # Database - reads from DATABASE_URL env var
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:5432/dreampilot"
-    )
-    
-    # Other settings
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "change-in-production")
-    HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8000"))
-    PROJECT_NAME: str = os.getenv("PROJECT_NAME", "DreamPilot API")
-```
+## Website Projects
 
-### PostgreSQL Schema Permissions (PG 15+)
+Website projects use `type_id=1`.
 
-PostgreSQL 15+ requires explicit schema permissions beyond database-level grants:
+High-level flow:
 
-```sql
--- Create database and user
-CREATE DATABASE "learninggrid_db";
-CREATE USER "learninggrid_user" WITH PASSWORD 'xxx';
+1. Insert project with `status='creating'`.
+2. Create project folder and initialize git.
+3. Copy/scaffold frontend and backend base.
+4. Run AI generation/editing worker.
+5. Build frontend/backend as needed.
+6. Configure PM2, nginx, DNS/domain, and verification.
+7. Mark project ready or error.
 
--- Database-level grant (traditional)
-GRANT ALL PRIVILEGES ON DATABASE "learninggrid_db" TO "learninggrid_user";
+Intermediate website statuses such as `building`, `deploying`, `verifying`, `provisioning`, and `ai_provisioning` are considered part of creation for UI and API locking.
 
--- Schema-level grant (required for PG 15+)
-GRANT ALL ON SCHEMA public TO "learninggrid_user";
+## Telegram Bot Projects
 
--- Table creation permissions
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "learninggrid_user";
-```
+Telegram projects use `type_id=2` and require `bot_token`.
 
-### Common Database Errors & Fixes
+Runtime:
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `FATAL: database "X" does not exist` | CREATE DATABASE failed | Check `_execute_sql()` logs, ensure connecting to `postgres` db |
-| `DROP DATABASE cannot run inside a transaction block` | Transaction mode active | Use `conn.autocommit = True` before DROP |
-| `password authentication failed` | Special chars in password | Use alphanumeric-only passwords |
-| `permission denied for schema public` | PG 15+ missing schema grant | Add `GRANT ALL ON SCHEMA public TO user` |
-| `relation "users" does not exist` | Tables not created | Check `init_db()` runs on startup |
+- PM2 process: `tg-bot-{project_id}`
+- Template: `templates/telegram-bot-template`
+- Worker: `services/telegram/worker.py`
+- Webhook API: `api/telegram_webhook.py`
 
-### Testing Database Connection
+Pipeline summary:
 
-**From Server:**
-```bash
-# Connect to project database
-docker exec -it postgres psql -U learninggrid_user -d learninggrid_db
+1. Validate Telegram token.
+2. Copy template.
+3. Inject environment.
+4. Install dependencies.
+5. Start PM2 bot process.
+6. Configure webhook routing.
+7. Run AI enhancement.
+8. Restart/publish and verify.
 
-# List tables
-\dt
+## Discord Bot Projects
 
-# Check connection
-SELECT current_database(), current_user;
-```
+Discord projects use `type_id=3` and require `bot_token`.
 
-**From Backend Logs:**
-```bash
-pm2 logs LearningGrid-backend --lines 50
-```
+Runtime:
 
-Look for:
-- `🔧 Initializing database...` - SQLAlchemy engine creation
-- `✓ Database tables created` - `init_db()` success
-- `sqlalchemy.exc.OperationalError` - Connection failed
+- PM2 process: `dc-bot-{project_id}`
+- Template: `templates/discord-bot-template`
+- Worker: `services/discord/worker.py`
+- Discord uses the gateway/WebSocket model, not Telegram-style webhooks.
 
-## Common Modifications
+Pipeline summary:
 
-### Bot Project Cleanup
+1. Validate Discord bot token.
+2. Copy template.
+3. Inject environment.
+4. Install dependencies.
+5. Start PM2 process.
+6. Configure health endpoint routing.
+7. Run AI enhancement.
+8. Restart/publish and verify.
 
-**File:** `app.py` → `cleanup_infrastructure()` (line 1565)
+## Scheduler Projects
 
-Bot and scheduler projects use dedicated cleanup logic that handles all infrastructure removal:
+Scheduler projects use `type_id=5`.
 
-| Type | Cleanup Module / Logic | PM2 Process |
-|------|----------------------|-------------|
-| Telegram (type_id=2) | `services/telegram/cleanup_infra.py` | `tg-bot-{project_id}` |
-| Discord (type_id=3) | `services/discord/cleanup_infra.py` | `dc-bot-{project_id}` |
-| Scheduler (type_id=5) | Inline in `cleanup_infrastructure()` | None |
+Runtime:
 
-**Discord Bot Cleanup Steps** (`services/discord/cleanup_infra.py`):
+- No per-project PM2 process.
+- Jobs live in central `scheduler_jobs`.
+- The centralized scheduler daemon executes per-project `scheduler/executor.py`.
 
-| Step | Description | Details |
-|------|-------------|---------|
-| 1 | Delete PM2 process | `pm2 delete dc-bot-{project_id}` |
-| 2 | Remove Nginx config | Delete `{domain}.conf` from sites-available/enabled |
-| 3 | Remove SSL certificates | Delete certbot certificates for domain |
-| 4 | Remove DNS records | Delete A record via Hostinger API |
-| 5 | Drop PostgreSQL database | DROP DATABASE and DROP USER (if applicable) |
-| 6 | Remove project directory | `shutil.rmtree(project_path)` |
+Pipeline summary:
 
-**Scheduler Cleanup Steps** (inline in `cleanup_infrastructure()`, line 1727):
+1. Copy scheduler template.
+2. Inject environment and notification channels.
+3. AI-enhance `executor.py`.
+4. Validate and mark ready.
 
-| Step | Description | Details |
-|------|-------------|---------|
-| 1 | Clear scheduler jobs | `DELETE FROM scheduler_jobs WHERE project_id=X` via `clear_jobs()` |
-| 2 | Remove project directory | `shutil.rmtree(project_path)` |
+See [scheduler.md](./scheduler.md) for job operations.
 
-**Detection Logic:**
-- Primary: `project.json` → `type_id` field
-- Fallback: Path contains `/telegram/`, `/discord/`, or `/scheduler/`
-- All bot/scheduler projects return early from cleanup (dedicated logic handles everything)
+## Clone
 
-### Add New Page Type
+`POST /projects/{project_id}/clone` creates a new project from an existing project. Non-website clones may require fresh bot tokens or scheduler channel settings. The new project follows the same creation guard and ownership requirements as normal project creation.
 
-| Step | File | Lines | Action |
-|------|------|-------|--------|
-| 1 | `infrastructure_manager.py` | 1700-1860 | Edit `build_frontend()` method |
-| 2 | `deployment_verifier.py` | 100-150 | Update build verification logic |
+## Deletion and Cleanup
 
-**Common Changes:**
-- Add build cache cleaning: `shutil.rmtree("node_modules/.cache")`
-- Modify npm flags: `--legacy-peer-deps`, `--force`
-- Add custom build steps: Run tests, linting before build
+Project deletion removes database records and attempts infrastructure cleanup.
 
-### Add New Pipeline Phase
+| Project type | Cleanup behavior |
+| --- | --- |
+| Website | PM2, nginx, SSL, DNS, database/user, project directory |
+| Telegram | `tg-bot-{project_id}`, webhook infra, nginx/SSL/DNS, directory |
+| Discord | `dc-bot-{project_id}`, nginx/SSL/DNS, directory |
+| Scheduler | Scheduler jobs/logs and project directory |
 
-| Step | File | Action |
-|------|------|--------|
-| 1 | `openclaw_wrapper.py` | Create `phase_X_name()` method returning bool |
-| 2 | `openclaw_wrapper.py` | Add to `run_all_phases()` execution order |
-| 3 | `pipeline_status.py` | Add to `PipelinePhase` enum |
-| 4 | `pipeline_status.py` | Add error codes if needed |
+## Related
 
-**Template:**
-```python
-def phase_X_name(self) -> bool:
-    logger.info("📋 Phase X/9: Phase Name")
-    self.status_tracker.start_phase(PipelinePhase.PHASE_NAME)
-    try:
-        # Implementation
-        self.completed_phases.append("Phase Name")
-        self.status_tracker.complete_phase(PipelinePhase.PHASE_NAME, {...})
-        return True
-    except Exception as e:
-        logger.error(f"❌ Phase X failed: {e}")
-        self.status_tracker.fail_phase(PipelinePhase.PHASE_NAME, ...)
-        return False
-```
-
-### Fix Routing Issues
-
-| Issue | File | Lines | Fix |
-|-------|------|-------|-----|
-| Duplicate "/" routes | `acp_frontend_editor_v2.py` | 992-1065 | Step 10.5 - Detect and merge duplicate routes |
-| Missing Layout wrapper | `acp_frontend_editor_v2.py` | 992-1065 | Wrap routes with `<Layout>` component |
-| Missing Outlet | `acp_frontend_editor_v2.py` | 1072-1118 | Step 10.6 - Replace `{children}` with `<Outlet />` |
-
-**Detection Logic:**
-```python
-# Finds routes like: <Route path="/" /> and <Route path="/" element={<Home />} />
-# Merges into single route with proper element
-```
-
-### Modify DNS/Domain Handling
-
-| Task | File | Lines | Action |
-|------|------|-------|--------|
-| Change base domain | `infrastructure_manager.py` | 36 | Update `BASE_DOMAIN = "dreamagent.cloud"` |
-| Change server IP | `infrastructure_manager.py` | 37 | Update `SERVER_IP = "195.200.14.37"` |
-| Add DNS provider | `dns_manager.py` | 1-150 | Implement new provider API client |
-| Modify nginx template | `infrastructure_manager.py` | 878-1021 | Edit `generate_config()` method |
-
-### Customize Frontend Optimization
-
-| File | Lines | Customization |
-|------|-------|---------------|
-| `frontend_optimizer.py` | 50-100 | Add custom package.json fields |
-| `frontend_optimizer.py` | 120-180 | Customize index.html template |
-| `frontend_optimizer.py` | 200-250 | Modify App.tsx branding logic |
-| `frontend_optimizer.py` | 260-300 | Add environment variable injection |
-
----
-
-## Key Configuration
-
-**Environment Variables:**
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
-- `USE_POSTGRES` (default: true)
-- `HOSTINGER_API_TOKEN` (optional, for DNS)
-
-**Timeouts:**
-- Build: 30 minutes (1800s)
-- ACPX watchdog: 5 minutes (300s)
-- HTTP verification: 30s
-
-**Limits:**
-- Max new files (ACPX): 50
-- Frontend ports: 3010-4000
-- Backend ports: 8010-9000
+- [backend_api_reference.md](./backend_api_reference.md)
+- [project_status.md](./project_status.md)
+- [publish_frontend.md](./publish_frontend.md)
+- [publish_backend.md](./publish_backend.md)
+- [scheduler.md](./scheduler.md)

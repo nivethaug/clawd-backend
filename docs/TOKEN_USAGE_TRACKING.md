@@ -1,197 +1,123 @@
-# Token Usage Tracking — Migration & Wiring Plan
+# Token Usage Tracking
 
-## Goal
+> [TOC](toc.md) | Updated: 2026-07-12
 
-Every Claude Code query (create + edit, all project types) must store real token usage + cost into the `token_usage` table after completion.
+## Purpose
 
----
+Token usage tracking records AI consumption for user dashboards, project usage, billing reconciliation, and admin monitoring.
 
-## 1. Database Migration: Add `cost_usd` Column
+## Main Files
 
-**Table:** `token_usage`
-**Migration type:** Non-destructive `ALTER TABLE ... ADD COLUMN`
+| File | Responsibility |
+| --- | --- |
+| `services/token_tracker.py` | Record and query token usage |
+| `database_postgres.py` | `token_usage` table and migrations |
+| `app.py` | Usage endpoints and chat/project wiring |
 
-```sql
-ALTER TABLE token_usage ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12,6) DEFAULT 0;
+## Usage Types
+
+Valid usage types:
+
+```text
+ai_chat, project_create, ai_completion
 ```
 
-### Migration Location
+`record_usage()` skips records with missing or invalid `user_id` because `token_usage.user_id` has a foreign key to `users(id)`. Anonymous Prompt Assistant usage is estimated in `app.py` but skipped by the tracker when `user_id=0`.
 
-File: `database_postgres.py` → in the migrations block after the `token_usage` table creation (~line 558+).
+## Table Shape
+
+Important columns:
+
+| Column | Description |
+| --- | --- |
+| `user_id` | User who consumed tokens |
+| `project_id` | Optional project |
+| `session_id` | Optional session |
+| `usage_type` | `ai_chat`, `project_create`, or `ai_completion` |
+| `description` | Human-readable event label |
+| `input_tokens` | Prompt/input tokens |
+| `output_tokens` | Completion/output tokens |
+| `total_tokens` | Total tokens |
+| `model` | Model name |
+| `provider` | Provider name |
+| `cost_usd` | Estimated USD cost |
+| `operation` | Billing operation code |
+| `credits_charged` | Credits charged |
+| `duration_ms` | Request duration |
+
+## Recording
+
+Use `record_usage()` for direct recording:
 
 ```python
-def migrate_token_usage_cost():
-    cur.execute(
-        "ALTER TABLE token_usage ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12,6) DEFAULT 0"
-    )
-    logger.info("✓ Added cost_usd column to token_usage table")
-_run_migration(migrate_token_usage_cost)
-```
-
-### Updated Table Schema
-
-```sql
-CREATE TABLE token_usage (
-    id              SERIAL PRIMARY KEY,
-    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    project_id      INTEGER,
-    session_id      INTEGER,
-    usage_type      VARCHAR(30) NOT NULL,     -- ai_chat | project_create | ai_completion
-    description     TEXT,
-    input_tokens    INTEGER DEFAULT 0,
-    output_tokens   INTEGER DEFAULT 0,
-    total_tokens    INTEGER DEFAULT 0,
-    model           VARCHAR(100),
-    cost_usd        NUMERIC(12,6) DEFAULT 0,   -- ← NEW
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
----
-
-## 2. Update `token_tracker.py`
-
-### `record_usage()` — Add `cost_usd` parameter
-
-```python
-def record_usage(
-    user_id: int,
-    usage_type: str,
-    total_tokens: int = 0,
-    input_tokens: int = 0,
-    output_tokens: int = 0,
-    cost_usd: float = 0.0,           # ← NEW
-    project_id: Optional[int] = None,
-    ...
-) -> bool:
-```
-
-SQL change:
-```python
-INSERT INTO token_usage
-   (user_id, project_id, session_id, usage_type, description,
-    input_tokens, output_tokens, total_tokens, model, cost_usd)   -- ← add cost_usd
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)                   -- ← add %s
-```
-
-### `record_from_token_usage_json()` — Extract `cost_usd`
-
-```python
-cost = token_usage_json.get("cost_usd") or token_usage_json.get("costUsd") or 0.0
-
-return record_usage(
-    ...,
-    cost_usd=float(cost),   # ← pass through
+record_usage(
+    user_id=1,
+    usage_type="ai_chat",
+    total_tokens=500,
+    project_id=1624,
+    session_id=165,
+    model="claude-sonnet",
+    provider="anthropic",
+    operation="ADD_FEATURE",
+    credits_charged=2,
 )
 ```
 
----
+Use `record_from_token_usage_json()` when handlers return token usage JSON. It accepts both snake_case and camelCase token fields.
 
-## 3. Wiring: Every Query Completion → `token_usage` Table
+## Current Wiring
 
-### Already wired (no change needed)
+| Path | Status |
+| --- | --- |
+| Streaming chat/edit | Records assistant message token JSON and `token_usage` row when user/project context exists |
+| Non-streaming chat/edit | Records assistant message token JSON and `token_usage` row when user/project context exists |
+| Website create | Records from `acp_frontend_editor_v2.py` after Claude agent calls |
+| Telegram create | Records from `services/telegram/worker.py` after editor enhancement |
+| Discord create | Records from `services/discord/worker.py` after editor enhancement |
+| Scheduler create | Records from `services/scheduler/worker.py` after executor enhancement |
+| Prompt Assistant | Estimates anonymous usage in route code, but tracker skips because there is no authenticated user |
 
-| Path | Where it's called | Status |
-|------|-------------------|--------|
-| Chat/Edit streaming | `app.py:3072` → `record_from_token_usage_json()` | ✅ Works |
-| Chat/Edit non-streaming | `app.py:3622` → `record_from_token_usage_json()` | ✅ Works |
+## Query Endpoints
 
-### Needs wiring
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/auth/usage` | Current user's usage summary |
+| GET | `/projects/{project_id}/usage` | Usage for one project |
+| GET | `/admin/usage` | Platform usage summary, admin only |
+| GET | `/admin/usage/logs` | Raw usage logs with filters, admin only |
 
-| Path | File | Editor Class | `user_id` available? | `project_id` available? |
-|------|------|-------------|---------------------|----------------------|
-| Website create | `acp_frontend_editor_v2.py` | `ACPXV2Editor` (has `self.project_id`) | ❌ Needs DB lookup | ✅ `self.project_id` |
-| Telegram create | `services/telegram/worker.py` | `TelegramBotEditor` | ❌ Needs DB lookup | ✅ `project_id` param |
-| Discord create | `services/discord/worker.py` | `DiscordBotEditor` | ❌ Needs DB lookup | ✅ `project_id` param |
-| Scheduler create | `services/scheduler/worker.py` | `SchedulerEditor` | ❌ Needs DB lookup | ✅ `project_id` param |
+### `/auth/usage`
 
-### Pattern for workers (telegram/discord/scheduler)
+Query params:
 
-After `editor.enhance_bot_logic()` / `editor.enhance_executor()` returns:
+| Param | Default | Description |
+| --- | --- | --- |
+| `period` | `month` | `day`, `week`, `month`, or `all` |
+| `usage_type` | null | Optional usage type filter |
 
-```python
-# Record token usage
-try:
-    from services.token_tracker import record_from_token_usage_json
-    usage = getattr(editor, '_last_token_usage', None)
-    if usage:
-        # Look up user_id from project
-        from database_adapter import get_db
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT user_id FROM projects WHERE id = %s", (project_id,)
-            ).fetchone()
-        user_id = row["user_id"] if row else None
-        if user_id:
-            record_from_token_usage_json(
-                user_id=user_id,
-                token_usage_json=usage,
-                usage_type="project_create",
-                project_id=project_id,
-                description=f"Telegram bot create: {project_name}",
-            )
-except Exception as track_err:
-    logger.warning(f"Token tracking failed: {track_err}")
-```
+### `/projects/{project_id}/usage`
 
-### Pattern for website create
+Query params:
 
-In `acp_frontend_editor_v2.py` after `agent.query()` returns (inside `_run_claude_agent`):
+| Param | Default | Description |
+| --- | --- | --- |
+| `period` | `all` | `day`, `week`, `month`, or `all` |
 
-```python
-self._last_token_usage = agent.last_token_usage
+The project must belong to the current user unless the caller is admin.
 
-# Record to token_usage table
-try:
-    from services.token_tracker import record_from_token_usage_json
-    from database_adapter import get_db
-    if self._last_token_usage and self.project_id:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT user_id FROM projects WHERE id = %s", (self.project_id,)
-            ).fetchone()
-        user_id = row["user_id"] if row else None
-        if user_id:
-            record_from_token_usage_json(
-                user_id=user_id,
-                token_usage_json=self._last_token_usage,
-                usage_type="project_create",
-                project_id=self.project_id,
-                description=f"Website create: {self.project_name}",
-            )
-except Exception as track_err:
-    logger.warning(f"[ACPX-V2] Token tracking failed: {track_err}")
-```
+### `/admin/usage/logs`
 
----
+Query params:
 
-## 4. Verification Checklist
+| Param | Default | Description |
+| --- | --- | --- |
+| `user_id` | null | Optional user filter |
+| `project_id` | null | Optional project filter |
+| `usage_type` | null | Optional usage type filter |
+| `limit` | `50` | Clamped to max 200 |
+| `offset` | `0` | Pagination offset |
 
-After deployment, verify:
+## Related
 
-```sql
--- Check cost_usd column exists
-SELECT column_name, data_type FROM information_schema.columns
-WHERE table_name = 'token_usage' AND column_name = 'cost_usd';
-
--- Check recent entries (after a create/edit query)
-SELECT id, usage_type, input_tokens, output_tokens, cost_usd, model, created_at
-FROM token_usage
-ORDER BY created_at DESC
-LIMIT 10;
-
--- Check all project types are tracked
-SELECT usage_type, COUNT(*), SUM(cost_usd)
-FROM token_usage
-WHERE created_at > NOW() - INTERVAL '1 hour'
-GROUP BY usage_type;
-```
-
----
-
-## 5. Cost Source
-
-Cost is calculated **client-side in the wrapper** (`model_adapter.py` pricing table).
-The wrapper returns `cost_usd` in its `/usage/session/{id}` endpoint totals.
-The backend's `_fetch_usage_session()` stores it in `self._last_token_usage["cost_usd"]`.
-This plan passes it through to the `token_usage.cost_usd` column — no backend calculation needed.
+- [billing.md](./billing.md)
+- [chat_stream.md](./chat_stream.md)

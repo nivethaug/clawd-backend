@@ -530,7 +530,7 @@ CREATE TABLE ai_sessions (
 **GLM API** (api.z.ai)
 - Endpoint: `/api/coding/paas/v4/chat/completions`
 - Auth: Bearer token
-- Model: GLM-4.5-Air
+- Model: `Z_AI_MODEL` env var, default `glm-4.7-flashx`
 - Features: Tool calling, streaming
 
 ### Internal Services

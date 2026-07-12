@@ -1,335 +1,70 @@
-# DreamPilot Documentation - Master Table of Contents
-
-> **Purpose:** Help AI agents quickly navigate codebase by API endpoint
-> Last updated: 2026-04-13
-
----
-
-## 🔗 Quick Links
-
-| Document | Purpose |
-|----------|---------|
-| [SKILL.md](../.agents/skills/project-info/SKILL.md) | Agent skill reference |
-| [project_creation.md](./project_creation.md) | Complete pipeline & infrastructure reference |
-
----
-
-## API Endpoints
-
-### Project Creation & Management
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/projects` | POST | `app.py:283-510` | [project_creation.md](./project_creation.md) |
-| `/projects` | GET | `app.py:241-280` | [project_creation.md](./project_creation.md) |
-| `/projects/{id}` | PUT | `app.py:1357-1436` | [project_deletion.md](./project_deletion.md) |
-| `/projects/{id}` | DELETE | `app.py:1204-1357` | [project_deletion.md](./project_deletion.md) |
-
-### Dashboard
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/dashboard/home` | GET | `app.py:3595-3680` | [dashboard.md](./dashboard.md) |
-
-### Recent Activity
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/projects/recent-activity` | GET | `app.py:3485-3545` | [recent_activity.md](./recent_activity.md) |
-| `/projects/recent-activity/simple` | GET | `app.py:3548-3560` | [recent_activity.md](./recent_activity.md) |
-| `/projects/{id}/activity` | GET | `app.py:3563-3590` | [recent_activity.md](./recent_activity.md) |
-
-### Project Status
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/projects/{id}/status` | GET | `app.py:1624-1657` | [project_status.md](./project_status.md) |
-| `/projects/{id}/ai-status` | GET | `app.py:1657-1813` | [project_status.md](./project_status.md) |
-| `/projects/{id}/claude-session` | GET | `app.py:1819-1880` | [project_status.md](./project_status.md) |
-
-### Project Publish
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/projects/{id}/publish/frontend` | POST | `app.py:1436-1534` | [publish_frontend.md](./publish_frontend.md) |
-| `/projects/{id}/publish/backend` | POST | `app.py:1534-1624` | [publish_backend.md](./publish_backend.md) |
-
-### Project Sessions
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/projects/{id}/sessions` | GET | `app.py:1882-1903` | [project_sessions.md](./project_sessions.md) |
-| `/projects/{id}/sessions` | POST | `app.py:1905-1945` | [project_sessions.md](./project_sessions.md) |
-| `/projects/{id}/sessions/{sid}` | DELETE | `app.py:1956-2020` | [project_sessions.md](./project_sessions.md) |
-| `/sessions/{sid}/messages` | GET | `app.py:2019-2035` | [project_sessions.md](./project_sessions.md) |
-| `/sessions/details` | GET | `app.py:2302-2415` | [project_sessions.md](./project_sessions.md) |
-
-### Session Locking
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/projects/{id}/active-session` | GET | `app.py:1888-1905` | [session_locking.md](./session_locking.md) |
-| `/projects/{id}/lock` | DELETE | `app.py:1908-1933` | [session_locking.md](./session_locking.md) |
-| `/sessions/{sid}/release-lock` | POST | `app.py:1936-1958` | [session_locking.md](./session_locking.md) |
-
-### Chat
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/chat` | POST | `app.py:2081-2155` | [chat.md](./chat.md) |
-| `/chat/stream` | POST | `app.py:2038-2081` | [chat_stream.md](./chat_stream.md) |
-
-### AI Chat System
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/api/ai/chat` | POST | `api/ai_chat.py:1-240` | [ai_chat.md](./ai_chat.md) |
-| `/api/ai/selection` | POST | `api/ai_selection.py:1-100` | [ai_chat.md](./ai_chat.md) |
-| `/api/ai/confirm` | POST | `api/ai_confirm.py:1-180` | [ai_chat.md](./ai_chat.md) |
-
-### AI Prompt Builder
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/ai/completion` | POST | `app.py:7718-7803` | [ai_completion.md](./ai_completion.md) |
-
-### Project Files
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/projects/{id}/files` | GET | `app.py:2154-2185` | [project_creation.md](./project_creation.md) |
-| `/projects/{id}/files/{path}` | GET | `app.py:2187-2225` | [project_creation.md](./project_creation.md) |
-| `/projects/{id}/files/{path}` | PUT | `app.py:2227-2265` | [project_creation.md](./project_creation.md) |
-
-### Templates & Types
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/project-types` | GET | `app.py:515-528` | [project_creation.md](./project_creation.md) |
-| `/templates` | GET | `app.py:574-600` | [project_creation.md](./project_creation.md) |
-| `/templates/select` | POST | `app.py:530-572` | [project_creation.md](./project_creation.md) |
-
-### Scheduler Jobs
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/api/scheduler/projects/{id}/jobs` | POST | `api/scheduler_router.py:96-120` | [scheduler.md](./scheduler.md) |
-| `/api/scheduler/projects/{id}/jobs` | GET | `api/scheduler_router.py:123-132` | [scheduler.md](./scheduler.md) |
-| `/api/scheduler/projects/{id}/jobs` | DELETE | `api/scheduler_router.py:181-185` | [scheduler.md](./scheduler.md) |
-| `/api/scheduler/jobs/{id}` | GET | `api/scheduler_router.py:135-140` | [scheduler.md](./scheduler.md) |
-| `/api/scheduler/jobs/{id}` | PUT | `api/scheduler_router.py:143-165` | [scheduler.md](./scheduler.md) |
-| `/api/scheduler/jobs/{id}` | DELETE | `api/scheduler_router.py:168-175` | [scheduler.md](./scheduler.md) |
-| `/api/scheduler/jobs/{id}/pause` | POST | `api/scheduler_router.py:178-187` | [scheduler.md](./scheduler.md) |
-| `/api/scheduler/jobs/{id}/resume` | POST | `api/scheduler_router.py:190-196` | [scheduler.md](./scheduler.md) |
-| `/api/scheduler/jobs/{id}/run` | POST | `api/scheduler_router.py:199-205` | [scheduler.md](./scheduler.md) |
-| `/api/scheduler/jobs/{id}/logs` | GET | `api/scheduler_router.py:215-230` | [scheduler.md](./scheduler.md) |
-
-### Billing & Subscriptions
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/api/billing/plans` | GET | `api/billing_router.py:65` | [billing.md](./billing.md) |
-| `/api/billing/summary` | GET | `api/billing_router.py:87` | [billing.md](./billing.md) |
-| `/api/billing/balances` | GET | `api/billing_router.py:96` | [billing.md](./billing.md) |
-| `/api/billing/transactions` | GET | `api/billing_router.py:119` | [billing.md](./billing.md) |
-| `/api/billing/checkout/plan/{slug}` | POST | `api/billing_router.py:157` | [billing.md](./billing.md) |
-| `/api/billing/checkout/credits` | POST | `api/billing_router.py:196` | [billing.md](./billing.md) |
-| `/api/billing/admin/*` | Various | `api/billing_router.py:242-405` | [billing.md](./billing.md) |
-| `/webhooks/lemonsqueezy` | POST | `api/lemonsqueezy_webhook.py:22` | [billing.md](./billing.md) |
-
-### System
-
-| Endpoint | Method | File:Lines | Docs |
-|----------|--------|------------|------|
-| `/health` | GET | `app.py:2269-2278` | - |
-
----
-
-## Documentation Files
-
-| File | Description |
-|------|-------------|
-| [project_creation.md](./project_creation.md) | Complete reference: API, pipeline, ACPX, infrastructure |
-| [dashboard.md](./dashboard.md) | Dashboard home API (single-call for home page) |
-| [recent_activity.md](./recent_activity.md) | Recent work/activity API for Activity page |
-| [project_status.md](./project_status.md) | Status & AI status endpoints |
-| [project_deletion.md](./project_deletion.md) | Delete/update projects |
-| [project_sessions.md](./project_sessions.md) | Session management |
-| [chat.md](./chat.md) | Non-streaming chat |
-| [chat_stream.md](./chat_stream.md) | Streaming chat (SSE) |
-| [ai_chat.md](./ai_chat.md) | LLM-powered DevOps chat system |
-| [ai_chat_architecture.md](./ai_chat_architecture.md) | AI chat system architecture |
-| [session_locking.md](./session_locking.md) | Session locking (single active session per project) |
-| [ai_completion.md](./ai_completion.md) | DreamAgent prompt builder endpoint |
-| [publish_frontend.md](./publish_frontend.md) | Frontend build & publish |
-| [publish_backend.md](./publish_backend.md) | Backend build & publish |
-| [scheduler.md](./scheduler.md) | Centralized job scheduling daemon + REST API |
-| [billing.md](./billing.md) | AI Credits billing system, LemonSqueezy, monthly cron, frontend |
-| [context_api_wrapper_claude_code.md](./context_api_wrapper_claude_code.md) | Context wrapper architecture + Dream Agent create/edit support gap analysis |
-3. **Find the exact file and line numbers** for the code you need
-4. **Make targeted changes** using the line references
-
-### Adding New Documentation
-
-1. Create `{feature}_toc.md` in `docs/` folder
-2. Add endpoint table to this file
-3. Include file paths and line numbers for quick navigation
-
-### Infrastructure & Deployment
-
-| Document | Path | Contains | When to Use |
-|----------|------|----------|-------------|
-| **PostgreSQL Migration** | `POSTGRESQL_MIGRATION_GUIDE.md` | Database migration steps | Migrating from SQLite to PostgreSQL |
-| **Implementation Summary** | `IMPLEMENTATION_SUMMARY.md` | Feature implementations | Understanding implemented features |
-| **Deployment Paths** | `legacy/DEPLOYMENT_PATHS.md` | File paths, directories | Finding deployed files |
-
-### Prompts & AI Instructions
-
-| Document | Path | Contains | When to Use |
-|----------|------|----------|-------------|
-| **Page Inference** | `prompts/01-page-inference.md` | Groq page detection prompt | Modifying page detection |
-| **ACPX Editor** | `prompts/02-acpx-frontend-editor.md` | ACPX frontend prompt | Modifying frontend generation |
-| **Infrastructure Task** | `prompts/03-infrastructure-task.md` | Infrastructure prompt | Modifying deployment logic |
-| **AI Refinement** | `prompts/04-ai-refinement.md` | AI refinement prompt | Modifying post-processing |
-| **Build Fix** | `prompts/05-build-fix.md` | Build error fix prompt | Modifying build error handling |
-
-### Skills (Agent Instructions)
-
-| Document | Path | Contains | When to Use |
-|----------|------|----------|-------------|
-| **Project Info Skill** | `.agents/skills/project-info/SKILL.md` | Full project knowledge | Understanding codebase |
-| **Spec Skill** | `.agents/skills/spec.md` | PRD generation instructions | Creating documentation |
-
----
-
-## 🚀 Quick Reference by Task
-
-### "I want to create a new project"
-
-1. **Understand the flow:** `docs/project_info_toc.md` → Project Creation Pipeline
-2. **See the code:** `app.py:1-100` (POST /projects)
-3. **Background worker:** `claude_code_worker.py:1-150`
-4. **Pipeline phases:** `openclaw_wrapper.py:1-100`
-
-### "I want to modify ACPX frontend editing"
-
-1. **Understand ACPX:** `ACP_CONTROLLED_FRONTEND_EDIT.md`
-2. **See TOC:** `docs/project_info_toc.md` → ACPX Frontend Editor
-3. **Main class:** `acp_frontend_editor_v2.py:1-100`
-4. **Apply changes:** `acp_frontend_editor_v2.py:600-850`
-
-### "I want to add a new pipeline phase"
-
-1. **Understand phases:** `docs/project_info_toc.md` → Phase Implementations
-2. **Pipeline orchestrator:** `openclaw_wrapper.py:1-100`
-3. **Phase template:** Copy existing phase function
-4. **Register phase:** Add to `run_all_phases()`
-
-### "I want to fix deployment issues"
-
-1. **Recent fixes:** `INFRASTRUCTURE_STABILIZATION.md`
-2. **Infrastructure manager:** `docs/project_info_toc.md` → Infrastructure Manager
-3. **Deployment verifier:** `deployment_verifier.py:1-200`
-4. **Check paths:** `legacy/DEPLOYMENT_PATHS.md`
-
-### "I want to modify page detection"
-
-1. **Page inference prompt:** `prompts/01-page-inference.md`
-2. **Groq service:** `groq_service.py:1-100`
-3. **Page extraction:** `acp_frontend_editor_v2.py:1456-1600`
-
-### "I want to understand the database"
-
-1. **Migration guide:** `POSTGRESQL_MIGRATION_GUIDE.md`
-2. **Connection:** `database_postgres.py:1-100`
-3. **Adapter:** `database_adapter.py:1-100`
-4. **Schema:** `projects_schema.sql:1-50`
-
-### "I want to understand billing"
-
-1. **Main reference:** `docs/billing.md`
-2. **Core logic:** `services/billing_service.py:140` (`can_afford`, cascade)
-3. **Cache layer:** `services/plan_cache.py:22`
-4. **Monthly cron:** `services/billing_cron.py:142`
-5. **API endpoints:** `api/billing_router.py:65-405`
-6. **Frontend:** `src/pages/Billing.tsx` + `CreditIndicator.tsx`
-
----
-
-## 📁 File Organization
-
-```
-clawd-backend/
-├── docs/                          # Documentation (NEW)
-│   ├── toc.md                     # This file - master index
-│   └── project_info_toc.md        # Project creation detailed TOC
-│
-├── .agents/skills/                # Agent instructions
-│   ├── project-info/SKILL.md      # Full project knowledge
-│   └── spec.md                    # PRD generation
-│
-├── prompts/                       # AI prompts
-│   ├── 01-page-inference.md
-│   ├── 02-acpx-frontend-editor.md
-│   ├── 03-infrastructure-task.md
-│   ├── 04-ai-refinement.md
-│   └── 05-build-fix.md
-│
-├── legacy/                        # Historical documentation
-│   ├── DEPLOYMENT_PATHS.md
-│   ├── DEBUGGING_REPORT.md
-│   └── ...
-│
-└── [root markdown files]          # Various documentation
-    ├── README.md
-    ├── ACP_CONTROLLED_FRONTEND_EDIT.md
-    ├── INFRASTRUCTURE_STABILIZATION.md
-    └── ...
-```
-
----
-
-## 🔄 Documentation Maintenance
-
-### When to Update This TOC
-
-- **Adding new documentation:** Add entry to appropriate section
-- **Creating new API endpoints:** Update `project_info_toc.md`
-- **Adding new pipeline phases:** Update `project_info_toc.md`
-- **Creating new prompts:** Add to Prompts section
-
-### Documentation Standards
-
-1. **Every MD should have:** Purpose, Last updated date, Related files
-2. **Line numbers should be:** Approximate ranges (e.g., 100-200)
-3. **File paths should be:** Relative to project root
-
----
-
-## 🤖 For AI Agents
-
-### How to Use This Documentation
-
-1. **Start here:** Read this `toc.md` to find relevant documentation
-2. **Deep dive:** Go to specific MD files for detailed information
-3. **Code reference:** Use line numbers to find exact code locations
-4. **Cross-reference:** Check related files mentioned in each document
-
-### Common Agent Tasks
-
-| Task | Primary Doc | Secondary Doc | Code Entry Point |
-|------|-------------|---------------|------------------|
-| Create project | `project_info_toc.md` | `projectcreationworkflow.md` | `app.py:1-100` |
-| Modify ACPX | `project_info_toc.md` | `ACP_CONTROLLED_FRONTEND_EDIT.md` | `acp_frontend_editor_v2.py:1` |
-| Fix deployment | `INFRASTRUCTURE_STABILIZATION.md` | `project_info_toc.md` | `infrastructure_manager.py:1` |
-| Add phase | `project_info_toc.md` | `openclaw_wrapper.py` | `openclaw_wrapper.py:200-400` |
-
----
-
-## 📞 Quick Links
-
-- **Project Creation TOC:** `docs/project_info_toc.md`
-- **Main README:** `README.md`
-- **ACPX Guide:** `ACP_CONTROLLED_FRONTEND_EDIT.md`
-- **Infrastructure Fixes:** `INFRASTRUCTURE_STABILIZATION.md`
-- **Agent Skill:** `.agents/skills/project-info/SKILL.md`
+# DreamAgent Backend Documentation
+
+> Purpose: help maintainers and AI agents navigate the current backend quickly.
+> Last updated: 2026-07-12
+
+## Start Here
+
+| Document | Use it for |
+| --- | --- |
+| [backend_api_reference.md](./backend_api_reference.md) | Current route inventory grouped by product area |
+| [project_creation.md](./project_creation.md) | Project creation, clone, type-specific workers, and creation guards |
+| [chat.md](./chat.md) | Chat request contract and non-streaming compatibility path |
+| [chat_stream.md](./chat_stream.md) | Streaming chat, ACP edit flow, image handling, cancel/resume |
+| [ai_completion.md](./ai_completion.md) | Prompt Assistant / DreamAgent Project AI prompt builder |
+| [scheduler.md](./scheduler.md) | Scheduler project runtime and job REST API |
+| [billing.md](./billing.md) | Billing, AI credits, LemonSqueezy, and billing admin routes |
+| [project_sessions.md](./project_sessions.md) | Session CRUD and message retrieval |
+| [session_locking.md](./session_locking.md) | Single active edit session per project |
+| [project_status.md](./project_status.md) | Project status and AI status endpoints |
+| [publish_frontend.md](./publish_frontend.md) | Frontend build/publish flow |
+| [publish_backend.md](./publish_backend.md) | Backend build/publish flow |
+| [recent_activity.md](./recent_activity.md) | Activity feed APIs |
+| [dashboard.md](./dashboard.md) | Home dashboard API |
+| [DOMAIN_MIGRATION.md](./DOMAIN_MIGRATION.md) | Domain migration notes |
+| [TOKEN_USAGE_TRACKING.md](./TOKEN_USAGE_TRACKING.md) | Token and usage tracking notes |
+| [ADMIN_USER_MANAGEMENT.md](./ADMIN_USER_MANAGEMENT.md) | Admin user controls |
+
+## Current Backend Entry Points
+
+| Area | Main files |
+| --- | --- |
+| FastAPI app and core routes | `app.py` |
+| AI workspace chat | `app.py`, `chat_handlers.py`, `acp_chat_handler.py`, `claude_code_agent.py` |
+| Prompt Assistant | `completion_service.py`, `services/ai/openrouter_client.py` |
+| AI chat assistant APIs | `api/ai_chat.py`, `api/ai_selection.py`, `api/ai_confirm.py`, `services/ai/*` |
+| Project creation | `app.py`, `project_manager.py`, `claude_code_worker.py`, `fast_wrapper.py`, `infrastructure_manager.py` |
+| Telegram projects | `services/telegram/*`, `api/telegram_webhook.py`, `templates/telegram-bot-template/*` |
+| Discord projects | `services/discord/*`, `templates/discord-bot-template/*` |
+| Scheduler projects | `services/scheduler/*`, `api/scheduler_router.py`, `templates/scheduler-template/*` |
+| Billing | `api/billing_router.py`, `services/billing_service.py`, `services/lemonsqueezy_service.py` |
+| Validation | `api/validate_router.py` |
+| Bot linking | `api/bot_link.py` |
+| Database | `database_postgres.py`, `database_adapter.py`, `projects_schema.sql`, `migrations/*` |
+
+## Auth Model
+
+Most application routes expect an `Authorization: Bearer <token>` header. Project and session routes validate ownership with helpers in `app.py`:
+
+- `_require_project_owner(project_id, authorization)`
+- `_require_session_owner(session_id, authorization)`
+- `_require_session_key_owner(session_key, authorization)`
+- `_require_admin_from_authorization(authorization)`
+
+Expected public or webhook-style routes are limited to auth bootstrap, stateless assistant, and service callbacks, such as `/auth/signup`, `/auth/login`, `/auth/google`, `/auth/verify-email`, `/auth/resend-verification`, `/ai/completion`, `/health`, `/webhooks/lemonsqueezy`, and Telegram webhook management endpoints.
+
+## Project Type IDs
+
+| ID | Type | Main runtime |
+| --- | --- | --- |
+| 1 | Website | Frontend + optional backend scaffold managed by PM2/nginx |
+| 2 | Telegram Bot | `tg-bot-{project_id}` PM2 process |
+| 3 | Discord Bot | `dc-bot-{project_id}` PM2 process |
+| 5 | Scheduler | Central scheduler daemon plus per-project executor |
+
+## Maintenance Notes
+
+- When routes change, update [backend_api_reference.md](./backend_api_reference.md).
+- When request/response behavior changes, update the feature-specific doc, not only this TOC.
+- Keep docs focused on current runtime behavior. Avoid preserving stale line numbers when code is moving quickly.
+- The frontend app lives outside this repository; backend docs should describe API contracts, persistence, auth, workers, and operational behavior.

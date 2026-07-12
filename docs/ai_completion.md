@@ -1,84 +1,145 @@
-# AI Prompt Builder - Complete Reference
+# AI Prompt Builder Completion API
 
-> [TOC](toc.md) | Updated: 2026-07-01
+> [TOC](toc.md) | Updated: 2026-07-12
 
----
+## Purpose
 
-## API Endpoints
+`POST /ai/completion` powers the Prompt Assistant. It is a conversational product-planning assistant that refines user ideas and, after confirmation or an explicit generate action, produces one DreamAgent Project AI prompt.
 
-| Endpoint | Method | File | Lines | Description |
-|----------|--------|------|-------|-------------|
-| `/ai/completion` | POST | `app.py` | 7718-7803 | DreamAgent prompt builder for Project AI |
+The endpoint does not create projects, edit files, or generate application code. It only returns assistant text.
 
----
+The route is currently stateless and anonymous. The client owns conversation history and sends the complete message list on each request.
 
-## POST /ai/completion
+## Main Files
 
-**File:** `app.py:7718-7803`
+| File | Responsibility |
+| --- | --- |
+| `app.py` | Request/response models and `/ai/completion` route |
+| `completion_service.py` | Conversation workflow, create/edit system prompts, project-type guidance |
+| `services/ai/openrouter_client.py` | OpenRouter chat completions client |
 
-Guide the user through a short Prompt Assistant conversation, then transform the
-refined idea into one final DreamAgent Project AI prompt. `mode=create` builds a
-premium MVP creation prompt; `mode=modify` builds a scoped edit prompt for an
-existing project.
+## Provider
 
-**Request:**
+The Prompt Assistant uses OpenRouter through `services/ai/openrouter_client.py`.
+
+| Setting | Default |
+| --- | --- |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` |
+| `PROMPT_ASSISTANT_MODEL` | `z-ai/glm-4.7-flash` |
+| `PROMPT_ASSISTANT_PROVIDER` | `balanced` |
+| `OPENROUTER_APP_NAME` | `DreamAgent` |
+
+`OPENROUTER_API_KEY` must be configured in the environment. Provider routing is balanced by default. Exact provider ordering can be enabled later with `PROMPT_ASSISTANT_PROVIDER=exact` and `PROMPT_ASSISTANT_PROVIDER_ORDER`.
+
+## Request
+
 ```json
 {
   "projectType": "website",
   "mode": "create",
   "generatePrompt": false,
   "messages": [
-    {"role": "user", "content": "Jurassic website"}
-  ]
+    {"role": "user", "content": "Premium landing page for an AI startup"}
+  ],
+  "projectInfo": null
 }
 ```
 
-**Request Fields:**
+## Request Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `projectType` | string | Type: `website`, `telegrambot`, `discordbot`, `tradingbot`, `scheduler`, `custom` |
-| `mode` | string | Mode: `create` or `modify` |
-| `generatePrompt` | boolean | Optional. When `true`, requests final Project AI prompt generation from the current conversation context. Defaults to `false`. |
-| `messages` | array | Array of user/assistant messages. Client system messages are rejected. |
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `projectType` | string | yes | `website`, `telegrambot`, `discordbot`, `tradingbot`, `scheduler`, or `custom` |
+| `mode` | string | yes | `create`, `modify`, or legacy `edit` alias handled as edit behavior by callers |
+| `generatePrompt` | boolean | no | Forces final prompt generation if enough context exists |
+| `messages` | array | yes | User/assistant conversation history. Client-supplied system messages are rejected. |
+| `projectInfo` | object | no | Existing project context for edit mode |
 
-Canonical `projectType` values match the project type table and Prompt Assistant dropdown payloads: `website`, `telegrambot`, `discordbot`, `tradingbot`, `scheduler`, `custom`.
+## `projectInfo`
 
-**Behavior:**
+Edit mode can include existing project context so Prompt Assistant can produce better edit prompts.
 
-- Behaves conversationally before final generation instead of immediately producing a full prompt for every message.
-- Greetings, thanks, and generic help requests receive a short friendly response asking what the user wants to build or change.
-- For vague ideas, asks only 1-3 high-value follow-up questions about purpose, audience, design style, or key functionality.
-- Generates the final Project AI prompt automatically when the request is specific enough.
-- `generatePrompt=true` lets the UI's Generate Prompt action request final generation after refinement.
-- Does not generate code, execute work, or provide implementation narration.
-- Uses independent system prompts for `create` and `modify`.
-- Sends only the selected `projectType` guidance in the system prompt.
-- For `create`, expands rough ideas into concise, visual-first MVP prompts.
-- For `modify`, produces incremental edit instructions and never regenerates the full project brief.
-- Scales prompt depth to the request: simple ideas stay short, complex products get more structure.
-- Matches visual style to user intent instead of defaulting every website to cinematic, 3D, or dashboard layouts.
-- Infers sensible design direction when unspecified, such as warm restaurant sites, premium real estate, clean healthcare, futuristic AI, or bold creative agency experiences.
-- Assumes DreamAgent Project AI already understands React, TypeScript, Tailwind CSS, existing structure, backend scaffold, routing, base APIs, deployment pipeline, and development environment.
-- Avoids repeating routine implementation details and spends tokens on product vision, UX, visual quality, user journey, layout, features, animations, interactions, and final experience.
-- May use inspiration qualities from Apple, Linear, Stripe, Vercel, Notion, Raycast, Arc Browser, or Awwwards when helpful, without copying existing products.
-- Focuses on frontend experience, UX, visual quality, interactions, and requested functionality unless backend work is explicitly requested.
-- Preserves pasted prompt intent while improving specificity and execution quality.
-- Asks a follow-up question only when critical information cannot be inferred.
+```json
+{
+  "title": "Modern furniture store",
+  "name": "furniture-store",
+  "description": "Premium editorial ecommerce website",
+  "projectType": "website",
+  "status": "ready",
+  "domain": "furniture-store",
+  "liveUrl": "https://furniture-store.dreamagent.cloud"
+}
+```
 
-**Response:**
+For non-website projects, frontend callers should avoid website-only fields such as `domain` and `liveUrl` unless they are truly useful.
+
+## Conversation Flow
+
+1. Understand the user's idea or edit request.
+2. Ask at most 1-2 high-value follow-up rounds when needed.
+3. Infer reasonable defaults instead of collecting perfect information.
+4. Present a short recommended summary.
+5. Generate the final DreamAgent Project AI prompt only after confirmation, `generatePrompt=true`, or an explicit generate request.
+
+Greetings and generic help messages should receive a short natural response, not a full project prompt.
+
+## Create Mode
+
+Create mode turns a rough idea into a concise, premium MVP build prompt. It focuses on:
+
+- Product vision
+- User experience
+- Visual quality
+- Layout and journey
+- Features and interactions
+- Mobile-first polish
+- Final expected experience
+
+DreamAgent Project AI already understands React, TypeScript, Tailwind CSS, routing, project structure, backend scaffold, base APIs, deployment pipeline, and development environment, so prompts should not waste space repeating routine implementation details.
+
+## Edit Mode
+
+Edit mode produces incremental edit instructions for an existing project. It should preserve existing architecture, folder structure, design language, navigation, user experience, routes, data, and working behavior unless the user explicitly requests a redesign.
+
+Edit prompts should include only relevant:
+
+- Requested changes
+- Likely affected files/components
+- UI changes
+- Feature additions
+- Bug fixes
+- Compatibility requirements
+- Constraints
+- Expected final behavior
+
+## Project-Type Guidance
+
+Only the selected project type guidance is sent to the model.
+
+| Type | Key rules |
+| --- | --- |
+| `website` | Max 4 pages, page names, premium UI, hero experience, animations, mobile/performance expectations |
+| `telegrambot` | Default max 5 commands unless user asks for more, practical MVP user flow |
+| `discordbot` | Default max 5 slash commands unless user asks for more, events and permissions |
+| `tradingbot` | Strategy, indicators, risk management, stop loss, take profit, position sizing |
+| `scheduler` | Jobs, schedules, retries, notifications, monitoring |
+| `custom` | Infer the most suitable lightweight MVP shape |
+
+## Response
+
 ```json
 {
   "success": true,
   "message": {
     "role": "assistant",
-    "content": "Build a cinematic Jurassic website..."
+    "content": "Based on our discussion, I recommend building..."
   },
   "error": null
 }
 ```
 
-**Error Response:**
+## Error Response
+
 ```json
 {
   "success": false,
@@ -87,31 +148,12 @@ Canonical `projectType` values match the project type table and Prompt Assistant
 }
 ```
 
----
+Provider failures, rate limits, invalid API keys, and timeouts are logged by `OpenRouterClient` and converted to the existing completion error shape.
 
-## Project Types
-
-| Type | Description |
-|------|-------------|
-| `website` | Web application with frontend/backend; max 4 pages and explicit page names |
-| `telegrambot` | Telegram bot that defaults to 5 commands unless more are requested |
-| `discordbot` | Discord bot that defaults to 5 slash commands unless more are requested |
-| `tradingbot` | Trading automation with mandatory risk management |
-| `scheduler` | Scheduled task runner with retries, monitoring, and recovery |
-| `custom` | Custom project type with inferred architecture |
-
----
-
-## Modes
-
-| Mode | Description |
-|------|-------------|
-| `create` | Create a concise, premium, visual-first MVP prompt |
-| `modify` | Create a precise incremental edit prompt for an existing project |
-
----
+Note: usage tracking for this endpoint is recorded as anonymous usage in `app.py` because the route does not currently require authentication.
 
 ## Related
 
-- [Chat](chat.md)
-- [Chat Stream](chat_stream.md)
+- [backend_api_reference.md](./backend_api_reference.md)
+- [chat.md](./chat.md)
+- [chat_stream.md](./chat_stream.md)

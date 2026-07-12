@@ -1,45 +1,50 @@
-# Publish Backend - Complete Reference
+# Backend Build and Publish
 
-> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
+> [TOC](toc.md) | Updated: 2026-07-12
 
----
+## Endpoint
 
-## API Endpoints
+`POST /projects/{project_id}/publish/backend`
 
-| Endpoint | Method | File | Lines | Description |
-|----------|--------|------|-------|-------------|
-| `/projects/{id}/publish/backend` | POST | `app.py` | 1534-1624 | Build & publish backend |
+Builds and publishes the backend for a project by running the project's `backend/buildpublish.py`.
 
----
+## Auth
 
-## POST /projects/{id}/publish/backend
+Requires `Authorization: Bearer <token>` and project ownership.
 
-**File:** `app.py:1534-1624`
+## Request
 
-Build and publish backend for a project.
-
-**Request:**
 ```json
 {
-  "project_path": "/path/to/project",
-  "project_name": "myproject",
+  "project_path": null,
+  "project_name": null,
   "skip_install": false,
   "skip_build": false,
   "restart": true
 }
 ```
 
-**Request Fields:**
-
 | Field | Type | Description |
-|-------|------|-------------|
-| `project_path` | string | Absolute path to project (optional, uses DB if omitted) |
-| `project_name` | string | Project name for PM2 restart (optional) |
-| `skip_install` | bool | Skip pip install |
-| `skip_build` | bool | Skip migrations |
-| `restart` | bool | Restart PM2 and nginx after build |
+| --- | --- | --- |
+| `project_path` | string/null | Optional override. Defaults to `projects.project_path`. |
+| `project_name` | string/null | Optional PM2/project name override. Defaults to database project name. |
+| `skip_install` | boolean | Adds `--skip-install` to `buildpublish.py`. |
+| `skip_build` | boolean | Adds `--skip-build` to `buildpublish.py`. |
+| `restart` | boolean | Adds `--restart` when true. |
 
-**Response:**
+## Behavior
+
+1. Validates project ownership.
+2. Loads project metadata from the database.
+3. Resolves `{project_path}/backend`.
+4. Requires `buildpublish.py`.
+5. Runs `python3 buildpublish.py` in the backend directory.
+6. Returns a trimmed stdout/stderr response.
+
+Timeout is 15 minutes.
+
+## Response
+
 ```json
 {
   "success": true,
@@ -49,38 +54,9 @@ Build and publish backend for a project.
 }
 ```
 
-**Error Response:**
-```json
-{
-  "success": false,
-  "message": "Backend build failed",
-  "output": "...",
-  "error": "Build error details..."
-}
-```
-
----
-
-## Build Steps
-
-| Step | Description |
-|------|-------------|
-| 1 | Verify `main.py` exists |
-| 2 | `pip install -r requirements.txt` |
-| 3 | Run Alembic migrations (if `alembic.ini` exists) |
-| 4 | Restart PM2/nginx (if `restart: true`) |
-
----
-
-## Script Location
-
-| File | Lines | Description |
-|------|-------|-------------|
-| `templates/blank-template/backend/buildpublish.py` | 1-200 | Backend build script |
-
----
+Failure response uses the same response model with `success=false`.
 
 ## Related
 
-- [Publish Frontend](publish_frontend.md)
-- [Project Creation](project_creation.md)
+- [publish_frontend.md](./publish_frontend.md)
+- [project_creation.md](./project_creation.md)

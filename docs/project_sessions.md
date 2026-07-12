@@ -1,138 +1,99 @@
-# Project Sessions - Complete Reference
+# Project Sessions
 
-> [TOC](toc.md) | [SKILL.md](../.agents/skills/project-info/SKILL.md) | Updated: 2026-03-15
+> [TOC](toc.md) | Updated: 2026-07-12
 
----
+## Purpose
 
-## API Endpoints
+Sessions group chat messages and edit/plan conversations for a project. Session routes are authenticated and scoped to the project owner.
 
-| Endpoint | Method | File | Lines | Description |
-|----------|--------|------|-------|-------------|
-| `/projects/{id}/sessions` | GET | `app.py` | 1882-1903 | List project sessions |
-| `/projects/{id}/sessions` | POST | `app.py` | 1905-1945 | Create session |
-| `/projects/{id}/sessions/{sid}` | DELETE | `app.py` | 1956-2020 | Delete session |
-| `/sessions/{sid}` | DELETE | `app.py` | 1948-1954 | Delete session (alt) |
-| `/sessions/{sid}/messages` | GET | `app.py` | 2019-2035 | Get session messages |
-| `/sessions/details` | GET | `app.py` | 2302-2415 | Get session details |
+## Endpoints
 
----
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/projects/{project_id}/sessions` | List non-archived sessions for a project |
+| POST | `/projects/{project_id}/sessions` | Create a new session |
+| DELETE | `/sessions/{session_id}` | Delete a session by ID |
+| DELETE | `/projects/{project_id}/sessions/{session_id}` | Delete a session inside a project |
+| GET | `/sessions/{session_id}/messages` | Return all messages for a session |
+| GET | `/sessions/details` | Return details for a session key |
 
-## GET /projects/{id}/sessions
+## Auth
 
-**File:** `app.py:1882-1903`
+All endpoints require `Authorization: Bearer <token>`.
 
-List all sessions for a project.
+- Project-scoped routes call `_require_project_owner()`.
+- Session-scoped routes call `_require_session_owner()`.
+- Message reads only return messages for sessions owned by the authenticated user.
 
-**Response:**
-```json
-[
-  {
-    "id": 1,
-    "project_id": 123,
-    "session_key": "abc123",
-    "label": "Main Chat",
-    "archived": 0,
-    "channel": "webchat",
-    "agent_id": "main",
-    "created_at": "2026-03-15T10:00:00"
-  }
-]
-```
+## Create Session
 
----
-
-## POST /projects/{id}/sessions
-
-**File:** `app.py:1905-1945`
-
-Create a new session.
-
-**Request:**
 ```json
 {
-  "label": "My Session"
+  "label": "Hero polish"
 }
 ```
 
-**Response:**
+Response:
+
 ```json
 {
-  "id": 2,
-  "project_id": 123,
-  "session_key": "xyz789",
-  "label": "My Session",
-  "created_at": "2026-03-15T10:05:00"
+  "id": 165,
+  "project_id": 1624,
+  "session_key": "08e68d65-2101-489b-be00-710746487e31",
+  "label": "Hero polish",
+  "archived": 0,
+  "scope": null,
+  "channel": "webchat",
+  "agent_id": "main",
+  "created_at": "2026-07-12 10:00:00",
+  "last_used_at": null
 }
 ```
 
----
+`channel` and `agent_id` are currently created from backend defaults.
 
-## DELETE /projects/{id}/sessions/{sid}
+## Delete Session
 
-**File:** `app.py:1957-1975`
+Both delete routes remove:
 
-Delete a session.
+- The session row
+- Messages for that session
+- Any active session lock held by that session
 
-**Response:**
+The project-scoped delete route also attempts to remove matching OpenClaw session metadata and JSONL transcript files.
+
+Response:
+
 ```json
 {
-  "success": true,
+  "status": "deleted",
   "message": "Session deleted"
 }
 ```
 
----
+## Messages
 
-## GET /sessions/{sid}/messages
+`GET /sessions/{session_id}/messages` returns messages ordered oldest-first.
 
-**File:** `app.py:2019-2035`
-
-Get all messages in a session.
-
-**Response:**
 ```json
 [
   {
     "id": 1,
     "role": "user",
-    "content": "Hello",
-    "created_at": "2026-03-15T10:00:00"
-  },
-  {
-    "id": 2,
-    "role": "assistant",
-    "content": "Hi there!",
-    "created_at": "2026-03-15T10:00:05"
+    "content": "Check this screenshot",
+    "image": "data:image/webp;base64,...",
+    "created_at": "2026-07-12 10:00:00",
+    "commit_hash": null,
+    "commit_status": null,
+    "reverted_message_id": null
   }
 ]
 ```
 
----
-
-## GET /sessions/details
-
-**File:** `app.py:2302-2415`
-
-Get detailed session information.
-
-**Query Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `session_key` | string | Session key to look up |
-
-**Response:**
-```json
-{
-  "session": {...},
-  "messages": [...],
-  "project": {...}
-}
-```
-
----
+Images are stored on user messages when uploaded. Assistant messages may include commit metadata when a chat edit produces a commit.
 
 ## Related
 
-- [Chat](chat.md)
-- [Chat Stream](chat_stream.md)
+- [chat.md](./chat.md)
+- [chat_stream.md](./chat_stream.md)
+- [session_locking.md](./session_locking.md)

@@ -1,240 +1,130 @@
 # Recent Activity API
 
-> **Purpose:** Fetch recent work/activity grouped by project, sorted by latest message timestamp
-> Last updated: 2026-03-23
+> [TOC](toc.md) | Updated: 2026-07-12
 
----
+## Purpose
 
-## Overview
+Recent Activity APIs return projects ordered by latest session message, plus session/message counts and active lock state.
 
-The Recent Activity API powers the **Activity page (Recent Work UI)**. It returns projects sorted by their most recent message across all sessions, with optional message previews and session statistics.
-
----
+All endpoints require `Authorization: Bearer <token>`.
 
 ## Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/projects/recent-activity` | GET | Full activity list with preview |
-| `/projects/recent-activity/simple` | GET | Lightweight version (no preview) |
-| `/projects/{id}/activity` | GET | Detailed single-project activity |
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/projects/recent-activity` | Paginated activity list with optional preview |
+| GET | `/projects/recent-activity/simple` | Lightweight activity list without preview |
+| GET | `/projects/{project_id}/activity` | Detailed activity for one project |
 
----
+## GET `/projects/recent-activity`
 
-## GET /projects/recent-activity
+Query params:
 
-Fetch recent activity grouped by project, sorted by latest message timestamp.
+| Param | Default | Description |
+| --- | --- | --- |
+| `limit` | `20` | Clamped to 1-100 |
+| `offset` | `0` | Pagination offset |
+| `include_preview` | `true` | Include `last_message_preview` |
 
-### Query Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `limit` | int | 20 | Max projects to return (1-100) |
-| `offset` | int | 0 | Pagination offset |
-| `include_preview` | bool | true | Include last message preview |
-
-### Response
+Response:
 
 ```json
 {
   "items": [
     {
-      "project_id": 1,
-      "project_name": "Trading Bot",
-      "project_description": "AI-powered trading bot",
-      "project_status": "active",
-      "domain": "trading.dreamagent.cloud",
-      "last_activity": "2026-03-23T14:06:16Z",
-      "total_messages": 12,
-      "total_sessions": 3,
-      "last_message_preview": "Fixed API connection issue...",
-      "last_session_id": 5,
-      "last_session_label": "Bug Fixes",
-      "active_session_id": 5
+      "project_id": 1624,
+      "project_name": "check",
+      "project_description": "VPS health dashboard",
+      "project_status": "ready",
+      "domain": "check.dreamagent.cloud",
+      "last_activity": "2026-07-12T10:00:00Z",
+      "total_messages": 8,
+      "total_sessions": 2,
+      "last_message_preview": "Fix spacing in the screenshot",
+      "last_session_id": 165,
+      "last_session_label": "Hero polish",
+      "active_session_id": null
     }
   ],
-  "total": 42,
+  "total": 1,
   "limit": 20,
   "offset": 0
 }
 ```
 
-### Response Fields
+The optimized query uses PostgreSQL `DISTINCT ON`, joins sessions/messages, and truncates previews to 100 characters.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `project_id` | int | Project ID |
-| `project_name` | string | Project name |
-| `project_description` | string? | Project description |
-| `project_status` | string? | Project status (creating, active, error) |
-| `domain` | string? | Project domain |
-| `last_activity` | string | ISO timestamp of latest message |
-| `total_messages` | int | Total messages across all sessions |
-| `total_sessions` | int | Total sessions count |
-| `last_message_preview` | string? | Preview of last message (truncated to 100 chars) |
-| `last_session_id` | int? | ID of session with latest message |
-| `last_session_label` | string? | Label of session with latest message |
-| `active_session_id` | int? | Active session ID (for lock badge) |
+## GET `/projects/recent-activity/simple`
 
-### Example Request
+Query params:
 
-```bash
-curl "http://localhost:8000/projects/recent-activity?limit=10&include_preview=true"
-```
+| Param | Default | Description |
+| --- | --- | --- |
+| `limit` | `20` | Clamped to 1-100 |
 
----
-
-## GET /projects/recent-activity/simple
-
-Simplified version without preview - faster response.
-
-### Query Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `limit` | int | 20 | Max projects to return (1-100) |
-
-### Response
+Response:
 
 ```json
 {
   "items": [
     {
-      "project_id": 1,
-      "project_name": "Trading Bot",
-      "project_status": "active",
-      "active_session_id": 5,
-      "last_activity": "2026-03-23T14:06:16Z",
-      "total_sessions": 3,
-      "total_messages": 12
+      "project_id": 1624,
+      "project_name": "check",
+      "project_status": "ready",
+      "active_session_id": null,
+      "last_activity": "2026-07-12T10:00:00Z",
+      "total_sessions": 2,
+      "total_messages": 8
     }
   ],
-  "count": 10
+  "count": 1
 }
 ```
 
----
+## GET `/projects/{project_id}/activity`
 
-## GET /projects/{project_id}/activity
+Query params:
 
-Detailed activity for a single project, including recent messages.
+| Param | Default | Description |
+| --- | --- | --- |
+| `message_limit` | `10` | Clamped to 1-50 |
 
-### Path Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `project_id` | int | Project ID |
-
-### Query Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `message_limit` | int | 10 | Max recent messages (1-50) |
-
-### Response
+Response:
 
 ```json
 {
-  "project_id": 1,
-  "project_name": "Trading Bot",
-  "description": "AI-powered trading bot",
-  "status": "active",
-  "domain": "trading.dreamagent.cloud",
-  "active_session_id": 5,
-  "last_activity": "2026-03-23T14:06:16Z",
-  "total_sessions": 3,
-  "total_messages": 12,
+  "project_id": 1624,
+  "project_name": "check",
+  "description": "VPS health dashboard",
+  "status": "ready",
+  "domain": "check.dreamagent.cloud",
+  "active_session_id": null,
+  "last_activity": "2026-07-12T10:00:00Z",
+  "total_sessions": 2,
+  "total_messages": 8,
   "recent_messages": [
     {
       "id": 123,
-      "session_id": 5,
-      "session_label": "Bug Fixes",
+      "session_id": 165,
+      "session_label": "Hero polish",
       "role": "assistant",
-      "content": "Fixed API connection issue...",
-      "created_at": "2026-03-23T14:06:16Z"
+      "content": "Done.",
+      "created_at": "2026-07-12T10:00:00Z"
     }
   ]
 }
 ```
 
----
+## Indexes
 
-## Performance
+`recent_activity_service.py` creates safe `IF NOT EXISTS` indexes for:
 
-### Indexes
+- `messages(session_id, created_at DESC)`
+- `sessions(project_id)`
+- `projects(user_id)`
+- `messages(session_id, role, created_at DESC)`
 
-The following indexes are automatically created on module load:
+## Related
 
-```sql
--- Composite index for messages by session + time
-CREATE INDEX idx_messages_session_created 
-ON messages(session_id, created_at DESC);
-
--- Index for session-project joins
-CREATE INDEX idx_sessions_project 
-ON sessions(project_id);
-
--- Index for project-user filtering
-CREATE INDEX idx_projects_user 
-ON projects(user_id);
-
--- Index for messages with role filter
-CREATE INDEX idx_messages_session_role_created 
-ON messages(session_id, role, created_at DESC);
-```
-
-### Query Optimization
-
-- Uses PostgreSQL `DISTINCT ON` for single-pass query
-- CTE-based aggregation for stats
-- Preview truncated to 100 chars
-- Pagination via `LIMIT`/`OFFSET`
-
----
-
-## Edge Cases
-
-| Scenario | Behavior |
-|----------|----------|
-| Project with no messages | Excluded from results |
-| Deleted sessions | Ignored (INNER JOIN) |
-| Large datasets | Use pagination (limit/offset) |
-| Multiple sessions | Picks latest message across all |
-
----
-
-## File References
-
-| File | Lines | Description |
-|------|-------|-------------|
-| `recent_activity_service.py` | 1-400 | Service with optimized queries |
-| `app.py` | 3485-3590 | API endpoint definitions |
-
----
-
-## Frontend Integration
-
-### Activity Page Usage
-
-```typescript
-// Fetch recent activity
-const response = await fetch('/projects/recent-activity?limit=20');
-const { items, total } = await response.json();
-
-// Display project cards sorted by last_activity
-items.forEach(project => {
-  // Show lock badge if active_session_id exists
-  // Show last_message_preview as subtitle
-  // Format last_activity as relative time
-});
-```
-
-### Lock Badge
-
-Use `active_session_id` to show a lock badge when another session is active:
-
-```typescript
-{project.active_session_id && (
-  <LockBadge sessionId={project.active_session_id} />
-)}
-```
+- [dashboard.md](./dashboard.md)
+- [session_locking.md](./session_locking.md)
