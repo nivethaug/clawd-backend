@@ -127,6 +127,24 @@ Every page MUST include data-testid on:
 
 These rules are NON-NEGOTIABLE. Pages missing data-testid or violating a11y rules will be rejected."""
 
+_PROMPT_API_SOURCE_GATE = """\
+## API / Asset Usage Gate
+
+Before using any external API, image, video, CDN asset, iframe, script, or third-party URL, classify it:
+
+1. Public: use documented public APIs/assets only. Prefer `llm/categories/` when available. Never invent URLs.
+   For public images/videos/assets, verify before writing into code:
+   `curl -I -L --max-time 10 "<FULL_URL>"`
+   Accept only 200 or redirects resolving to 200. Reject 403, 404, 5xx, timeout, DNS failure, or hotlink-blocked responses.
+   If it fails, try up to 2 alternatives from the same approved source. If all fail, ask the user.
+
+2. Private / secret-based: never put API keys, tokens, secrets, webhooks, or paid/private endpoints in frontend code.
+   Use backend environment variables and backend proxy/service logic. If credentials are missing, ask the user.
+
+3. Internal: if the project backend already provides the needed data/action, reuse it instead of adding a new public API.
+
+Final check: public media URL verified, private secrets kept out of frontend, existing internal API reused where possible, and no invented URLs."""
+
 
 class ACPChatHandler:
     """Handles ACP chat mode for frontend editing."""
@@ -788,6 +806,8 @@ Before making any code changes, follow this process:
 
 {context_section}
 {integrations_section}
+{_PROMPT_API_SOURCE_GATE}
+
 ## USER REQUEST
 
 {user_message}
@@ -1656,6 +1676,8 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow, with m
 
 {context_section}
 {integrations_section}
+{_PROMPT_API_SOURCE_GATE}
+
 ## USER'S REQUEST
 
 {user_message}
@@ -2067,6 +2089,8 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 
 {context_section}
 {integrations_section}
+{_PROMPT_API_SOURCE_GATE}
+
 ## USER'S REQUEST
 
 {user_message}
@@ -2384,6 +2408,8 @@ Bad: "Created weather_command() handler in commands/weather.py..."
 
 {context_section}
 {integrations_section}
+{_PROMPT_API_SOURCE_GATE}
+
 ## USER'S REQUEST
 
 {user_message}

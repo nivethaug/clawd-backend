@@ -77,6 +77,86 @@ BUILD_TIMEOUT = 3000  # 30 minutes
 # Claude Code Agent settings
 CLAUDE_TIMEOUT = int(os.getenv("CLAUDE_TIMEOUT", "3000"))  # 21 minutes default
 
+PROMPT_API_SOURCE_GATE = """\
+## API SOURCE AND ACCESSIBILITY GATE - MANDATORY
+
+Before adding, changing, or using ANY external API, image, video, iframe, script, CDN asset, or third-party URL, classify it first.
+
+### 1. Public API / Public Asset
+
+Use this only when the resource is intentionally public and does not require private credentials.
+
+Examples:
+- Public JSON APIs from `llm/categories/`
+- Public image URLs
+- Public video URLs
+- Public documentation/data endpoints
+
+Rules:
+- Prefer the project's `llm/categories/` catalog when available.
+- Never invent API endpoints or asset URLs.
+- Use the exact documented `direct_url` or official public URL.
+- Before writing any external image, video, or asset URL into code, verify it is reachable in the current session.
+
+Required check:
+
+```bash
+curl -I -L --max-time 10 "<FULL_URL>"
+```
+
+Accept only:
+- HTTP 200
+- HTTP 301/302 that resolves to HTTP 200
+
+Reject:
+- 403
+- 404
+- 5xx
+- timeout
+- DNS failure
+- blocked or hotlink-protected response
+
+If the URL fails:
+- Do NOT use it.
+- Try up to 2 better alternatives from the same approved source.
+- Verify each with `curl -I -L`.
+- If none work, ask the user before choosing another source.
+
+Never commit an external media URL that was not verified.
+
+### 2. Private API / Secret-Based API
+
+Use this only when the API requires credentials, tokens, API keys, user-specific auth, paid access, webhooks, or private infrastructure.
+
+Rules:
+- Never place private API keys, tokens, secrets, or webhook URLs in frontend code.
+- Never hardcode secrets.
+- Store secrets only in backend environment variables.
+- Frontend must call the project backend, not the private third-party API directly.
+- Backend/service layer is responsible for attaching secrets.
+- If credentials are missing, ask the user for the integration details or env variable name.
+- Do not fake private API responses unless the user explicitly asks for mock UI only.
+
+### 3. Internal Project API
+
+Use internal backend APIs when the app already owns the data or action.
+
+Rules:
+- Reuse existing backend endpoints and API helpers when present.
+- Do not create a new public API integration if the backend already has the required data.
+- Do not bypass the backend for authenticated or project-specific actions.
+
+### Final Self-Check
+
+Before editing any file that references an API or external media URL, answer internally:
+- Is this public, private, or internal?
+- If public media: did I verify it with `curl -I -L`?
+- If private: are secrets kept out of frontend code?
+- If internal: am I reusing existing backend/API helpers?
+- Did I avoid invented URLs?
+
+If any answer is uncertain, STOP and resolve it before writing code."""
+
 # =============================================================================
 # PATH VALIDATION
 # =============================================================================
@@ -1670,6 +1750,10 @@ return <div className="p-4">Page content coming soon</div>
 ## STEP 4 — PAGE SPECIFICATIONS
 
 {page_specs_section}
+
+---
+
+{PROMPT_API_SOURCE_GATE}
 
 ---
 
