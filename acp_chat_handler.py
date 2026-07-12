@@ -139,7 +139,12 @@ Before using any external API, image, video, CDN asset, iframe, script, or third
    If it fails, try up to 2 alternatives from the same approved source. If all fail, ask the user.
 
 2. Private / secret-based: never put API keys, tokens, secrets, webhooks, or paid/private endpoints in frontend code.
-   Use backend environment variables and backend proxy/service logic. If credentials are missing, ask the user.
+   Use backend environment variables and backend proxy/service logic. Never print, expose, or hardcode secret values.
+   If the integration table has a docs URL, fetch it first: `curl -L --max-time 20 "<DOCS_URL>"`.
+   Read docs for base URL, endpoint path, auth method, headers, params, and response shape.
+   Before writing source code, run a real one-off API test using the env var/key. Do not create permanent test endpoints or commit test files.
+   If no docs URL exists and endpoint/auth details are uncertain, do not guess from model memory; ask the user for docs or a sample request.
+   If the API test fails, do not continue with fake data; ask for corrected credentials, docs, or a working sample.
 
 3. Internal: if the project backend already provides the needed data/action, reuse it instead of adding a new public API.
 
