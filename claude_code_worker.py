@@ -8,9 +8,10 @@ import subprocess
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from database_adapter import get_db
+from project_initial_env import write_initial_environment_variables
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +22,15 @@ BACKEND_DIR = Path(__file__).parent.resolve()
 logger.info(f"BACKEND_DIR resolved to: {BACKEND_DIR}")
 
 
-def run_claude_code_background(project_id: int, project_path: str, project_name: str, description: Optional[str] = None, session_name: str = None, template_id: Optional[str] = None) -> threading.Thread:
+def run_claude_code_background(
+    project_id: int,
+    project_path: str,
+    project_name: str,
+    description: Optional[str] = None,
+    session_name: str = None,
+    template_id: Optional[str] = None,
+    initial_environment_variables: Optional[List[Dict[str, Any]]] = None,
+) -> threading.Thread:
     """
     Run Claude Code initialization in a background thread.
 
@@ -47,6 +56,8 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
         - Does NOT reuse request DB session
         - Closes DB session after completion
     """
+
+    initial_env_vars = initial_environment_variables or []
 
     def _worker():
         """Worker function that runs in background thread."""
@@ -129,6 +140,15 @@ def run_claude_code_background(project_id: int, project_path: str, project_name:
                 return
 
             logger.info(f"Fast wrapper completed successfully for project {project_id}")
+
+            if initial_env_vars:
+                env_path = str(Path(project_path) / "backend" / ".env")
+                write_initial_environment_variables(env_path, initial_env_vars)
+                logger.info(
+                    "Initial environment variables applied for website project %s: %s",
+                    project_id,
+                    [item.get("key") for item in initial_env_vars],
+                )
 
             # Step 2: Run OpenClaw wrapper for phases 3-7 (infrastructure provisioning)
             # Build command args as list - use current Python interpreter and dynamic paths

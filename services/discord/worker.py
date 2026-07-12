@@ -5,7 +5,7 @@ Main orchestration pipeline for discord bot deployment.
 import os
 import time
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 from utils.logger import logger  # noqa: F811 — reassign below
 logger = logging.getLogger("services.discord.worker")
@@ -17,6 +17,7 @@ from services.discord.editor import DiscordBotEditor
 from services.discord.env_injector import inject_bot_token
 from services.discord.installer import install_bot_dependencies
 from services.discord.pm2_manager import start_bot_pm2, get_bot_status_pm2
+from project_initial_env import write_initial_environment_variables
 
 from domain_config import BASE_DOMAIN, SERVER_IP, frontend_domain as _frontend_domain
 
@@ -99,7 +100,8 @@ def run_discord_bot_pipeline(
     project_path: str,
     domain: str,
     port: int,
-    database_url: str = None
+    database_url: str = None,
+    initial_environment_variables: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[bool, Dict]:
     """
     Run complete discord bot deployment pipeline.
@@ -192,6 +194,16 @@ def run_discord_bot_pipeline(
 
         logger.info("Environment configured")
         result_info["steps_completed"].append("env_injection")
+
+        initial_env_vars = initial_environment_variables or []
+        if initial_env_vars:
+            write_initial_environment_variables(str(Path(discord_path) / ".env"), initial_env_vars)
+            logger.info(
+                "Initial environment variables applied for discord project %s: %s",
+                project_id,
+                [item.get("key") for item in initial_env_vars],
+            )
+            result_info["steps_completed"].append("initial_env_injection")
 
         # Step 4: Install dependencies
         logger.info("Step 4/12: Installing dependencies...")

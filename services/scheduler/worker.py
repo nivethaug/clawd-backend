@@ -20,7 +20,7 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import Tuple, Dict
+from typing import Any, Dict, List, Optional, Tuple
 
 import logging
 from utils.logger import logger  # noqa: F811 — reassign below
@@ -30,6 +30,7 @@ from services.scheduler.template import copy_scheduler_template
 from services.scheduler.env_injector import inject_scheduler_env
 from services.scheduler.editor import SchedulerEditor
 from services.scheduler.validator import validate_scheduler_project
+from project_initial_env import write_initial_environment_variables
 
 
 def run_scheduler_pipeline(
@@ -38,6 +39,7 @@ def run_scheduler_pipeline(
     description: str,
     project_path: str,
     backend_url: str = None,
+    initial_environment_variables: Optional[List[Dict[str, Any]]] = None,
     **kwargs
 ) -> Tuple[bool, Dict]:
     """
@@ -101,6 +103,16 @@ def run_scheduler_pipeline(
 
         logger.info(f"✅ Environment configured")
         result_info["steps_completed"].append("env_injection")
+
+        initial_env_vars = initial_environment_variables or []
+        if initial_env_vars:
+            write_initial_environment_variables(str(Path(scheduler_path) / ".env"), initial_env_vars)
+            logger.info(
+                "Initial environment variables applied for scheduler project %s: %s",
+                project_id,
+                [item.get("key") for item in initial_env_vars],
+            )
+            result_info["steps_completed"].append("initial_env_injection")
 
         # Step 3: AI enhance executor.py
         logger.info("📋 Step 3/4: AI enhancement of executor.py...")

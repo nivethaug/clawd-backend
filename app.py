@@ -71,6 +71,10 @@ from services.email_service import send_verification_email
 import env_manager
 import env_registry_service
 import custom_domain_service
+from project_initial_env import (
+    build_initial_integrations_prompt_block,
+    normalize_initial_environment_variables,
+)
 
 # AI Chat System
 from api.ai_chat import router as ai_chat_router
@@ -305,6 +309,13 @@ class SessionResponse(BaseModel):
     created_at: str
     last_used_at: Optional[str] = None
 
+class InitialEnvironmentVariable(BaseModel):
+    key: str
+    value: str
+    docs_url: str
+    description: Optional[str] = None
+
+
 class CreateProjectRequest(BaseModel):
     model_config = {"populate_by_name": True}  # Allow both type_id and typeId
     
@@ -321,6 +332,7 @@ class CreateProjectRequest(BaseModel):
     discord_webhook_url: Optional[str] = None  # Discord webhook URL
     email_to: Optional[str] = None  # Default email recipient (SMTP is shared)
     api_endpoint: Optional[str] = None  # Default API endpoint URL
+    environment_variables: Optional[List[InitialEnvironmentVariable]] = None
 
 
 PROJECT_CREATION_IN_PROGRESS_STATUSES = (
@@ -710,6 +722,20 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             detail=f"Project limit reached ({current_p}/{max_p}) for {proj_limit.get('tier', 'free')} tier. Upgrade to create more projects."
         )
 
+    raw_initial_env = [
+        item.model_dump() if hasattr(item, "model_dump") else item
+        for item in (request.environment_variables or [])
+    ]
+    try:
+        initial_environment_variables = normalize_initial_environment_variables(raw_initial_env)
+    except (ValueError, env_manager.EnvValidationError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    initial_integrations_block = build_initial_integrations_prompt_block(initial_environment_variables)
+    description_for_worker = request.description or ""
+    if initial_integrations_block:
+        description_for_worker = f"{description_for_worker}\n\n{initial_integrations_block}".strip()
+
     # Get GitHub service for repo name sanitization
     github = get_github_service()
     
@@ -774,6 +800,12 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             ).fetchone()
             if website_type:
                 type_id = website_type['id']
+
+    if initial_environment_variables and type_id not in (1, 2, 3, 5):
+        raise HTTPException(
+            status_code=400,
+            detail="Initial environment variables are supported for Website, Telegram Bot, Discord Bot, and Scheduler projects.",
+        )
 
     # Step 1: Get project_id first to use in folder naming
     logger.info("[PROJECT] inserting project into database")
@@ -929,9 +961,10 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                 project_id=project_id,
                 project_path=project_folder_path,
                 project_name=request.name,
-                description=request.description,
+                description=description_for_worker,
                 session_name=session_name,
-                template_id=selected_template_id  # Pass selected template ID
+                template_id=selected_template_id,  # Pass selected template ID
+                initial_environment_variables=initial_environment_variables,
             )
             logger.info(f"[PROJECT] fast_wrapper launched successfully for project {project_id}")
         except Exception as e:
@@ -1000,12 +1033,13 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                     success, result = run_telegram_bot_pipeline(
                         project_id=project_id,
                         project_name=request.name,
-                        description=request.description or "",
+                        description=description_for_worker,
                         bot_token=request.bot_token,
                         project_path=project_folder_path,
                         domain=bot_domain,
                         port=bot_port,
-                        database_url=bot_database_url
+                        database_url=bot_database_url,
+                        initial_environment_variables=initial_environment_variables,
                     )
                         
                     
@@ -1125,12 +1159,13 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                     success, result = run_discord_bot_pipeline(
                         project_id=project_id,
                         project_name=request.name,
-                        description=request.description or "",
+                        description=description_for_worker,
                         bot_token=request.bot_token,
                         project_path=project_folder_path,
                         domain=bot_domain,
                         port=bot_port,
-                        database_url=bot_database_url
+                        database_url=bot_database_url,
+                        initial_environment_variables=initial_environment_variables,
                     )
 
                     if success:
@@ -1214,7 +1249,7 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                     success, result_info = run_scheduler_pipeline(
                         project_id=project_id,
                         project_name=request.name,
-                        description=request.description or "",
+                        description=description_for_worker,
                         project_path=project_folder_path,
                         backend_url=backend_url,
                         telegram_bot_token=request.telegram_bot_token,
@@ -1222,6 +1257,7 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                         discord_webhook_url=request.discord_webhook_url,
                         email_to=request.email_to,
                         api_endpoint=request.api_endpoint,
+                        initial_environment_variables=initial_environment_variables,
                     )
 
                     if success:
