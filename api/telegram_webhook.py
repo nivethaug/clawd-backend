@@ -418,6 +418,21 @@ def _load_session_context(session_id: int, limit: int = 10) -> str:
         return ""
 
 
+async def _typing_heartbeat(chat_id: int, stop_event: asyncio.Event, interval_seconds: float = 4.0) -> None:
+    """Keep Telegram's transient typing indicator alive during long background work."""
+    try:
+        while not stop_event.is_set():
+            await send_chat_action(chat_id, "typing")
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            except asyncio.TimeoutError:
+                continue
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.debug("[TELEGRAM] Typing heartbeat stopped: %s", e)
+
+
 async def _run_selected_session_chat(
     *,
     chat_id: int,
@@ -433,10 +448,10 @@ async def _run_selected_session_chat(
     session_key = selected_session["session_key"]
     session_label = selected_session.get("label") or f"session #{session_id}"
     handler = None
+    typing_stop = asyncio.Event()
+    typing_task = asyncio.create_task(_typing_heartbeat(chat_id, typing_stop))
 
     try:
-        await send_chat_action(chat_id, "typing")
-
         lock_result = SessionLockService.acquire_lock(project_id, session_id)
         if not lock_result.get("success"):
             from utils.devops_session_context import get_devops_session_context
@@ -508,6 +523,13 @@ async def _run_selected_session_chat(
             reply_to_message_id=reply_to_message_id,
         )
     finally:
+        typing_stop.set()
+        if typing_task:
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
         if handler:
             try:
                 handler.kill_orphan_processes()
