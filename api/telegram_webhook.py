@@ -448,6 +448,8 @@ def _finalize_session_token_usage(
     handler,
     project_id: int,
     session_id: int,
+    billing_user_id: Optional[int] = None,
+    precharged_amount: int = 0,
 ) -> Optional[str]:
     """Persist token analytics and apply the same post-edit billing used by web sessions."""
     if not handler or not hasattr(handler, "get_last_token_usage"):
@@ -463,16 +465,21 @@ def _finalize_session_token_usage(
         from services.billing_service import charge_token_usage
 
         with get_db() as tconn:
-            prow = tconn.execute(
-                "SELECT user_id FROM projects WHERE id = %s",
-                (project_id,),
-            ).fetchone()
-            if not prow:
-                logger.warning("[TELEGRAM-SESSION] Token billing skipped: project %s owner not found", project_id)
-                return token_usage_json
-
-            owner_user_id = prow["user_id"] if isinstance(prow, dict) else prow[0]
+            owner_user_id = billing_user_id
+            if not owner_user_id:
+                prow = tconn.execute(
+                    "SELECT user_id FROM projects WHERE id = %s",
+                    (project_id,),
+                ).fetchone()
+                if not prow:
+                    logger.warning("[TELEGRAM-SESSION] Token billing skipped: project %s owner not found", project_id)
+                    return token_usage_json
+                owner_user_id = prow["user_id"] if isinstance(prow, dict) else prow[0]
             total_tokens = _total_tokens_from_usage(usage_data)
+
+            if precharged_amount:
+                usage_data["operation"] = "ADD_FEATURE"
+                usage_data["credits_charged"] = precharged_amount + max(0, total_tokens - precharged_amount)
 
             record_from_token_usage_json(
                 user_id=owner_user_id,
@@ -493,7 +500,7 @@ def _finalize_session_token_usage(
                     project_id=project_id,
                     session_id=session_id,
                     model=usage_data.get("model"),
-                    precharged_amount=0,
+                    precharged_amount=precharged_amount,
                     cache_read_tokens=cache_read_tokens,
                 )
                 tconn.commit()
@@ -502,6 +509,55 @@ def _finalize_session_token_usage(
         logger.warning("[TELEGRAM-SESSION] Token tracking/billing failed: %s", e, exc_info=True)
 
     return token_usage_json
+
+
+def _reserve_session_chat_credits(project_id: int) -> dict:
+    """Reserve the same upfront ADD_FEATURE credit hold used by web ACP streaming."""
+    try:
+        from services.billing_service import reserve_credits
+
+        with get_db() as conn:
+            prow = conn.execute(
+                "SELECT user_id FROM projects WHERE id = %s",
+                (project_id,),
+            ).fetchone()
+            if not prow:
+                return {"success": True, "user_id": None, "charged": []}
+
+            owner_user_id = prow["user_id"] if isinstance(prow, dict) else prow[0]
+            result = reserve_credits(conn, owner_user_id, "ADD_FEATURE", amount=1)
+            conn.commit()
+
+        if not result.get("success"):
+            return {
+                "success": False,
+                "user_id": owner_user_id,
+                "charged": [],
+                "error": result.get("error", "insufficient_credits"),
+                "cost": result.get("cost"),
+                "available": result.get("total_available", 0),
+            }
+
+        charged = result.get("charged", [])
+        logger.info("[TELEGRAM-SESSION] Reserved chat credits for user %s: %s", owner_user_id, charged)
+        return {"success": True, "user_id": owner_user_id, "charged": charged}
+    except Exception as e:
+        logger.warning("[TELEGRAM-SESSION] Credit reservation failed; allowing request: %s", e)
+        return {"success": True, "user_id": None, "charged": []}
+
+
+def _refund_session_chat_credits(user_id: Optional[int], charged: list) -> None:
+    if not user_id or not charged:
+        return
+    try:
+        from services.billing_service import refund_credits
+
+        with get_db() as conn:
+            refund_credits(conn, user_id, "ADD_FEATURE", charged)
+            conn.commit()
+        logger.info("[TELEGRAM-SESSION] Refunded reserved chat credits for user %s", user_id)
+    except Exception as e:
+        logger.warning("[TELEGRAM-SESSION] Reserved credit refund failed: %s", e)
 
 
 async def _run_selected_session_chat(
@@ -521,6 +577,9 @@ async def _run_selected_session_chat(
     handler = None
     typing_stop = asyncio.Event()
     typing_task = asyncio.create_task(_typing_heartbeat(chat_id, typing_stop))
+    billing_user_id = None
+    reserved_charges = []
+    assistant_saved = False
 
     try:
         lock_result = SessionLockService.acquire_lock(project_id, session_id)
@@ -532,6 +591,21 @@ async def _run_selected_session_chat(
                 (
                     f"This project is currently active in {lock_owner}. "
                     "Complete/release that session first. If it is open in web chat, finish it there first."
+                ),
+                reply_to_message_id=reply_to_message_id,
+            )
+            return
+
+        reserve_result = _reserve_session_chat_credits(project_id)
+        billing_user_id = reserve_result.get("user_id")
+        reserved_charges = reserve_result.get("charged", [])
+        if not reserve_result.get("success"):
+            SessionLockService.release_lock(project_id, session_id)
+            await send_message(
+                chat_id,
+                (
+                    "You don't have enough AI credits for this request. "
+                    f"Required: {reserve_result.get('cost')}, available: {reserve_result.get('available', 0)}."
                 ),
                 reply_to_message_id=reply_to_message_id,
             )
@@ -568,6 +642,8 @@ async def _run_selected_session_chat(
             handler=handler,
             project_id=project_id,
             session_id=session_id,
+            billing_user_id=billing_user_id,
+            precharged_amount=sum(abs(c.get("amount", 0)) for c in reserved_charges),
         )
 
         with get_db() as conn:
@@ -583,6 +659,7 @@ async def _run_selected_session_chat(
                 )
             conn.execute("UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = %s", (session_id,))
             conn.commit()
+        assistant_saved = True
 
         if len(assistant_content) > 3900:
             assistant_content = assistant_content[:3900] + "\n\n... (truncated)"
@@ -595,6 +672,8 @@ async def _run_selected_session_chat(
             f"Session chat failed: {str(e)}",
             reply_to_message_id=reply_to_message_id,
         )
+        if not assistant_saved:
+            _refund_session_chat_credits(billing_user_id, reserved_charges)
     finally:
         typing_stop.set()
         if typing_task:
