@@ -3,6 +3,8 @@ Telegram Webhook Handler
 Receives Telegram updates via webhook, routes messages to the AI chat engine.
 """
 
+import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import Optional, Any
@@ -25,6 +27,7 @@ from services.telegram_client import (
 )
 from api.ai_chat import process_message
 from domain_config import CONTROL_API_HOST
+from services.session_lock_service import SessionLockService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -347,6 +350,146 @@ async def _handle_callback(callback: dict):
 
 # ── Webhook endpoint ────────────────────────────────────────
 
+def _get_selected_project_session(user_id: int, telegram_session_key: str) -> Optional[dict]:
+    """Return the selected project session for Telegram, if one is active."""
+    try:
+        from utils.devops_session_context import get_devops_session_context
+
+        context = get_devops_session_context()
+        session_id = context.get_user_active_session_id(user_id)
+        if not session_id:
+            return None
+
+        session = context.get_session(user_id, int(session_id))
+        if not session:
+            context.clear_context(user_id, telegram_session_key)
+            return None
+        return session
+    except Exception as e:
+        logger.warning("[TELEGRAM-SESSION] Failed to resolve selected session: %s", e, exc_info=True)
+        return None
+
+
+def _load_session_context(session_id: int, limit: int = 10) -> str:
+    """Load recent editor chat messages for ACP continuity."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """SELECT role, content, image FROM messages
+                   WHERE session_id = %s
+                   ORDER BY created_at DESC LIMIT %s""",
+                (session_id, limit),
+            ).fetchall()
+
+        if not rows:
+            return ""
+
+        parts = []
+        for row in reversed(rows):
+            role = row["role"] if isinstance(row, dict) else row[0]
+            content = row["content"] if isinstance(row, dict) else row[1]
+            image = row.get("image") if isinstance(row, dict) else (row[2] if len(row) > 2 else None)
+            if image:
+                content = f"{content}\n\n[Image was attached in previous message]"
+            parts.append(f"{str(role).upper()}: {content}")
+        return "\n\n".join(parts)
+    except Exception as e:
+        logger.warning("[TELEGRAM-SESSION] Failed to load session context: %s", e, exc_info=True)
+        return ""
+
+
+async def _run_selected_session_chat(
+    *,
+    chat_id: int,
+    user_id: int,
+    telegram_session_key: str,
+    selected_session: dict,
+    text: str,
+    reply_to_message_id: Optional[int] = None,
+) -> None:
+    """Run selected project-session chat in the background and send the final Telegram reply."""
+    session_id = int(selected_session["id"])
+    project_id = int(selected_session["project_id"])
+    session_key = selected_session["session_key"]
+    session_label = selected_session.get("label") or f"session #{session_id}"
+    handler = None
+
+    try:
+        await send_chat_action(chat_id, "typing")
+
+        lock_result = SessionLockService.acquire_lock(project_id, session_id)
+        if not lock_result.get("success"):
+            await send_message(
+                chat_id,
+                "Session is locked by another active session. Use `/current` for details.",
+                reply_to_message_id=reply_to_message_id,
+            )
+            return
+
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content, mode) VALUES (%s, %s, %s, %s)",
+                (session_id, "user", text, "dream"),
+            )
+            conn.commit()
+
+        from acp_chat_handler import get_acp_chat_handler
+
+        handler = get_acp_chat_handler(session_key)
+        if not handler:
+            assistant_content = "Error: Could not initialize the project session chat handler."
+        else:
+            handler.set_session_id(session_id)
+            session_context = _load_session_context(session_id)
+            logger.info(
+                "[TELEGRAM-SESSION] Routing chat to selected session id=%s label=%s project_id=%s user=%s",
+                session_id,
+                session_label,
+                project_id,
+                user_id,
+            )
+            result = await handler.run_chat_unified(text, session_context)
+            assistant_content = result.get("response") or result.get("text") or ""
+            if not result.get("success"):
+                assistant_content = assistant_content or f"Error: {result.get('error', 'Session chat failed')}"
+
+        token_usage_json = None
+        if handler and hasattr(handler, "get_last_token_usage") and handler.get_last_token_usage():
+            token_usage_json = json.dumps(handler.get_last_token_usage())
+
+        with get_db() as conn:
+            if token_usage_json:
+                conn.execute(
+                    "INSERT INTO messages (session_id, role, content, token_usage) VALUES (%s, %s, %s, %s)",
+                    (session_id, "assistant", assistant_content, token_usage_json),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO messages (session_id, role, content) VALUES (%s, %s, %s)",
+                    (session_id, "assistant", assistant_content),
+                )
+            conn.execute("UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = %s", (session_id,))
+            conn.commit()
+
+        if len(assistant_content) > 3900:
+            assistant_content = assistant_content[:3900] + "\n\n... (truncated)"
+        await send_message(chat_id, assistant_content or "Session chat completed.", reply_to_message_id=reply_to_message_id)
+
+    except Exception as e:
+        logger.error("[TELEGRAM-SESSION] Selected session chat failed: %s", e, exc_info=True)
+        await send_message(
+            chat_id,
+            f"Session chat failed: {str(e)}",
+            reply_to_message_id=reply_to_message_id,
+        )
+    finally:
+        if handler:
+            try:
+                handler.kill_orphan_processes()
+            except Exception as cleanup_error:
+                logger.warning("[TELEGRAM-SESSION] Cleanup failed: %s", cleanup_error)
+
+
 @router.post("/bot/telegram/webhook")
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Optional[str] = Header(None)):
     """
@@ -380,6 +523,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         return {"ok": True}  # Not a text message — ignore silently
     
     text = text.strip()
+    original_text = text
     logger.info(f"[TELEGRAM] Message from chat_id={chat_id}: {text[:100]}")
     
     # ── Handle commands ─────────────────────────────────────
@@ -527,6 +671,25 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
     
     # Use per-Telegram-user session
     session_id = f"tg_{chat_id}"
+
+    selected_session = _get_selected_project_session(user_id, session_id)
+    original_command = original_text.split(maxsplit=1)[0].lower() if original_text.startswith("/") else ""
+    if selected_session and original_command not in {"/switch", "/sessions", "/newsession", "/clearsession", "/complete", "/current", "/help", "/link", "/unlink", "/start"}:
+        session_label = selected_session.get("label") or f"session #{selected_session['id']}"
+        await send_message(
+            chat_id,
+            f"Continuing in `{session_label}`. I will reply here when the session finishes this step.",
+            reply_to_message_id=message_id,
+        )
+        asyncio.create_task(_run_selected_session_chat(
+            chat_id=chat_id,
+            user_id=user_id,
+            telegram_session_key=session_id,
+            selected_session=selected_session,
+            text=text,
+            reply_to_message_id=message_id,
+        ))
+        return {"ok": True}
 
     # Show native "typing..." indicator (NOT a visible message)
     await send_chat_action(chat_id, "typing")

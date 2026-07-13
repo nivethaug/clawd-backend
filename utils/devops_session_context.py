@@ -190,7 +190,10 @@ class DevOpsSessionContext:
         self.touch_session(session_id)
         return {
             "status": "success",
-            "message": f"Using session: {session.get('label') or f'#{session_id}'}",
+            "message": (
+                f"Using session: {session.get('label') or f'#{session_id}'}. "
+                "All normal messages now continue in this session until `/complete` or `/clearsession`."
+            ),
             "result": {"session": session, "lock": lock_result},
         }
 
