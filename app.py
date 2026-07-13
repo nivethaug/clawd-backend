@@ -327,7 +327,7 @@ def prepare_chat_image_attachment(payload: str, session_id: int, log_prefix: str
 
 
 def append_chat_image_instruction(user_content: str, attachment: dict) -> str:
-    """Add a clear image-inspection instruction for non-vision ACP agents."""
+    """Add mandatory screenshot-grounding instructions for non-vision ACP agents."""
     image_path = attachment["inspection_path"]
     image_size = ""
     if attachment.get("width") and attachment.get("height"):
@@ -335,12 +335,21 @@ def append_chat_image_instruction(user_content: str, attachment: dict) -> str:
 
     return (
         f"{user_content}\n\n"
+        "<IMAGE_ATTACHED_REQUIRES_VISUAL_INSPECTION>\n"
         "The user attached a screenshot/image for this request.\n\n"
-        f"Image path:\n`{image_path}`"
+        f"Image path:\n{image_path}"
         f"{image_size}\n\n"
-        "Before answering, identifying the page, or editing code, inspect this image file using available "
-        "filesystem/image tools. Do not guess from the text alone. If the image cannot be opened, say that "
-        "clearly and ask the user to reattach it."
+        "Mandatory visual grounding:\n"
+        "1. Inspect the image file path with available filesystem/image tools before answering or editing code.\n"
+        "2. Base the page/screen identification only on the image, not on chat history or assumptions.\n"
+        "3. In your first user-visible response about this image, include:\n"
+        "   - Observed screen: the page, route, or UI area visible in the screenshot, or 'unclear'.\n"
+        "   - Visible issue: the specific visible problem or requested target area.\n"
+        "   - Confidence: high, medium, or low.\n"
+        "4. If confidence is low or the image cannot be opened/read clearly, ask one short clarification question.\n"
+        "5. Do not guess page names. Do not proceed to code changes until the screenshot is understood.\n"
+        "6. If the user explicitly asks only to explain what is visible, describe the screenshot and do not edit files.\n"
+        "</IMAGE_ATTACHED_REQUIRES_VISUAL_INSPECTION>"
     )
 
 
