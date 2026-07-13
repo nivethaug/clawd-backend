@@ -840,18 +840,30 @@ class ToolExecutor:
         if not session_key or not user_id:
             return {"status": "error", "message": "Missing session context"}
 
-        active_project = await self._get_active_project_for_session(session_key, user_id)
-        if not active_project:
-            return {"status": "error", "message": "Select a project before selecting a session."}
-
         session_id = args.get("session_id")
         if not session_id:
             return {"status": "error", "message": "Missing session_id"}
 
         context = get_devops_session_context()
         session = context.get_session(user_id, int(session_id))
-        if not session or int(session["project_id"]) != int(active_project["id"]):
-            return {"status": "error", "message": "Session does not belong to the active project."}
+        if not session:
+            return {"status": "error", "message": "Session not found or not accessible."}
+
+        active_project = await self._get_active_project_for_session(session_key, user_id)
+        if not active_project or int(session["project_id"]) != int(active_project["id"]):
+            session_project_domain = session.get("project_domain")
+            if not session_project_domain:
+                return {"status": "error", "message": "Could not resolve the selected session project."}
+
+            session_manager = get_session_manager()
+            await session_manager.set_active_project(session_key, session_project_domain)
+            from utils.project_chat_repo import ProjectChatRepository
+            ProjectChatRepository().set_active_project(user_id, session_project_domain)
+            logger.info(
+                "[TOOL] Synced active project to %s for selected session %s",
+                session_project_domain,
+                session_id,
+            )
 
         return context.select_session(user_id, session_key, int(session_id))
 
