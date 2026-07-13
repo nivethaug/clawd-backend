@@ -78,7 +78,7 @@ class SessionLockService:
                        FROM projects p
                        LEFT JOIN sessions s ON s.id = p.active_session_id
                        WHERE p.id = %s
-                       FOR UPDATE""",
+                       FOR UPDATE OF p""",
                     (project_id,)
                 )
                 result = cur.fetchone()
