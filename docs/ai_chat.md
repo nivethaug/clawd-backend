@@ -1,12 +1,14 @@
 # AI Chat System
 
-> [TOC](toc.md) | Updated: 2026-07-12
+> [TOC](toc.md) | Updated: 2026-07-14
 
 ## Purpose
 
 The AI Chat system is the tool-driven DevOps assistant exposed under `/api/ai/*`. It can answer project questions and execute safe project operations through registered Python tools.
 
 This is separate from workspace edit chat (`/chat`, `/chat/stream`) and separate from Prompt Assistant (`/ai/completion`).
+
+Telegram can bridge from DevOps chat into a selected project session. Once a Telegram project session is selected, normal Telegram messages bypass general DevOps tool chat and route to the same project session edit handler used by web session chat.
 
 ## Main Files
 
@@ -20,6 +22,7 @@ This is separate from workspace edit chat (`/chat`, `/chat/stream`) and separate
 | `services/ai/tool_executor.py` | Direct Python execution of tools |
 | `services/ai/project_resolver.py` | Project ID/domain/name resolution |
 | `utils/ai_session_manager.py` | Session state and active project tracking |
+| `utils/devops_session_context.py` | Active project-session context shared with Telegram |
 | `utils/ai_response_formatter.py` | Response shape helpers |
 
 ## Provider
@@ -91,8 +94,15 @@ Confirmation-required tools include destructive or broad actions such as delete/
 
 When the active project is a scheduler, the assistant can list, create, update, pause, resume, run, and inspect jobs through scheduler-specific tools. It should not advertise unrelated website/bot features for scheduler projects.
 
+## Telegram Project Sessions
+
+Telegram project session commands are handled by `api/telegram_webhook.py`, not by the web Chat UI. The DevOps context can store one selected project session for the linked user. While that session is active, Telegram messages continue in that session until `/complete`, `/clearsession`, or project switch.
+
+This preserves the same project lock rules as web session chat and avoids running a separate duplicate editor pipeline for Telegram.
+
 ## Related
 
 - [ai_chat_architecture.md](./ai_chat_architecture.md)
 - [backend_api_reference.md](./backend_api_reference.md)
 - [scheduler.md](./scheduler.md)
+- [telegram_session_chat.md](./telegram_session_chat.md)

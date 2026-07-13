@@ -1,6 +1,6 @@
 # Token Usage Tracking
 
-> [TOC](toc.md) | Updated: 2026-07-12
+> [TOC](toc.md) | Updated: 2026-07-14
 
 ## Purpose
 
@@ -71,6 +71,7 @@ Use `record_from_token_usage_json()` when handlers return token usage JSON. It a
 | --- | --- |
 | Streaming chat/edit | Records assistant message token JSON and `token_usage` row when user/project context exists |
 | Non-streaming chat/edit | Records assistant message token JSON and `token_usage` row when user/project context exists |
+| Telegram selected-session chat | Records handler token usage after session completion and charges the project owner |
 | Website create | Records from `acp_frontend_editor_v2.py` after Claude agent calls |
 | Telegram create | Records from `services/telegram/worker.py` after editor enhancement |
 | Discord create | Records from `services/discord/worker.py` after editor enhancement |
@@ -121,3 +122,4 @@ Query params:
 
 - [billing.md](./billing.md)
 - [chat_stream.md](./chat_stream.md)
+- [telegram_session_chat.md](./telegram_session_chat.md)

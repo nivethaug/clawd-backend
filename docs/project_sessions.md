@@ -1,6 +1,6 @@
 # Project Sessions
 
-> [TOC](toc.md) | Updated: 2026-07-12
+> [TOC](toc.md) | Updated: 2026-07-14
 
 ## Purpose
 
@@ -52,6 +52,19 @@ Response:
 
 `channel` and `agent_id` are currently created from backend defaults.
 
+## Telegram Session Selection
+
+Linked Telegram users can select an existing project session with `/sessions` or create one with `/newsession LABEL`. Once selected, normal Telegram messages are appended to the same `messages` table and routed through the same `acp_chat_handler.py` flow used by web session chat.
+
+Telegram does not create a duplicate edit system per project type. The selected session's `project_type_id` controls the prompt builder inside `ACPChatHandler`:
+
+- Website sessions use the website edit prompt.
+- Telegram bot sessions use the Telegram bot edit prompt.
+- Discord bot sessions use the Discord bot edit prompt.
+- Scheduler sessions use the scheduler edit prompt.
+
+See [telegram_session_chat.md](./telegram_session_chat.md) for the full command and lock behavior.
+
 ## Delete Session
 
 Both delete routes remove:
@@ -97,3 +110,4 @@ Images are stored on user messages when uploaded. Assistant messages may include
 - [chat.md](./chat.md)
 - [chat_stream.md](./chat_stream.md)
 - [session_locking.md](./session_locking.md)
+- [telegram_session_chat.md](./telegram_session_chat.md)

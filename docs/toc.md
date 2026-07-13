@@ -16,6 +16,7 @@
 | [billing.md](./billing.md) | Billing, AI credits, LemonSqueezy, and billing admin routes |
 | [project_sessions.md](./project_sessions.md) | Session CRUD and message retrieval |
 | [session_locking.md](./session_locking.md) | Single active edit session per project |
+| [telegram_session_chat.md](./telegram_session_chat.md) | Telegram bridge into project session chat |
 | [project_status.md](./project_status.md) | Project status and AI status endpoints |
 | [publish_frontend.md](./publish_frontend.md) | Frontend build/publish flow |
 | [publish_backend.md](./publish_backend.md) | Backend build/publish flow |
@@ -35,6 +36,7 @@
 | AI chat assistant APIs | `api/ai_chat.py`, `api/ai_selection.py`, `api/ai_confirm.py`, `services/ai/*` |
 | Project creation | `app.py`, `project_manager.py`, `claude_code_worker.py`, `fast_wrapper.py`, `infrastructure_manager.py` |
 | Telegram projects | `services/telegram/*`, `api/telegram_webhook.py`, `templates/telegram-bot-template/*` |
+| Telegram session chat | `api/telegram_webhook.py`, `utils/devops_session_context.py`, `acp_chat_handler.py` |
 | Discord projects | `services/discord/*`, `templates/discord-bot-template/*` |
 | Scheduler projects | `services/scheduler/*`, `api/scheduler_router.py`, `templates/scheduler-template/*` |
 | Billing | `api/billing_router.py`, `services/billing_service.py`, `services/lemonsqueezy_service.py` |

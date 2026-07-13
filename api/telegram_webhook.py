@@ -560,6 +560,37 @@ def _refund_session_chat_credits(user_id: Optional[int], charged: list) -> None:
         logger.warning("[TELEGRAM-SESSION] Reserved credit refund failed: %s", e)
 
 
+async def _run_handler_like_web_session(handler, user_message: str, session_context: str) -> str:
+    """
+    Run ACP chat through the same streaming entrypoint used by web sessions.
+
+    Telegram cannot stream chunks into the editor UI, but collecting chunks from
+    run_chat_streaming_unified keeps the important web behavior: Claude session
+    resume keyed by project/session, streaming prompt routing, and full-response
+    extraction from handler._last_query_response.
+    """
+    chunks = []
+    async for chunk in handler.run_chat_streaming_unified(user_message, session_context):
+        if chunk:
+            chunks.append(str(chunk))
+
+    final_response = getattr(handler, "_last_query_response", None)
+    if final_response:
+        return str(final_response).strip()
+
+    real_chunks = []
+    for chunk in chunks:
+        text = str(chunk).strip()
+        if not text or text.startswith("PROGRESS:"):
+            continue
+        if text.startswith("TEXT:"):
+            text = text[5:].strip()
+        if text:
+            real_chunks.append(text)
+
+    return "\n".join(real_chunks).strip()
+
+
 async def _run_selected_session_chat(
     *,
     chat_id: int,
@@ -627,16 +658,15 @@ async def _run_selected_session_chat(
             handler.set_session_id(session_id)
             session_context = _load_session_context(session_id)
             logger.info(
-                "[TELEGRAM-SESSION] Routing chat to selected session id=%s label=%s project_id=%s user=%s",
+                "[TELEGRAM-SESSION] Routing chat to selected session id=%s label=%s project_id=%s user=%s via web streaming handler",
                 session_id,
                 session_label,
                 project_id,
                 user_id,
             )
-            result = await handler.run_chat_unified(text, session_context)
-            assistant_content = result.get("response") or result.get("text") or ""
-            if not result.get("success"):
-                assistant_content = assistant_content or f"Error: {result.get('error', 'Session chat failed')}"
+            assistant_content = await _run_handler_like_web_session(handler, text, session_context)
+            if not assistant_content:
+                assistant_content = "Session chat completed, but no response text was returned."
 
         token_usage_json = _finalize_session_token_usage(
             handler=handler,

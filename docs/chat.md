@@ -1,12 +1,14 @@
 # Chat API
 
-> [TOC](toc.md) | Updated: 2026-07-12
+> [TOC](toc.md) | Updated: 2026-07-14
 
 ## Purpose
 
 `/chat` is the workspace chat endpoint used by project sessions. It supports Dream mode and Plan mode, optional ACP editing, and image attachments.
 
 The frontend should prefer streaming for long-running edit work. When `stream=true`, `/chat` delegates to `/chat/stream`.
+
+Telegram selected-session chat uses the same `acp_chat_handler.py` execution path, but it is triggered by `api/telegram_webhook.py` instead of the `/chat` HTTP route.
 
 ## Main Files
 
@@ -70,6 +72,16 @@ All session chat routes require `Authorization: Bearer <token>`. Ownership is en
 - Uses recent messages as compact context and replaces historical base64 images with placeholders.
 - Saves the assistant response and updates session usage timestamps.
 
+## Telegram Compatibility
+
+When a linked Telegram chat has a selected project session, normal Telegram messages are routed into that same project session:
+
+```text
+Telegram -> api/telegram_webhook.py -> get_acp_chat_handler(session_key) -> run_chat_unified()
+```
+
+The session transcript remains in the same `messages` table as web chat. The same project-aware prompt selection applies for website, Telegram bot, Discord bot, and scheduler projects.
+
 ## Image Handling
 
 Uploaded images may arrive as browser data URLs such as:
@@ -97,3 +109,4 @@ data:image/webp;base64,UklGR...
 - [project_sessions.md](./project_sessions.md)
 - [session_locking.md](./session_locking.md)
 - [message-persistence-guarantee.md](./message-persistence-guarantee.md)
+- [telegram_session_chat.md](./telegram_session_chat.md)
