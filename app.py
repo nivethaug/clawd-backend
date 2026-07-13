@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import zipfile
 import base64
+from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator, Any, Optional, Dict, List
@@ -222,6 +223,8 @@ IMAGE_MIME_EXTENSIONS = {
     "image/gif": ".gif",
 }
 
+CHAT_IMAGE_TEMP_DIR = os.getenv("CHAT_IMAGE_TEMP_DIR", "/tmp/acp_images")
+
 
 def decode_chat_image_payload(payload: str) -> tuple[bytes, str]:
     """
@@ -251,6 +254,108 @@ def decode_chat_image_payload(payload: str) -> tuple[bytes, str]:
         return base64.b64decode(compact_payload, validate=True), extension
     except Exception as exc:
         raise ValueError("Invalid base64 image payload") from exc
+
+
+def prepare_chat_image_attachment(payload: str, session_id: int, log_prefix: str) -> dict:
+    """
+    Save a chat image as a temporary file Claude/ACP tools can inspect.
+
+    The UI sends compact WebP data URLs for speed. Some filesystem/image tools
+    are less reliable with WebP, so create a PNG inspection copy when Pillow is
+    available. The returned paths must be cleaned up after the ACP run ends.
+    """
+    image_data, image_extension = decode_chat_image_payload(payload)
+    os.makedirs(CHAT_IMAGE_TEMP_DIR, exist_ok=True)
+
+    image_id = uuid.uuid4().hex[:8]
+    original_path = os.path.join(CHAT_IMAGE_TEMP_DIR, f"{session_id}_{image_id}{image_extension}")
+    with open(original_path, "wb") as image_file:
+        image_file.write(image_data)
+
+    cleanup_paths = [original_path]
+    inspection_path = original_path
+    width = None
+    height = None
+
+    try:
+        from PIL import Image
+
+        with Image.open(BytesIO(image_data)) as image:
+            width, height = image.size
+            converted = image.convert("RGBA")
+            png_path = os.path.join(CHAT_IMAGE_TEMP_DIR, f"{session_id}_{image_id}_inspect.png")
+            converted.save(png_path, format="PNG", optimize=True)
+            inspection_path = png_path
+            if png_path not in cleanup_paths:
+                cleanup_paths.append(png_path)
+            logger.info(
+                "%s Saved image inspection copy to %s (%sx%s)",
+                log_prefix,
+                inspection_path,
+                width,
+                height,
+            )
+    except ImportError:
+        logger.warning(
+            "%s Pillow is not installed; using original image path for inspection: %s",
+            log_prefix,
+            original_path,
+        )
+    except Exception as convert_err:
+        logger.warning(
+            "%s Failed to create PNG inspection copy; using original image path %s: %s",
+            log_prefix,
+            original_path,
+            convert_err,
+        )
+
+    logger.info(
+        "%s Saved uploaded chat image original to %s (%s bytes)",
+        log_prefix,
+        original_path,
+        len(image_data),
+    )
+
+    return {
+        "inspection_path": inspection_path,
+        "original_path": original_path,
+        "cleanup_paths": cleanup_paths,
+        "width": width,
+        "height": height,
+        "bytes": len(image_data),
+    }
+
+
+def append_chat_image_instruction(user_content: str, attachment: dict) -> str:
+    """Add a clear image-inspection instruction for non-vision ACP agents."""
+    image_path = attachment["inspection_path"]
+    image_size = ""
+    if attachment.get("width") and attachment.get("height"):
+        image_size = f"\nImage size: {attachment['width']}x{attachment['height']}px"
+
+    return (
+        f"{user_content}\n\n"
+        "The user attached a screenshot/image for this request.\n\n"
+        f"Image path:\n`{image_path}`"
+        f"{image_size}\n\n"
+        "Before answering, identifying the page, or editing code, inspect this image file using available "
+        "filesystem/image tools. Do not guess from the text alone. If the image cannot be opened, say that "
+        "clearly and ask the user to reattach it."
+    )
+
+
+def cleanup_chat_image_attachment(attachment: Optional[dict], log_prefix: str) -> None:
+    """Remove temporary chat image files after the ACP/Claude session ends."""
+    if not attachment:
+        return
+
+    for image_path in attachment.get("cleanup_paths", []):
+        try:
+            if image_path and os.path.exists(image_path):
+                os.remove(image_path)
+                logger.info("%s Cleaned up temp chat image: %s", log_prefix, image_path)
+        except Exception as cleanup_err:
+            logger.warning("%s Failed to clean up temp chat image %s: %s", log_prefix, image_path, cleanup_err)
 
 # ============================================================================
 # Initialize Schema
@@ -5094,25 +5199,13 @@ async def chat_stream_endpoint(
             
             # Handle image for ACP mode - save to temp file and use path instead of base64
             acp_user_content = user_content
-            image_path_for_context = None
+            image_attachment = None
             
             if request.image:
-                logger.info(f"[ACP-STREAM] Image detected, saving to temp file...")
-                # Save image to temp file for ACPX to access
-                import uuid
-                temp_dir = "/tmp/acp_images"
-                os.makedirs(temp_dir, exist_ok=True)
-                
+                logger.info(f"[ACP-STREAM] Image detected, preparing inspection file...")
                 try:
-                    # Decode and save image
-                    image_data, image_extension = decode_chat_image_payload(request.image)
-                    image_filename = f"{session_id}_{uuid.uuid4().hex[:8]}{image_extension}"
-                    image_path = os.path.join(temp_dir, image_filename)
-                    with open(image_path, 'wb') as f:
-                        f.write(image_data)
-                    image_path_for_context = image_path
-                    acp_user_content = f"{user_content}\n\n[Image attached: {image_path}]"
-                    logger.info(f"[ACP-STREAM] Saved image to {image_path} ({len(image_data)} bytes)")
+                    image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-STREAM]")
+                    acp_user_content = append_chat_image_instruction(user_content, image_attachment)
                 except Exception as img_err:
                     logger.error(f"[ACP-STREAM] Failed to save image: {img_err}")
                     acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
@@ -5154,15 +5247,18 @@ async def chat_stream_endpoint(
             # ── PREPROCESSOR CHECK ────────────────────────────────────────────
             # Try fast LLM first to see if we can skip ACPX
             direct_response = None
-            try:
-                from acp_chat_handler import check_preprocessor
-                project_name = handler.project_name if handler else "App"
-                project_path = handler.frontend_src_path if handler else None
-                direct_response = await check_preprocessor(acp_user_content, project_name, project_path)
-                if direct_response:
-                    logger.info(f"[ACP-STREAM] Using preprocessor direct response")
-            except Exception as pre_err:
-                logger.warning(f"[ACP-STREAM] Preprocessor check failed: {pre_err}")
+            if request.image:
+                logger.info("[ACP-STREAM] Skipping preprocessor because image inspection requires ACP tools")
+            else:
+                try:
+                    from acp_chat_handler import check_preprocessor
+                    project_name = handler.project_name if handler else "App"
+                    project_path = handler.frontend_src_path if handler else None
+                    direct_response = await check_preprocessor(acp_user_content, project_name, project_path)
+                    if direct_response:
+                        logger.info(f"[ACP-STREAM] Using preprocessor direct response")
+                except Exception as pre_err:
+                    logger.warning(f"[ACP-STREAM] Preprocessor check failed: {pre_err}")
             
             # If preprocessor handled it, return direct response
             if direct_response:
@@ -5342,13 +5438,7 @@ async def chat_stream_endpoint(
                         await save_response_to_db(assistant_content)
                         await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
 
-                    # Cleanup temp image file
-                    if image_path_for_context and os.path.exists(image_path_for_context):
-                        try:
-                            os.remove(image_path_for_context)
-                            logger.info(f"[ACP-STREAM] Cleaned up temp image")
-                        except:
-                            pass
+                    cleanup_chat_image_attachment(image_attachment, "[ACP-STREAM]")
                     
                     logger.info(f"[ACP-STREAM] === ACP STREAMING COMPLETED ===")
                     
@@ -5407,6 +5497,7 @@ async def chat_stream_endpoint(
                         except Exception as e:
                             logger.error(f"[ACP-STREAM] Background save error: {e}")
                         finally:
+                            cleanup_chat_image_attachment(image_attachment, "[ACP-STREAM]")
                             # Remove handler from registry after background save completes
                             active_handlers.pop(request.session_key, None)
                             logger.info(f"[ACP-STREAM] Background save done, handler removed from registry")
@@ -5432,6 +5523,7 @@ async def chat_stream_endpoint(
                     if handler and not handler.is_query_running():
                         active_handlers.pop(request.session_key, None)
                         logger.info(f"[ACP-STREAM] Handler removed from active registry (query complete)")
+                        cleanup_chat_image_attachment(image_attachment, "[ACP-STREAM]")
                     else:
                         logger.info(f"[ACP-STREAM] Query still running in background, keeping handler in registry")
 
@@ -5439,6 +5531,7 @@ async def chat_stream_endpoint(
                     async def delayed_cleanup():
                         await asyncio.sleep(600)
                         active_handlers.pop(request.session_key, None)
+                        cleanup_chat_image_attachment(image_attachment, "[ACP-STREAM]")
                         logger.info(f"[ACP-STREAM] Delayed cleanup: handler removed from registry")
                     asyncio.create_task(delayed_cleanup())
 
@@ -5748,24 +5841,13 @@ async def chat_endpoint(
                 
                 # Handle image for ACP mode - save to temp file and use path instead of base64
                 acp_user_content = user_content
-                image_path_for_context = None
+                image_attachment = None
                 
                 if request.image:
-                    logger.info(f"[ACP-MODE] Image detected, saving to temp file...")
-                    # Save image to temp file for ACPX to access
-                    temp_dir = "/tmp/acp_images"
-                    os.makedirs(temp_dir, exist_ok=True)
-                    
+                    logger.info(f"[ACP-MODE] Image detected, preparing inspection file...")
                     try:
-                        # Decode and save image
-                        image_data, image_extension = decode_chat_image_payload(request.image)
-                        image_filename = f"{session_id}_{uuid.uuid4().hex[:8]}{image_extension}"
-                        image_path = os.path.join(temp_dir, image_filename)
-                        with open(image_path, 'wb') as f:
-                            f.write(image_data)
-                        image_path_for_context = image_path
-                        acp_user_content = f"{user_content}\n\n[Image attached: {image_path}]"
-                        logger.info(f"[ACP-MODE] Saved image to {image_path} ({len(image_data)} bytes)")
+                        image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-MODE]")
+                        acp_user_content = append_chat_image_instruction(user_content, image_attachment)
                     except Exception as img_err:
                         logger.error(f"[ACP-MODE] Failed to save image: {img_err}")
                         acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
@@ -5803,29 +5885,23 @@ async def chat_endpoint(
                 logger.info(f"[ACP-MODE] Session context: {session_context[:500]}...")
                 logger.info(f"[ACP-MODE] ========================")
                 
-                # Run ACPX (synchronous)
-                logger.info(f"[ACP-MODE] Starting ACPX execution (timeout: 300s)...")
-                result = handler.run_acpx_chat(acp_user_content, session_context)
-                
-                logger.info(f"[ACP-MODE] ACPX completed with status: {result.get('status')}")
-                assistant_content = result.get('response', '')
-                if not result.get('success'):
-                    logger.error(f"[ACP-MODE] ACPX failed: {result.get('error')}")
-                    assistant_content = f"Error: {result.get('error', 'ACPX failed')}"
-                else:
-                    logger.info(f"[ACP-MODE] Response length: {len(assistant_content)} chars")
-                
-                # Kill orphan processes after response
-                handler.kill_orphan_processes()
-                logger.info(f"[ACP-MODE] Cleaned up ACPX processes for session {session_id}")
-                
-                # Cleanup temp image file
-                if image_path_for_context and os.path.exists(image_path_for_context):
-                    try:
-                        os.remove(image_path_for_context)
-                        logger.info(f"[ACP-MODE] Cleaned up temp image: {image_path_for_context}")
-                    except:
-                        pass
+                try:
+                    # Run ACPX (synchronous)
+                    logger.info(f"[ACP-MODE] Starting ACPX execution (timeout: 300s)...")
+                    result = handler.run_acpx_chat(acp_user_content, session_context)
+                    
+                    logger.info(f"[ACP-MODE] ACPX completed with status: {result.get('status')}")
+                    assistant_content = result.get('response', '')
+                    if not result.get('success'):
+                        logger.error(f"[ACP-MODE] ACPX failed: {result.get('error')}")
+                        assistant_content = f"Error: {result.get('error', 'ACPX failed')}"
+                    else:
+                        logger.info(f"[ACP-MODE] Response length: {len(assistant_content)} chars")
+                finally:
+                    # Kill orphan processes after response
+                    handler.kill_orphan_processes()
+                    logger.info(f"[ACP-MODE] Cleaned up ACPX processes for session {session_id}")
+                    cleanup_chat_image_attachment(image_attachment, "[ACP-MODE]")
             
             # Save assistant message
             logger.info(f"[ACP-MODE] Saving assistant message to database...")
