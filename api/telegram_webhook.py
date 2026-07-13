@@ -433,6 +433,77 @@ async def _typing_heartbeat(chat_id: int, stop_event: asyncio.Event, interval_se
         logger.debug("[TELEGRAM] Typing heartbeat stopped: %s", e)
 
 
+def _total_tokens_from_usage(usage_data: dict) -> int:
+    return int(
+        usage_data.get("total_tokens", 0)
+        or usage_data.get("totalTokens", 0)
+        or (usage_data.get("input_tokens", 0) + usage_data.get("output_tokens", 0))
+        or (usage_data.get("inputTokens", 0) + usage_data.get("outputTokens", 0))
+        or 0
+    )
+
+
+def _finalize_session_token_usage(
+    *,
+    handler,
+    project_id: int,
+    session_id: int,
+) -> Optional[str]:
+    """Persist token analytics and apply the same post-edit billing used by web sessions."""
+    if not handler or not hasattr(handler, "get_last_token_usage"):
+        return None
+
+    usage_data = handler.get_last_token_usage()
+    if not usage_data:
+        return None
+
+    token_usage_json = json.dumps(usage_data)
+    try:
+        from services.token_tracker import record_from_token_usage_json
+        from services.billing_service import charge_token_usage
+
+        with get_db() as tconn:
+            prow = tconn.execute(
+                "SELECT user_id FROM projects WHERE id = %s",
+                (project_id,),
+            ).fetchone()
+            if not prow:
+                logger.warning("[TELEGRAM-SESSION] Token billing skipped: project %s owner not found", project_id)
+                return token_usage_json
+
+            owner_user_id = prow["user_id"] if isinstance(prow, dict) else prow[0]
+            total_tokens = _total_tokens_from_usage(usage_data)
+
+            record_from_token_usage_json(
+                user_id=owner_user_id,
+                token_usage_json=usage_data,
+                usage_type="ai_chat",
+                project_id=project_id,
+                session_id=session_id,
+                description="Telegram project session chat",
+            )
+
+            if total_tokens > 0:
+                cache_read_tokens = int(usage_data.get("cache_read_input_tokens", 0) or 0)
+                charge_result = charge_token_usage(
+                    conn=tconn,
+                    user_id=owner_user_id,
+                    total_tokens=total_tokens,
+                    operation_code="ADD_FEATURE",
+                    project_id=project_id,
+                    session_id=session_id,
+                    model=usage_data.get("model"),
+                    precharged_amount=0,
+                    cache_read_tokens=cache_read_tokens,
+                )
+                tconn.commit()
+                logger.info("[TELEGRAM-SESSION] Post-edit token charge: %s", charge_result)
+    except Exception as e:
+        logger.warning("[TELEGRAM-SESSION] Token tracking/billing failed: %s", e, exc_info=True)
+
+    return token_usage_json
+
+
 async def _run_selected_session_chat(
     *,
     chat_id: int,
@@ -493,9 +564,11 @@ async def _run_selected_session_chat(
             if not result.get("success"):
                 assistant_content = assistant_content or f"Error: {result.get('error', 'Session chat failed')}"
 
-        token_usage_json = None
-        if handler and hasattr(handler, "get_last_token_usage") and handler.get_last_token_usage():
-            token_usage_json = json.dumps(handler.get_last_token_usage())
+        token_usage_json = _finalize_session_token_usage(
+            handler=handler,
+            project_id=project_id,
+            session_id=session_id,
+        )
 
         with get_db() as conn:
             if token_usage_json:
