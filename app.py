@@ -5367,6 +5367,21 @@ async def chat_stream_endpoint(
         last_user_message = user_messages[-1]
         user_content = last_user_message.content
 
+        processing_acquired = False
+        if request.acp_mode:
+            processing_result = SessionLockService.acquire_processing(session_id, "webchat")
+            if not processing_result.get("success"):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "session_message_in_progress",
+                        "message": "A message is already running in this session. Please wait for it to finish.",
+                        "processing_channel": processing_result.get("processing_channel"),
+                        "processing_started_at": str(processing_result.get("processing_started_at") or ""),
+                    },
+                )
+            processing_acquired = True
+
         # Save user message to database and commit
         msg_mode = getattr(request, 'mode', 'dream')
         if request.image:
@@ -5416,6 +5431,8 @@ async def chat_stream_endpoint(
                     _chat_charged = result.get("charged", [])
                     logger.info(f"[BILLING] Reserved chat credits for user {_chat_user_id}: {_chat_charged}")
         except HTTPException:
+            if processing_acquired:
+                SessionLockService.release_processing(session_id)
             raise
         except Exception as bill_err:
             logger.warning(f"[BILLING] Chat credit reservation failed (allowing request): {bill_err}")
@@ -5530,22 +5547,25 @@ async def chat_stream_endpoint(
             if direct_response:
                 async def preprocessor_response():
                     """Return preprocessor's direct response."""
-                    event_data = json.dumps({'choices': [{'delta': {'content': direct_response + "\n"}}]})
-                    yield f"data: {event_data}\n\n"
-                    
-                    # Save to database
                     try:
-                        with get_db() as save_conn:
-                            save_conn.execute(
-                                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                                (session_id, 'assistant', direct_response)
-                            )
-                            save_conn.commit()
-                            logger.info(f"[ACP-STREAM] Saved preprocessor response ({len(direct_response)} chars)")
-                    except Exception as save_err:
-                        logger.error(f"[ACP-STREAM] Failed to save preprocessor response: {save_err}")
-                    
-                    logger.info(f"[ACP-STREAM] === PREPROCESSOR RESPONSE COMPLETED ===")
+                        event_data = json.dumps({'choices': [{'delta': {'content': direct_response + "\n"}}]})
+                        yield f"data: {event_data}\n\n"
+                        
+                        # Save to database
+                        try:
+                            with get_db() as save_conn:
+                                save_conn.execute(
+                                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                                    (session_id, 'assistant', direct_response)
+                                )
+                                save_conn.commit()
+                                logger.info(f"[ACP-STREAM] Saved preprocessor response ({len(direct_response)} chars)")
+                        except Exception as save_err:
+                            logger.error(f"[ACP-STREAM] Failed to save preprocessor response: {save_err}")
+                        
+                        logger.info(f"[ACP-STREAM] === PREPROCESSOR RESPONSE COMPLETED ===")
+                    finally:
+                        SessionLockService.release_processing(session_id)
                 
                 return StreamingResponse(
                     preprocessor_response(),
@@ -5764,6 +5784,7 @@ async def chat_stream_endpoint(
                             logger.error(f"[ACP-STREAM] Background save error: {e}")
                         finally:
                             cleanup_chat_image_attachment(image_attachment, "[ACP-STREAM]")
+                            SessionLockService.release_processing(session_id)
                             # Remove handler from registry after background save completes
                             active_handlers.pop(request.session_key, None)
                             logger.info(f"[ACP-STREAM] Background save done, handler removed from registry")
@@ -5790,6 +5811,7 @@ async def chat_stream_endpoint(
                         active_handlers.pop(request.session_key, None)
                         logger.info(f"[ACP-STREAM] Handler removed from active registry (query complete)")
                         cleanup_chat_image_attachment(image_attachment, "[ACP-STREAM]")
+                        SessionLockService.release_processing(session_id)
                     else:
                         logger.info(f"[ACP-STREAM] Query still running in background, keeping handler in registry")
 
@@ -5814,6 +5836,8 @@ async def chat_stream_endpoint(
             )
         except Exception as e:
             logger.error(f"[STREAM ENDPOINT] ACP mode error: {e}")
+            if processing_acquired:
+                SessionLockService.release_processing(session_id)
 
             # Refund AI credits (chat failed)
             if _chat_charged and _chat_user_id:
@@ -5954,20 +5978,38 @@ async def cancel_chat(
     logger.info(f"[CANCEL] Cancel requested for session_key: {request.session_key[:16]}...")
     logger.info(f"[CANCEL] Active handlers in registry: {list(active_handlers.keys())}")
 
+    session_id_for_release = None
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id FROM sessions WHERE session_key = ?",
+                (request.session_key,),
+            ).fetchone()
+            if row:
+                session_id_for_release = row["id"] if isinstance(row, dict) else row[0]
+    except Exception as lookup_err:
+        logger.warning(f"[CANCEL] Could not resolve session id for processing release: {lookup_err}")
+
     handler = active_handlers.get(request.session_key)
     if handler:
         logger.info(f"[CANCEL] Handler found. Agent active: {handler._active_agent is not None}, Query running: {handler.is_query_running()}")
         try:
             await handler.cancel_query()
             active_handlers.pop(request.session_key, None)
+            if session_id_for_release:
+                SessionLockService.release_processing(int(session_id_for_release))
             logger.info(f"[CANCEL] Query cancelled successfully")
             return {"success": True, "message": "Query cancelled"}
         except Exception as e:
             logger.error(f"[CANCEL] Error cancelling query: {e}")
             active_handlers.pop(request.session_key, None)
+            if session_id_for_release:
+                SessionLockService.release_processing(int(session_id_for_release))
             return {"success": False, "message": f"Error cancelling: {str(e)}"}
 
     logger.info(f"[CANCEL] No active handler found for session_key: {request.session_key[:16]}...")
+    if session_id_for_release:
+        SessionLockService.release_processing(int(session_id_for_release))
     return {"success": False, "message": "No active query found"}
 
 
@@ -5986,6 +6028,24 @@ async def chat_status(
     handler = active_handlers.get(session_key)
     if handler and handler.is_query_running():
         return {"active": True, "session_key": session_key}
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id FROM sessions WHERE session_key = ?",
+                (session_key,),
+            ).fetchone()
+            if row:
+                session_id = row["id"] if isinstance(row, dict) else row[0]
+                processing = SessionLockService.get_processing_state(int(session_id))
+                if processing.get("processing"):
+                    return {
+                        "active": True,
+                        "session_key": session_key,
+                        "processing_channel": processing.get("processing_channel"),
+                        "processing_started_at": str(processing.get("processing_started_at") or ""),
+                    }
+    except Exception as status_err:
+        logger.warning(f"[STATUS] Could not read session processing state: {status_err}")
     return {"active": False, "session_key": session_key}
 
 
@@ -6068,6 +6128,21 @@ async def chat_endpoint(
 
         last_user_message = user_messages[-1]
         user_content = last_user_message.content
+
+        processing_acquired = False
+        if request.acp_mode:
+            processing_result = SessionLockService.acquire_processing(session_id, "webchat")
+            if not processing_result.get("success"):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "session_message_in_progress",
+                        "message": "A message is already running in this session. Please wait for it to finish.",
+                        "processing_channel": processing_result.get("processing_channel"),
+                        "processing_started_at": str(processing_result.get("processing_started_at") or ""),
+                    },
+                )
+            processing_acquired = True
 
         # Insert user message and COMMIT IMMEDIATELY (ensures user message saved even if API fails)
         # Image belongs to USER message, not assistant
@@ -6246,6 +6321,7 @@ async def chat_endpoint(
                 logger.debug(f"[TOKEN] Non-streaming tracking failed: {track_err}")
 
             logger.info(f"[ACP-MODE] === ACP MODE COMPLETED ===")
+            SessionLockService.release_processing(session_id)
             
             return ChatResponse(
                 id=0,
@@ -6283,6 +6359,9 @@ async def chat_endpoint(
             )
             save_conn.commit()
             logger.info(f"[IMAGE] Database commit successful for session {session_id}")
+
+        if processing_acquired:
+            SessionLockService.release_processing(session_id)
 
         return ChatResponse(
             id=0,

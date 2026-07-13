@@ -411,10 +411,28 @@ def init_schema():
                 scope TEXT,
                 channel TEXT DEFAULT 'webchat',
                 agent_id TEXT DEFAULT 'main',
+                processing BOOLEAN DEFAULT FALSE,
+                processing_started_at TIMESTAMP,
+                processing_channel TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""")
             conn.commit()
+
+            def migrate_session_processing():
+                cur.execute("ALTER TABLE sessions ADD COLUMN processing BOOLEAN DEFAULT FALSE")
+                logger.info("✓ Added processing column to sessions")
+            _run_migration(migrate_session_processing)
+
+            def migrate_session_processing_started_at():
+                cur.execute("ALTER TABLE sessions ADD COLUMN processing_started_at TIMESTAMP")
+                logger.info("✓ Added processing_started_at column to sessions")
+            _run_migration(migrate_session_processing_started_at)
+
+            def migrate_session_processing_channel():
+                cur.execute("ALTER TABLE sessions ADD COLUMN processing_channel TEXT")
+                logger.info("✓ Added processing_channel column to sessions")
+            _run_migration(migrate_session_processing_channel)
 
             # Messages table
             cur.execute("""CREATE TABLE IF NOT EXISTS messages (

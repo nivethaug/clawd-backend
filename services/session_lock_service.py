@@ -119,6 +119,124 @@ class SessionLockService:
                 conn.commit()
                 logger.info(f"[LOCK] Session {session_id} acquired lock on project {project_id}")
                 return {"success": True}
+
+    @staticmethod
+    def acquire_processing(session_id: int, channel: str = "webchat", stale_after_minutes: int = 90) -> Dict[str, Any]:
+        """
+        Atomically mark a session as processing one chat message.
+
+        Project locks are intentionally re-entrant for the same session so users
+        can continue an active edit session. This flag is stricter: only one
+        message may run inside that session at a time across web and Telegram.
+        """
+        from psycopg2.extras import RealDictCursor
+
+        channel = (channel or "unknown").strip()[:50] or "unknown"
+
+        with SessionLockService._get_direct_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT id, processing, processing_started_at, processing_channel
+                       FROM sessions
+                       WHERE id = %s AND archived = 0
+                       FOR UPDATE""",
+                    (session_id,),
+                )
+                result = cur.fetchone()
+
+                if not result:
+                    conn.rollback()
+                    return {"success": False, "error": "Session not found"}
+
+                if result.get("processing"):
+                    is_stale = result.get("processing_started_at") is None
+                    if not is_stale:
+                        cur.execute(
+                            "SELECT NOW() - processing_started_at > (%s || ' minutes')::interval AS is_stale",
+                            (stale_after_minutes,),
+                        )
+                        stale_row = cur.fetchone()
+                        is_stale = bool(stale_row and stale_row.get("is_stale"))
+                    if not is_stale:
+                        conn.rollback()
+                        logger.info(
+                            "[PROCESSING] Session %s is already processing via %s",
+                            session_id,
+                            result.get("processing_channel") or "unknown",
+                        )
+                        return {
+                            "success": False,
+                            "error": "Session is already processing a message",
+                            "processing_channel": result.get("processing_channel"),
+                            "processing_started_at": result.get("processing_started_at"),
+                        }
+                    logger.warning(
+                        "[PROCESSING] Recovering stale processing flag for session %s started at %s",
+                        session_id,
+                        result.get("processing_started_at"),
+                    )
+
+                cur.execute(
+                    """UPDATE sessions
+                       SET processing = TRUE,
+                           processing_started_at = CURRENT_TIMESTAMP,
+                           processing_channel = %s,
+                           last_used_at = CURRENT_TIMESTAMP
+                       WHERE id = %s""",
+                    (channel, session_id),
+                )
+                conn.commit()
+                logger.info("[PROCESSING] Session %s marked processing via %s", session_id, channel)
+                return {"success": True}
+
+    @staticmethod
+    def release_processing(session_id: int) -> Dict[str, Any]:
+        """
+        Clear the in-progress message flag for a session.
+        """
+        from psycopg2.extras import RealDictCursor
+
+        with SessionLockService._get_direct_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """UPDATE sessions
+                       SET processing = FALSE,
+                           processing_started_at = NULL,
+                           processing_channel = NULL
+                       WHERE id = %s
+                       RETURNING id""",
+                    (session_id,),
+                )
+                row = cur.fetchone()
+                conn.commit()
+                if row:
+                    logger.info("[PROCESSING] Session %s processing flag released", session_id)
+                    return {"success": True, "released": True}
+                return {"success": True, "released": False, "reason": "Session not found"}
+
+    @staticmethod
+    def get_processing_state(session_id: int) -> Dict[str, Any]:
+        """
+        Read the in-progress message flag for a session.
+        """
+        from psycopg2.extras import RealDictCursor
+
+        with SessionLockService._get_direct_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT processing, processing_started_at, processing_channel
+                       FROM sessions
+                       WHERE id = %s""",
+                    (session_id,),
+                )
+                result = cur.fetchone()
+                if not result:
+                    return {"processing": False, "processing_started_at": None, "processing_channel": None}
+                return {
+                    "processing": bool(result.get("processing")),
+                    "processing_started_at": result.get("processing_started_at"),
+                    "processing_channel": result.get("processing_channel"),
+                }
     
     @staticmethod
     def release_lock(project_id: int, session_id: int) -> Dict[str, Any]:

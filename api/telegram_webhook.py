@@ -611,8 +611,24 @@ async def _run_selected_session_chat(
     billing_user_id = None
     reserved_charges = []
     assistant_saved = False
+    processing_acquired = False
 
     try:
+        processing_result = SessionLockService.acquire_processing(session_id, "telegram")
+        if not processing_result.get("success"):
+            channel = processing_result.get("processing_channel") or "another client"
+            await send_message(
+                chat_id,
+                (
+                    f"Still working on the previous message in {session_label}. "
+                    f"Please wait for it to finish before sending another one. "
+                    f"Current channel: {channel}."
+                ),
+                reply_to_message_id=reply_to_message_id,
+            )
+            return
+        processing_acquired = True
+
         lock_result = SessionLockService.acquire_lock(project_id, session_id)
         if not lock_result.get("success"):
             from utils.devops_session_context import get_devops_session_context
@@ -717,6 +733,8 @@ async def _run_selected_session_chat(
                 handler.kill_orphan_processes()
             except Exception as cleanup_error:
                 logger.warning("[TELEGRAM-SESSION] Cleanup failed: %s", cleanup_error)
+        if processing_acquired:
+            SessionLockService.release_processing(session_id)
 
 
 @router.post("/bot/telegram/webhook")
