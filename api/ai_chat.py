@@ -21,6 +21,7 @@ class DateTimeEncoder(json.JSONEncoder):
 
 # Import AI services
 from services.ai.glm_client import get_glm_client
+from services.ai.openrouter_client import get_openrouter_client
 from services.ai.tool_registry import get_all_tools, get_tools_for_project, get_tools_without_project, is_disabled, validate_tool_args
 from services.ai.tool_executor import get_tool_executor
 from services.ai.project_resolver import get_project_resolver
@@ -437,6 +438,38 @@ async def process_message(
         
         # 5. Call GLM with tools
         glm_client = get_glm_client()
+
+        async def _chat_with_tools_primary_then_openrouter(
+            call_messages: List[Dict[str, Any]],
+            call_tools: List[Dict[str, Any]],
+            tool_choice: str,
+            temperature: float,
+            max_tokens: int,
+            purpose: str,
+        ) -> Dict[str, Any]:
+            try:
+                return await glm_client.chat_with_tools(
+                    messages=call_messages,
+                    tools=call_tools,
+                    tool_choice=tool_choice,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            except Exception as glm_error:
+                logger.warning(
+                    "[AI-CHAT] GLM failed for %s; falling back to OpenRouter once: %s",
+                    purpose,
+                    glm_error,
+                )
+                openrouter_client = get_openrouter_client()
+                return await openrouter_client.chat_completion(
+                    messages=call_messages,
+                    tools=call_tools,
+                    tool_choice=tool_choice,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    max_retries=1,
+                )
         
         # ── Persist user message ─────────────────────────────────────
         # Store the user's message now (before LLM call) if we have a project context
@@ -712,15 +745,16 @@ async def process_message(
                 ))
         
         try:
-            response = await glm_client.chat_with_tools(
-                messages=messages,
-                tools=tools,
+            response = await _chat_with_tools_primary_then_openrouter(
+                call_messages=messages,
+                call_tools=tools,
                 tool_choice="auto",
                 temperature=0.1,
-                max_tokens=1000
+                max_tokens=1000,
+                purpose="tool selection",
             )
         except Exception as e:
-            logger.error(f"[AI-CHAT] GLM API error: {e}")
+            logger.error(f"[AI-CHAT] Primary and fallback LLM failed: {e}")
             return _finalize(error_response(f"AI service error: {str(e)}"))
         
         # 6. Parse response
@@ -893,12 +927,13 @@ async def process_message(
             # Call LLM again to generate natural language response
             try:
                 logger.info(f"[AI-CHAT] Calling LLM for summarization of {tool_name}")
-                final_response = await glm_client.chat_with_tools(
-                    messages=messages,
-                    tools=tools,
+                final_response = await _chat_with_tools_primary_then_openrouter(
+                    call_messages=messages,
+                    call_tools=tools,
                     tool_choice="none",  # Force text response, no more tools
                     temperature=0.3,
-                    max_tokens=500
+                    max_tokens=500,
+                    purpose=f"{tool_name} success summarization",
                 )
                 
                 # Extract final text response
@@ -949,12 +984,13 @@ async def process_message(
             })
             
             try:
-                final_response = await glm_client.chat_with_tools(
-                    messages=messages,
-                    tools=tools,
+                final_response = await _chat_with_tools_primary_then_openrouter(
+                    call_messages=messages,
+                    call_tools=tools,
                     tool_choice="none",
                     temperature=0.3,
-                    max_tokens=300
+                    max_tokens=300,
+                    purpose=f"{tool_name} error summarization",
                 )
                 
                 final_text = glm_client.get_text_response(final_response)

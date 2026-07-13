@@ -16,7 +16,6 @@ Z_AI_API_KEY = os.getenv("Z_AI_API_KEY", "")
 Z_AI_API_BASE = os.getenv("Z_AI_API_BASE", "https://api.z.ai/api/coding/paas/v4")
 Z_AI_MODEL = os.getenv("Z_AI_MODEL", "glm-4.7-flashx")  # GLM-4.7-FlashX: high rate limits, strong tool calling, near-free pricing
 DEFAULT_TIMEOUT = 30.0
-RETRY_TIMEOUT = 60.0
 
 
 class GLMClient:
@@ -99,30 +98,8 @@ class GLMClient:
                 return data
                 
             except httpx.TimeoutException:
-                logger.warning(f"[GLM-CLIENT] Timeout after {DEFAULT_TIMEOUT}s, retrying with {RETRY_TIMEOUT}s")
-                
-                # Retry with longer timeout
-                async with httpx.AsyncClient(timeout=RETRY_TIMEOUT) as retry_client:
-                    response = await retry_client.post(
-                        f"{self.api_base}/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {self.api_key}",
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "model": self.model,
-                            "messages": messages,
-                            "tools": tools,
-                            "tool_choice": tool_choice,
-                            "temperature": temperature,
-                            "max_tokens": max_tokens,
-                            "thinking": {"type": "disabled"}
-                        }
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    logger.info(f"[GLM-CLIENT] Retry successful")
-                    return data
+                logger.warning(f"[GLM-CLIENT] Timeout after {DEFAULT_TIMEOUT}s; no retry")
+                raise
                     
             except httpx.HTTPStatusError as e:
                 logger.error(f"[GLM-CLIENT] HTTP error {e.response.status_code}: {e.response.text}")

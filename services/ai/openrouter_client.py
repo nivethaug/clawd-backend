@@ -115,6 +115,8 @@ class OpenRouterClient:
         temperature: float,
         max_tokens: int,
         stream: bool = False,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "model": self.model,
@@ -123,6 +125,11 @@ class OpenRouterClient:
             "max_tokens": max_tokens,
             "stream": stream,
         }
+
+        if tools is not None:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
 
         provider = self._provider_routing()
         if provider:
@@ -135,6 +142,9 @@ class OpenRouterClient:
         messages: List[Dict[str, Any]],
         temperature: float = 0.1,
         max_tokens: int = 1000,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
+        max_retries: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Call OpenRouter Chat Completions API.
@@ -154,16 +164,25 @@ class OpenRouterClient:
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY not configured")
 
-        payload = self._build_payload(messages, temperature, max_tokens)
+        payload = self._build_payload(
+            messages,
+            temperature,
+            max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+        attempts = max(1, int(max_retries if max_retries is not None else MAX_RETRIES))
         logger.debug(
-            "[OPENROUTER-CLIENT] Calling OpenRouter with %s messages, model=%s, provider=%s",
+            "[OPENROUTER-CLIENT] Calling OpenRouter with %s messages, model=%s, provider=%s, tools=%s, attempts=%s",
             len(messages),
             self.model,
             self.provider_strategy,
+            len(tools or []),
+            attempts,
         )
 
         last_error: Optional[Exception] = None
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, attempts + 1):
             started = time.perf_counter()
             try:
                 client = await self._get_client()
@@ -188,7 +207,7 @@ class OpenRouterClient:
 
             except httpx.TimeoutException as e:
                 last_error = e
-                logger.warning("[OPENROUTER-CLIENT] Timeout on attempt %s/%s", attempt, MAX_RETRIES)
+                logger.warning("[OPENROUTER-CLIENT] Timeout on attempt %s/%s", attempt, attempts)
 
             except httpx.HTTPStatusError as e:
                 last_error = e
@@ -200,13 +219,13 @@ class OpenRouterClient:
                     raise
 
                 if status_code == 429:
-                    logger.warning("[OPENROUTER-CLIENT] Rate limited on attempt %s/%s: %s", attempt, MAX_RETRIES, body)
+                    logger.warning("[OPENROUTER-CLIENT] Rate limited on attempt %s/%s: %s", attempt, attempts, body)
                 elif status_code in RETRYABLE_STATUSES:
                     logger.warning(
                         "[OPENROUTER-CLIENT] Retryable provider error HTTP %s on attempt %s/%s: %s",
                         status_code,
                         attempt,
-                        MAX_RETRIES,
+                        attempts,
                         body,
                     )
                 else:
@@ -217,7 +236,7 @@ class OpenRouterClient:
                 logger.error(f"[OPENROUTER-CLIENT] Unexpected error: {e}")
                 raise
 
-            if attempt < MAX_RETRIES:
+            if attempt < attempts:
                 backoff = BACKOFF_SECONDS * (2 ** (attempt - 1))
                 await asyncio.sleep(backoff)
 
