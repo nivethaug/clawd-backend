@@ -224,6 +224,12 @@ IMAGE_MIME_EXTENSIONS = {
 }
 
 CHAT_IMAGE_TEMP_DIR = os.getenv("CHAT_IMAGE_TEMP_DIR", "/tmp/acp_images")
+CHAT_IMAGE_VISION_MODEL = os.getenv("CHAT_IMAGE_VISION_MODEL", "mistralai/mistral-small-3.2-24b-instruct")
+CHAT_IMAGE_VISION_FALLBACK_MODEL = os.getenv("CHAT_IMAGE_VISION_FALLBACK_MODEL", "openrouter/free")
+CHAT_IMAGE_VISION_MAX_TOKENS = int(os.getenv("CHAT_IMAGE_VISION_MAX_TOKENS", "450"))
+CHAT_IMAGE_GLM_FALLBACK_ENABLED = os.getenv("CHAT_IMAGE_GLM_FALLBACK_ENABLED", "true").lower() not in {"0", "false", "no"}
+CHAT_IMAGE_GLM_MODEL = os.getenv("CHAT_IMAGE_GLM_MODEL", "glm-4.6v-flash")
+CHAT_IMAGE_GLM_BASE_URL = os.getenv("CHAT_IMAGE_GLM_BASE_URL", "https://api.z.ai/api/paas/v4")
 
 
 def decode_chat_image_payload(payload: str) -> tuple[bytes, str]:
@@ -326,7 +332,242 @@ def prepare_chat_image_attachment(payload: str, session_id: int, log_prefix: str
     }
 
 
-def append_chat_image_instruction(user_content: str, attachment: dict) -> str:
+def get_image_mime_type(image_path: str) -> str:
+    extension = Path(image_path).suffix.lower()
+    if extension in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if extension == ".webp":
+        return "image/webp"
+    if extension == ".gif":
+        return "image/gif"
+    return "image/png"
+
+
+def image_file_to_data_url(image_path: str) -> str:
+    with open(image_path, "rb") as image_file:
+        encoded = base64.b64encode(image_file.read()).decode("ascii")
+    return f"data:{get_image_mime_type(image_path)};base64,{encoded}"
+
+
+async def call_glm_vision_preprocessor(messages: list[dict], log_prefix: str) -> Optional[str]:
+    """Fallback image-to-text call using Z.ai GLM-4.6V-compatible chat completions."""
+    api_key = os.getenv("Z_AI_API_KEY", "")
+    if not api_key:
+        logger.warning("%s Z_AI_API_KEY not configured; skipping GLM vision fallback", log_prefix)
+        return None
+
+    payload = {
+        "model": CHAT_IMAGE_GLM_MODEL,
+        "messages": messages,
+        "temperature": 0,
+        "max_tokens": CHAT_IMAGE_VISION_MAX_TOKENS,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    url = f"{CHAT_IMAGE_GLM_BASE_URL.rstrip('/')}/chat/completions"
+    try:
+        started = datetime.utcnow()
+        logger.info(
+            "%s [VISION] Trying GLM fallback model=%s base_url=%s max_tokens=%s",
+            log_prefix,
+            CHAT_IMAGE_GLM_MODEL,
+            CHAT_IMAGE_GLM_BASE_URL.rstrip("/"),
+            CHAT_IMAGE_VISION_MAX_TOKENS,
+        )
+        async with AsyncClient(timeout=45) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+
+        content = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        if isinstance(content, list):
+            content = "\n".join(
+                item.get("text", "") if isinstance(item, dict) else str(item)
+                for item in content
+            )
+
+        summary = str(content or "").strip()
+        duration_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+        if summary:
+            usage = data.get("usage", {})
+            logger.info(
+                "%s [VISION] GLM fallback succeeded with model=%s in %sms (tokens=%s, summary_chars=%s, preview=%r)",
+                log_prefix,
+                CHAT_IMAGE_GLM_MODEL,
+                duration_ms,
+                usage,
+                len(summary),
+                summary[:240],
+            )
+            return summary
+
+        logger.warning("%s [VISION] GLM fallback returned empty response", log_prefix)
+        return None
+    except Exception as glm_err:
+        logger.warning("%s [VISION] GLM fallback failed: %s", log_prefix, glm_err)
+        return None
+
+
+async def analyze_chat_image_attachment(attachment: dict, user_content: str, log_prefix: str) -> Optional[str]:
+    """
+    Run a cheap OpenRouter vision model before ACP/Claude Code sees the prompt.
+
+    Claude Code is not treated as a vision model. This preprocessor converts the
+    screenshot into grounded text so the coding agent does not guess from history
+    or live-page inspection.
+    """
+    image_path = attachment.get("inspection_path")
+    if not image_path or not os.path.exists(image_path):
+        logger.warning("%s [VISION] Image inspection path missing; skipping vision preprocessing: %s", log_prefix, image_path)
+        return (
+            "Image read status: unreadable\n"
+            f"Image read issue: Backend image inspection path is missing or no longer exists: {image_path}\n"
+            "Observed screen: unclear\n"
+            "Visible issue: unclear\n"
+            "Confidence: low\n"
+            "Important visual details: unavailable"
+        )
+
+    try:
+        image_bytes = os.path.getsize(image_path)
+        logger.info(
+            "%s [VISION] Starting image-to-text preprocessing path=%s mime=%s bytes=%s dimensions=%sx%s openrouter=%s glm_fallback=%s",
+            log_prefix,
+            image_path,
+            get_image_mime_type(image_path),
+            image_bytes,
+            attachment.get("width") or "unknown",
+            attachment.get("height") or "unknown",
+            "configured" if os.getenv("OPENROUTER_API_KEY") else "missing",
+            "enabled" if CHAT_IMAGE_GLM_FALLBACK_ENABLED else "disabled",
+        )
+        image_url = image_file_to_data_url(image_path)
+    except Exception as image_err:
+        logger.warning("%s [VISION] Failed to encode image for vision preprocessing: %s", log_prefix, image_err)
+        return (
+            "Image read status: unreadable\n"
+            f"Image read issue: Backend could not encode the image for the vision model: {image_err}\n"
+            "Observed screen: unclear\n"
+            "Visible issue: unclear\n"
+            "Confidence: low\n"
+            "Important visual details: unavailable"
+        )
+
+    models = [CHAT_IMAGE_VISION_MODEL]
+    if CHAT_IMAGE_VISION_FALLBACK_MODEL and CHAT_IMAGE_VISION_FALLBACK_MODEL not in models:
+        models.append(CHAT_IMAGE_VISION_FALLBACK_MODEL)
+    failure_reasons = []
+
+    user_text = user_content.strip() or "Please inspect the attached screenshot."
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are DreamAgent's screenshot analysis preprocessor. Read the attached UI screenshot "
+                "carefully and produce a grounded, concise text summary for a coding agent. Do not infer "
+                "from prior chat history. If the image is unreadable or only partly readable, explain exactly "
+                "what is blocking visual understanding."
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "User request:\n"
+                        f"{user_text}\n\n"
+                        "Return exactly this structure:\n"
+                        "Image read status: <readable|partially_readable|unreadable>\n"
+                        "Image read issue: <none, or why the image/page cannot be read clearly>\n"
+                        "Observed screen: <page/screen/route/UI area or unclear>\n"
+                        "Visible issue: <specific visible issue or target area>\n"
+                        "Confidence: <high|medium|low>\n"
+                        "Important visual details: <1-3 concise bullets or short sentence>\n"
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_url},
+                },
+            ],
+        },
+    ]
+
+    if os.getenv("OPENROUTER_API_KEY"):
+        for model in models:
+            client = None
+            try:
+                from services.ai.openrouter_client import OpenRouterClient
+
+                logger.info(
+                    "%s [VISION] Trying OpenRouter vision model=%s max_tokens=%s",
+                    log_prefix,
+                    model,
+                    CHAT_IMAGE_VISION_MAX_TOKENS,
+                )
+                client = OpenRouterClient(model=model)
+                response = await client.chat_completion(
+                    messages=messages,
+                    temperature=0.0,
+                    max_tokens=CHAT_IMAGE_VISION_MAX_TOKENS,
+                )
+                summary = client.get_text_response(response).strip()
+                if summary:
+                    logger.info(
+                        "%s [VISION] OpenRouter vision succeeded model=%s summary_chars=%s usage=%s preview=%r",
+                        log_prefix,
+                        model,
+                        len(summary),
+                        client.get_usage(response),
+                        summary[:240],
+                    )
+                    return summary
+                logger.warning("%s [VISION] OpenRouter vision returned empty response with model=%s", log_prefix, model)
+                failure_reasons.append(f"{model}: empty response")
+            except Exception as vision_err:
+                failure_reasons.append(f"{model}: {vision_err}")
+                logger.warning("%s [VISION] OpenRouter vision failed with model=%s: %s", log_prefix, model, vision_err)
+            finally:
+                if client:
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        pass
+    else:
+        failure_reasons.append("OpenRouter: OPENROUTER_API_KEY not configured")
+        logger.warning("%s [VISION] OPENROUTER_API_KEY not configured; trying GLM fallback if available", log_prefix)
+
+    if CHAT_IMAGE_GLM_FALLBACK_ENABLED:
+        logger.info("%s [VISION] Proceeding to GLM fallback after OpenRouter result/failure", log_prefix)
+        glm_summary = await call_glm_vision_preprocessor(messages, log_prefix)
+        if glm_summary:
+            return glm_summary
+        failure_reasons.append(f"GLM fallback ({CHAT_IMAGE_GLM_MODEL}): failed or empty response")
+    else:
+        failure_reasons.append("GLM fallback disabled")
+
+    failure_summary = "; ".join(failure_reasons) if failure_reasons else "Vision model returned no usable summary"
+    logger.warning("%s [VISION] Image-to-text preprocessing unavailable: %s", log_prefix, failure_summary)
+    return (
+        "Image read status: unreadable\n"
+        f"Image read issue: Vision preprocessing failed before a reliable visual summary could be produced: {failure_summary}\n"
+        "Observed screen: unclear\n"
+        "Visible issue: unclear\n"
+        "Confidence: low\n"
+        "Important visual details: unavailable"
+    )
+
+
+def append_chat_image_instruction(user_content: str, attachment: dict, vision_summary: Optional[str] = None) -> str:
     """Add mandatory screenshot-grounding instructions for non-vision ACP agents."""
     image_path = attachment["inspection_path"]
     image_size = ""
@@ -339,16 +580,20 @@ def append_chat_image_instruction(user_content: str, attachment: dict) -> str:
         "The user attached a screenshot/image for this request.\n\n"
         f"Image path:\n{image_path}"
         f"{image_size}\n\n"
+        f"Vision preprocessor summary:\n{vision_summary or 'Unavailable. Use the image path directly and say clearly if it cannot be read.'}\n\n"
         "Mandatory visual grounding:\n"
-        "1. Inspect the image file path with available filesystem/image tools before answering or editing code.\n"
-        "2. Base the page/screen identification only on the image, not on chat history or assumptions.\n"
-        "3. In your first user-visible response about this image, include:\n"
+        "1. Treat the vision preprocessor summary as the primary visual grounding for the screenshot.\n"
+        "2. If more detail is needed, inspect the image file path with available filesystem/image tools.\n"
+        "3. Base the page/screen identification only on the image/vision summary, not on chat history or assumptions.\n"
+        "4. In your first user-visible response about this image, include:\n"
         "   - Observed screen: the page, route, or UI area visible in the screenshot, or 'unclear'.\n"
         "   - Visible issue: the specific visible problem or requested target area.\n"
         "   - Confidence: high, medium, or low.\n"
-        "4. If confidence is low or the image cannot be opened/read clearly, ask one short clarification question.\n"
-        "5. Do not guess page names. Do not proceed to code changes until the screenshot is understood.\n"
-        "6. If the user explicitly asks only to explain what is visible, describe the screenshot and do not edit files.\n"
+        "5. If confidence is low or the image cannot be opened/read clearly, ask one short clarification question.\n"
+        "6. Do not guess page names. Do not proceed to code changes until the screenshot is understood.\n"
+        "7. If the user explicitly asks only to explain what is visible, describe the screenshot and do not edit files.\n"
+        "8. Do not use live-page inspection as a replacement for screenshot understanding; only inspect the live page after "
+        "the screenshot has been identified or the user confirms the target page.\n"
         "</IMAGE_ATTACHED_REQUIRES_VISUAL_INSPECTION>"
     )
 
@@ -5214,7 +5459,8 @@ async def chat_stream_endpoint(
                 logger.info(f"[ACP-STREAM] Image detected, preparing inspection file...")
                 try:
                     image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-STREAM]")
-                    acp_user_content = append_chat_image_instruction(user_content, image_attachment)
+                    vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-STREAM]")
+                    acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary)
                 except Exception as img_err:
                     logger.error(f"[ACP-STREAM] Failed to save image: {img_err}")
                     acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
@@ -5856,7 +6102,8 @@ async def chat_endpoint(
                     logger.info(f"[ACP-MODE] Image detected, preparing inspection file...")
                     try:
                         image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-MODE]")
-                        acp_user_content = append_chat_image_instruction(user_content, image_attachment)
+                        vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-MODE]")
+                        acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary)
                     except Exception as img_err:
                         logger.error(f"[ACP-MODE] Failed to save image: {img_err}")
                         acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
