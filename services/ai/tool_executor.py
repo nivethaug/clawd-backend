@@ -779,7 +779,10 @@ class ToolExecutor:
             "type": "selection",
             "message": f"Choose a session for {active_project['name']}:",
             "options": options,
-            "intent": {"tool": "set_active_project_session", "args": {}},
+            "intent": {
+                "tool": "set_active_project_session",
+                "args": {"project_domain": active_project["domain"]},
+            },
             "result": {"sessions": sessions, "lock": lock, "selected_session": selected},
         }
 
@@ -796,13 +799,13 @@ class ToolExecutor:
         context = get_devops_session_context()
         lock = context.get_project_lock(int(active_project["id"]))
         if lock.get("active_session_id") is not None:
-            lock_owner = lock.get("session_name") or f"session #{lock.get('active_session_id')}"
+            lock_owner = context.format_lock_owner(lock)
             return {
                 "status": "error",
                 "message": (
-                    f"{active_project['name']} is locked by "
-                    f"{lock_owner}. "
-                    "Complete or release it before creating a new session."
+                    f"{active_project['name']} is currently active in {lock_owner}. "
+                    "Complete/release that session before creating a new one. "
+                    "If it is open in web chat, finish it there first."
                 ),
                 "result": {"lock": lock},
             }
@@ -892,8 +895,7 @@ class ToolExecutor:
             message = f"Active project: {active_project['name']}. No active session selected."
 
         if lock.get("active_session_id"):
-            lock_label = lock.get("session_name") or f"session #{lock['active_session_id']}"
-            message += f" Lock: {lock_label}."
+            message += f" Lock: {context.format_lock_owner(lock)}."
 
         return {
             "status": "success",

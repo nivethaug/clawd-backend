@@ -71,7 +71,14 @@ class SessionLockService:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 # Lock the project row FOR UPDATE (atomic)
                 cur.execute(
-                    "SELECT active_session_id FROM projects WHERE id = %s FOR UPDATE",
+                    """SELECT p.active_session_id,
+                              s.label AS session_name,
+                              s.channel AS session_channel,
+                              s.session_key AS session_key
+                       FROM projects p
+                       LEFT JOIN sessions s ON s.id = p.active_session_id
+                       WHERE p.id = %s
+                       FOR UPDATE""",
                     (project_id,)
                 )
                 result = cur.fetchone()
@@ -98,7 +105,10 @@ class SessionLockService:
                     return {
                         "success": False,
                         "error": "Another session is active",
-                        "active_session_id": current_lock
+                        "active_session_id": current_lock,
+                        "session_name": result.get("session_name"),
+                        "session_channel": result.get("session_channel"),
+                        "session_key": result.get("session_key"),
                     }
                 
                 # Acquire lock
@@ -177,7 +187,10 @@ class SessionLockService:
         with SessionLockService._get_direct_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    """SELECT p.active_session_id, s.label as session_name
+                    """SELECT p.active_session_id,
+                              s.label as session_name,
+                              s.channel as session_channel,
+                              s.session_key as session_key
                        FROM projects p
                        LEFT JOIN sessions s ON s.id = p.active_session_id
                        WHERE p.id = %s""",
@@ -186,11 +199,13 @@ class SessionLockService:
                 result = cur.fetchone()
                 
                 if not result:
-                    return {"active_session_id": None, "session_name": None}
+                    return {"active_session_id": None, "session_name": None, "session_channel": None, "session_key": None}
                 
                 return {
                     "active_session_id": result["active_session_id"],
-                    "session_name": result["session_name"]
+                    "session_name": result["session_name"],
+                    "session_channel": result["session_channel"],
+                    "session_key": result["session_key"],
                 }
     
     @staticmethod

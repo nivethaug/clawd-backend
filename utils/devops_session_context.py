@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 class DevOpsSessionContext:
     """Repository-style helper for active DevOps project-session state."""
 
+    @staticmethod
+    def format_lock_owner(lock: Dict[str, Any]) -> str:
+        session_id = lock.get("active_session_id")
+        label = lock.get("session_name") or (f"session #{session_id}" if session_id else "another session")
+        channel = (lock.get("session_channel") or "").lower()
+        if channel in {"web", "webchat"}:
+            return f"web chat session '{label}'"
+        if channel == "telegram":
+            return f"Telegram session '{label}'"
+        return str(label)
+
     def get_user_active_session_id(self, user_id: int) -> Optional[int]:
         try:
             with get_db() as conn:
@@ -153,12 +164,13 @@ class DevOpsSessionContext:
         lock = self.get_project_lock(project_id)
         active_session_id = lock.get("active_session_id")
         if active_session_id is not None and int(active_session_id) != int(session_id):
+            lock_owner = self.format_lock_owner(lock)
             return {
                 "allowed": False,
                 "lock": lock,
                 "message": (
-                    f"Project is locked by {lock.get('session_name') or f'session #{active_session_id}'}. "
-                    "Complete or release that session before switching."
+                    f"Project is currently active in {lock_owner}. "
+                    "Complete/release that session before switching. If it is open in web chat, finish it there first."
                 ),
             }
         return {"allowed": True, "lock": lock}

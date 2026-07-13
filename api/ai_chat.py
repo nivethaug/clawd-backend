@@ -304,6 +304,22 @@ async def process_message(
                         logger.info(f"[AI-CHAT] ✓ Matched by numeric ID {numeric_id}, using domain: {project['domain']}")
                         break
         
+        chat_repo = ProjectChatRepository()
+
+        # Telegram shares project selection across web and bot, so prefer
+        # users.active_project over this Telegram chat's cached ai_session row.
+        if not active_project and source == "telegram":
+            user_active = chat_repo.get_active_project(user_id)
+            if user_active:
+                logger.info(f"[AI-CHAT:TELEGRAM] users.active_project = {user_active}")
+                for project in projects:
+                    if project["domain"] == user_active:
+                        active_project = project
+                        logger.info(f"[AI-CHAT] ✓ Matched from users.active_project: {user_active}")
+                        break
+                if not active_project:
+                    logger.warning(f"[AI-CHAT] ✗ users.active_project '{user_active}' not found in projects list")
+
         # 5. Check session's active project (stored as domain string)
         if not active_project and session.get("active_project_id"):
             session_project_domain = session["active_project_id"]
@@ -314,7 +330,6 @@ async def process_message(
                     break
         
         # 5b. Check users.active_project as third source (priority: request > session > users table)
-        chat_repo = ProjectChatRepository()
         if not active_project:
             user_active = chat_repo.get_active_project(user_id)
             if user_active:

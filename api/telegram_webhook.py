@@ -159,9 +159,14 @@ def _build_keyboard(resp: dict) -> Optional[dict]:
             return None
         intent = resp.get("intent", {}) or {}
         tool_name = intent.get("tool")
+        intent_args = intent.get("args", {}) or {}
         keyboard = []
         for opt in options:
-            callback_data = f"session:set:{opt['value']}" if tool_name == "set_active_project_session" else f"switch:{opt['value']}"
+            if tool_name == "set_active_project_session":
+                project_domain = intent_args.get("project_domain", "")
+                callback_data = f"session:set:{project_domain}:{opt['value']}" if project_domain else f"session:set:{opt['value']}"
+            else:
+                callback_data = f"switch:{opt['value']}"
             keyboard.append([{
                 "text": opt["label"],
                 "callback_data": callback_data,
@@ -286,8 +291,13 @@ async def _handle_callback(callback: dict):
             await send_message(chat_id, "❌ Failed to switch project. Please try again.")
     
     elif data.startswith("session:set:"):
-        raw_session_id = data[len("session:set:"):]
-        logger.info(f"[TELEGRAM] Session button tapped: session_id={raw_session_id}")
+        raw_payload = data[len("session:set:"):]
+        parts = raw_payload.rsplit(":", 1)
+        if len(parts) == 2:
+            project_domain, raw_session_id = parts
+        else:
+            project_domain, raw_session_id = "", raw_payload
+        logger.info(f"[TELEGRAM] Session button tapped: project_domain={project_domain}, session_id={raw_session_id}")
 
         user_id = _lookup_user_by_chat_id(chat_id)
         if not user_id:
@@ -299,6 +309,14 @@ async def _handle_callback(callback: dict):
         await edit_message_text(chat_id, message_id, f"Selecting session `{raw_session_id}`...")
 
         try:
+            if project_domain:
+                switch_resp = await process_message(
+                    user_id=user_id,
+                    message=f"switch to {project_domain}",
+                    session_id=session_id,
+                    source="telegram",
+                )
+                logger.info(f"[TELEGRAM] Session callback project sync: {switch_resp.get('type')} {switch_resp.get('message') or switch_resp.get('text')}")
             resp = await process_message(
                 user_id=user_id,
                 message=f"select session {raw_session_id}",
@@ -419,9 +437,14 @@ async def _run_selected_session_chat(
 
         lock_result = SessionLockService.acquire_lock(project_id, session_id)
         if not lock_result.get("success"):
+            from utils.devops_session_context import get_devops_session_context
+            lock_owner = get_devops_session_context().format_lock_owner(lock_result)
             await send_message(
                 chat_id,
-                "Session is locked by another active session. Use `/current` for details.",
+                (
+                    f"This project is currently active in {lock_owner}. "
+                    "Complete/release that session first. If it is open in web chat, finish it there first."
+                ),
                 reply_to_message_id=reply_to_message_id,
             )
             return
