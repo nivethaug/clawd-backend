@@ -474,7 +474,9 @@ async def analyze_chat_image_attachment(attachment: dict, user_content: str, log
                 "You are DreamAgent's screenshot analysis preprocessor. Read the attached UI screenshot "
                 "carefully and produce a grounded, concise text summary for a coding agent. Do not infer "
                 "from prior chat history. If the image is unreadable or only partly readable, explain exactly "
-                "what is blocking visual understanding."
+                "what is blocking visual understanding. Red circles, arrows, underlines, boxes, scribbles, "
+                "or other markup are user annotations that indicate the target/problem area, not proof that "
+                "the UI is correct."
             ),
         },
         {
@@ -489,9 +491,15 @@ async def analyze_chat_image_attachment(attachment: dict, user_content: str, log
                         "Image read status: <readable|partially_readable|unreadable>\n"
                         "Image read issue: <none, or why the image/page cannot be read clearly>\n"
                         "Observed screen: <page/screen/route/UI area or unclear>\n"
-                        "Visible issue: <specific visible issue or target area>\n"
+                        "User annotation: <none, or describe red circle/arrow/box/scribble and the UI region it marks>\n"
+                        "Visible issue: <specific visible issue or target area; if annotated, infer what looks off in that marked area>\n"
                         "Confidence: <high|medium|low>\n"
                         "Important visual details: <1-3 concise bullets or short sentence>\n"
+                        "Recommended next step: <explain only | ask clarification | inspect related code | fix marked UI>\n\n"
+                        "Rules:\n"
+                        "- If the screenshot has user markup, focus on the marked area first.\n"
+                        "- Do not say the marked area is working correctly unless the user explicitly asks for validation.\n"
+                        "- Do not convert a marked-area request into a generic live-page health check.\n"
                     ),
                 },
                 {
@@ -587,6 +595,7 @@ def append_chat_image_instruction(user_content: str, attachment: dict, vision_su
         "3. Base the page/screen identification only on the image/vision summary, not on chat history or assumptions.\n"
         "4. In your first user-visible response about this image, include:\n"
         "   - Observed screen: the page, route, or UI area visible in the screenshot, or 'unclear'.\n"
+        "   - User annotation: whether the screenshot contains red circles/arrows/boxes/scribbles and what region they mark.\n"
         "   - Visible issue: the specific visible problem or requested target area.\n"
         "   - Confidence: high, medium, or low.\n"
         "5. If confidence is low or the image cannot be opened/read clearly, ask one short clarification question.\n"
@@ -594,6 +603,8 @@ def append_chat_image_instruction(user_content: str, attachment: dict, vision_su
         "7. If the user explicitly asks only to explain what is visible, describe the screenshot and do not edit files.\n"
         "8. Do not use live-page inspection as a replacement for screenshot understanding; only inspect the live page after "
         "the screenshot has been identified or the user confirms the target page.\n"
+        "9. If red markup is present, treat it as the user's target/problem area. Do not answer 'everything looks good' "
+        "or run a generic page QA unless the user explicitly asks for validation.\n"
         "</IMAGE_ATTACHED_REQUIRES_VISUAL_INSPECTION>"
     )
 
