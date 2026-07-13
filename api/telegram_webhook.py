@@ -376,6 +376,8 @@ def _get_selected_project_session(user_id: int, telegram_session_key: str) -> Op
         context = get_devops_session_context()
         session_id = context.get_user_active_session_id(user_id)
         if not session_id:
+            session_id = context.get_ai_active_session_id(telegram_session_key)
+        if not session_id:
             return None
 
         session = context.get_session(user_id, int(session_id))

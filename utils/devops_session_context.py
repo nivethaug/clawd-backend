@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from database_postgres import get_db
 from services.session_lock_service import SessionLockService
+from services.rate_limiter import get_user_tier_and_role
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,38 @@ class DevOpsSessionContext:
             logger.error("[DEVOPS-SESSION] Failed to clear user active session: %s", e, exc_info=True)
             return False
 
+    def get_ai_active_session_id(self, session_key: str) -> Optional[int]:
+        try:
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT active_project_session_id FROM ai_sessions WHERE session_key = %s",
+                    (session_key,),
+                ).fetchone()
+                value = row["active_project_session_id"] if row else None
+                return int(value) if value is not None else None
+        except Exception as e:
+            logger.error("[DEVOPS-SESSION] Failed to get AI active session: %s", e, exc_info=True)
+            return None
+
+    def can_access_project(self, user_id: int, project_id: int) -> bool:
+        try:
+            info = get_user_tier_and_role(user_id)
+            if info.get("role") == "admin":
+                return True
+
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT user_id FROM projects WHERE id = %s AND status != %s",
+                    (project_id, "deleted"),
+                ).fetchone()
+            if not row:
+                return False
+            owner_id = row["user_id"] if isinstance(row, dict) else row[0]
+            return str(owner_id) == str(user_id)
+        except Exception as e:
+            logger.error("[DEVOPS-SESSION] Failed to check project access: %s", e, exc_info=True)
+            return False
+
     def get_session(self, user_id: int, session_id: int) -> Optional[Dict[str, Any]]:
         try:
             with get_db() as conn:
@@ -76,13 +109,39 @@ class DevOpsSessionContext:
                     SELECT s.*, p.user_id, p.name AS project_name, p.domain AS project_domain
                     FROM sessions s
                     JOIN projects p ON p.id = s.project_id
-                    WHERE s.id = %s AND s.archived = 0 AND p.user_id = %s
+                    WHERE s.id = %s AND s.archived = 0
                     """,
-                    (session_id, user_id),
+                    (session_id,),
+                ).fetchone()
+                if not row:
+                    return None
+
+                session = self._row_to_dict(row)
+                if not self.can_access_project(user_id, int(session["project_id"])):
+                    return None
+                return session
+        except Exception as e:
+            logger.error("[DEVOPS-SESSION] Failed to get session: %s", e, exc_info=True)
+            return None
+
+    def get_session_for_project(self, user_id: int, session_id: int, project_id: int) -> Optional[Dict[str, Any]]:
+        if not self.can_access_project(user_id, project_id):
+            return None
+
+        try:
+            with get_db() as conn:
+                row = conn.execute(
+                    """
+                    SELECT s.*, p.user_id, p.name AS project_name, p.domain AS project_domain
+                    FROM sessions s
+                    JOIN projects p ON p.id = s.project_id
+                    WHERE s.id = %s AND s.project_id = %s AND s.archived = 0
+                    """,
+                    (session_id, project_id),
                 ).fetchone()
                 return self._row_to_dict(row) if row else None
         except Exception as e:
-            logger.error("[DEVOPS-SESSION] Failed to get session: %s", e, exc_info=True)
+            logger.error("[DEVOPS-SESSION] Failed to get project session: %s", e, exc_info=True)
             return None
 
     def get_active_session(
@@ -109,18 +168,33 @@ class DevOpsSessionContext:
         return None
 
     def list_project_sessions(self, user_id: int, project_id: int) -> List[Dict[str, Any]]:
+        if not self.can_access_project(user_id, project_id):
+            logger.warning(
+                "[DEVOPS-SESSION] User %s cannot access project %s for session listing",
+                user_id,
+                project_id,
+            )
+            return []
+
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT s.*
+                SELECT s.*, p.user_id, p.name AS project_name, p.domain AS project_domain
                 FROM sessions s
                 JOIN projects p ON p.id = s.project_id
-                WHERE s.project_id = %s AND s.archived = 0 AND p.user_id = %s
+                WHERE s.project_id = %s AND s.archived = 0
                 ORDER BY s.last_used_at DESC, s.created_at DESC
                 """,
-                (project_id, user_id),
+                (project_id,),
             ).fetchall()
-        return [self._row_to_dict(row) for row in rows]
+        sessions = [self._row_to_dict(row) for row in rows]
+        logger.info(
+            "[DEVOPS-SESSION] Listed %s sessions for user=%s project=%s",
+            len(sessions),
+            user_id,
+            project_id,
+        )
+        return sessions
 
     def create_project_session(
         self,
