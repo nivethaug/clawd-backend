@@ -167,6 +167,93 @@ TOOLS_AUTO = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_project_sessions",
+            "description": "List editor sessions for the active project, including lock status. Use when user asks 'sessions', 'show sessions', 'switch session', or 'continue a session'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_project_session",
+            "description": "Create a new editor session for the active project and select it if lock rules allow. Use when user asks 'new session', 'create session', or 'start a new change'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "Short session label, such as 'Fix mobile nav' or 'Hero polish'"
+                    },
+                    "channel": {
+                        "type": "string",
+                        "description": "Source channel: webchat or telegram",
+                        "default": "webchat"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_active_project_session",
+            "description": "Select an existing editor session for the active project. Respects the existing project session lock.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "integer",
+                        "description": "Editor session ID to select"
+                    }
+                },
+                "required": ["session_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clear_active_project_session",
+            "description": "Clear the selected DevOps project-session context without releasing the project lock.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_active_project_session",
+            "description": "Show the active project, selected session, and lock state. Use when user asks 'current session' or 'what session am I using'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "release_active_project_session",
+            "description": "Complete/release the selected project session lock and clear DevOps session context. Use when user says 'complete session' or 'release session'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
 
     # ============================================================
     # Scheduler Job Tools

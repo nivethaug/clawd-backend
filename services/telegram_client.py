@@ -192,6 +192,10 @@ def is_configured() -> bool:
 
 BOT_COMMANDS = [
     {"command": "switch",   "description": "🔄 Switch / select project"},
+    {"command": "sessions", "description": "Select a project session"},
+    {"command": "newsession", "description": "Create a project session"},
+    {"command": "clearsession", "description": "Clear selected session"},
+    {"command": "complete", "description": "Release selected session"},
     {"command": "current",  "description": "📌 Show active project"},
     {"command": "link",     "description": "🔗 Link your account"},
     {"command": "unlink",   "description": "🔓 Unlink account"},

@@ -234,6 +234,11 @@ def init_schema():
                 logger.info("✓ Added active_project column to users")
             _run_migration(migrate_active_project)
 
+            def migrate_active_project_session():
+                cur.execute("ALTER TABLE users ADD COLUMN active_project_session_id INTEGER")
+                logger.info("✓ Added active_project_session_id column to users")
+            _run_migration(migrate_active_project_session)
+
             # Telegram account linking columns
             def migrate_telegram_chat_id():
                 cur.execute("ALTER TABLE users ADD COLUMN telegram_chat_id BIGINT")
@@ -556,6 +561,7 @@ def init_schema():
                 id SERIAL PRIMARY KEY,
                 session_key TEXT UNIQUE NOT NULL,
                 active_project_id TEXT,
+                active_project_session_id INTEGER,
                 pending_intent JSONB,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -565,8 +571,14 @@ def init_schema():
             # AI Sessions indexes
             cur.execute("CREATE INDEX IF NOT EXISTS idx_ai_sessions_session_key ON ai_sessions(session_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_ai_sessions_active_project_id ON ai_sessions(active_project_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_ai_sessions_active_project_session_id ON ai_sessions(active_project_session_id)")
             conn.commit()
             logger.info("✓ Added ai_sessions table with indexes")
+
+            def migrate_ai_sessions_project_session():
+                cur.execute("ALTER TABLE ai_sessions ADD COLUMN active_project_session_id INTEGER")
+                logger.info("✓ Added active_project_session_id column to ai_sessions")
+            _run_migration(migrate_ai_sessions_project_session)
 
             # Migration: Change active_project_id from INTEGER to TEXT (domain-based)
             def migrate_ai_sessions_domain():
@@ -716,6 +728,7 @@ def init_schema():
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 project_domain TEXT NOT NULL,
+                project_session_id INTEGER,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 response_type TEXT,
@@ -723,9 +736,17 @@ def init_schema():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""")
             conn.commit()
+            def migrate_projectchat_session_id():
+                cur.execute("ALTER TABLE projectchat ADD COLUMN project_session_id INTEGER")
+                logger.info("✓ Added project_session_id column to projectchat")
+            _run_migration(migrate_projectchat_session_id)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_projectchat_lookup
                 ON projectchat(user_id, project_domain, created_at DESC)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_projectchat_session_lookup
+                ON projectchat(user_id, project_domain, project_session_id, created_at DESC)
             """)
             conn.commit()
             logger.info("✓ Added projectchat table with index")

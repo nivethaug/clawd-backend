@@ -13,6 +13,7 @@ from database_postgres import get_db
 from apps_service import pm2_action, get_pm2_processes
 from services.ai.tool_registry import is_safe_tool, requires_confirmation, is_disabled
 from utils.ai_session_manager import get_session_manager
+from utils.devops_session_context import get_devops_session_context
 
 from domain_config import frontend_url as _frontend_url
 
@@ -111,6 +112,18 @@ class ToolExecutor:
                 return await self._execute_get_active_project(args, session_key)
             elif tool_name == "get_project_info":
                 return await self._execute_get_project_info(args, session_key)
+            elif tool_name == "list_project_sessions":
+                return await self._execute_list_project_sessions(args, session_key, user_id)
+            elif tool_name == "create_project_session":
+                return await self._execute_create_project_session(args, session_key, user_id)
+            elif tool_name == "set_active_project_session":
+                return await self._execute_set_active_project_session(args, session_key, user_id)
+            elif tool_name == "clear_active_project_session":
+                return await self._execute_clear_active_project_session(args, session_key, user_id)
+            elif tool_name == "get_active_project_session":
+                return await self._execute_get_active_project_session(args, session_key, user_id)
+            elif tool_name == "release_active_project_session":
+                return await self._execute_release_active_project_session(args, session_key, user_id)
             elif tool_name == "scheduler_list_jobs":
                 return await self._execute_scheduler_list_jobs(args, session_key)
             elif tool_name == "scheduler_get_job":
@@ -596,6 +609,7 @@ class ToolExecutor:
         # Update session (store domain, not numeric ID)
         session_manager = get_session_manager()
         await session_manager.set_active_project(session_key, project["domain"])
+        await session_manager.clear_active_project_session(session_key)
         
         # Also update users.active_project for persistence
         if user_id:
@@ -679,6 +693,230 @@ class ToolExecutor:
                 }
             }
         }
+
+    async def _get_active_project_for_session(
+        self,
+        session_key: str = None,
+        user_id: int = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not session_key:
+            return None
+
+        session_manager = get_session_manager()
+        active_project = await session_manager.get_active_project(session_key)
+        if active_project:
+            return active_project
+
+        if not user_id:
+            return None
+
+        from utils.project_chat_repo import ProjectChatRepository
+        user_active = ProjectChatRepository().get_active_project(user_id)
+        if not user_active:
+            return None
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM projects WHERE domain = %s AND user_id = %s",
+                (user_active, user_id),
+            ).fetchone()
+            return dict(row) if row else None
+
+    async def _get_selected_devops_session(
+        self,
+        session_key: str = None,
+        user_id: int = None,
+        active_project: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not session_key or not user_id or not active_project:
+            return None
+
+        session_manager = get_session_manager()
+        ai_session = await session_manager.get_or_create_session(session_key)
+        context = get_devops_session_context()
+        return context.get_active_session(
+            user_id=user_id,
+            active_project=active_project,
+            session_active_id=ai_session.get("active_project_session_id"),
+            user_active_id=context.get_user_active_session_id(user_id),
+        )
+
+    async def _execute_list_project_sessions(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None,
+        user_id: int = None,
+    ) -> Dict[str, Any]:
+        active_project = await self._get_active_project_for_session(session_key, user_id)
+        if not active_project:
+            return {"status": "error", "message": "Select a project before choosing a session."}
+
+        context = get_devops_session_context()
+        sessions = context.list_project_sessions(user_id, int(active_project["id"]))
+        lock = context.get_project_lock(int(active_project["id"]))
+        selected = await self._get_selected_devops_session(session_key, user_id, active_project)
+
+        if not sessions:
+            return {
+                "status": "success",
+                "message": f"No sessions found for {active_project['name']}. Create a new session to continue.",
+                "type": "selection",
+                "options": [],
+                "result": {"sessions": [], "lock": lock, "selected_session": selected},
+            }
+
+        options = [
+            {
+                "label": f"{s.get('label') or 'Untitled Session'} #{s['id']}",
+                "value": str(s["id"]),
+                "description": f"Last used: {s.get('last_used_at') or 'never'}",
+            }
+            for s in sessions
+        ]
+
+        return {
+            "status": "selection",
+            "type": "selection",
+            "message": f"Choose a session for {active_project['name']}:",
+            "options": options,
+            "intent": {"tool": "set_active_project_session", "args": {}},
+            "result": {"sessions": sessions, "lock": lock, "selected_session": selected},
+        }
+
+    async def _execute_create_project_session(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None,
+        user_id: int = None,
+    ) -> Dict[str, Any]:
+        active_project = await self._get_active_project_for_session(session_key, user_id)
+        if not active_project:
+            return {"status": "error", "message": "Select a project before creating a session."}
+
+        context = get_devops_session_context()
+        lock = context.get_project_lock(int(active_project["id"]))
+        if lock.get("active_session_id") is not None:
+            lock_owner = lock.get("session_name") or f"session #{lock.get('active_session_id')}"
+            return {
+                "status": "error",
+                "message": (
+                    f"{active_project['name']} is locked by "
+                    f"{lock_owner}. "
+                    "Complete or release it before creating a new session."
+                ),
+                "result": {"lock": lock},
+            }
+
+        created = context.create_project_session(
+            user_id=user_id,
+            project_id=int(active_project["id"]),
+            label=args.get("label") or "DevOps session",
+            channel=args.get("channel") or "webchat",
+        )
+        if created.get("status") != "success":
+            return created
+
+        session = created["session"]
+        selected = context.select_session(user_id, session_key, int(session["id"]))
+        if selected.get("status") != "success":
+            return selected
+
+        session_label = session.get("label") or f"#{session['id']}"
+        return {
+            "status": "success",
+            "message": f"Created and selected session: {session_label}",
+            "result": {"session": session, "selection": selected.get("result")},
+        }
+
+    async def _execute_set_active_project_session(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None,
+        user_id: int = None,
+    ) -> Dict[str, Any]:
+        if not session_key or not user_id:
+            return {"status": "error", "message": "Missing session context"}
+
+        active_project = await self._get_active_project_for_session(session_key, user_id)
+        if not active_project:
+            return {"status": "error", "message": "Select a project before selecting a session."}
+
+        session_id = args.get("session_id")
+        if not session_id:
+            return {"status": "error", "message": "Missing session_id"}
+
+        context = get_devops_session_context()
+        session = context.get_session(user_id, int(session_id))
+        if not session or int(session["project_id"]) != int(active_project["id"]):
+            return {"status": "error", "message": "Session does not belong to the active project."}
+
+        return context.select_session(user_id, session_key, int(session_id))
+
+    async def _execute_clear_active_project_session(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None,
+        user_id: int = None,
+    ) -> Dict[str, Any]:
+        if not session_key or not user_id:
+            return {"status": "error", "message": "Missing session context"}
+
+        get_devops_session_context().clear_context(user_id, session_key)
+        return {
+            "status": "success",
+            "message": "Cleared the active session context. Project selection is unchanged.",
+            "result": {"active_project_session_id": None},
+        }
+
+    async def _execute_get_active_project_session(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None,
+        user_id: int = None,
+    ) -> Dict[str, Any]:
+        active_project = await self._get_active_project_for_session(session_key, user_id)
+        if not active_project:
+            return {"status": "success", "message": "No active project selected.", "result": {}}
+
+        context = get_devops_session_context()
+        selected = await self._get_selected_devops_session(session_key, user_id, active_project)
+        lock = context.get_project_lock(int(active_project["id"]))
+
+        if selected:
+            selected_label = selected.get("label") or f"#{selected['id']}"
+            message = (
+                f"Active project: {active_project['name']}. "
+                f"Active session: {selected_label}."
+            )
+        else:
+            message = f"Active project: {active_project['name']}. No active session selected."
+
+        if lock.get("active_session_id"):
+            lock_label = lock.get("session_name") or f"session #{lock['active_session_id']}"
+            message += f" Lock: {lock_label}."
+
+        return {
+            "status": "success",
+            "message": message,
+            "result": {"project": active_project, "session": selected, "lock": lock},
+        }
+
+    async def _execute_release_active_project_session(
+        self,
+        args: Dict[str, Any],
+        session_key: str = None,
+        user_id: int = None,
+    ) -> Dict[str, Any]:
+        active_project = await self._get_active_project_for_session(session_key, user_id)
+        selected = await self._get_selected_devops_session(session_key, user_id, active_project)
+        if not selected:
+            return {"status": "error", "message": "No active session selected to complete."}
+
+        return get_devops_session_context().release_selected_session(
+            user_id=user_id,
+            session_key=session_key,
+            session_id=int(selected["id"]),
+        )
     
     async def _execute_get_project_info(
         self,

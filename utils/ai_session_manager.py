@@ -61,6 +61,7 @@ class AISessionManager:
             return {
                 "session_key": session_key,
                 "active_project_id": None,
+                "active_project_session_id": None,
                 "pending_intent": None
             }
     
@@ -110,11 +111,31 @@ class AISessionManager:
         """
         with get_db() as conn:
             conn.execute(
-                "UPDATE ai_sessions SET active_project_id = NULL, updated_at = NOW() WHERE session_key = %s",
+                "UPDATE ai_sessions SET active_project_id = NULL, active_project_session_id = NULL, updated_at = NOW() WHERE session_key = %s",
                 (session_key,)
             )
             conn.commit()
             logger.info(f"[AI-SESSION] Cleared active project for session {session_key}")
+
+    async def set_active_project_session(self, session_key: str, project_session_id: int) -> None:
+        """Update active project session for an AI chat session."""
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE ai_sessions SET active_project_session_id = %s, updated_at = NOW() WHERE session_key = %s",
+                (project_session_id, session_key),
+            )
+            conn.commit()
+            logger.info(f"[AI-SESSION] Set active project session '{project_session_id}' for session {session_key}")
+
+    async def clear_active_project_session(self, session_key: str) -> None:
+        """Clear active project session for an AI chat session."""
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE ai_sessions SET active_project_session_id = NULL, updated_at = NOW() WHERE session_key = %s",
+                (session_key,),
+            )
+            conn.commit()
+            logger.info(f"[AI-SESSION] Cleared active project session for session {session_key}")
     
     async def set_pending_intent(self, session_key: str, intent: Dict[str, Any]) -> None:
         """

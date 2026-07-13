@@ -81,18 +81,27 @@ async def ai_selection(request: AISelectionRequest, authorization: Optional[str]
         if not tool_name:
             return error_response("Invalid intent: missing tool name")
         
-        # Update args with selected project
-        args["project_id"] = request.selection
+        is_session_selection = tool_name == "set_active_project_session"
+        if is_session_selection:
+            try:
+                args["session_id"] = int(request.selection)
+            except (TypeError, ValueError):
+                return error_response("Invalid session selection")
+        else:
+            # Update args with selected project
+            args["project_id"] = request.selection
         
         logger.info(f"[AI-SELECTION] Executing {tool_name} with project_id={request.selection}")
         
-        # Update session's active project (store domain, not numeric ID)
-        session_manager = get_session_manager()
-        await session_manager.set_active_project(request.session_id, request.selection)
-        
-        # Also update users.active_project for persistence
-        chat_repo = ProjectChatRepository()
-        chat_repo.set_active_project(user_id, request.selection)
+        if not is_session_selection:
+            # Update session's active project (store domain, not numeric ID)
+            session_manager = get_session_manager()
+            await session_manager.set_active_project(request.session_id, request.selection)
+            await session_manager.clear_active_project_session(request.session_id)
+
+            # Also update users.active_project for persistence
+            chat_repo = ProjectChatRepository()
+            chat_repo.set_active_project(user_id, request.selection)
         
         # NOTE: Project selection messages are NOT persisted to projectchat.
         # They are flow-control noise ("Selected project: X", "You have switched...").

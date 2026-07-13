@@ -33,6 +33,7 @@ from utils.ai_response_formatter import (
 )
 from utils.ai_session_manager import get_session_manager
 from utils.auth_helpers import get_user_id_from_token
+from utils.devops_session_context import get_devops_session_context
 from utils.project_chat_repo import ProjectChatRepository
 from database_postgres import get_db
 
@@ -327,6 +328,16 @@ async def process_message(
         
         if not active_project:
             logger.warning(f"[AI-CHAT] ✗ No active project resolved from any source")
+
+        devops_context = get_devops_session_context()
+        active_project_session = None
+        if active_project:
+            active_project_session = devops_context.get_active_session(
+                user_id=user_id,
+                active_project=active_project,
+                session_active_id=session.get("active_project_session_id"),
+                user_active_id=devops_context.get_user_active_session_id(user_id),
+            )
         
         # 6. Build messages for GLM (with conversation history: last 4 messages)
         system_content = SYSTEM_PROMPT
@@ -383,6 +394,15 @@ async def process_message(
                 f"\n\nCurrent active project: {active_project['name']} "
                 f"(domain: {active_project['domain']}, type: {_project_type or 'unknown'})"
             )
+            if active_project_session:
+                _lock = devops_context.get_project_lock(int(active_project["id"]))
+                _lock_owner = _lock.get("session_name") or _lock.get("active_session_id") or "none"
+                system_content += (
+                    f"\nCurrent active project session: {active_project_session.get('label') or 'Untitled Session'} "
+                    f"(id: {active_project_session['id']}, channel: {active_project_session.get('channel') or 'webchat'}, "
+                    f"last used: {active_project_session.get('last_used_at') or 'never'}). "
+                    f"Lock owner: {_lock_owner}."
+                )
             # ── Inject project-type-specific capabilities ────────────
             # GLM must tailor 'what can you do' answers to the ACTIVE
             # project type only — not list every possible project type.
@@ -397,7 +417,12 @@ async def process_message(
         
         # Inject last 4 persisted messages as conversation context
         if active_project:
-            recent = chat_repo.get_recent_messages(user_id, active_project["domain"], limit=4)
+            recent = chat_repo.get_recent_messages(
+                user_id,
+                active_project["domain"],
+                limit=4,
+                project_session_id=active_project_session.get("id") if active_project_session else None,
+            )
             for msg in recent:
                 messages.append({
                     "role": msg["role"],
@@ -416,12 +441,18 @@ async def process_message(
         # ── Persist user message ─────────────────────────────────────
         # Store the user's message now (before LLM call) if we have a project context
         _active_domain = active_project["domain"] if active_project else None
+        _active_session_id = active_project_session.get("id") if active_project_session else None
         
         # Messages about switching/clearing projects should NOT be persisted
         # — they are flow-control noise, not project-specific conversation.
         _switch_keywords = ["switch project", "change project", "select project",
                            "clear project", "switch to", "change to", "use project",
-                           "clear active project", "clear active"]
+                           "clear active project", "clear active", "sessions",
+                           "show sessions", "list sessions", "switch session",
+                           "select session", "new session", "create session",
+                           "start session", "clear session", "clear active session",
+                           "forget session", "current session", "which session",
+                           "complete session", "release session", "finish session"]
         _is_switch_msg = any(kw in message.strip().lower() for kw in _switch_keywords)
         
         if _active_domain and not _is_switch_msg:
@@ -430,6 +461,7 @@ async def process_message(
                 project_domain=_active_domain,
                 role="user",
                 content=message,
+                project_session_id=_active_session_id,
             )
         
         # ── Helper: persist assistant response then return ────────────
@@ -444,6 +476,7 @@ async def process_message(
                     project_domain=_active_domain,
                     role="assistant",
                     content=resp.get("text") or resp.get("message") or "",
+                    project_session_id=_active_session_id,
                     response_type=resp.get("type"),
                     metadata=resp,
                 )
@@ -455,6 +488,82 @@ async def process_message(
         # chat operations (switch, clear, current project).
         import re
         _msg_lower = message.strip().lower()
+
+        def _result_to_response(result: dict) -> dict:
+            if result.get("type") == "selection" or result.get("status") == "selection":
+                return result
+            if result.get("status") == "error":
+                return error_response(result.get("message", "Operation failed"), result)
+            return text_response(result.get("message", "Done."))
+
+        if _msg_lower in ("sessions", "show sessions", "list sessions", "switch session", "select session"):
+            _executor = get_tool_executor()
+            result = await _executor.execute(
+                "list_project_sessions",
+                {},
+                session_key=session_id,
+                user_id=user_id,
+            )
+            await session_manager.update_last_used(session_id)
+            return _finalize(_result_to_response(result))
+
+        _new_session_match = re.match(r'^(?:new session|create session|start session)(?:\s+(.+))?$', message.strip(), re.I)
+        if _new_session_match:
+            label = (_new_session_match.group(1) or "DevOps session").strip()
+            _executor = get_tool_executor()
+            result = await _executor.execute(
+                "create_project_session",
+                {"label": label, "channel": source},
+                session_key=session_id,
+                user_id=user_id,
+            )
+            await session_manager.update_last_used(session_id)
+            return _finalize(_result_to_response(result))
+
+        _select_session_match = re.match(r'^(?:select session|use session|switch session to)\s+#?(\d+)$', _msg_lower)
+        if _select_session_match:
+            _executor = get_tool_executor()
+            result = await _executor.execute(
+                "set_active_project_session",
+                {"session_id": int(_select_session_match.group(1))},
+                session_key=session_id,
+                user_id=user_id,
+            )
+            await session_manager.update_last_used(session_id)
+            return _finalize(_result_to_response(result))
+
+        if _msg_lower in ("clear session", "clear active session", "forget session"):
+            _executor = get_tool_executor()
+            result = await _executor.execute(
+                "clear_active_project_session",
+                {},
+                session_key=session_id,
+                user_id=user_id,
+            )
+            await session_manager.update_last_used(session_id)
+            return _finalize(_result_to_response(result))
+
+        if _msg_lower in ("current session", "which session", "what session am i using"):
+            _executor = get_tool_executor()
+            result = await _executor.execute(
+                "get_active_project_session",
+                {},
+                session_key=session_id,
+                user_id=user_id,
+            )
+            await session_manager.update_last_used(session_id)
+            return _finalize(_result_to_response(result))
+
+        if _msg_lower in ("complete session", "release session", "finish session"):
+            _executor = get_tool_executor()
+            result = await _executor.execute(
+                "release_active_project_session",
+                {},
+                session_key=session_id,
+                user_id=user_id,
+            )
+            await session_manager.update_last_used(session_id)
+            return _finalize(_result_to_response(result))
         
         # "switch to {domain}" → set_active_project directly
         _switch_match = re.match(r'^(?:switch to|use|change to|set active project(?: to)?)\s+(.+)$', _msg_lower)

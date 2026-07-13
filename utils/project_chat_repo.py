@@ -35,6 +35,7 @@ class ProjectChatRepository:
         project_domain: str,
         role: str,
         content: str,
+        project_session_id: Optional[int] = None,
         response_type: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
@@ -59,10 +60,10 @@ class ProjectChatRepository:
                 # Insert the message and capture the returned row
                 row = conn.execute(
                     """INSERT INTO projectchat
-                       (user_id, project_domain, role, content, response_type, metadata)
-                       VALUES (%s, %s, %s, %s, %s, %s)
+                       (user_id, project_domain, project_session_id, role, content, response_type, metadata)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)
                        RETURNING *""",
-                    (user_id, project_domain, role, content, response_type, metadata_json),
+                    (user_id, project_domain, project_session_id, role, content, response_type, metadata_json),
                 ).fetchone()
 
                 conn.commit()
@@ -77,17 +78,30 @@ class ProjectChatRepository:
                     """DELETE FROM projectchat
                        WHERE user_id = %s
                          AND project_domain = %s
+                         AND (
+                             (project_session_id IS NULL AND %s IS NULL)
+                             OR project_session_id = %s
+                         )
                          AND id NOT IN (
                              SELECT id FROM projectchat
-                             WHERE user_id = %s AND project_domain = %s
+                             WHERE user_id = %s
+                               AND project_domain = %s
+                               AND (
+                                   (project_session_id IS NULL AND %s IS NULL)
+                                   OR project_session_id = %s
+                               )
                              ORDER BY created_at DESC
                              LIMIT %s
                          )""",
                     (
                         user_id,
                         project_domain,
+                        project_session_id,
+                        project_session_id,
                         user_id,
                         project_domain,
+                        project_session_id,
+                        project_session_id,
                         MAX_MESSAGES_PER_PROJECT,
                     ),
                 )
@@ -108,6 +122,7 @@ class ProjectChatRepository:
         user_id: int,
         project_domain: str,
         limit: int = MAX_MESSAGES_PER_PROJECT,
+        project_session_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get messages for a project (oldest first, for UI display).
@@ -119,12 +134,17 @@ class ProjectChatRepository:
                 rows = conn.execute(
                     """SELECT * FROM (
                            SELECT * FROM projectchat
-                           WHERE user_id = %s AND project_domain = %s
+                           WHERE user_id = %s
+                             AND project_domain = %s
+                             AND (
+                                 (project_session_id IS NULL AND %s IS NULL)
+                                 OR project_session_id = %s
+                             )
                            ORDER BY created_at DESC
                            LIMIT %s
                        ) AS recent
                        ORDER BY created_at ASC""",
-                    (user_id, project_domain, limit),
+                    (user_id, project_domain, project_session_id, project_session_id, limit),
                 ).fetchall()
 
                 return [self._row_to_dict(r) for r in rows]
@@ -138,6 +158,7 @@ class ProjectChatRepository:
         user_id: int,
         project_domain: str,
         limit: int = 4,
+        project_session_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get the most recent N messages for LLM context (oldest→newest order).
@@ -149,12 +170,17 @@ class ProjectChatRepository:
                 rows = conn.execute(
                     """SELECT * FROM (
                            SELECT * FROM projectchat
-                           WHERE user_id = %s AND project_domain = %s
+                           WHERE user_id = %s
+                             AND project_domain = %s
+                             AND (
+                                 (project_session_id IS NULL AND %s IS NULL)
+                                 OR project_session_id = %s
+                             )
                            ORDER BY created_at DESC
                            LIMIT %s
                        ) AS recent
                        ORDER BY created_at ASC""",
-                    (user_id, project_domain, limit),
+                    (user_id, project_domain, project_session_id, project_session_id, limit),
                 ).fetchall()
 
                 return [self._row_to_dict(r) for r in rows]
@@ -163,14 +189,24 @@ class ProjectChatRepository:
             logger.error(f"[PROJECT-CHAT] Failed to get recent messages: {e}", exc_info=True)
             return []
 
-    def clear_messages(self, user_id: int, project_domain: str) -> bool:
+    def clear_messages(
+        self,
+        user_id: int,
+        project_domain: str,
+        project_session_id: Optional[int] = None,
+    ) -> bool:
         """Delete all messages for a project (e.g. when switching projects)."""
         try:
             with get_db() as conn:
                 conn.execute(
                     """DELETE FROM projectchat
-                       WHERE user_id = %s AND project_domain = %s""",
-                    (user_id, project_domain),
+                       WHERE user_id = %s
+                         AND project_domain = %s
+                         AND (
+                             (project_session_id IS NULL AND %s IS NULL)
+                             OR project_session_id = %s
+                         )""",
+                    (user_id, project_domain, project_session_id, project_session_id),
                 )
                 conn.commit()
                 return True
@@ -200,7 +236,7 @@ class ProjectChatRepository:
         try:
             with get_db() as conn:
                 conn.execute(
-                    "UPDATE users SET active_project = %s WHERE id = %s",
+                    "UPDATE users SET active_project = %s, active_project_session_id = NULL WHERE id = %s",
                     (domain, user_id),
                 )
                 conn.commit()
@@ -215,7 +251,7 @@ class ProjectChatRepository:
         try:
             with get_db() as conn:
                 conn.execute(
-                    "UPDATE users SET active_project = NULL WHERE id = %s",
+                    "UPDATE users SET active_project = NULL, active_project_session_id = NULL WHERE id = %s",
                     (user_id,),
                 )
                 conn.commit()
