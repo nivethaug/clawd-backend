@@ -567,6 +567,11 @@ def init_schema():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""")
             conn.commit()
+
+            def migrate_ai_sessions_project_session():
+                cur.execute("ALTER TABLE ai_sessions ADD COLUMN active_project_session_id INTEGER")
+                logger.info("✓ Added active_project_session_id column to ai_sessions")
+            _run_migration(migrate_ai_sessions_project_session)
             
             # AI Sessions indexes
             cur.execute("CREATE INDEX IF NOT EXISTS idx_ai_sessions_session_key ON ai_sessions(session_key)")
@@ -574,11 +579,6 @@ def init_schema():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_ai_sessions_active_project_session_id ON ai_sessions(active_project_session_id)")
             conn.commit()
             logger.info("✓ Added ai_sessions table with indexes")
-
-            def migrate_ai_sessions_project_session():
-                cur.execute("ALTER TABLE ai_sessions ADD COLUMN active_project_session_id INTEGER")
-                logger.info("✓ Added active_project_session_id column to ai_sessions")
-            _run_migration(migrate_ai_sessions_project_session)
 
             # Migration: Change active_project_id from INTEGER to TEXT (domain-based)
             def migrate_ai_sessions_domain():
