@@ -442,7 +442,8 @@ async def process_message(
         # Store the user's message now (before LLM call) if we have a project context
         _active_domain = active_project["domain"] if active_project else None
         _active_session_id = active_project_session.get("id") if active_project_session else None
-        
+        _normalized_message = message.strip().lower()
+        _is_telegram_greeting = source == "telegram" and _normalized_message in {"hi", "hello", "hey"}
         # Messages about switching/clearing projects should NOT be persisted
         # — they are flow-control noise, not project-specific conversation.
         _switch_keywords = ["switch project", "change project", "select project",
@@ -453,7 +454,7 @@ async def process_message(
                            "start session", "clear session", "clear active session",
                            "forget session", "current session", "which session",
                            "complete session", "release session", "finish session"]
-        _is_switch_msg = any(kw in message.strip().lower() for kw in _switch_keywords)
+        _is_switch_msg = _is_telegram_greeting or any(kw in _normalized_message for kw in _switch_keywords)
         
         if _active_domain and not _is_switch_msg:
             chat_repo.add_message(
@@ -487,7 +488,19 @@ async def process_message(
         # the LLM entirely. Saves ~3-20s per request for the most common
         # chat operations (switch, clear, current project).
         import re
-        _msg_lower = message.strip().lower()
+        _msg_lower = _normalized_message
+
+        if _is_telegram_greeting:
+            await session_manager.update_last_used(session_id)
+            if active_project:
+                return _finalize(text_response(
+                    f"Hi! You are connected to **{active_project['name']}**. "
+                    "Send `/current` to see the active project/session, `/sessions` to choose a session, "
+                    "or ask for `status`, `logs`, `start`, `stop`, or `restart`."
+                ))
+            return _finalize(text_response(
+                "Hi! Send `/switch` to choose a project, then I can help with status, logs, start, stop, restart, and sessions."
+            ))
 
         def _result_to_response(result: dict) -> dict:
             if result.get("type") == "selection" or result.get("status") == "selection":
