@@ -332,9 +332,10 @@ def _help_text() -> str:
         "1. `/link code:YOURCODE` - link your DreamAgent account\n"
         "2. `/switch` - choose a project\n"
         "3. `/sessions` or `/newsession label:Fix navbar` - choose work\n"
-        "4. `/chat message:make the hero more premium` - continue the selected session\n"
+        "4. `/project message:make the hero more premium` - continue the selected session\n"
         "5. `/complete` - finish and release the session\n\n"
-        "Project controls: `/current` `/status` `/logs` `/billing` `/restart` `/start` `/stop`"
+        "Project controls: `/current` `/status` `/logs` `/billing` `/restart` `/start` `/stop`\n"
+        "Note: normal Discord server messages do not reach DreamAgent. Use `/project message:...` or `/chat message:...`."
     )
 
 
@@ -347,7 +348,7 @@ def _normalize_action(command: str, data: Optional[dict] = None) -> tuple[str, s
     if command == "newsession":
         label = _option_value(data, "label") or "Discord session"
         return "newsession", f"/newsession {label}"
-    if command == "chat":
+    if command in {"chat", "project"}:
         return "chat", _option_value(data, "message") or ""
     return command, f"/{command}"
 

@@ -46,6 +46,7 @@ Discord signs every interaction with `X-Signature-Ed25519` and `X-Signature-Time
 | `/sessions` | List sessions for the active project |
 | `/newsession label:LABEL` | Create and select a new project session |
 | `/chat message:TEXT` | Continue the selected project session |
+| `/project message:TEXT` | Friendlier alias for `/chat`, recommended inside Discord servers |
 | `/clearsession` | Clear selected session context without releasing the lock |
 | `/complete` | Release selected session lock |
 | `/current` | Show active project/session |
@@ -57,7 +58,7 @@ Discord signs every interaction with `X-Signature-Ed25519` and `X-Signature-Time
 | `/restart` | Restart active project |
 | `/help` | Show guided workflow |
 
-Discord Interactions do not deliver arbitrary normal channel messages to this webhook. Use `/chat message:...` as the Discord equivalent of typing naturally in Telegram after a session is selected.
+Discord Interactions do not deliver arbitrary normal channel messages to this webhook. Use `/project message:...` or `/chat message:...` as the Discord equivalent of typing naturally in Telegram after a session is selected.
 
 ## Buttons
 
@@ -80,7 +81,7 @@ Button `custom_id` values follow the same idea as Telegram callback data:
 ## Session Chat Flow
 
 ```text
-/chat message:...
+/project message:...
 -> resolve Discord user link
 -> resolve active DreamAgent project/session
 -> acquire processing lock with channel=discord
