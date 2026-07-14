@@ -325,11 +325,12 @@ def _help_text() -> str:
         "Workflow:\n"
         "1. `/link code:YOURCODE` - link your DreamAgent account\n"
         "2. `/switch` - choose a project\n"
-        "3. `/sessions` or `/newsession label:Fix navbar` - choose work\n"
-        "4. `/project message:make the hero more premium` - continue the selected session\n"
-        "5. `/complete` - finish and release the session\n\n"
+        "3. `/project message:status` - ask the normal project assistant\n"
+        "4. `/sessions` or `/newsession label:Fix navbar` - choose an edit session when you want code changes\n"
+        "5. `/chat message:make the hero more premium` - continue the selected edit session\n"
+        "6. `/complete` - finish and release the session\n\n"
         "Project controls: `/current` `/status` `/logs` `/billing` `/restart` `/start` `/stop`\n"
-        "Note: normal Discord server messages do not reach DreamAgent. Use `/project message:...` or `/chat message:...`."
+        "Note: normal Discord server messages do not reach DreamAgent. Use `/project message:...` for normal project chat, or `/chat message:...` for selected-session edits."
     )
 
 
@@ -342,8 +343,10 @@ def _normalize_action(command: str, data: Optional[dict] = None) -> tuple[str, s
     if command == "newsession":
         label = _option_value(data, "label") or "Discord session"
         return "newsession", f"/newsession {label}"
-    if command in {"chat", "project"}:
+    if command == "chat":
         return "chat", _option_value(data, "message") or ""
+    if command == "project":
+        return "project", _option_value(data, "message") or ""
     return command, f"/{command}"
 
 
@@ -390,6 +393,20 @@ async def _run_discord_action(
         )
         kind = "busy" if result.get("status") == "busy" else "session"
         await edit_original_response(interaction_token, result.get("message") or "Session chat completed.", _action_components(kind))
+        return
+
+    if action == "project":
+        resp = await process_message(
+            user_id=user_id,
+            message=message_text,
+            session_id=session_key,
+            source="discord",
+        )
+        await edit_original_response(
+            interaction_token,
+            _format_for_discord(resp),
+            _components_from_response(resp) or _action_components(),
+        )
         return
 
     mapped = {

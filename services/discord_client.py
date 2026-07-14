@@ -121,8 +121,8 @@ CONTROL_COMMANDS = [
     {"name": "chat", "description": "Continue the selected project session", "type": 1, "options": [
         {"name": "message", "description": "What should DreamAgent do?", "type": 3, "required": True}
     ]},
-    {"name": "project", "description": "Send a message to the selected DreamAgent project session", "type": 1, "options": [
-        {"name": "message", "description": "What should DreamAgent do in the selected session?", "type": 3, "required": True}
+    {"name": "project", "description": "Send a normal message to the DreamAgent project assistant", "type": 1, "options": [
+        {"name": "message", "description": "Ask about or control the active project", "type": 3, "required": True}
     ]},
     {"name": "link", "description": "Link your DreamAgent account", "type": 1, "options": [
         {"name": "code", "description": "Link code from DreamAgent", "type": 3, "required": True}
