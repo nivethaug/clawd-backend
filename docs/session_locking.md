@@ -10,8 +10,9 @@ Session locking prevents concurrent AI edits against the same project. A project
 
 | File | Responsibility |
 | --- | --- |
-| `services/session_lock_service.py` | Acquire/release lock helpers |
-| `app.py` | Lock endpoints and chat lock enforcement |
+| `services/session_lock_service.py` | Acquire/release project locks and per-session processing flags |
+| `app.py` | Lock endpoints, web chat lock enforcement, cancel/status processing cleanup |
+| `api/telegram_webhook.py` | Telegram selected-session lock and processing enforcement |
 
 ## Enforcement Points
 
@@ -29,6 +30,28 @@ Example:
   }
 }
 ```
+
+## Same-Session Processing Guard
+
+The project lock is intentionally re-entrant for the same session, because users must be able to continue the active editing session. A second guard prevents duplicate messages inside that same session while one edit is already running.
+
+`sessions` stores:
+
+| Column | Purpose |
+| --- | --- |
+| `processing` | Whether a message is currently running for the session |
+| `processing_started_at` | Start time used for stale recovery |
+| `processing_channel` | `webchat`, `telegram`, or another caller label |
+
+Web ACP chat returns `409 session_message_in_progress` when the same session is already processing. Telegram replies with a "Still working..." message and action buttons instead of starting another background task.
+
+The processing flag is cleared when:
+
+- web streaming completes normally
+- web background save completes after disconnect
+- web Stop/cancel is called
+- Telegram selected-session chat finishes
+- the flag is detected as stale by `SessionLockService.acquire_processing()`
 
 ## Endpoints
 
@@ -50,6 +73,7 @@ Telegram session chat follows the same one-active-edit-session rule:
 
 - Selecting or creating a Telegram project session is blocked when another session owns the project lock.
 - Selecting the session that already owns the lock is allowed.
+- Sending another Telegram message while the same session is processing is blocked by the per-session processing guard.
 - `/clearsession` clears Telegram context only and does not release the lock.
 - `/complete` releases the selected session lock through `SessionLockService`.
 - Switching the active project clears the selected session context.

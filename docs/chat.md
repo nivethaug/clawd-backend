@@ -77,10 +77,12 @@ All session chat routes require `Authorization: Bearer <token>`. Ownership is en
 When a linked Telegram chat has a selected project session, normal Telegram messages are routed into that same project session:
 
 ```text
-Telegram -> api/telegram_webhook.py -> get_acp_chat_handler(session_key) -> run_chat_unified()
+Telegram -> api/telegram_webhook.py -> get_acp_chat_handler(session_key) -> run_chat_streaming_unified()
 ```
 
 The session transcript remains in the same `messages` table as web chat. The same project-aware prompt selection applies for website, Telegram bot, Discord bot, and scheduler projects.
+
+Telegram also shares the same per-session in-progress guard as web ACP chat. If a selected session is already processing a message, Telegram returns a "Still working..." response and does not enqueue another edit request.
 
 ## Image Handling
 
@@ -100,6 +102,7 @@ data:image/webp;base64,UklGR...
 | 401 | Missing or invalid auth token |
 | 403 | Session does not belong to the user |
 | 404 | Session not found |
+| 409 | Same session already has a message in progress |
 | 423 | Another session is active for the same project |
 | 402 | Insufficient AI credits for ACP edit work |
 

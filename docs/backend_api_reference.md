@@ -206,10 +206,12 @@ Telegram webhook routes:
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | POST | `/bot/telegram/webhook` | Telegram webhook receiver |
-| POST | `/bot/telegram/setwebhook` | Configure Telegram webhook |
+| POST | `/bot/telegram/setwebhook` | Configure Telegram webhook and refresh Telegram default commands |
 | DELETE | `/bot/telegram/webhook` | Delete Telegram webhook |
 
 The set/delete webhook routes intentionally remain unauthenticated for current operational compatibility.
+
+Telegram supports slash commands, inline action buttons, and natural aliases for project/session operations. See [telegram_session_chat.md](./telegram_session_chat.md) for the current command list and selected-session behavior.
 
 ## Dashboard, Activity, and Admin
 

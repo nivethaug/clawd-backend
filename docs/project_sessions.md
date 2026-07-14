@@ -56,6 +56,8 @@ Response:
 
 Linked Telegram users can select an existing project session with `/sessions` or create one with `/newsession LABEL`. Once selected, normal Telegram messages are appended to the same `messages` table and routed through the same `acp_chat_handler.py` flow used by web session chat.
 
+Telegram also exposes inline action buttons after common replies. Buttons and natural aliases such as `current`, `sessions`, `status`, `logs`, `clear session`, and `complete session` are handled before selected-session chat routing so obvious controls do not get sent into the editor prompt.
+
 Telegram does not create a duplicate edit system per project type. The selected session's `project_type_id` controls the prompt builder inside `ACPChatHandler`:
 
 - Website sessions use the website edit prompt.

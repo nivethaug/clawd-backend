@@ -12,10 +12,11 @@ Telegram is only the transport. The project session, lock, prompt routing, messa
 
 | File | Responsibility |
 | --- | --- |
-| `api/telegram_webhook.py` | Telegram command handling, selected-session routing, typing heartbeat, token billing |
+| `api/telegram_webhook.py` | Telegram command handling, inline action buttons, selected-session routing, typing heartbeat, token billing |
 | `utils/devops_session_context.py` | Active project/session context shared by Telegram and DevOps chat |
-| `services/session_lock_service.py` | Single active editing session lock per project |
+| `services/session_lock_service.py` | Single active editing session lock per project and per-session in-progress guard |
 | `acp_chat_handler.py` | Project-aware ACP/Claude edit handler used by web and Telegram session chat |
+| `services/telegram_client.py` | Telegram API client and default bot command registration |
 | `services/token_tracker.py` | Token usage recording after session completion |
 | `services/billing_service.py` | Edit-token/AI-credit reconciliation |
 
@@ -29,9 +30,45 @@ Telegram is only the transport. The project session, lock, prompt routing, messa
 | `/clearsession` | Clear the selected Telegram session context without releasing the project lock. |
 | `/complete` | Release the selected session lock through the existing lock service. |
 | `/current` | Show active project, selected session, and lock state. |
-| `/help` | Show Telegram bot help. |
+| `/status` | Show active project runtime status. |
+| `/logs` | Show recent logs for the active project. |
+| `/restart` | Restart the active project. |
+| `/start` | Start the active project. |
+| `/stop` | Stop the active project. |
+| `/help` | Show the guided Telegram workflow. |
 
 After a session is selected, any normal Telegram text message is treated as session chat input until `/complete`, `/clearsession`, or a project switch.
+
+The default Telegram command menu is registered through `services.telegram_client.set_my_commands()`. The existing `/bot/telegram/setwebhook` endpoint calls this registration flow, so after deploy call that setup endpoint once to refresh Telegram's `/` autocomplete menu.
+
+## Inline Action Buttons
+
+Telegram replies include compact inline buttons for common next steps:
+
+| Context | Buttons |
+| --- | --- |
+| Project/default replies | Current, Sessions, Status, Logs, Restart, Help |
+| Selected-session replies | Current, Sessions, Complete, Clear Session, Status, Logs |
+| Busy/in-progress replies | Current, Sessions, Complete, Clear Session |
+| Selection replies | Project or session choices from the existing selection response |
+
+Inline buttons use `callback_data` values such as `action:current`, `action:sessions`, `action:logs`, `switch:{domain}`, and `session:set:{project_domain}:{session_id}`. The callback handler routes action buttons through the same deterministic command dispatcher used by slash commands.
+
+## Natural Aliases
+
+Common plain-text shortcuts are treated as commands before selected-session chat routing:
+
+| User text | Mapped behavior |
+| --- | --- |
+| `current`, `current project`, `current session`, `where am i` | `/current` |
+| `sessions`, `show sessions`, `list sessions`, `switch session`, `select session` | `/sessions` |
+| `new session mobile fixes`, `newsession mobile fixes` | `/newsession mobile fixes` |
+| `clear session`, `leave session` | `/clearsession` |
+| `complete`, `finish session`, `release session` | `/complete` |
+| `status`, `logs`, `restart`, `start`, `stop` | Project control actions |
+| `help`, `menu`, `commands` | `/help` |
+
+This preserves natural editing messages for selected sessions while keeping obvious project/session control phrases out of the editor prompt.
 
 ## Routing Flow
 
@@ -44,9 +81,10 @@ Telegram message
 -> reserve edit credits
 -> save user message to messages
 -> get_acp_chat_handler(session_key)
--> ACPChatHandler.run_chat_unified()
+-> ACPChatHandler.run_chat_streaming_unified()
 -> save assistant message + token usage
 -> reconcile billing
+-> auto-commit if handler usage reports has_writes=true
 -> send final Telegram reply
 ```
 
@@ -86,6 +124,18 @@ Telegram follows the existing one-active-session-per-project lock.
 
 This keeps web and Telegram from editing the same project concurrently.
 
+## In-Progress Message Guard
+
+In addition to the project lock, selected-session chat uses a per-session processing flag in `sessions`:
+
+- `processing`
+- `processing_started_at`
+- `processing_channel`
+
+This prevents duplicate messages from the same selected session while a web or Telegram edit is already running. Web `/chat` and `/chat/stream` return `409 session_message_in_progress`. Telegram replies with a user-facing "Still working..." message plus inline buttons.
+
+The flag is released when the web stream completes, a background save finishes, the user cancels from web, or Telegram selected-session processing finishes. A stale flag can be recovered after the configured timeout inside `SessionLockService.acquire_processing()`.
+
 ## Billing And Token Usage
 
 Telegram session chat should charge the same type of edit usage as web ACP chat.
@@ -96,6 +146,7 @@ Telegram session chat should charge the same type of edit usage as web ACP chat.
 - Billing reconciles against the same `ADD_FEATURE` operation used by web edits.
 - If the run fails before an assistant message is saved, reserved credits are refunded.
 - Assistant messages may store token usage JSON in `messages.token_usage`.
+- If handler usage reports `has_writes=true`, Telegram selected-session chat reuses the same auto-commit path as web session chat.
 
 Billing is charged to the project owner, not to a separate Telegram identity.
 
