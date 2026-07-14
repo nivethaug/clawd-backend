@@ -189,6 +189,39 @@ def _build_keyboard(resp: dict) -> Optional[dict]:
     return None
 
 
+def _action_keyboard(rows: list[list[tuple[str, str]]]) -> dict:
+    """Build a compact inline keyboard for common bot actions."""
+    return {
+        "inline_keyboard": [
+            [{"text": label, "callback_data": f"action:{action}"} for label, action in row]
+            for row in rows
+        ]
+    }
+
+
+def _project_actions_keyboard() -> dict:
+    return _action_keyboard([
+        [("Current", "current"), ("Sessions", "sessions")],
+        [("Status", "status"), ("Logs", "logs")],
+        [("Restart", "restart"), ("Help", "help")],
+    ])
+
+
+def _session_actions_keyboard() -> dict:
+    return _action_keyboard([
+        [("Current", "current"), ("Sessions", "sessions")],
+        [("Complete", "complete"), ("Clear Session", "clearsession")],
+        [("Status", "status"), ("Logs", "logs")],
+    ])
+
+
+def _busy_actions_keyboard() -> dict:
+    return _action_keyboard([
+        [("Current", "current"), ("Sessions", "sessions")],
+        [("Complete", "complete"), ("Clear Session", "clearsession")],
+    ])
+
+
 def _format_for_telegram(resp: dict) -> str:
     """
     Convert AI chat response dict to Telegram-friendly text.
@@ -228,6 +261,158 @@ def _format_for_telegram(resp: dict) -> str:
 
 # ── Callback query handler (button taps) ────────────────────
 
+def _help_text() -> str:
+    return (
+        "*DreamAgent Bot*\n\n"
+        "Typical flow:\n"
+        "1. `/switch` - choose a project\n"
+        "2. `/sessions` - choose a work session\n"
+        "3. Type naturally, like `make the hero more premium`\n"
+        "4. `/complete` - finish and release the session\n\n"
+        "Fast project controls:\n"
+        "`/current` `/status` `/logs` `/restart` `/start` `/stop`\n\n"
+        "Session controls:\n"
+        "`/newsession Fix navbar` `/clearsession` `/complete`\n\n"
+        "You can also type natural shortcuts like `current`, `sessions`, "
+        "`new session mobile fixes`, `clear session`, or `complete session`."
+    )
+
+
+def _normalize_natural_action(text: str) -> Optional[str]:
+    """Map common natural phrases to deterministic Telegram actions."""
+    value = " ".join((text or "").strip().lower().split())
+    if not value:
+        return None
+
+    aliases = {
+        "help": "help",
+        "menu": "help",
+        "commands": "help",
+        "current": "current",
+        "current project": "current",
+        "current session": "current",
+        "where am i": "current",
+        "sessions": "sessions",
+        "show sessions": "sessions",
+        "list sessions": "sessions",
+        "switch session": "sessions",
+        "select session": "sessions",
+        "clear session": "clearsession",
+        "clear active session": "clearsession",
+        "leave session": "clearsession",
+        "complete": "complete",
+        "complete session": "complete",
+        "finish session": "complete",
+        "release session": "complete",
+        "status": "status",
+        "project status": "status",
+        "logs": "logs",
+        "show logs": "logs",
+        "recent logs": "logs",
+        "restart": "restart",
+        "restart project": "restart",
+        "start": "start",
+        "start project": "start",
+        "stop": "stop",
+        "stop project": "stop",
+        "switch": "switch",
+        "switch project": "switch",
+        "change project": "switch",
+    }
+    if value in aliases:
+        return aliases[value]
+    if value.startswith("new session") or value.startswith("newsession"):
+        return "newsession"
+    return None
+
+
+async def _run_telegram_action(
+    *,
+    chat_id: int,
+    user_id: int,
+    action: str,
+    message_text: str = "",
+    reply_to_message_id: Optional[int] = None,
+) -> None:
+    """Execute a deterministic Telegram action and send the response."""
+    session_key = f"tg_{chat_id}"
+    action = (action or "").strip().lower()
+
+    if action == "help":
+        await send_message(
+            chat_id,
+            _help_text(),
+            reply_to_message_id=reply_to_message_id,
+            reply_markup=_project_actions_keyboard(),
+        )
+        return
+
+    if action == "clearsession":
+        from utils.devops_session_context import get_devops_session_context
+
+        get_devops_session_context().clear_context(user_id, session_key)
+        await send_message(
+            chat_id,
+            "Cleared the selected session. Project selection is unchanged.",
+            reply_to_message_id=reply_to_message_id,
+            reply_markup=_project_actions_keyboard(),
+        )
+        return
+
+    switch_arg = ""
+    if action == "switch":
+        switch_parts = (message_text or "").split(maxsplit=1)
+        if len(switch_parts) == 2 and switch_parts[1].strip().lower() not in {"project", "projects"}:
+            switch_arg = switch_parts[1].strip()
+
+    action_map = {
+        "switch": f"switch to {switch_arg}" if switch_arg else "switch project",
+        "current": "current session",
+        "sessions": "sessions",
+        "complete": "complete session",
+        "status": "status",
+        "logs": "logs",
+        "restart": "restart",
+        "start": "start",
+        "stop": "stop",
+    }
+    if action == "newsession":
+        raw_text = (message_text or "").strip()
+        lower_text = raw_text.lower()
+        if lower_text.startswith("/newsession"):
+            arg = raw_text[len("/newsession"):].strip()
+        elif lower_text.startswith("new session"):
+            arg = raw_text[len("new session"):].strip()
+        elif lower_text.startswith("newsession"):
+            arg = raw_text[len("newsession"):].strip()
+        else:
+            arg = ""
+        mapped_message = f"new session {arg}" if arg else "new session"
+    else:
+        mapped_message = action_map.get(action)
+
+    if not mapped_message:
+        await send_message(chat_id, "I don't recognize that action yet.", reply_to_message_id=reply_to_message_id)
+        return
+
+    await send_chat_action(chat_id, "typing")
+    resp = await process_message(
+        user_id=user_id,
+        message=mapped_message,
+        session_id=session_key,
+        source="telegram",
+    )
+    reply_markup = _build_keyboard(resp)
+    if not reply_markup:
+        reply_markup = _session_actions_keyboard() if action in {"current", "sessions", "complete"} else _project_actions_keyboard()
+    await send_message(
+        chat_id,
+        _format_for_telegram(resp),
+        reply_to_message_id=reply_to_message_id,
+        reply_markup=reply_markup,
+    )
+
+
 async def _handle_callback(callback: dict):
     """Handle inline keyboard button taps."""
     callback_id = callback.get("id", "")
@@ -247,6 +432,20 @@ async def _handle_callback(callback: dict):
         return
     
     # Parse callback data
+    if data.startswith("action:"):
+        action = data[len("action:"):]
+        user_id = _lookup_user_by_chat_id(chat_id)
+        if not user_id:
+            await send_message(chat_id, "Your Telegram is not linked.")
+            return
+        await _run_telegram_action(
+            chat_id=chat_id,
+            user_id=user_id,
+            action=action,
+            reply_to_message_id=message_id,
+        )
+        return
+
     if data.startswith("switch:"):
         project_domain = data[len("switch:"):]
         logger.info(f"[TELEGRAM] Switch button tapped: project_domain={project_domain}")
@@ -278,7 +477,7 @@ async def _handle_callback(callback: dict):
             logger.info(f"[TELEGRAM] process_message returned: type={resp.get('type')}, keys={list(resp.keys())}")
             
             reply_text = _format_for_telegram(resp)
-            reply_markup = _build_keyboard(resp)
+            reply_markup = _build_keyboard(resp) or _project_actions_keyboard()
             
             logger.info(f"[TELEGRAM] Sending reply ({len(reply_text)} chars) to chat_id={chat_id}")
             _sent = await send_message(
@@ -326,7 +525,7 @@ async def _handle_callback(callback: dict):
             await send_message(
                 chat_id,
                 _format_for_telegram(resp),
-                reply_markup=_build_keyboard(resp),
+                reply_markup=_build_keyboard(resp) or _session_actions_keyboard(),
             )
         except Exception as e:
             logger.error(f"[TELEGRAM] !!! Callback session select error: {e}", exc_info=True)
@@ -358,7 +557,7 @@ async def _handle_callback(callback: dict):
         )
         
         reply_text = _format_for_telegram(resp)
-        reply_markup = _build_keyboard(resp)
+        reply_markup = _build_keyboard(resp) or _project_actions_keyboard()
         
         await send_message(
             chat_id, reply_text,
@@ -639,6 +838,7 @@ async def _run_selected_session_chat(
                         f"Current channel: {channel}."
                     ),
                     reply_to_message_id=reply_to_message_id,
+                    reply_markup=_busy_actions_keyboard(),
                 )
                 return
             processing_acquired = True
@@ -823,82 +1023,36 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         return {"ok": True}
     
     if text.startswith("/help"):
-        await send_message(
-            chat_id,
-            "*DreamAgent Bot*\n\n"
-            "- `/switch` - Select or change project\n"
-            "- `/sessions` - Select a project session\n"
-            "- `/newsession LABEL` - Create a project session\n"
-            "- `/clearsession` - Clear selected session\n"
-            "- `/complete` - Release selected session lock\n"
-            "- `/current` - Show active project and session\n"
-            "- `/link CODE` - Link your account\n"
-            "- `/unlink` - Unlink this chat\n"
-            "- `/help` - This help\n\n"
-            "Once a project is selected, just type naturally:\n"
-            "`status` | `start` | `stop` | `restart` | `logs`",
-            reply_to_message_id=message_id,
-        )
+        await send_message(chat_id, _help_text(), reply_to_message_id=message_id, reply_markup=_project_actions_keyboard())
         return {"ok": True}
 
     # Session commands.
-    if text.startswith("/sessions") or text.startswith("/newsession") or text.startswith("/clearsession") or text.startswith("/complete"):
+    _COMMAND_ACTIONS = {
+        "/switch": "switch",
+        "/current": "current",
+        "/sessions": "sessions",
+        "/newsession": "newsession",
+        "/clearsession": "clearsession",
+        "/complete": "complete",
+        "/status": "status",
+        "/logs": "logs",
+        "/restart": "restart",
+        "/start": "start",
+        "/stop": "stop",
+    }
+    _command_name = text.split(maxsplit=1)[0].lower() if text.startswith("/") else ""
+    if _command_name in _COMMAND_ACTIONS:
         user_id = _lookup_user_by_chat_id(chat_id)
         if not user_id:
             await send_message(chat_id, "Not linked. Send `/link CODE` first.", reply_to_message_id=message_id)
             return {"ok": True}
 
-        command, *rest = text.split(maxsplit=1)
-        arg = rest[0].strip() if rest else ""
-        if command == "/clearsession":
-            from utils.devops_session_context import get_devops_session_context
-            get_devops_session_context().clear_context(user_id, f"tg_{chat_id}")
-            await send_message(
-                chat_id,
-                "Cleared the selected session context. Project selection is unchanged.",
-                reply_to_message_id=message_id,
-            )
-            return {"ok": True}
-
-        command_map = {
-            "/sessions": "sessions",
-            "/newsession": f"new session {arg}" if arg else "new session",
-            "/clearsession": "clear session",
-            "/complete": "complete session",
-        }
-        await send_chat_action(chat_id, "typing")
-        resp = await process_message(
+        await _run_telegram_action(
+            chat_id=chat_id,
             user_id=user_id,
-            message=command_map[command],
-            session_id=f"tg_{chat_id}",
-            source="telegram",
-        )
-        await send_message(
-            chat_id,
-            _format_for_telegram(resp),
+            action=_COMMAND_ACTIONS[_command_name],
+            message_text=text,
             reply_to_message_id=message_id,
-            reply_markup=_build_keyboard(resp),
-        )
-        return {"ok": True}
-
-    if text.startswith("/current"):
-        user_id = _lookup_user_by_chat_id(chat_id)
-        if not user_id:
-            await send_message(chat_id, "Not linked. Send `/link CODE` first.", reply_to_message_id=message_id)
-            return {"ok": True}
-
-        await send_chat_action(chat_id, "typing")
-        resp = await process_message(
-            user_id=user_id,
-            message="current session",
-            session_id=f"tg_{chat_id}",
-            source="telegram",
-        )
-        await send_message(
-            chat_id,
-            _format_for_telegram(resp),
-            reply_to_message_id=message_id,
-            reply_markup=_build_keyboard(resp),
         )
         return {"ok": True}
     # ── Normalize slash commands to natural language ───────
@@ -934,6 +1088,17 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
     # Use per-Telegram-user session
     session_id = f"tg_{chat_id}"
 
+    natural_action = _normalize_natural_action(text)
+    if natural_action:
+        await _run_telegram_action(
+            chat_id=chat_id,
+            user_id=user_id,
+            action=natural_action,
+            message_text=text,
+            reply_to_message_id=message_id,
+        )
+        return {"ok": True}
+
     selected_session = _get_selected_project_session(user_id, session_id)
     original_command = original_text.split(maxsplit=1)[0].lower() if original_text.startswith("/") else ""
     if selected_session and original_command not in {"/switch", "/sessions", "/newsession", "/clearsession", "/complete", "/current", "/help", "/link", "/unlink", "/start"}:
@@ -949,6 +1114,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
                     f"Current channel: {channel}."
                 ),
                 reply_to_message_id=message_id,
+                reply_markup=_busy_actions_keyboard(),
             )
             return {"ok": True}
 
@@ -956,6 +1122,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
             chat_id,
             f"Continuing in `{session_label}`. I will reply here when the session finishes this step.",
             reply_to_message_id=message_id,
+            reply_markup=_busy_actions_keyboard(),
         )
         asyncio.create_task(_run_selected_session_chat(
             chat_id=chat_id,
@@ -980,7 +1147,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         )
         
         reply_text = _format_for_telegram(resp)
-        reply_markup = _build_keyboard(resp)
+        reply_markup = _build_keyboard(resp) or _project_actions_keyboard()
         
         # Telegram has a 4096 char limit per message
         if len(reply_text) > 4000:

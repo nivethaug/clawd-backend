@@ -203,6 +203,24 @@ BOT_COMMANDS = [
 ]
 
 
+DEFAULT_BOT_COMMANDS = [
+    {"command": "switch", "description": "Choose or change project"},
+    {"command": "current", "description": "Show active project and session"},
+    {"command": "sessions", "description": "Choose a project session"},
+    {"command": "newsession", "description": "Create and select a session"},
+    {"command": "complete", "description": "Complete and release session"},
+    {"command": "clearsession", "description": "Leave selected session"},
+    {"command": "status", "description": "Check project status"},
+    {"command": "logs", "description": "Show recent logs"},
+    {"command": "restart", "description": "Restart active project"},
+    {"command": "start", "description": "Start active project"},
+    {"command": "stop", "description": "Stop active project"},
+    {"command": "link", "description": "Link your account"},
+    {"command": "unlink", "description": "Unlink this chat"},
+    {"command": "help", "description": "How to use DreamAgent Bot"},
+]
+
+
 async def set_my_commands() -> dict:
     """Register the bot command menu (shows when user types /)."""
     if not BOT_TOKEN:
@@ -212,7 +230,7 @@ async def set_my_commands() -> dict:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 f"{API_BASE}/setMyCommands",
-                json={"commands": BOT_COMMANDS},
+                json={"commands": DEFAULT_BOT_COMMANDS},
             )
             return resp.json()
     except Exception as e:
