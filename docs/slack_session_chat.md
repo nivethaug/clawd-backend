@@ -33,7 +33,13 @@ The events endpoint supports Slack `url_verification` and app-DM message events.
 
 ## Commands
 
-Slack uses one slash command: `/dreamagent`.
+Slack uses one primary slash command: `/dreamagent`.
+
+Optional shortcut command:
+
+| Command | Request URL | Behavior |
+| --- | --- | --- |
+| `/dream-switch` | `/bot/slack/commands` | Opens project selection directly, equivalent to `/dreamagent switch`. |
 
 | Command | Behavior |
 | --- | --- |

@@ -247,6 +247,14 @@ def _normalize_slash_text(text: str) -> tuple[str, str]:
     return action, f"/{action}" if not arg else f"/{action} {arg}"
 
 
+def _normalize_slack_command(command: str, text: str) -> tuple[str, str]:
+    command = (command or "").strip().lower()
+    if command == "/dream-switch":
+        target = (text or "").strip()
+        return "switch", f"/switch {target}" if target else "/switch"
+    return _normalize_slash_text(text)
+
+
 def _normalize_natural_action(text: str) -> Optional[str]:
     value = (text or "").strip().lower()
     aliases = {
@@ -460,7 +468,7 @@ async def slack_commands(
     team_id = form.get("team_id", "")
     slack_user_id = form.get("user_id", "")
     response_url = form.get("response_url", "")
-    action, message_text = _normalize_slash_text(form.get("text", ""))
+    action, message_text = _normalize_slack_command(form.get("command", ""), form.get("text", ""))
 
     if action == "help":
         return {"response_type": "ephemeral", "text": _help_text(), "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": _help_text()}}, *action_blocks()]}
