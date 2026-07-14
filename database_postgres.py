@@ -265,12 +265,30 @@ def init_schema():
                 cur.execute("ALTER TABLE users ADD COLUMN discord_link_expires_at TIMESTAMP")
             _run_migration(migrate_discord_link_expires)
 
+            # Slack control bot account linking columns
+            def migrate_slack_user_id():
+                cur.execute("ALTER TABLE users ADD COLUMN slack_user_id VARCHAR(32)")
+            _run_migration(migrate_slack_user_id)
+
+            def migrate_slack_team_id():
+                cur.execute("ALTER TABLE users ADD COLUMN slack_team_id VARCHAR(32)")
+            _run_migration(migrate_slack_team_id)
+
+            def migrate_slack_link_code():
+                cur.execute("ALTER TABLE users ADD COLUMN slack_link_code VARCHAR(6)")
+            _run_migration(migrate_slack_link_code)
+
+            def migrate_slack_link_expires():
+                cur.execute("ALTER TABLE users ADD COLUMN slack_link_expires_at TIMESTAMP")
+            _run_migration(migrate_slack_link_expires)
+
             try:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_users_slack_identity ON users(slack_team_id, slack_user_id)")
                 conn.commit()
             except Exception as e:
                 conn.rollback()
-                logger.debug(f"Discord user index migration skipped: {e}")
+                logger.debug(f"Bot user index migration skipped: {e}")
 
             # Ensure existing users have correct defaults
             try:

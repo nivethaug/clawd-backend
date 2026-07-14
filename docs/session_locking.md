@@ -13,12 +13,14 @@ Session locking prevents concurrent AI edits against the same project. A project
 | `services/session_lock_service.py` | Acquire/release project locks and per-session processing flags |
 | `app.py` | Lock endpoints, web chat lock enforcement, cancel/status processing cleanup |
 | `api/telegram_webhook.py` | Telegram selected-session lock and processing enforcement |
+| `api/discord_webhook.py` | Discord selected-session lock and processing enforcement |
+| `api/slack_webhook.py` | Slack selected-session lock and processing enforcement |
 
 ## Enforcement Points
 
-Both `/chat` and `/chat/stream` acquire a lock before running ACP/code-edit work. Telegram selected-session chat also uses the same lock service before routing a message into `acp_chat_handler.py`.
+Both `/chat` and `/chat/stream` acquire a lock before running ACP/code-edit work. Telegram, Discord, and Slack selected-session chat also use the same lock service before routing a message into `acp_chat_handler.py`.
 
-If another session holds the project lock, web routes return `423`. Telegram returns a user-facing message that names the active lock holder and asks the user to complete/release that session first.
+If another session holds the project lock, web routes return `423`. Telegram, Discord, and Slack return a user-facing message that names the active lock holder and asks the user to complete/release that session first.
 
 Example:
 
@@ -41,16 +43,16 @@ The project lock is intentionally re-entrant for the same session, because users
 | --- | --- |
 | `processing` | Whether a message is currently running for the session |
 | `processing_started_at` | Start time used for stale recovery |
-| `processing_channel` | `webchat`, `telegram`, or another caller label |
+| `processing_channel` | `webchat`, `telegram`, `discord`, `slack`, or another caller label |
 
-Web ACP chat returns `409 session_message_in_progress` when the same session is already processing. Telegram replies with a "Still working..." message and action buttons instead of starting another background task.
+Web ACP chat returns `409 session_message_in_progress` when the same session is already processing. Telegram, Discord, and Slack reply with a "Still working..." message and action buttons instead of starting another background task.
 
 The processing flag is cleared when:
 
 - web streaming completes normally
 - web background save completes after disconnect
 - web Stop/cancel is called
-- Telegram selected-session chat finishes
+- Telegram, Discord, or Slack selected-session chat finishes
 - the flag is detected as stale by `SessionLockService.acquire_processing()`
 
 ## Endpoints
@@ -67,14 +69,14 @@ All endpoints require auth and validate project/session ownership.
 
 Deleting a session releases the lock if that session holds it.
 
-## Telegram Behavior
+## External Bot Behavior
 
-Telegram session chat follows the same one-active-edit-session rule:
+Telegram, Discord, and Slack session chat follow the same one-active-edit-session rule:
 
-- Selecting or creating a Telegram project session is blocked when another session owns the project lock.
+- Selecting or creating a project session is blocked when another session owns the project lock.
 - Selecting the session that already owns the lock is allowed.
-- Sending another Telegram message while the same session is processing is blocked by the per-session processing guard.
-- `/clearsession` clears Telegram context only and does not release the lock.
+- Sending another message while the same session is processing is blocked by the per-session processing guard.
+- `/clearsession` clears bot context only and does not release the lock.
 - `/complete` releases the selected session lock through `SessionLockService`.
 - Switching the active project clears the selected session context.
 
@@ -84,3 +86,5 @@ Telegram session chat follows the same one-active-edit-session rule:
 - [chat_stream.md](./chat_stream.md)
 - [project_sessions.md](./project_sessions.md)
 - [telegram_session_chat.md](./telegram_session_chat.md)
+- [discord_session_chat.md](./discord_session_chat.md)
+- [slack_session_chat.md](./slack_session_chat.md)

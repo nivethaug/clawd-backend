@@ -1,6 +1,6 @@
 """
 Bot Account Linking API
-Endpoints for generating link codes and checking Telegram connection status.
+Endpoints for generating shared link codes and checking bot connection status.
 """
 
 import secrets
@@ -31,6 +31,8 @@ class LinkStatusResponse(BaseModel):
     linked: bool
     telegram_chat_id: Optional[int] = None
     discord_user_id: Optional[str] = None
+    slack_user_id: Optional[str] = None
+    slack_team_id: Optional[str] = None
 
 
 # ── Helpers ─────────────────────────────────────────────────
@@ -50,7 +52,7 @@ def _generate_code() -> str:
 async def generate_link_code(authorization: Optional[str] = Header(None)):
     """
     Generate a one-time code to link the user's bot account.
-    The user can send '/link {code}' to Telegram or Discord within 10 minutes.
+    The user can send the code to Telegram, Discord, or Slack within 10 minutes.
     """
     user_id = get_user_id_from_token(authorization)
 
@@ -66,9 +68,11 @@ async def generate_link_code(authorization: Optional[str] = Header(None)):
                SET telegram_link_code = %s,
                    telegram_link_expires_at = %s,
                    discord_link_code = %s,
-                   discord_link_expires_at = %s
+                   discord_link_expires_at = %s,
+                   slack_link_code = %s,
+                   slack_link_expires_at = %s
                WHERE id = %s""",
-            (code, expires_at, code, expires_at, user_id)
+            (code, expires_at, code, expires_at, code, expires_at, user_id)
         )
         conn.commit()
 
@@ -88,18 +92,26 @@ async def get_link_status(authorization: Optional[str] = Header(None)):
 
     with get_db() as conn:
         row = conn.execute(
-            "SELECT telegram_chat_id, discord_user_id FROM users WHERE id = %s",
+            "SELECT telegram_chat_id, discord_user_id, slack_user_id, slack_team_id FROM users WHERE id = %s",
             (user_id,)
         ).fetchone()
 
-    if row and (row.get("telegram_chat_id") or row.get("discord_user_id")):
+    if row and (row.get("telegram_chat_id") or row.get("discord_user_id") or row.get("slack_user_id")):
         return LinkStatusResponse(
             linked=True,
             telegram_chat_id=row.get("telegram_chat_id"),
             discord_user_id=row.get("discord_user_id"),
+            slack_user_id=row.get("slack_user_id"),
+            slack_team_id=row.get("slack_team_id"),
         )
 
-    return LinkStatusResponse(linked=False, discord_user_id=row.get("discord_user_id") if row else None)
+    return LinkStatusResponse(
+        linked=False,
+        telegram_chat_id=row.get("telegram_chat_id") if row else None,
+        discord_user_id=row.get("discord_user_id") if row else None,
+        slack_user_id=row.get("slack_user_id") if row else None,
+        slack_team_id=row.get("slack_team_id") if row else None,
+    )
 
 
 @router.delete("/link")
@@ -140,3 +152,24 @@ async def unlink_discord(authorization: Optional[str] = Header(None)):
 
     logger.info(f"[BOT-LINK] Unlinked Discord for user {user_id}")
     return {"message": "Discord account unlinked successfully"}
+
+
+@router.delete("/slack-link")
+async def unlink_slack(authorization: Optional[str] = Header(None)):
+    """Unlink the user's Slack account."""
+    user_id = get_user_id_from_token(authorization)
+
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE users
+               SET slack_user_id = NULL,
+                   slack_team_id = NULL,
+                   slack_link_code = NULL,
+                   slack_link_expires_at = NULL
+               WHERE id = %s""",
+            (user_id,),
+        )
+        conn.commit()
+
+    logger.info(f"[BOT-LINK] Unlinked Slack for user {user_id}")
+    return {"message": "Slack account unlinked successfully"}
