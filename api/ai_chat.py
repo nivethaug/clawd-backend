@@ -260,15 +260,19 @@ async def process_message(
         session_manager = get_session_manager()
         session = await session_manager.get_or_create_session(session_id)
         
-        # 2. Load all projects from DB
+        # 2. Load projects owned by the authenticated/linked account.
+        # Bot transports pass the DreamAgent user_id resolved from the linked
+        # Telegram/Discord/Slack account, so project selection must be scoped
+        # to that user instead of all rows in the database.
         with get_db() as conn:
             result = conn.execute("""
                 SELECT p.*, pt.display_name as type_name, pt.type as type_slug
                 FROM projects p
                 LEFT JOIN project_types pt ON p.type_id = pt.id
                 WHERE p.status != %s
+                  AND p.user_id = %s
                 ORDER BY p.created_at DESC
-            """, ("deleted",)).fetchall()
+            """, ("deleted", user_id)).fetchall()
             
             projects = [dict(row) for row in result]
         
@@ -1081,7 +1085,8 @@ async def get_active_project(
                 FROM projects p
                 LEFT JOIN project_types pt ON p.type_id = pt.id
                 WHERE p.domain = %s
-            """, (project,)).fetchone()
+                  AND p.user_id = %s
+            """, (project, user_id)).fetchone()
             if row:
                 project_type = row["type_slug"]
 

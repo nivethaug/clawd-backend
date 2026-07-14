@@ -85,33 +85,33 @@ class ToolExecutor:
         # 4. Execute safe tool
         try:
             if tool_name == "start_project":
-                return await self._execute_start_project(args)
+                return await self._execute_start_project(args, user_id=user_id)
             elif tool_name == "stop_project":
-                return await self._execute_stop_project(args)
+                return await self._execute_stop_project(args, user_id=user_id)
             elif tool_name == "restart_project":
-                return await self._execute_restart_project(args)
+                return await self._execute_restart_project(args, user_id=user_id)
             elif tool_name == "list_projects":
-                return await self._execute_list_projects(args)
+                return await self._execute_list_projects(args, user_id=user_id)
             elif tool_name == "project_status":
-                return await self._execute_project_status(args)
+                return await self._execute_project_status(args, user_id=user_id)
             elif tool_name == "get_logs":
-                return await self._execute_get_logs(args)
+                return await self._execute_get_logs(args, user_id=user_id)
             elif tool_name == "delete_project":
-                return await self._execute_delete_project(args)
+                return await self._execute_delete_project(args, user_id=user_id)
             elif tool_name == "start_all_projects":
-                return await self._execute_start_all_projects(args)
+                return await self._execute_start_all_projects(args, user_id=user_id)
             elif tool_name == "stop_all_projects":
-                return await self._execute_stop_all_projects(args)
+                return await self._execute_stop_all_projects(args, user_id=user_id)
             elif tool_name == "remove_all_projects":
-                return await self._execute_remove_all_projects(args)
+                return await self._execute_remove_all_projects(args, user_id=user_id)
             elif tool_name == "set_active_project":
                 return await self._execute_set_active_project(args, session_key, user_id=user_id)
             elif tool_name == "clear_active_project":
                 return await self._execute_clear_active_project(args, session_key, user_id=user_id)
             elif tool_name == "get_active_project":
-                return await self._execute_get_active_project(args, session_key)
+                return await self._execute_get_active_project(args, session_key, user_id=user_id)
             elif tool_name == "get_project_info":
-                return await self._execute_get_project_info(args, session_key)
+                return await self._execute_get_project_info(args, session_key, user_id=user_id)
             elif tool_name == "list_project_sessions":
                 return await self._execute_list_project_sessions(args, session_key, user_id)
             elif tool_name == "create_project_session":
@@ -125,25 +125,25 @@ class ToolExecutor:
             elif tool_name == "release_active_project_session":
                 return await self._execute_release_active_project_session(args, session_key, user_id)
             elif tool_name == "scheduler_list_jobs":
-                return await self._execute_scheduler_list_jobs(args, session_key)
+                return await self._execute_scheduler_list_jobs(args, session_key, user_id=user_id)
             elif tool_name == "scheduler_get_job":
-                return await self._execute_scheduler_get_job(args)
+                return await self._execute_scheduler_get_job(args, user_id=user_id)
             elif tool_name == "scheduler_create_job":
-                return await self._execute_scheduler_create_job(args, session_key)
+                return await self._execute_scheduler_create_job(args, session_key, user_id=user_id)
             elif tool_name == "scheduler_update_job":
-                return await self._execute_scheduler_update_job(args)
+                return await self._execute_scheduler_update_job(args, user_id=user_id)
             elif tool_name == "scheduler_pause_job":
-                return await self._execute_scheduler_pause_job(args)
+                return await self._execute_scheduler_pause_job(args, user_id=user_id)
             elif tool_name == "scheduler_resume_job":
-                return await self._execute_scheduler_resume_job(args)
+                return await self._execute_scheduler_resume_job(args, user_id=user_id)
             elif tool_name == "scheduler_run_job":
-                return await self._execute_scheduler_run_job(args)
+                return await self._execute_scheduler_run_job(args, user_id=user_id)
             elif tool_name == "scheduler_job_logs":
-                return await self._execute_scheduler_job_logs(args)
+                return await self._execute_scheduler_job_logs(args, user_id=user_id)
             elif tool_name == "scheduler_delete_job":
-                return await self._execute_scheduler_delete_job(args)
+                return await self._execute_scheduler_delete_job(args, user_id=user_id)
             elif tool_name == "scheduler_clear_jobs":
-                return await self._execute_scheduler_clear_jobs(args, session_key)
+                return await self._execute_scheduler_clear_jobs(args, session_key, user_id=user_id)
             else:
                 return {
                     "status": "error",
@@ -155,15 +155,66 @@ class ToolExecutor:
                 "status": "error",
                 "message": f"Error executing tool: {str(e)}"
             }
+
+    def _normalize_project_id(self, project_id: Any) -> str:
+        value = str(project_id or "").strip()
+        return value.split(".")[0] if "." in value else value
+
+    def _resolve_accessible_project(self, project_id: Any, user_id: Optional[int] = None, include_type: bool = False) -> Optional[Dict[str, Any]]:
+        domain = self._normalize_project_id(project_id)
+        if not domain:
+            return None
+
+        select_type = ", pt.display_name as type_name" if include_type else ""
+        join_type = "LEFT JOIN project_types pt ON p.type_id = pt.id" if include_type else ""
+        owner_filter = "AND p.user_id = %s" if user_id is not None else ""
+
+        with get_db() as conn:
+            params = [domain, "deleted"]
+            if user_id is not None:
+                params.append(user_id)
+            result = conn.execute(
+                f"""
+                SELECT p.*{select_type}
+                FROM projects p
+                {join_type}
+                WHERE p.domain = %s
+                  AND p.status != %s
+                  {owner_filter}
+                LIMIT 1
+                """,
+                tuple(params),
+            ).fetchone()
+
+            if not result and domain.isdigit():
+                params = [int(domain), "deleted"]
+                if user_id is not None:
+                    params.append(user_id)
+                result = conn.execute(
+                    f"""
+                    SELECT p.*{select_type}
+                    FROM projects p
+                    {join_type}
+                    WHERE p.id = %s
+                      AND p.status != %s
+                      {owner_filter}
+                    LIMIT 1
+                    """,
+                    tuple(params),
+                ).fetchone()
+
+        return dict(result) if result else None
     
-    async def _execute_start_project(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_start_project(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Start PM2 services for a project (uses restart for robustness)."""
         project_id = args.get("project_id")
         if not project_id:
             return {"status": "error", "message": "Missing project_id"}
         
-        # Extract domain (remove full domain if provided)
-        domain = project_id.split(".")[0] if "." in project_id else project_id
+        project = self._resolve_accessible_project(project_id, user_id=user_id)
+        if not project:
+            return {"status": "error", "message": f"Project '{project_id}' not found or not accessible"}
+        domain = project["domain"]
         
         # Use restart instead of start - works whether process is running or stopped
         result = pm2_action(domain, "restart")
@@ -181,13 +232,16 @@ class ToolExecutor:
                 "result": result
             }
     
-    async def _execute_stop_project(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_stop_project(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Stop PM2 services for a project."""
         project_id = args.get("project_id")
         if not project_id:
             return {"status": "error", "message": "Missing project_id"}
         
-        domain = project_id.split(".")[0] if "." in project_id else project_id
+        project = self._resolve_accessible_project(project_id, user_id=user_id)
+        if not project:
+            return {"status": "error", "message": f"Project '{project_id}' not found or not accessible"}
+        domain = project["domain"]
         
         result = pm2_action(domain, "stop")
         
@@ -204,13 +258,16 @@ class ToolExecutor:
                 "result": result
             }
     
-    async def _execute_restart_project(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_restart_project(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Restart PM2 services for a project."""
         project_id = args.get("project_id")
         if not project_id:
             return {"status": "error", "message": "Missing project_id"}
         
-        domain = project_id.split(".")[0] if "." in project_id else project_id
+        project = self._resolve_accessible_project(project_id, user_id=user_id)
+        if not project:
+            return {"status": "error", "message": f"Project '{project_id}' not found or not accessible"}
+        domain = project["domain"]
         
         result = pm2_action(domain, "restart")
         
@@ -227,17 +284,22 @@ class ToolExecutor:
                 "result": result
             }
     
-    async def _execute_list_projects(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """List all active projects."""
+    async def _execute_list_projects(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
+        """List active projects for the linked/authenticated user."""
+        owner_filter = "AND p.user_id = %s" if user_id is not None else ""
+        params = ["deleted"]
+        if user_id is not None:
+            params.append(user_id)
         with get_db() as conn:
-            result = conn.execute("""
+            result = conn.execute(f"""
                 SELECT p.id, p.name, p.domain, p.status, p.created_at,
                        pt.display_name as type_name
                 FROM projects p
                 LEFT JOIN project_types pt ON p.type_id = pt.id
                 WHERE p.status != %s
+                  {owner_filter}
                 ORDER BY p.created_at DESC
-            """, ("deleted",)).fetchall()
+            """, tuple(params)).fetchall()
             
             projects = [dict(row) for row in result]
             
@@ -247,67 +309,46 @@ class ToolExecutor:
                 "result": {"projects": projects}
             }
     
-    async def _execute_project_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_project_status(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Get detailed status of a project."""
         project_id = args.get("project_id")
         if not project_id:
             return {"status": "error", "message": "Missing project_id"}
         
-        with get_db() as conn:
-            # Get project from DB - try domain first, then numeric ID if applicable
-            result = conn.execute("""
-                SELECT p.*, pt.display_name as type_name
-                FROM projects p
-                LEFT JOIN project_types pt ON p.type_id = pt.id
-                WHERE p.domain = %s
-                LIMIT 1
-            """, (project_id,)).fetchone()
-            
-            # Fallback: try numeric ID if domain not found and input is numeric
-            if not result and project_id.isdigit():
-                result = conn.execute("""
-                    SELECT p.*, pt.display_name as type_name
-                    FROM projects p
-                    LEFT JOIN project_types pt ON p.type_id = pt.id
-                    WHERE p.id = %s
-                    LIMIT 1
-                """, (int(project_id),)).fetchone()
-            
-            if not result:
-                return {
-                    "status": "error",
-                    "message": f"Project '{project_id}' not found"
-                }
-            
-            project = dict(result)
-            domain = project["domain"]
-            
-            # Get PM2 status
-            pm2_processes = get_pm2_processes()
-            running = pm2_processes.get("running", [])
-            
-            frontend_status = "stopped"
-            backend_status = "stopped"
-            
-            for proc in running:
-                if proc.get("name") == f"{domain}-frontend":
-                    frontend_status = "running"
-                elif proc.get("name") == f"{domain}-backend":
-                    backend_status = "running"
-            
+        project = self._resolve_accessible_project(project_id, user_id=user_id, include_type=True)
+        if not project:
             return {
-                "status": "success",
-                "message": f"Status for project: {project['name']}",
-                "result": {
-                    "project": project,
-                    "services": {
-                        "frontend": frontend_status,
-                        "backend": backend_status
-                    }
+                "status": "error",
+                "message": f"Project '{project_id}' not found or not accessible"
+            }
+        domain = project["domain"]
+
+        # Get PM2 status
+        pm2_processes = get_pm2_processes()
+        running = pm2_processes.get("running", [])
+
+        frontend_status = "stopped"
+        backend_status = "stopped"
+
+        for proc in running:
+            if proc.get("name") == f"{domain}-frontend":
+                frontend_status = "running"
+            elif proc.get("name") == f"{domain}-backend":
+                backend_status = "running"
+
+        return {
+            "status": "success",
+            "message": f"Status for project: {project['name']}",
+            "result": {
+                "project": project,
+                "services": {
+                    "frontend": frontend_status,
+                    "backend": backend_status
                 }
             }
+        }
     
-    async def _execute_get_logs(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_get_logs(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Get PM2 logs for a project by reading log files directly."""
         project_id = args.get("project_id")
         lines = args.get("lines", 50)
@@ -315,7 +356,10 @@ class ToolExecutor:
         if not project_id:
             return {"status": "error", "message": "Missing project_id"}
         
-        domain = project_id.split(".")[0] if "." in project_id else project_id
+        project = self._resolve_accessible_project(project_id, user_id=user_id)
+        if not project:
+            return {"status": "error", "message": f"Project '{project_id}' not found or not accessible"}
+        domain = project["domain"]
         
         logs = {"frontend": {"out": "", "error": ""}, "backend": {"out": "", "error": ""}}
         
@@ -421,38 +465,22 @@ class ToolExecutor:
             }
         }
     
-    async def _execute_delete_project(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_delete_project(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Delete a project (soft delete)."""
         project_id = args.get("project_id")
         if not project_id:
             return {"status": "error", "message": "Missing project_id"}
         
-        domain = project_id.split(".")[0] if "." in project_id else project_id
+        project = self._resolve_accessible_project(project_id, user_id=user_id)
+        if not project:
+            return {"status": "error", "message": f"Project '{project_id}' not found or not accessible"}
+        domain = project["domain"]
         
         with get_db() as conn:
-            # Check if project exists - try domain first
-            result = conn.execute(
-                "SELECT id, name, domain FROM projects WHERE domain = %s",
-                (domain,)
-            ).fetchone()
-            
-            # Fallback: try numeric ID if domain not found and input is numeric
-            if not result and domain.isdigit():
-                result = conn.execute(
-                    "SELECT id, name, domain FROM projects WHERE id = %s",
-                    (int(domain),)
-                ).fetchone()
-            
-            if not result:
-                return {
-                    "status": "error",
-                    "message": f"Project '{project_id}' not found"
-                }
-            
             # Soft delete
             conn.execute(
                 "UPDATE projects SET status = 'deleted' WHERE id = %s",
-                (result["id"],)
+                (project["id"],)
             )
             
             # Stop PM2 services if running
@@ -460,15 +488,18 @@ class ToolExecutor:
             
             return {
                 "status": "success",
-                "message": f"Deleted project: {result['name']}",
-                "result": {"project_id": result["id"]}
+                "message": f"Deleted project: {project['name']}",
+                "result": {"project_id": project["id"]}
             }
     
-    async def _execute_start_all_projects(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Start all projects."""
+    async def _execute_start_all_projects(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Start all projects owned by the linked/authenticated user."""
+        owner_filter = "AND user_id = %s" if user_id is not None else ""
+        params = [user_id] if user_id is not None else []
         with get_db() as conn:
             result = conn.execute(
-                "SELECT domain FROM projects WHERE status != 'deleted'"
+                f"SELECT domain FROM projects WHERE status != 'deleted' {owner_filter}",
+                tuple(params),
             ).fetchall()
             
             domains = [row["domain"] for row in result]
@@ -495,11 +526,14 @@ class ToolExecutor:
                 }
             }
     
-    async def _execute_stop_all_projects(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Stop all projects."""
+    async def _execute_stop_all_projects(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Stop all projects owned by the linked/authenticated user."""
+        owner_filter = "AND user_id = %s" if user_id is not None else ""
+        params = [user_id] if user_id is not None else []
         with get_db() as conn:
             result = conn.execute(
-                "SELECT domain FROM projects WHERE status != 'deleted'"
+                f"SELECT domain FROM projects WHERE status != 'deleted' {owner_filter}",
+                tuple(params),
             ).fetchall()
             
             domains = [row["domain"] for row in result]
@@ -526,11 +560,14 @@ class ToolExecutor:
                 }
             }
     
-    async def _execute_remove_all_projects(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove all projects (soft delete)."""
+    async def _execute_remove_all_projects(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Remove all projects owned by the linked/authenticated user."""
+        owner_filter = "AND user_id = %s" if user_id is not None else ""
+        params = [user_id] if user_id is not None else []
         with get_db() as conn:
             result = conn.execute(
-                "SELECT id, domain FROM projects WHERE status != 'deleted'"
+                f"SELECT id, domain FROM projects WHERE status != 'deleted' {owner_filter}",
+                tuple(params),
             ).fetchall()
             
             removed = []
@@ -581,30 +618,12 @@ class ToolExecutor:
         if not session_key:
             return {"status": "error", "message": "Missing session context"}
         
-        # Resolve project from DB
-        domain = project_id.split(".")[0] if "." in project_id else project_id
-        
-        # Try domain first, then numeric ID if applicable
-        with get_db() as conn:
-            result = conn.execute(
-                "SELECT id, name, domain FROM projects WHERE domain = %s",
-                (domain,)
-            ).fetchone()
-            
-            # Fallback: try numeric ID if domain not found and input is numeric
-            if not result and domain.isdigit():
-                result = conn.execute(
-                    "SELECT id, name, domain FROM projects WHERE id = %s",
-                    (int(domain),)
-                ).fetchone()
-            
-            if not result:
-                return {
-                    "status": "error",
-                    "message": f"Project '{project_id}' not found"
-                }
-            
-            project = dict(result)
+        project = self._resolve_accessible_project(project_id, user_id=user_id)
+        if not project:
+            return {
+                "status": "error",
+                "message": f"Project '{project_id}' not found or not accessible"
+            }
         
         # Update session (store domain, not numeric ID)
         session_manager = get_session_manager()
@@ -660,7 +679,8 @@ class ToolExecutor:
     async def _execute_get_active_project(
         self,
         args: Dict[str, Any],
-        session_key: str = None
+        session_key: str = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Get active project for session.
@@ -672,8 +692,7 @@ class ToolExecutor:
         if not session_key:
             return {"status": "error", "message": "Missing session context"}
         
-        session_manager = get_session_manager()
-        project = await session_manager.get_active_project(session_key)
+        project = await self._get_active_project_for_session(session_key, user_id)
         
         if not project:
             return {
@@ -705,7 +724,14 @@ class ToolExecutor:
         session_manager = get_session_manager()
         active_project = await session_manager.get_active_project(session_key)
         if active_project:
-            return active_project
+            if user_id is None or int(active_project.get("user_id") or 0) == int(user_id):
+                return active_project
+            await session_manager.clear_active_project(session_key)
+            logger.info(
+                "[TOOL] Cleared stale active project %s for session %s after user scope mismatch",
+                active_project.get("domain"),
+                session_key,
+            )
 
         if not user_id:
             return None
@@ -935,7 +961,8 @@ class ToolExecutor:
     async def _execute_get_project_info(
         self,
         args: Dict[str, Any],
-        session_key: str = None
+        session_key: str = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Get detailed information about a project.
@@ -950,8 +977,7 @@ class ToolExecutor:
         
         # Fallback to active project if not provided
         if not project_id and session_key:
-            session_manager = get_session_manager()
-            active_project = await session_manager.get_active_project(session_key)
+            active_project = await self._get_active_project_for_session(session_key, user_id)
             if active_project:
                 project_id = active_project.get("domain")
         
@@ -961,26 +987,13 @@ class ToolExecutor:
                 "message": "No project selected. Please specify a project or set an active project first."
             }
         
-        # Extract domain (remove full domain if provided)
-        domain = project_id.split(".")[0] if "." in project_id else project_id
-        
-        # Query project by domain ONLY (no numeric ID support)
-        with get_db() as conn:
-            result = conn.execute("""
-                SELECT p.*, pt.display_name as type_name, pt.type as type_slug
-                FROM projects p
-                LEFT JOIN project_types pt ON p.type_id = pt.id
-                WHERE p.domain = %s
-                LIMIT 1
-            """, (domain,)).fetchone()
-            
-            if not result:
-                return {
-                    "status": "error",
-                    "message": f"Project '{domain}' not found"
-                }
-            
-            project = dict(result)
+        project = self._resolve_accessible_project(project_id, user_id=user_id, include_type=True)
+        if not project:
+            return {
+                "status": "error",
+                "message": f"Project '{project_id}' not found or not accessible"
+            }
+        domain = project["domain"]
         
         # Get PM2 status for additional context
         pm2_processes = get_pm2_processes()
@@ -1058,48 +1071,49 @@ class ToolExecutor:
     # Scheduler Job Tools
     # ================================================================
 
-    def _resolve_project_to_id(self, project_id: str, session_key: str = None) -> Optional[int]:
+    def _resolve_project_to_id(self, project_id: str, session_key: str = None, user_id: Optional[int] = None) -> Optional[int]:
         """Resolve project domain or string ID to numeric database ID."""
         domain = project_id.split(".")[0] if "." in project_id else project_id
+        project = self._resolve_accessible_project(domain, user_id=user_id)
+        return int(project["id"]) if project else None
 
+    def _resolve_scheduler_job(self, job_id: Any, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        if not job_id:
+            return None
         with get_db() as conn:
-            # Try domain first
-            result = conn.execute(
-                "SELECT id FROM projects WHERE domain = %s",
-                (domain,)
+            owner_filter = "AND p.user_id = %s" if user_id is not None else ""
+            params = [int(job_id)]
+            if user_id is not None:
+                params.append(user_id)
+            row = conn.execute(
+                f"""
+                SELECT j.*
+                FROM scheduler_jobs j
+                JOIN projects p ON p.id = j.project_id
+                WHERE j.id = %s
+                  {owner_filter}
+                LIMIT 1
+                """,
+                tuple(params),
             ).fetchone()
-
-            if result:
-                return result["id"] if isinstance(result, dict) else result[0]
-
-            # Try numeric ID
-            if domain.isdigit():
-                result = conn.execute(
-                    "SELECT id FROM projects WHERE id = %s",
-                    (int(domain),)
-                ).fetchone()
-                if result:
-                    return result["id"] if isinstance(result, dict) else result[0]
-
-        return None
+        return dict(row) if row else None
 
     async def _execute_scheduler_list_jobs(
-        self, args: Dict[str, Any], session_key: str = None
+        self, args: Dict[str, Any], session_key: str = None, user_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """List all scheduled jobs for a project."""
         project_id = args.get("project_id")
 
         # Fallback to active project
         if not project_id and session_key:
-            session_manager = get_session_manager()
-            active_project = await session_manager.get_active_project(session_key)
+            active_project = await self._get_active_project_for_session(session_key, user_id)
             if active_project:
                 project_id = active_project.get("domain")
 
         if not project_id:
             return {"status": "error", "message": "No project specified. Please specify a project or set an active project."}
 
-        numeric_id = self._resolve_project_to_id(project_id, session_key)
+        numeric_id = self._resolve_project_to_id(project_id, session_key, user_id=user_id)
         if not numeric_id:
             return {"status": "error", "message": f"Project '{project_id}' not found"}
 
@@ -1137,7 +1151,7 @@ class ToolExecutor:
             logger.error(f"Error listing scheduler jobs: {e}")
             return {"status": "error", "message": f"Failed to list jobs: {str(e)}"}
 
-    async def _execute_scheduler_get_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_scheduler_get_job(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Get details of a specific scheduler job."""
         job_id = args.get("job_id")
         if not job_id:
@@ -1145,6 +1159,8 @@ class ToolExecutor:
 
         try:
             from services.scheduler import get_job as scheduler_get_job
+            if not self._resolve_scheduler_job(job_id, user_id=user_id):
+                return {"status": "error", "message": f"Job {job_id} not found or not accessible"}
             job = scheduler_get_job(int(job_id))
 
             if not job:
@@ -1160,7 +1176,7 @@ class ToolExecutor:
             return {"status": "error", "message": f"Failed to get job: {str(e)}"}
 
     async def _execute_scheduler_create_job(
-        self, args: Dict[str, Any], session_key: str = None
+        self, args: Dict[str, Any], session_key: str = None, user_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """Create a new scheduled job."""
         project_id = args.get("project_id")
@@ -1174,15 +1190,14 @@ class ToolExecutor:
 
         # Fallback to active project
         if not project_id and session_key:
-            session_manager = get_session_manager()
-            active_project = await session_manager.get_active_project(session_key)
+            active_project = await self._get_active_project_for_session(session_key, user_id)
             if active_project:
                 project_id = active_project.get("domain")
 
         if not project_id:
             return {"status": "error", "message": "No project specified. Please specify a project or set an active project."}
 
-        numeric_id = self._resolve_project_to_id(project_id, session_key)
+        numeric_id = self._resolve_project_to_id(project_id, session_key, user_id=user_id)
         if not numeric_id:
             return {"status": "error", "message": f"Project '{project_id}' not found"}
 
@@ -1208,7 +1223,7 @@ class ToolExecutor:
             logger.error(f"Error creating scheduler job: {e}")
             return {"status": "error", "message": f"Failed to create job: {str(e)}"}
 
-    async def _execute_scheduler_update_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_scheduler_update_job(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Update an existing scheduler job."""
         job_id = args.get("job_id")
         if not job_id:
@@ -1227,6 +1242,8 @@ class ToolExecutor:
 
         try:
             from services.scheduler import update_job as scheduler_update_job
+            if not self._resolve_scheduler_job(job_id, user_id=user_id):
+                return {"status": "error", "message": f"Job {job_id} not found or not accessible"}
             job = scheduler_update_job(int(job_id), updates)
 
             return {
@@ -1240,7 +1257,7 @@ class ToolExecutor:
             logger.error(f"Error updating scheduler job: {e}")
             return {"status": "error", "message": f"Failed to update job: {str(e)}"}
 
-    async def _execute_scheduler_pause_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_scheduler_pause_job(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Pause an active scheduler job."""
         job_id = args.get("job_id")
         if not job_id:
@@ -1248,6 +1265,8 @@ class ToolExecutor:
 
         try:
             from services.scheduler import pause_job as scheduler_pause_job, get_job as scheduler_get_job
+            if not self._resolve_scheduler_job(job_id, user_id=user_id):
+                return {"status": "error", "message": f"Job {job_id} not found or not accessible"}
             job = scheduler_get_job(int(job_id))
             if not job:
                 return {"status": "error", "message": f"Job {job_id} not found"}
@@ -1265,7 +1284,7 @@ class ToolExecutor:
             logger.error(f"Error pausing scheduler job: {e}")
             return {"status": "error", "message": f"Failed to pause job: {str(e)}"}
 
-    async def _execute_scheduler_resume_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_scheduler_resume_job(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Resume a paused scheduler job."""
         job_id = args.get("job_id")
         if not job_id:
@@ -1273,6 +1292,8 @@ class ToolExecutor:
 
         try:
             from services.scheduler import resume_job as scheduler_resume_job
+            if not self._resolve_scheduler_job(job_id, user_id=user_id):
+                return {"status": "error", "message": f"Job {job_id} not found or not accessible"}
             scheduler_resume_job(int(job_id))
 
             return {
@@ -1286,7 +1307,7 @@ class ToolExecutor:
             logger.error(f"Error resuming scheduler job: {e}")
             return {"status": "error", "message": f"Failed to resume job: {str(e)}"}
 
-    async def _execute_scheduler_run_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_scheduler_run_job(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Trigger a scheduler job to run immediately."""
         job_id = args.get("job_id")
         if not job_id:
@@ -1294,6 +1315,8 @@ class ToolExecutor:
 
         try:
             from services.scheduler import run_job_now as scheduler_run_job_now
+            if not self._resolve_scheduler_job(job_id, user_id=user_id):
+                return {"status": "error", "message": f"Job {job_id} not found or not accessible"}
             job = scheduler_run_job_now(int(job_id))
 
             return {
@@ -1307,7 +1330,7 @@ class ToolExecutor:
             logger.error(f"Error running scheduler job: {e}")
             return {"status": "error", "message": f"Failed to trigger job: {str(e)}"}
 
-    async def _execute_scheduler_job_logs(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_scheduler_job_logs(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Get execution logs for a scheduler job."""
         job_id = args.get("job_id")
         limit = args.get("limit", 20)
@@ -1315,6 +1338,8 @@ class ToolExecutor:
             return {"status": "error", "message": "Missing job_id"}
 
         try:
+            if not self._resolve_scheduler_job(job_id, user_id=user_id):
+                return {"status": "error", "message": f"Job {job_id} not found or not accessible"}
             with get_db() as cur:
                 cur.execute("""
                     SELECT id, job_id, status, message, created_at
@@ -1342,7 +1367,7 @@ class ToolExecutor:
             logger.error(f"Error getting scheduler job logs: {e}")
             return {"status": "error", "message": f"Failed to get logs: {str(e)}"}
 
-    async def _execute_scheduler_delete_job(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_scheduler_delete_job(self, args: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
         """Delete a scheduler job permanently."""
         job_id = args.get("job_id")
         if not job_id:
@@ -1350,6 +1375,8 @@ class ToolExecutor:
 
         try:
             from services.scheduler import delete_job as scheduler_delete_job
+            if not self._resolve_scheduler_job(job_id, user_id=user_id):
+                return {"status": "error", "message": f"Job {job_id} not found or not accessible"}
             deleted = scheduler_delete_job(int(job_id))
 
             if not deleted:
@@ -1365,22 +1392,21 @@ class ToolExecutor:
             return {"status": "error", "message": f"Failed to delete job: {str(e)}"}
 
     async def _execute_scheduler_clear_jobs(
-        self, args: Dict[str, Any], session_key: str = None
+        self, args: Dict[str, Any], session_key: str = None, user_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """Delete all jobs for a project."""
         project_id = args.get("project_id")
 
         # Fallback to active project
         if not project_id and session_key:
-            session_manager = get_session_manager()
-            active_project = await session_manager.get_active_project(session_key)
+            active_project = await self._get_active_project_for_session(session_key, user_id)
             if active_project:
                 project_id = active_project.get("domain")
 
         if not project_id:
             return {"status": "error", "message": "No project specified."}
 
-        numeric_id = self._resolve_project_to_id(project_id, session_key)
+        numeric_id = self._resolve_project_to_id(project_id, session_key, user_id=user_id)
         if not numeric_id:
             return {"status": "error", "message": f"Project '{project_id}' not found"}
 
