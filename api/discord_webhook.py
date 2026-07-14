@@ -11,6 +11,12 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
+try:
+    from nacl.signing import VerifyKey
+    from nacl.exceptions import BadSignatureError
+except Exception:  # pragma: no cover - deployment config issue
+    VerifyKey = None
+    BadSignatureError = None
 
 from api.ai_chat import process_message
 from database_postgres import get_db
@@ -62,23 +68,24 @@ def _verify_signature(body: bytes, timestamp: Optional[str], signature: Optional
         )
         return False
     try:
-        from nacl.signing import VerifyKey
-        from nacl.exceptions import BadSignatureError
+        if VerifyKey is None:
+            logger.error("[DISCORD-CONTROL] PyNaCl is not installed or could not be imported")
+            return False
 
         verify_key = VerifyKey(bytes.fromhex(DISCORD_PUBLIC_KEY))
         verify_key.verify(timestamp.encode("utf-8") + body, bytes.fromhex(signature))
         logger.info("[DISCORD-CONTROL] Signature verified successfully")
         return True
-    except BadSignatureError:
-        logger.warning(
-            "[DISCORD-CONTROL] Bad Discord signature public_key_len=%s timestamp_len=%s signature_len=%s body_bytes=%s",
-            public_key_len,
-            len(timestamp or ""),
-            len(signature or ""),
-            len(body or b""),
-        )
-        return False
     except Exception as e:
+        if BadSignatureError is not None and isinstance(e, BadSignatureError):
+            logger.warning(
+                "[DISCORD-CONTROL] Bad Discord signature public_key_len=%s timestamp_len=%s signature_len=%s body_bytes=%s",
+                public_key_len,
+                len(timestamp or ""),
+                len(signature or ""),
+                len(body or b""),
+            )
+            return False
         logger.error("[DISCORD-CONTROL] Signature verification error: %s", e, exc_info=True)
         return False
 
