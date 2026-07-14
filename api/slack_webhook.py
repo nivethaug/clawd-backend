@@ -249,9 +249,35 @@ def _normalize_slash_text(text: str) -> tuple[str, str]:
 
 def _normalize_slack_command(command: str, text: str) -> tuple[str, str]:
     command = (command or "").strip().lower()
-    if command == "/dream-switch":
-        target = (text or "").strip()
-        return "switch", f"/switch {target}" if target else "/switch"
+    arg = (text or "").strip()
+    shortcut_actions = {
+        "/dream-link": "link",
+        "/dream-unlink": "unlink",
+        "/dream-switch": "switch",
+        "/dream-sessions": "sessions",
+        "/dream-newsession": "newsession",
+        "/dream-new-session": "newsession",
+        "/dream-clearsession": "clearsession",
+        "/dream-clear-session": "clearsession",
+        "/dream-complete": "complete",
+        "/dream-current": "current",
+        "/dream-billing": "billing",
+        "/dream-status": "status",
+        "/dream-logs": "logs",
+        "/dream-start": "start",
+        "/dream-stop": "stop",
+        "/dream-restart": "restart",
+        "/dream-project": "project",
+        "/dream-chat": "chat",
+        "/dream-help": "help",
+    }
+    action = shortcut_actions.get(command)
+    if action:
+        if action in {"project", "chat", "link"}:
+            return action, arg
+        if action == "newsession":
+            return action, f"/newsession {arg or 'Slack session'}"
+        return action, f"/{action} {arg}" if arg else f"/{action}"
     return _normalize_slash_text(text)
 
 

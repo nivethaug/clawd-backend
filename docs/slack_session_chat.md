@@ -35,11 +35,27 @@ The events endpoint supports Slack `url_verification` and app-DM message events.
 
 Slack uses one primary slash command: `/dreamagent`.
 
-Optional shortcut command:
+Optional shortcut commands can be added for better Slack autocomplete. Every shortcut uses the same request URL:
 
 | Command | Request URL | Behavior |
 | --- | --- | --- |
-| `/dream-switch` | `/bot/slack/commands` | Opens project selection directly, equivalent to `/dreamagent switch`. |
+| `/dream-link` | `/bot/slack/commands` | Link Slack to DreamAgent. |
+| `/dream-unlink` | `/bot/slack/commands` | Unlink Slack. |
+| `/dream-switch` | `/bot/slack/commands` | Select or change active project. |
+| `/dream-sessions` | `/bot/slack/commands` | List/select project sessions. |
+| `/dream-newsession` | `/bot/slack/commands` | Create/select a project session. |
+| `/dream-clearsession` | `/bot/slack/commands` | Clear selected session context. |
+| `/dream-complete` | `/bot/slack/commands` | Release selected session lock. |
+| `/dream-current` | `/bot/slack/commands` | Show active project/session. |
+| `/dream-billing` | `/bot/slack/commands` | Show billing summary. |
+| `/dream-status` | `/bot/slack/commands` | Show active project status. |
+| `/dream-logs` | `/bot/slack/commands` | Show recent logs. |
+| `/dream-start` | `/bot/slack/commands` | Start active project. |
+| `/dream-stop` | `/bot/slack/commands` | Stop active project. |
+| `/dream-restart` | `/bot/slack/commands` | Restart active project. |
+| `/dream-project` | `/bot/slack/commands` | Normal DevOps project message. |
+| `/dream-chat` | `/bot/slack/commands` | Selected-session edit message. |
+| `/dream-help` | `/bot/slack/commands` | Guided workflow. |
 
 | Command | Behavior |
 | --- | --- |
