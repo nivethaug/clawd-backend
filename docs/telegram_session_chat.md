@@ -30,6 +30,7 @@ Telegram is only the transport. The project session, lock, prompt routing, messa
 | `/clearsession` | Clear the selected Telegram session context without releasing the project lock. |
 | `/complete` | Release the selected session lock through the existing lock service. |
 | `/current` | Show active project, selected session, and lock state. |
+| `/billing` | Show the linked account's current plan, credit balances, and recent billing activity. |
 | `/status` | Show active project runtime status. |
 | `/logs` | Show recent logs for the active project. |
 | `/restart` | Restart the active project. |
@@ -47,9 +48,9 @@ Telegram replies include compact inline buttons for common next steps:
 
 | Context | Buttons |
 | --- | --- |
-| Project/default replies | Current, Sessions, Status, Logs, Restart, Help |
-| Selected-session replies | Current, Sessions, Complete, Clear Session, Status, Logs |
-| Busy/in-progress replies | Current, Sessions, Complete, Clear Session |
+| Project/default replies | Current, Sessions, Status, Logs, Restart, Billing, Help |
+| Selected-session replies | Current, Sessions, Complete, Clear Session, Status, Logs, Billing |
+| Busy/in-progress replies | Current, Sessions, Complete, Clear Session, Billing |
 | Selection replies | Project or session choices from the existing selection response |
 
 Inline buttons use `callback_data` values such as `action:current`, `action:sessions`, `action:logs`, `switch:{domain}`, and `session:set:{project_domain}:{session_id}`. The callback handler routes action buttons through the same deterministic command dispatcher used by slash commands.
@@ -61,6 +62,7 @@ Common plain-text shortcuts are treated as commands before selected-session chat
 | User text | Mapped behavior |
 | --- | --- |
 | `current`, `current project`, `current session`, `where am i` | `/current` |
+| `billing`, `credits`, `my credits`, `balance`, `my balance`, `plan`, `my plan` | `/billing` |
 | `sessions`, `show sessions`, `list sessions`, `switch session`, `select session` | `/sessions` |
 | `new session mobile fixes`, `newsession mobile fixes` | `/newsession mobile fixes` |
 | `clear session`, `leave session` | `/clearsession` |

@@ -203,7 +203,8 @@ def _project_actions_keyboard() -> dict:
     return _action_keyboard([
         [("Current", "current"), ("Sessions", "sessions")],
         [("Status", "status"), ("Logs", "logs")],
-        [("Restart", "restart"), ("Help", "help")],
+        [("Restart", "restart"), ("Billing", "billing")],
+        [("Help", "help")],
     ])
 
 
@@ -212,6 +213,7 @@ def _session_actions_keyboard() -> dict:
         [("Current", "current"), ("Sessions", "sessions")],
         [("Complete", "complete"), ("Clear Session", "clearsession")],
         [("Status", "status"), ("Logs", "logs")],
+        [("Billing", "billing")],
     ])
 
 
@@ -219,6 +221,7 @@ def _busy_actions_keyboard() -> dict:
     return _action_keyboard([
         [("Current", "current"), ("Sessions", "sessions")],
         [("Complete", "complete"), ("Clear Session", "clearsession")],
+        [("Billing", "billing")],
     ])
 
 
@@ -261,6 +264,79 @@ def _format_for_telegram(resp: dict) -> str:
 
 # ── Callback query handler (button taps) ────────────────────
 
+def _format_int(value: Any) -> str:
+    try:
+        return f"{int(value or 0):,}"
+    except Exception:
+        return str(value or 0)
+
+
+def _format_money_cents(value: Any) -> str:
+    try:
+        cents = int(value or 0)
+        return "$0/mo" if cents == 0 else f"${cents / 100:.0f}/mo"
+    except Exception:
+        return "$0/mo"
+
+
+def _credit_label(credit_type: str) -> str:
+    labels = {
+        "project_ai": "AI credits",
+        "edit_token": "Edit tokens",
+    }
+    return labels.get((credit_type or "").lower(), (credit_type or "Credits").replace("_", " ").title())
+
+
+def _format_billing_summary(user_id: int) -> str:
+    """Return a concise Telegram billing summary for a linked user."""
+    from services.billing_service import get_user_billing_summary
+
+    with get_db() as conn:
+        summary = get_user_billing_summary(conn, user_id)
+
+    plan = summary.get("plan") or {}
+    plan_name = plan.get("name") or plan.get("slug") or "Free"
+    plan_price = _format_money_cents(plan.get("price_monthly_cents"))
+
+    lines = [
+        "*Billing & Credits*",
+        f"Plan: *{plan_name}* ({plan_price})",
+        "",
+        "*Balances*",
+    ]
+
+    balances = summary.get("balances") or []
+    if balances:
+        for bal in balances:
+            label = _credit_label(bal.get("credit_type"))
+            total = _format_int(bal.get("total_available"))
+            used = _format_int(bal.get("used"))
+            limit = _format_int(bal.get("monthly_limit"))
+            purchased = int(bal.get("purchased") or 0)
+            extra = f", {_format_int(purchased)} purchased" if purchased else ""
+            lines.append(f"- {label}: *{total} available* ({used}/{limit} used{extra})")
+    else:
+        lines.append("- No credit balances found yet.")
+
+    transactions = summary.get("transactions") or []
+    if transactions:
+        lines.extend(["", "*Recent activity*"])
+        for tx in transactions[:3]:
+            credits = int(tx.get("credits") or 0)
+            sign = "+" if credits > 0 else ""
+            label = _credit_label(tx.get("credit_type"))
+            status = (tx.get("status") or "").replace("_", " ").title()
+            project = tx.get("project_name") or tx.get("session_name")
+            context = f" - {project}" if project else ""
+            lines.append(f"- {sign}{_format_int(credits)} {label} ({status}){context}")
+
+    lines.extend([
+        "",
+        "Open Billing in DreamAgent to upgrade plans or buy credit packs.",
+    ])
+    return "\n".join(lines)
+
+
 def _help_text() -> str:
     return (
         "*DreamAgent Bot*\n\n"
@@ -270,11 +346,11 @@ def _help_text() -> str:
         "3. Type naturally, like `make the hero more premium`\n"
         "4. `/complete` - finish and release the session\n\n"
         "Fast project controls:\n"
-        "`/current` `/status` `/logs` `/restart` `/start` `/stop`\n\n"
+        "`/current` `/status` `/logs` `/billing` `/restart` `/start` `/stop`\n\n"
         "Session controls:\n"
         "`/newsession Fix navbar` `/clearsession` `/complete`\n\n"
         "You can also type natural shortcuts like `current`, `sessions`, "
-        "`new session mobile fixes`, `clear session`, or `complete session`."
+        "`billing`, `new session mobile fixes`, `clear session`, or `complete session`."
     )
 
 
@@ -292,6 +368,13 @@ def _normalize_natural_action(text: str) -> Optional[str]:
         "current project": "current",
         "current session": "current",
         "where am i": "current",
+        "billing": "billing",
+        "credits": "billing",
+        "my credits": "billing",
+        "balance": "billing",
+        "my balance": "billing",
+        "plan": "billing",
+        "my plan": "billing",
         "sessions": "sessions",
         "show sessions": "sessions",
         "list sessions": "sessions",
@@ -354,6 +437,15 @@ async def _run_telegram_action(
         await send_message(
             chat_id,
             "Cleared the selected session. Project selection is unchanged.",
+            reply_to_message_id=reply_to_message_id,
+            reply_markup=_project_actions_keyboard(),
+        )
+        return
+
+    if action == "billing":
+        await send_message(
+            chat_id,
+            _format_billing_summary(user_id),
             reply_to_message_id=reply_to_message_id,
             reply_markup=_project_actions_keyboard(),
         )
@@ -1034,6 +1126,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         "/newsession": "newsession",
         "/clearsession": "clearsession",
         "/complete": "complete",
+        "/billing": "billing",
         "/status": "status",
         "/logs": "logs",
         "/restart": "restart",
@@ -1059,7 +1152,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
     # /switch project   →  "switch project" (shows picker)
     # /switch myapp     →  "switch to myapp"
     # /status           →  "status"
-    _KNOWN_BOT_CMDS = {"/link", "/unlink", "/help", "/start", "/current"}
+    _KNOWN_BOT_CMDS = {"/link", "/unlink", "/help", "/start", "/current", "/billing"}
     if text.startswith("/") and text.split()[0] not in _KNOWN_BOT_CMDS:
         _cmd = text[1:].strip()
         if _cmd.lower().startswith("switch"):
@@ -1101,7 +1194,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
 
     selected_session = _get_selected_project_session(user_id, session_id)
     original_command = original_text.split(maxsplit=1)[0].lower() if original_text.startswith("/") else ""
-    if selected_session and original_command not in {"/switch", "/sessions", "/newsession", "/clearsession", "/complete", "/current", "/help", "/link", "/unlink", "/start"}:
+    if selected_session and original_command not in {"/switch", "/sessions", "/newsession", "/clearsession", "/complete", "/current", "/billing", "/help", "/link", "/unlink", "/start"}:
         session_label = selected_session.get("label") or f"session #{selected_session['id']}"
         processing_result = SessionLockService.acquire_processing(int(selected_session["id"]), "telegram")
         if not processing_result.get("success"):
