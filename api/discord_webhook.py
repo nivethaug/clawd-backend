@@ -41,10 +41,25 @@ EPHEMERAL_FLAG = 64
 
 
 def _verify_signature(body: bytes, timestamp: Optional[str], signature: Optional[str]) -> bool:
+    public_key_len = len(DISCORD_PUBLIC_KEY or "")
+    logger.info(
+        "[DISCORD-CONTROL] Verifying interaction signature body_bytes=%s public_key_configured=%s public_key_len=%s timestamp_present=%s signature_present=%s signature_len=%s",
+        len(body or b""),
+        bool(DISCORD_PUBLIC_KEY),
+        public_key_len,
+        bool(timestamp),
+        bool(signature),
+        len(signature or ""),
+    )
     if not DISCORD_PUBLIC_KEY:
         logger.error("[DISCORD-CONTROL] DISCORD_PUBLIC_KEY not configured")
         return False
     if not timestamp or not signature:
+        logger.warning(
+            "[DISCORD-CONTROL] Missing Discord signature headers timestamp_present=%s signature_present=%s",
+            bool(timestamp),
+            bool(signature),
+        )
         return False
     try:
         from nacl.signing import VerifyKey
@@ -52,8 +67,16 @@ def _verify_signature(body: bytes, timestamp: Optional[str], signature: Optional
 
         verify_key = VerifyKey(bytes.fromhex(DISCORD_PUBLIC_KEY))
         verify_key.verify(timestamp.encode("utf-8") + body, bytes.fromhex(signature))
+        logger.info("[DISCORD-CONTROL] Signature verified successfully")
         return True
     except BadSignatureError:
+        logger.warning(
+            "[DISCORD-CONTROL] Bad Discord signature public_key_len=%s timestamp_len=%s signature_len=%s body_bytes=%s",
+            public_key_len,
+            len(timestamp or ""),
+            len(signature or ""),
+            len(body or b""),
+        )
         return False
     except Exception as e:
         logger.error("[DISCORD-CONTROL] Signature verification error: %s", e, exc_info=True)
@@ -529,13 +552,28 @@ async def discord_interactions(
 ):
     """Receive Discord Interactions. Verified by Discord Ed25519 signature."""
     body = await request.body()
+    logger.info(
+        "[DISCORD-CONTROL] Interaction request received method=%s path=%s content_type=%s body_bytes=%s",
+        request.method,
+        request.url.path,
+        request.headers.get("content-type"),
+        len(body or b""),
+    )
     if not _verify_signature(body, x_signature_timestamp, x_signature_ed25519):
         logger.warning("[DISCORD-CONTROL] Interaction rejected: invalid signature")
         raise HTTPException(status_code=401, detail="invalid request signature")
 
     interaction = await request.json()
     interaction_type = interaction.get("type")
+    logger.info(
+        "[DISCORD-CONTROL] Interaction accepted type=%s command=%s custom_id=%s user_id_present=%s",
+        interaction_type,
+        (interaction.get("data") or {}).get("name"),
+        (interaction.get("data") or {}).get("custom_id"),
+        bool(_extract_discord_user_id(interaction)),
+    )
     if interaction_type == INTERACTION_PING:
+        logger.info("[DISCORD-CONTROL] Responding to Discord PING verification")
         return {"type": RESPONSE_PONG}
 
     if interaction_type == INTERACTION_APPLICATION_COMMAND:
