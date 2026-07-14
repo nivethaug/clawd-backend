@@ -7,6 +7,7 @@ generated Discord bot projects.
 
 import logging
 import os
+import asyncio
 from typing import Optional
 
 import httpx
@@ -57,6 +58,10 @@ async def edit_original_response(
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.patch(url, json=payload)
+            if resp.status_code == 404 and "Unknown Webhook" in resp.text:
+                logger.warning("[DISCORD-CONTROL] original response webhook not ready, retrying once")
+                await asyncio.sleep(0.75)
+                resp = await client.patch(url, json=payload)
             if resp.status_code >= 300:
                 logger.error("[DISCORD-CONTROL] edit original failed %s: %s", resp.status_code, resp.text[:500])
                 return False
