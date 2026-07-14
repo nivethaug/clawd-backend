@@ -55,7 +55,8 @@ def _button(text: str, action_id: str, style: Optional[str] = None) -> dict:
 def action_blocks(kind: str = "project") -> list:
     if kind == "session":
         rows = [
-            [("Current", "action:current", None), ("Sessions", "action:sessions", None)],
+            [("Current", "action:current", None), ("Switch Project", "action:switch", None)],
+            [("Sessions", "action:sessions", None), ("New Session", "action:newsession", None)],
             [("Complete", "action:complete", "primary"), ("Clear Session", "action:clearsession", None)],
             [("Status", "action:status", None), ("Logs", "action:logs", None)],
             [("Billing", "action:billing", None), ("Help", "action:help", None)],
@@ -64,11 +65,12 @@ def action_blocks(kind: str = "project") -> list:
         rows = [
             [("Current", "action:current", None), ("Sessions", "action:sessions", None)],
             [("Complete", "action:complete", "primary"), ("Clear Session", "action:clearsession", None)],
-            [("Billing", "action:billing", None)],
+            [("Billing", "action:billing", None), ("Help", "action:help", None)],
         ]
     else:
         rows = [
-            [("Current", "action:current", None), ("Sessions", "action:sessions", None)],
+            [("Current", "action:current", None), ("Switch Project", "action:switch", None)],
+            [("Sessions", "action:sessions", None), ("New Session", "action:newsession", None)],
             [("Status", "action:status", None), ("Logs", "action:logs", None)],
             [("Restart", "action:restart", None), ("Billing", "action:billing", None)],
             [("Help", "action:help", None)],
@@ -93,16 +95,20 @@ def selection_blocks(resp: dict) -> Optional[list]:
     intent = resp.get("intent", {}) or {}
     tool_name = intent.get("tool")
     intent_args = intent.get("args", {}) or {}
-    blocks = []
+    buttons = []
     for opt in options[:25]:
         if tool_name == "set_active_project_session":
             project_domain = intent_args.get("project_domain", "")
             action_id = f"session:set:{project_domain}:{opt['value']}" if project_domain else f"session:set:{opt['value']}"
         else:
             action_id = f"switch:{opt['value']}"
+        buttons.append(_button(str(opt["label"]), action_id, "primary"))
+
+    blocks = []
+    for idx in range(0, len(buttons), 3):
         blocks.append({
             "type": "actions",
-            "elements": [_button(str(opt["label"]), action_id, "primary")],
+            "elements": buttons[idx:idx + 3],
         })
     return blocks
 
@@ -115,7 +121,7 @@ async def respond(response_url: str, text: str, blocks: Optional[list] = None, r
     }
     if blocks is not None:
         payload["blocks"] = [
-            {"type": "section", "text": {"type": "mrkdwn", "text": truncate_content(text)}} ,
+            {"type": "section", "text": {"type": "mrkdwn", "text": truncate_content(text)}},
             *blocks,
         ]
     try:
@@ -137,7 +143,7 @@ async def post_message(channel: str, text: str, blocks: Optional[list] = None) -
     payload = {"channel": channel, "text": truncate_content(text)}
     if blocks is not None:
         payload["blocks"] = [
-            {"type": "section", "text": {"type": "mrkdwn", "text": truncate_content(text)}} ,
+            {"type": "section", "text": {"type": "mrkdwn", "text": truncate_content(text)}},
             *blocks,
         ]
     try:

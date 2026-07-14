@@ -218,14 +218,14 @@ def _format_billing_summary(user_id: int) -> str:
 def _help_text() -> str:
     return (
         "*DreamAgent Slack Bot*\n\n"
-        "Workflow:\n"
-        "1. `/dreamagent link CODE` - link your DreamAgent account\n"
-        "2. `/dreamagent switch` - choose a project\n"
-        "3. `/dreamagent project status` - ask the normal project assistant\n"
-        "4. `/dreamagent sessions` or `/dreamagent newsession Fix navbar` - choose an edit session\n"
-        "5. `/dreamagent chat make the hero more premium` - continue the selected edit session\n"
-        "6. `/dreamagent complete` - finish and release the session\n\n"
-        "In the DreamAgent app DM, you can type naturally after selecting a session."
+        "Start with the buttons below whenever possible.\n\n"
+        "*Fast workflow*\n"
+        "1. Link once with `/dreamagent link CODE`\n"
+        "2. Click *Switch Project* and pick a project\n"
+        "3. Click *Sessions* or *New Session* for edit work\n"
+        "4. Use `/dreamagent project MESSAGE` for normal project questions\n"
+        "5. Use `/dreamagent chat MESSAGE` for selected-session edits\n\n"
+        "In the DreamAgent app DM, ordinary messages continue the selected edit session."
     )
 
 
