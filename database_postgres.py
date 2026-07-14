@@ -252,6 +252,26 @@ def init_schema():
                 cur.execute("ALTER TABLE users ADD COLUMN telegram_link_expires_at TIMESTAMP")
             _run_migration(migrate_telegram_link_expires)
 
+            # Discord control bot account linking columns
+            def migrate_discord_user_id():
+                cur.execute("ALTER TABLE users ADD COLUMN discord_user_id VARCHAR(32)")
+            _run_migration(migrate_discord_user_id)
+
+            def migrate_discord_link_code():
+                cur.execute("ALTER TABLE users ADD COLUMN discord_link_code VARCHAR(6)")
+            _run_migration(migrate_discord_link_code)
+
+            def migrate_discord_link_expires():
+                cur.execute("ALTER TABLE users ADD COLUMN discord_link_expires_at TIMESTAMP")
+            _run_migration(migrate_discord_link_expires)
+
+            try:
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id)")
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.debug(f"Discord user index migration skipped: {e}")
+
             # Ensure existing users have correct defaults
             try:
                 cur.execute(

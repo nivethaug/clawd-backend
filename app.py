@@ -1021,6 +1021,9 @@ app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])
 from api.telegram_webhook import router as telegram_webhook_router
 app.include_router(telegram_webhook_router, tags=["telegram"])
 
+from api.discord_webhook import router as discord_webhook_router
+app.include_router(discord_webhook_router, tags=["discord"])
+
 
 @app.get("/projects", response_model=list[ProjectResponse])
 async def get_projects(authorization: Optional[str] = Header(None)):

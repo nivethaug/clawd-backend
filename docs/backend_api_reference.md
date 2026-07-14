@@ -213,6 +213,16 @@ The set/delete webhook routes intentionally remain unauthenticated for current o
 
 Telegram supports slash commands, inline action buttons, and natural aliases for project/session operations. See [telegram_session_chat.md](./telegram_session_chat.md) for the current command list and selected-session behavior.
 
+Discord control bot routes:
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| POST | `/bot/discord/interactions` | Discord Interactions receiver |
+| POST | `/bot/discord/register-commands` | Register Discord slash commands |
+| DELETE | `/bot/discord/commands` | Remove Discord slash commands |
+
+Discord supports slash commands, buttons, account linking, project/session operations, billing, and selected-session `/chat` using the same ACP session path as web and Telegram. See [discord_session_chat.md](./discord_session_chat.md).
+
 ## Dashboard, Activity, and Admin
 
 | Method | Endpoint | Description |
@@ -249,6 +259,7 @@ Current unauthenticated routes include:
 - Stateless Prompt Assistant: `/ai/completion`
 - Public catalog routes where intended: `/gallery`, `/gallery/{gallery_id}`, `/templates`, `/templates/{template_id}`
 - Service callbacks: `/webhooks/lemonsqueezy`, `/bot/telegram/webhook`
+- Discord Interactions callback: `/bot/discord/interactions`
 - Telegram webhook operations retained for compatibility: `/bot/telegram/setwebhook`, `DELETE /bot/telegram/webhook`
 - System health/diagnostics: `/health`, `/test`
 

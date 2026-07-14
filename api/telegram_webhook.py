@@ -905,128 +905,34 @@ async def _run_selected_session_chat(
     processing_already_acquired: bool = False,
 ) -> None:
     """Run selected project-session chat in the background and send the final Telegram reply."""
-    session_id = int(selected_session["id"])
-    project_id = int(selected_session["project_id"])
-    session_key = selected_session["session_key"]
-    session_label = selected_session.get("label") or f"session #{session_id}"
-    handler = None
     typing_stop = asyncio.Event()
     typing_task = asyncio.create_task(_typing_heartbeat(chat_id, typing_stop))
-    billing_user_id = None
-    reserved_charges = []
-    assistant_saved = False
-    processing_acquired = processing_already_acquired
 
     try:
-        if not processing_acquired:
-            processing_result = SessionLockService.acquire_processing(session_id, "telegram")
-            if not processing_result.get("success"):
-                channel = processing_result.get("processing_channel") or "another client"
-                await send_message(
-                    chat_id,
-                    (
-                        f"Still working on the previous message in {session_label}. "
-                        f"Please wait for it to finish before sending another one. "
-                        f"Current channel: {channel}."
-                    ),
-                    reply_to_message_id=reply_to_message_id,
-                    reply_markup=_busy_actions_keyboard(),
-                )
-                return
-            processing_acquired = True
+        from services.external_session_chat import run_selected_session_chat, truncate_for_transport
 
-        lock_result = SessionLockService.acquire_lock(project_id, session_id)
-        if not lock_result.get("success"):
-            from utils.devops_session_context import get_devops_session_context
-            lock_owner = get_devops_session_context().format_lock_owner(lock_result)
-            await send_message(
-                chat_id,
-                (
-                    f"This project is currently active in {lock_owner}. "
-                    "Complete/release that session first. If it is open in web chat, finish it there first."
-                ),
-                reply_to_message_id=reply_to_message_id,
-            )
-            return
-
-        reserve_result = _reserve_session_chat_credits(project_id)
-        billing_user_id = reserve_result.get("user_id")
-        reserved_charges = reserve_result.get("charged", [])
-        if not reserve_result.get("success"):
-            SessionLockService.release_lock(project_id, session_id)
-            await send_message(
-                chat_id,
-                (
-                    "You don't have enough AI credits for this request. "
-                    f"Required: {reserve_result.get('cost')}, available: {reserve_result.get('available', 0)}."
-                ),
-                reply_to_message_id=reply_to_message_id,
-            )
-            return
-
-        with get_db() as conn:
-            conn.execute(
-                "INSERT INTO messages (session_id, role, content, mode) VALUES (%s, %s, %s, %s)",
-                (session_id, "user", text, "dream"),
-            )
-            conn.commit()
-
-        from acp_chat_handler import get_acp_chat_handler
-
-        handler = get_acp_chat_handler(session_key)
-        if not handler:
-            assistant_content = "Error: Could not initialize the project session chat handler."
-        else:
-            handler.set_session_id(session_id)
-            session_context = _load_session_context(session_id)
-            logger.info(
-                "[TELEGRAM-SESSION] Routing chat to selected session id=%s label=%s project_id=%s user=%s via web streaming handler",
-                session_id,
-                session_label,
-                project_id,
-                user_id,
-            )
-            assistant_content = await _run_handler_like_web_session(handler, text, session_context)
-            if not assistant_content:
-                assistant_content = "Session chat completed, but no response text was returned."
-
-        token_usage_json = _finalize_session_token_usage(
-            handler=handler,
-            project_id=project_id,
-            session_id=session_id,
-            billing_user_id=billing_user_id,
-            precharged_amount=sum(abs(c.get("amount", 0)) for c in reserved_charges),
+        result = await run_selected_session_chat(
+            user_id=user_id,
+            selected_session=selected_session,
+            text=text,
+            channel="telegram",
+            processing_already_acquired=processing_already_acquired,
         )
 
-        with get_db() as conn:
-            if token_usage_json:
-                conn.execute(
-                    "INSERT INTO messages (session_id, role, content, token_usage) VALUES (%s, %s, %s, %s)",
-                    (session_id, "assistant", assistant_content, token_usage_json),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO messages (session_id, role, content) VALUES (%s, %s, %s)",
-                    (session_id, "assistant", assistant_content),
-                )
-            conn.execute("UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = %s", (session_id,))
-            conn.commit()
-        assistant_saved = True
-        await _auto_commit_selected_session_change(project_id, session_id, handler)
-
-        if len(assistant_content) > 3900:
-            assistant_content = assistant_content[:3900] + "\n\n... (truncated)"
-        await send_message(chat_id, assistant_content or "Session chat completed.", reply_to_message_id=reply_to_message_id)
-
+        reply_markup = _busy_actions_keyboard() if result.get("status") == "busy" else None
+        await send_message(
+            chat_id,
+            truncate_for_transport(result.get("message") or "Session chat completed.", 3900),
+            reply_to_message_id=reply_to_message_id,
+            reply_markup=reply_markup,
+        )
     except Exception as e:
-        logger.error("[TELEGRAM-SESSION] Selected session chat failed: %s", e, exc_info=True)
+        logger.error("[TELEGRAM-SESSION] Selected session chat wrapper failed: %s", e, exc_info=True)
         await send_message(
             chat_id,
             f"Session chat failed: {str(e)}",
             reply_to_message_id=reply_to_message_id,
         )
-        if not assistant_saved:
-            _refund_session_chat_credits(billing_user_id, reserved_charges)
     finally:
         typing_stop.set()
         if typing_task:
@@ -1035,13 +941,6 @@ async def _run_selected_session_chat(
                 await typing_task
             except asyncio.CancelledError:
                 pass
-        if handler:
-            try:
-                handler.kill_orphan_processes()
-            except Exception as cleanup_error:
-                logger.warning("[TELEGRAM-SESSION] Cleanup failed: %s", cleanup_error)
-        if processing_acquired:
-            SessionLockService.release_processing(session_id)
 
 
 @router.post("/bot/telegram/webhook")

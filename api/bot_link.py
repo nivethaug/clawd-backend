@@ -30,6 +30,7 @@ class LinkCodeResponse(BaseModel):
 class LinkStatusResponse(BaseModel):
     linked: bool
     telegram_chat_id: Optional[int] = None
+    discord_user_id: Optional[str] = None
 
 
 # ── Helpers ─────────────────────────────────────────────────
@@ -48,8 +49,8 @@ def _generate_code() -> str:
 @router.post("/link/generate", response_model=LinkCodeResponse)
 async def generate_link_code(authorization: Optional[str] = Header(None)):
     """
-    Generate a one-time code to link the user's Telegram account.
-    The user must send '/link {code}' to the Telegram bot within 10 minutes.
+    Generate a one-time code to link the user's bot account.
+    The user can send '/link {code}' to Telegram or Discord within 10 minutes.
     """
     user_id = get_user_id_from_token(authorization)
 
@@ -63,9 +64,11 @@ async def generate_link_code(authorization: Optional[str] = Header(None)):
         conn.execute(
             """UPDATE users
                SET telegram_link_code = %s,
-                   telegram_link_expires_at = %s
+                   telegram_link_expires_at = %s,
+                   discord_link_code = %s,
+                   discord_link_expires_at = %s
                WHERE id = %s""",
-            (code, expires_at, user_id)
+            (code, expires_at, code, expires_at, user_id)
         )
         conn.commit()
 
@@ -80,19 +83,23 @@ async def generate_link_code(authorization: Optional[str] = Header(None)):
 
 @router.get("/link/status", response_model=LinkStatusResponse)
 async def get_link_status(authorization: Optional[str] = Header(None)):
-    """Check if the user's Telegram account is linked."""
+    """Check if the user's bot accounts are linked."""
     user_id = get_user_id_from_token(authorization)
 
     with get_db() as conn:
         row = conn.execute(
-            "SELECT telegram_chat_id FROM users WHERE id = %s",
+            "SELECT telegram_chat_id, discord_user_id FROM users WHERE id = %s",
             (user_id,)
         ).fetchone()
 
     if row and row.get("telegram_chat_id"):
-        return LinkStatusResponse(linked=True, telegram_chat_id=row["telegram_chat_id"])
+        return LinkStatusResponse(
+            linked=True,
+            telegram_chat_id=row["telegram_chat_id"],
+            discord_user_id=row.get("discord_user_id"),
+        )
 
-    return LinkStatusResponse(linked=False)
+    return LinkStatusResponse(linked=False, discord_user_id=row.get("discord_user_id") if row else None)
 
 
 @router.delete("/link")
