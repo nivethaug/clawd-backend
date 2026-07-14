@@ -20,6 +20,7 @@ Usage:
 import logging
 from typing import Optional, Dict, Any
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -149,14 +150,11 @@ class SessionLockService:
                     return {"success": False, "error": "Session not found"}
 
                 if result.get("processing"):
-                    is_stale = result.get("processing_started_at") is None
+                    started_at = result.get("processing_started_at")
+                    is_stale = started_at is None
                     if not is_stale:
-                        cur.execute(
-                            "SELECT NOW() - processing_started_at > (%s || ' minutes')::interval AS is_stale",
-                            (stale_after_minutes,),
-                        )
-                        stale_row = cur.fetchone()
-                        is_stale = bool(stale_row and stale_row.get("is_stale"))
+                        now = datetime.now(started_at.tzinfo) if getattr(started_at, "tzinfo", None) else datetime.now()
+                        is_stale = (now - started_at) > timedelta(minutes=stale_after_minutes)
                     if not is_stale:
                         conn.rollback()
                         logger.info(

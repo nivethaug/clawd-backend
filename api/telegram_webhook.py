@@ -599,6 +599,7 @@ async def _run_selected_session_chat(
     selected_session: dict,
     text: str,
     reply_to_message_id: Optional[int] = None,
+    processing_already_acquired: bool = False,
 ) -> None:
     """Run selected project-session chat in the background and send the final Telegram reply."""
     session_id = int(selected_session["id"])
@@ -611,23 +612,24 @@ async def _run_selected_session_chat(
     billing_user_id = None
     reserved_charges = []
     assistant_saved = False
-    processing_acquired = False
+    processing_acquired = processing_already_acquired
 
     try:
-        processing_result = SessionLockService.acquire_processing(session_id, "telegram")
-        if not processing_result.get("success"):
-            channel = processing_result.get("processing_channel") or "another client"
-            await send_message(
-                chat_id,
-                (
-                    f"Still working on the previous message in {session_label}. "
-                    f"Please wait for it to finish before sending another one. "
-                    f"Current channel: {channel}."
-                ),
-                reply_to_message_id=reply_to_message_id,
-            )
-            return
-        processing_acquired = True
+        if not processing_acquired:
+            processing_result = SessionLockService.acquire_processing(session_id, "telegram")
+            if not processing_result.get("success"):
+                channel = processing_result.get("processing_channel") or "another client"
+                await send_message(
+                    chat_id,
+                    (
+                        f"Still working on the previous message in {session_label}. "
+                        f"Please wait for it to finish before sending another one. "
+                        f"Current channel: {channel}."
+                    ),
+                    reply_to_message_id=reply_to_message_id,
+                )
+                return
+            processing_acquired = True
 
         lock_result = SessionLockService.acquire_lock(project_id, session_id)
         if not lock_result.get("success"):
@@ -923,6 +925,20 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
     original_command = original_text.split(maxsplit=1)[0].lower() if original_text.startswith("/") else ""
     if selected_session and original_command not in {"/switch", "/sessions", "/newsession", "/clearsession", "/complete", "/current", "/help", "/link", "/unlink", "/start"}:
         session_label = selected_session.get("label") or f"session #{selected_session['id']}"
+        processing_result = SessionLockService.acquire_processing(int(selected_session["id"]), "telegram")
+        if not processing_result.get("success"):
+            channel = processing_result.get("processing_channel") or "another client"
+            await send_message(
+                chat_id,
+                (
+                    f"Still working on the previous message in `{session_label}`. "
+                    "Please wait for it to finish before sending another one. "
+                    f"Current channel: {channel}."
+                ),
+                reply_to_message_id=message_id,
+            )
+            return {"ok": True}
+
         await send_message(
             chat_id,
             f"Continuing in `{session_label}`. I will reply here when the session finishes this step.",
@@ -935,6 +951,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
             selected_session=selected_session,
             text=text,
             reply_to_message_id=message_id,
+            processing_already_acquired=True,
         ))
         return {"ok": True}
 
