@@ -202,35 +202,60 @@ def _option_value(data: dict, name: str) -> Optional[str]:
 
 def _lookup_user_by_discord_id(discord_user_id: str) -> Optional[int]:
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT id FROM users WHERE discord_user_id = %s",
+        rows = conn.execute(
+            """SELECT id
+               FROM users
+               WHERE discord_user_id = %s
+               ORDER BY id DESC""",
             (discord_user_id,),
-        ).fetchone()
-    return row["id"] if row else None
+        ).fetchall()
+    if len(rows) > 1:
+        logger.warning(
+            "[DISCORD-CONTROL] Discord user_id=%s is linked to multiple DreamAgent users: %s",
+            discord_user_id,
+            [row["id"] for row in rows],
+        )
+    return rows[0]["id"] if rows else None
 
 
 def _try_link_code(discord_user_id: str, code: str) -> tuple[bool, str]:
     code = code.upper().strip()
     with get_db() as conn:
         row = conn.execute(
-            """SELECT id, discord_link_expires_at, telegram_link_expires_at
+            """SELECT id, discord_link_expires_at
                FROM users
-               WHERE discord_link_code = %s OR telegram_link_code = %s""",
-            (code, code),
+               WHERE discord_link_code = %s""",
+            (code,),
         ).fetchone()
         if not row:
             return False, f"Invalid code `{code}`. Please check and try again."
 
-        expires_at = row.get("discord_link_expires_at") or row.get("telegram_link_expires_at")
+        expires_at = row.get("discord_link_expires_at")
         if expires_at and datetime.utcnow() > expires_at:
             return False, "This code has expired. Please generate a new one in DreamAgent."
 
-        existing = conn.execute(
-            "SELECT id FROM users WHERE discord_user_id = %s AND id != %s",
+        existing_rows = conn.execute(
+            """SELECT id
+               FROM users
+               WHERE discord_user_id = %s
+                 AND id != %s
+               ORDER BY id""",
             (discord_user_id, row["id"]),
-        ).fetchone()
-        if existing:
-            return False, "This Discord account is already linked to another DreamAgent account."
+        ).fetchall()
+        if existing_rows:
+            logger.warning(
+                "[DISCORD-CONTROL] Relinking discord_user_id=%s from users=%s to user_id=%s",
+                discord_user_id,
+                [existing["id"] for existing in existing_rows],
+                row["id"],
+            )
+            conn.execute(
+                """UPDATE users
+                   SET discord_user_id = NULL
+                   WHERE discord_user_id = %s
+                     AND id != %s""",
+                (discord_user_id, row["id"]),
+            )
 
         conn.execute(
             """UPDATE users

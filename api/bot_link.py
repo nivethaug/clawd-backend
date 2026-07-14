@@ -92,10 +92,10 @@ async def get_link_status(authorization: Optional[str] = Header(None)):
             (user_id,)
         ).fetchone()
 
-    if row and row.get("telegram_chat_id"):
+    if row and (row.get("telegram_chat_id") or row.get("discord_user_id")):
         return LinkStatusResponse(
             linked=True,
-            telegram_chat_id=row["telegram_chat_id"],
+            telegram_chat_id=row.get("telegram_chat_id"),
             discord_user_id=row.get("discord_user_id"),
         )
 
