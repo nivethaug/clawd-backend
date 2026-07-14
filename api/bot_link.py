@@ -120,3 +120,23 @@ async def unlink_telegram(authorization: Optional[str] = Header(None)):
 
     logger.info(f"[BOT-LINK] Unlinked Telegram for user {user_id}")
     return {"message": "Telegram account unlinked successfully"}
+
+
+@router.delete("/discord-link")
+async def unlink_discord(authorization: Optional[str] = Header(None)):
+    """Unlink the user's Discord account."""
+    user_id = get_user_id_from_token(authorization)
+
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE users
+               SET discord_user_id = NULL,
+                   discord_link_code = NULL,
+                   discord_link_expires_at = NULL
+               WHERE id = %s""",
+            (user_id,),
+        )
+        conn.commit()
+
+    logger.info(f"[BOT-LINK] Unlinked Discord for user {user_id}")
+    return {"message": "Discord account unlinked successfully"}
