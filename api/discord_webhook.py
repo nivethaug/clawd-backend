@@ -584,7 +584,23 @@ async def discord_interactions(
         return {"type": RESPONSE_PONG}
 
     if interaction_type == INTERACTION_APPLICATION_COMMAND:
-        command = (interaction.get("data") or {}).get("name", "")
+        data = interaction.get("data") or {}
+        command = data.get("name", "")
+        discord_user_id = _extract_discord_user_id(interaction)
+
+        if command == "help":
+            return _interaction_response(_help_text(), _action_components(), ephemeral=True)
+
+        if not discord_user_id:
+            return _interaction_response("Could not identify your Discord user.", ephemeral=True)
+
+        if command == "link":
+            ok, msg = _try_link_code(discord_user_id, _option_value(data, "code") or "")
+            return _interaction_response(msg, _action_components() if ok else None, ephemeral=True)
+
+        if command == "unlink":
+            return _interaction_response(_unlink_discord(discord_user_id), ephemeral=True)
+
         ephemeral = command not in {"status", "logs", "start", "stop", "restart"}
         asyncio.create_task(_handle_command(interaction))
         return _deferred_response(ephemeral=ephemeral)
