@@ -560,6 +560,18 @@ def _refund_session_chat_credits(user_id: Optional[int], charged: list) -> None:
         logger.warning("[TELEGRAM-SESSION] Reserved credit refund failed: %s", e)
 
 
+async def _auto_commit_selected_session_change(project_id: int, session_id: int, handler) -> None:
+    """Reuse the web session auto-commit path for Telegram session edits."""
+    if not handler:
+        return
+    try:
+        from app import _auto_commit_and_push
+
+        await _auto_commit_and_push(project_id, session_id, handler, "dream")
+    except Exception as e:
+        logger.warning("[TELEGRAM-SESSION] Auto-commit check failed: %s", e)
+
+
 async def _run_handler_like_web_session(handler, user_message: str, session_context: str) -> str:
     """
     Run ACP chat through the same streaming entrypoint used by web sessions.
@@ -708,6 +720,7 @@ async def _run_selected_session_chat(
             conn.execute("UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = %s", (session_id,))
             conn.commit()
         assistant_saved = True
+        await _auto_commit_selected_session_change(project_id, session_id, handler)
 
         if len(assistant_content) > 3900:
             assistant_content = assistant_content[:3900] + "\n\n... (truncated)"
