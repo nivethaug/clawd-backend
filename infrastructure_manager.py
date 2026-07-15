@@ -1925,8 +1925,15 @@ class InfrastructureManager:
                 "frontend": frontend_domain,
                 "backend": backend_domain
             }
-            self.nginx_configurator.install_config(self.domain, config)
-            self.nginx_configurator.reload_nginx()
+            if not self.nginx_configurator.install_config(self.domain, config):
+                logger.error("PHASE_6_NGINX_COMPLETE: failed (install config)")
+                return False
+            logger.info("PHASE_6_NGINX_INSTALL_COMPLETE: success")
+
+            if not self.nginx_configurator.reload_nginx():
+                logger.error("PHASE_6_NGINX_COMPLETE: failed (reload)")
+                return False
+            logger.info("PHASE_6_NGINX_COMPLETE: success")
             # logger.info(f"✓ Nginx configured with SPA routing: {self.domains}")  # Commented for cleaner logs
 
             # Phase 7: Start services (PM2) - SERVICE PHASE ONLY
@@ -1939,6 +1946,7 @@ class InfrastructureManager:
             else:
                 logger.error("PHASE_6_SERVICE_COMPLETE: failed")
                 logger.error("❌ Service phase had failures")
+                return False
 
             # PHASE_9 Verification
             # logger.info("[VERIFY] PHASE_9_VERIFY_START")  # Commented for cleaner logs
