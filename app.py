@@ -1183,6 +1183,18 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             detail="Initial environment variables are supported for Website, Telegram Bot, Discord Bot, and Scheduler projects.",
         )
 
+    if type_id == 2 and not request.bot_token:
+        raise HTTPException(
+            status_code=400,
+            detail="bot_token is required for telegram bot projects (type_id=2)",
+        )
+
+    if type_id == 3 and not request.bot_token:
+        raise HTTPException(
+            status_code=400,
+            detail="bot_token is required for discord bot projects (type_id=3)",
+        )
+
     # Step 1: Get project_id first to use in folder naming
     logger.info("[PROJECT] inserting project into database")
     with get_db() as conn:
@@ -1211,14 +1223,96 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                 detail=f"Failed to create project record: {str(e)}"
             )
 
+    project_creation_charge = []
+    project_creation_operation_code = "WEBSITE"
+    try:
+        from services.billing_service import charge_project_creation
+
+        with get_db() as conn:
+            charge_result = charge_project_creation(
+                conn,
+                user_id,
+                project_type_id=type_id,
+                project_id=project_id,
+            )
+            if not charge_result.get("success"):
+                conn.rollback()
+                with get_db() as cleanup_conn:
+                    cleanup_conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+                    cleanup_conn.commit()
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "error": charge_result.get("error", "insufficient_credits"),
+                        "message": "You don't have enough AI credits to create this project.",
+                        "cost": charge_result.get("cost"),
+                        "available": charge_result.get("total_available", 0),
+                    },
+                )
+            project_creation_charge = charge_result.get("charged", [])
+            project_creation_operation_code = (charge_result.get("operation") or {}).get("code") or project_creation_operation_code
+            conn.commit()
+            logger.info(
+                "[BILLING] Charged project creation credits for user=%s project=%s charge=%s",
+                user_id,
+                project_id,
+                project_creation_charge,
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[BILLING] Project creation credit charge failed: {e}")
+        with get_db() as cleanup_conn:
+            cleanup_conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            cleanup_conn.commit()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to charge project creation credits. Please try again.",
+        )
+
     # Step 2: Create project folder with Git initialization
     project_manager = ProjectFileManager()
-    project_folder_path, folder_success = project_manager.create_project_with_git(project_id, request.name, type_id)
+    try:
+        project_folder_path, folder_success = project_manager.create_project_with_git(project_id, request.name, type_id)
+    except Exception as folder_err:
+        if project_creation_charge:
+            try:
+                from services.billing_service import refund_credits
+
+                with get_db() as conn:
+                    refund_credits(conn, user_id, project_creation_operation_code, project_creation_charge)
+                    conn.commit()
+                logger.info(
+                    "[BILLING] Refunded project creation credits after folder creation exception for project=%s",
+                    project_id,
+                )
+            except Exception as refund_err:
+                logger.warning(f"[BILLING] Failed to refund project creation credits: {refund_err}")
+        with get_db() as conn:
+            conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            conn.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create project folder, Git repository, and required files: {folder_err}",
+        )
     subprocess.run(["chattr", "-R", "-i", project_folder_path], check=False)  # ← ADD THIS FIRST
     subprocess.run(["chown", "-R", "dreampilot:dreampilot", project_folder_path], check=False)
     subprocess.run(["chmod", "-R", "755", project_folder_path], check=False)
     if not folder_success:
         # Rollback: Delete project from database
+        if project_creation_charge:
+            try:
+                from services.billing_service import refund_credits
+
+                with get_db() as conn:
+                    refund_credits(conn, user_id, project_creation_operation_code, project_creation_charge)
+                    conn.commit()
+                logger.info(
+                    "[BILLING] Refunded project creation credits after folder creation failure for project=%s",
+                    project_id,
+                )
+            except Exception as refund_err:
+                logger.warning(f"[BILLING] Failed to refund project creation credits: {refund_err}")
         with get_db() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             conn.commit()

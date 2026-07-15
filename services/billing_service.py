@@ -482,21 +482,97 @@ def charge_token_usage(
 # High-level: project creation charge
 # ======================================================================
 
-def charge_project_creation(conn, user_id: int, project_type_id: int = None) -> Dict[str, Any]:
+def charge_project_creation(
+    conn,
+    user_id: int,
+    project_type_id: int = None,
+    project_id: Optional[int] = None,
+) -> Dict[str, Any]:
     """Charge credits for creating a project.
 
     Looks up the AI operation for the given project_type_id (or defaults to
-    'project_create'). Returns the reserve_credits result.
+    the website creation operation). Creation is a final charge rather than a
+    temporary reservation because there is no later token reconciliation step.
     """
-    from services.plan_cache import get_operation_for_type
+    from services.plan_cache import get_operation, get_operation_for_type
 
-    op_code = "project_create"
+    fallback_by_type = {
+        1: "WEBSITE",
+        2: "TELEGRAM_BOT",
+        3: "DISCORD_BOT",
+        5: "SCHEDULER",
+    }
+    op_code = fallback_by_type.get(project_type_id, "WEBSITE")
     if project_type_id:
         op = get_operation_for_type(project_type_id)
         if op:
             op_code = op["code"]
 
-    return reserve_credits(conn, user_id, op_code, amount=1)
+    op = get_operation(op_code)
+    if op is None:
+        return {"success": False, "error": f"Unknown operation: {op_code}"}
+
+    check = can_afford(conn, user_id, op_code, amount=1)
+    if not check.get("can_afford"):
+        return {
+            "success": False,
+            "error": "insufficient_credits",
+            "cost": check.get("cost"),
+            "total_available": check.get("total_available", 0),
+            "operation": op,
+        }
+
+    remaining_to_charge = int(op.get("credit_cost", 1))
+    charged = []
+
+    for tier in check["cascade"]:
+        if remaining_to_charge <= 0:
+            break
+        deduct = _charge_tier(conn, user_id, tier["credit_type"], tier["source"], remaining_to_charge)
+        if deduct > 0:
+            charged.append({
+                "credit_type": tier["credit_type"],
+                "source": tier["source"],
+                "amount": deduct,
+            })
+            remaining_to_charge -= deduct
+
+    if remaining_to_charge > 0:
+        return {
+            "success": False,
+            "error": "insufficient_credits",
+            "cost": int(op.get("credit_cost", 1)),
+            "charged": charged,
+            "operation": op,
+        }
+
+    for c in charged:
+        _record_transaction(
+            conn,
+            user_id,
+            c["credit_type"],
+            op.get("id"),
+            -c["amount"],
+            c["source"],
+            status="charged",
+            project_id=project_id,
+        )
+
+    logger.info(
+        "[BILLING] Project creation charge applied for user %s project=%s type=%s op=%s charged=%s",
+        user_id,
+        project_id,
+        project_type_id,
+        op_code,
+        charged,
+    )
+
+    return {
+        "success": True,
+        "operation": op,
+        "cost": int(op.get("credit_cost", 1)),
+        "charged": charged,
+    }
 
 
 # ======================================================================
