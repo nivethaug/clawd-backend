@@ -1195,6 +1195,46 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             detail="bot_token is required for discord bot projects (type_id=3)",
         )
 
+    if os.getenv("PROJECT_CREATION_DURABLE_RUNS", "true").lower() not in {"0", "false", "no"}:
+        try:
+            from services.project_creation_runs import enqueue_project_creation_run
+
+            logger.info("[PROJECT] queueing durable project creation run")
+            final_project = enqueue_project_creation_run(
+                user_id=user_id,
+                name=request.name,
+                domain=domain,
+                description=request.description,
+                type_id=type_id,
+                template_id=request.template_id,
+                bot_token=request.bot_token,
+                telegram_bot_token=request.telegram_bot_token,
+                telegram_chat_id=request.telegram_chat_id,
+                discord_webhook_url=request.discord_webhook_url,
+                email_to=request.email_to,
+                api_endpoint=request.api_endpoint,
+                description_for_worker=description_for_worker,
+                initial_environment_variables=initial_environment_variables,
+            )
+        except Exception as e:
+            logger.error("[PROJECT] durable project creation enqueue failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to queue project creation: {str(e)}")
+
+        return ProjectResponse(
+            id=final_project["id"],
+            user_id=final_project["user_id"],
+            name=final_project["name"],
+            domain=final_project["domain"],
+            description=final_project.get("description"),
+            project_path=final_project.get("project_path"),
+            type_id=final_project.get("type_id"),
+            status=final_project.get("status"),
+            claude_code_session_name=final_project.get("claude_code_session_name"),
+            template_id=final_project.get("template_id") if "template_id" in final_project else None,
+            frontend=None,
+            created_at=str(final_project.get("created_at")),
+        )
+
     # Step 1: Get project_id first to use in folder naming
     logger.info("[PROJECT] inserting project into database")
     with get_db() as conn:

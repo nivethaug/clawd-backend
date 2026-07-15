@@ -1,0 +1,714 @@
+"""
+Durable project creation run storage and worker execution.
+
+The API enqueues project creation into the database and returns the project
+record immediately. A separate PM2 worker claims queued rows and performs the
+same creation pipeline that used to run inside the FastAPI process.
+"""
+
+import asyncio
+import json
+import logging
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import threading
+import uuid
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from database_adapter import get_db
+from database_postgres import get_connection_pool
+from github_service import get_github_service
+from project_initial_env import write_initial_environment_variables
+from project_manager import ProjectFileManager
+from services.token_tracker import record_usage
+from template_selector import TemplateSelector
+
+logger = logging.getLogger(__name__)
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+TERMINAL_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
+ACTIVE_STATUSES = {"queued", "running"}
+
+
+def _row_value(row: Any, key: str, index: int = 0) -> Any:
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return row.get(key)
+    return row[index]
+
+
+def _json_loads(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value or {}, ensure_ascii=False)
+
+
+def enqueue_project_creation_run(
+    *,
+    user_id: int,
+    name: str,
+    domain: str,
+    description: Optional[str],
+    type_id: int,
+    template_id: Optional[str],
+    bot_token: Optional[str],
+    telegram_bot_token: Optional[str],
+    telegram_chat_id: Optional[str],
+    discord_webhook_url: Optional[str],
+    email_to: Optional[str],
+    api_endpoint: Optional[str],
+    description_for_worker: str,
+    initial_environment_variables: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Create the project row and queue a durable creation run."""
+    run_uuid = str(uuid.uuid4())
+    payload = {
+        "name": name,
+        "domain": domain,
+        "description": description or "",
+        "description_for_worker": description_for_worker or description or "",
+        "type_id": type_id,
+        "template_id": template_id,
+        "bot_token": bot_token,
+        "telegram_bot_token": telegram_bot_token,
+        "telegram_chat_id": telegram_chat_id,
+        "discord_webhook_url": discord_webhook_url,
+        "email_to": email_to,
+        "api_endpoint": api_endpoint,
+        "initial_environment_variables": initial_environment_variables or [],
+    }
+
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+            """,
+            (user_id, name, domain, description, "", type_id, "creating", None),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            raise RuntimeError("Failed to create project record")
+
+        project = dict(row)
+        conn.execute(
+            """
+            INSERT INTO project_creation_runs (
+                run_uuid, project_id, user_id, type_id, status, payload, created_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, 'queued', %s::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (run_uuid, project["id"], user_id, type_id, _json_dumps(payload)),
+        )
+        conn.commit()
+
+    logger.info("[PROJECT-RUN] queued run=%s project=%s type=%s", run_uuid, project["id"], type_id)
+    return project
+
+
+def append_chunk(run_id: int, chunk_type: str, content: str) -> int:
+    content = content or ""
+    if not content:
+        return -1
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM project_creation_chunks WHERE run_id = %s",
+            (run_id,),
+        ).fetchone()
+        seq = int(_row_value(row, "next_seq") or 0)
+        conn.execute(
+            """
+            INSERT INTO project_creation_chunks (run_id, seq, chunk_type, content, created_at)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+            """,
+            (run_id, seq, chunk_type or "log", content[:8000]),
+        )
+        conn.execute(
+            """
+            UPDATE project_creation_runs
+            SET heartbeat_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (run_id,),
+        )
+        conn.commit()
+    return seq
+
+
+def claim_next_run(worker_id: str) -> Optional[Dict[str, Any]]:
+    pool = get_connection_pool()
+    conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id FROM project_creation_runs
+                WHERE status = 'queued'
+                ORDER BY created_at ASC, id ASC
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+                """
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.commit()
+                return None
+            run_id = row["id"] if isinstance(row, dict) else row[0]
+            cur.execute(
+                """
+                UPDATE project_creation_runs
+                SET status = 'running',
+                    worker_id = %s,
+                    started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                    heartbeat_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                RETURNING *
+                """,
+                (worker_id, run_id),
+            )
+            run = cur.fetchone()
+            conn.commit()
+            return dict(run) if run else None
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        pool.putconn(conn)
+
+
+def update_heartbeat(run_id: int) -> None:
+    with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE project_creation_runs
+            SET heartbeat_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (run_id,),
+        )
+        conn.commit()
+
+
+def mark_completed(run_id: int, has_writes: bool = False) -> None:
+    with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE project_creation_runs
+            SET status = 'completed',
+                has_writes = %s,
+                completed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (bool(has_writes), run_id),
+        )
+        conn.commit()
+
+
+def mark_failed(run_id: int, status: str, error: str, project_id: Optional[int] = None) -> None:
+    final_status = status if status in {"failed", "cancelled", "interrupted"} else "failed"
+    with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE project_creation_runs
+            SET status = %s,
+                error = %s,
+                completed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (final_status, error[:2000], run_id),
+        )
+        if project_id:
+            conn.execute(
+                "UPDATE projects SET status = %s, error_code = %s WHERE id = %s AND status = 'creating'",
+                ("failed", "creation_worker_failed", project_id),
+            )
+        conn.commit()
+
+
+def _record_charge(run_id: int, operation_code: str, charge: List[Dict[str, Any]], charge_result: Dict[str, Any]) -> None:
+    with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE project_creation_runs
+            SET operation_code = %s,
+                charge = %s::jsonb,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (operation_code, _json_dumps({"charged": charge, "cost": charge_result.get("cost")}), run_id),
+        )
+        conn.commit()
+
+
+def _set_project_status(project_id: int, status: str, error_code: Optional[str] = None) -> None:
+    with get_db() as conn:
+        if error_code:
+            conn.execute(
+                "UPDATE projects SET status = %s, error_code = %s WHERE id = %s",
+                (status, error_code, project_id),
+            )
+        else:
+            conn.execute("UPDATE projects SET status = %s WHERE id = %s", (status, project_id))
+        conn.commit()
+
+
+def _get_project(project_id: int) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM projects WHERE id = %s", (project_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def _database_url() -> Optional[str]:
+    if os.getenv("USE_POSTGRES", "true").lower() != "true":
+        return None
+    db_host = os.getenv("DB_HOST", "localhost")
+    db_port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME", "dreampilot")
+    db_user = os.getenv("DB_USER", "admin")
+    db_password = os.getenv("DB_PASSWORD", "StrongAdminPass123")
+    return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+
+def _run_logged_subprocess(
+    run_id: int,
+    args: List[str],
+    *,
+    cwd: Optional[str] = None,
+    env: Optional[Dict[str, str]] = None,
+    timeout: int = 1800,
+    prefix: str = "",
+) -> int:
+    logger.info("[PROJECT-RUN] executing: %s", " ".join(args))
+    append_chunk(run_id, "log", f"Executing: {' '.join(args)}")
+
+    process = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+        cwd=cwd,
+        env=env,
+    )
+
+    def stream(pipe, stream_prefix: str) -> None:
+        try:
+            for line in iter(pipe.readline, ""):
+                if not line:
+                    continue
+                text = f"{stream_prefix}{line.rstrip()}"
+                logger.info("%s", text)
+                append_chunk(run_id, "log", text)
+        except Exception as exc:
+            logger.warning("[PROJECT-RUN] stream error: %s", exc)
+        finally:
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+    stdout_thread = threading.Thread(target=stream, args=(process.stdout, prefix), daemon=True)
+    stderr_thread = threading.Thread(target=stream, args=(process.stderr, f"{prefix}STDERR: "), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+
+    try:
+        return_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+
+    append_chunk(run_id, "log", f"Process exited with code {return_code}")
+    return return_code
+
+
+def _run_best_effort_command(args: List[str], path: str) -> None:
+    if not args or not shutil.which(args[0]):
+        return
+    try:
+        subprocess.run([*args, path], check=False, capture_output=True, timeout=30)
+    except Exception as exc:
+        logger.debug("[PROJECT-RUN] best-effort command failed %s: %s", args, exc)
+
+
+def _create_project_folder(run_id: int, project_id: int, name: str, type_id: int) -> str:
+    append_chunk(run_id, "log", "Creating project folder and Git repository")
+    project_manager = ProjectFileManager()
+    project_folder_path, folder_success = project_manager.create_project_with_git(project_id, name, type_id)
+    if not folder_success or not project_folder_path:
+        raise RuntimeError("Failed to create project folder, Git repository, and required files")
+
+    _run_best_effort_command(["chattr", "-R", "-i"], project_folder_path)
+    _run_best_effort_command(["chown", "-R", "dreampilot:dreampilot"], project_folder_path)
+    _run_best_effort_command(["chmod", "-R", "755"], project_folder_path)
+
+    with get_db() as conn:
+        conn.execute("UPDATE projects SET project_path = %s WHERE id = %s", (project_folder_path, project_id))
+        conn.commit()
+    return project_folder_path
+
+
+def _create_github_repo(run_id: int, project_id: int, project_path: str, domain: str, name: str) -> None:
+    try:
+        github = get_github_service()
+        append_chunk(run_id, "log", f"Creating GitHub repository: {domain}")
+        repo_url = github.create_repository(name=domain, public=True, description=f"Project: {name}")
+        if not repo_url:
+            append_chunk(run_id, "log", "GitHub repository was not created; continuing without remote")
+            return
+        if github.add_remote(project_path, repo_url):
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET repo_url = %s WHERE id = %s", (repo_url, project_id))
+                conn.commit()
+            append_chunk(run_id, "log", f"GitHub remote attached: {repo_url}")
+    except Exception as exc:
+        logger.warning("[PROJECT-RUN] GitHub integration failed for project %s: %s", project_id, exc)
+        append_chunk(run_id, "log", f"GitHub setup skipped: {exc}")
+
+
+def _select_template(run_id: int, project_id: int, name: str, description: str, type_id: int, template_id: Optional[str]) -> Optional[str]:
+    selected_template_id = template_id
+    if os.getenv("EMPTY_TEMPLATE_MODE", "false").lower() == "true":
+        selected_template_id = "blank"
+    elif type_id == 1 and not selected_template_id:
+        try:
+            selector = TemplateSelector()
+            if selector.is_available():
+                append_chunk(run_id, "log", "Selecting the best website template")
+                result = asyncio.run(selector.select_template(
+                    project_name=name,
+                    project_description=description or "",
+                    project_type="website",
+                ))
+                if result.get("template"):
+                    selected_template_id = result["template"]["id"]
+        except Exception as exc:
+            logger.warning("[PROJECT-RUN] template selection failed: %s", exc)
+            append_chunk(run_id, "log", f"Template selection skipped: {exc}")
+
+    if selected_template_id:
+        with get_db() as conn:
+            conn.execute("UPDATE projects SET template_id = %s WHERE id = %s", (selected_template_id, project_id))
+            conn.commit()
+    return selected_template_id
+
+
+def _run_website_pipeline(
+    run_id: int,
+    project_id: int,
+    project_path: str,
+    name: str,
+    description: str,
+    template_id: Optional[str],
+    initial_env_vars: List[Dict[str, Any]],
+) -> None:
+    session_name = f"project-{project_id}-{name.replace(' ', '-')}"
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE projects SET claude_code_session_name = %s WHERE id = %s",
+            (session_name, project_id),
+        )
+        conn.commit()
+
+    env = os.environ.copy()
+    env["EMPTY_TEMPLATE_MODE"] = os.getenv("EMPTY_TEMPLATE_MODE", "false")
+    env["PYTHONUNBUFFERED"] = "1"
+    python_exe = sys.executable
+
+    fast_code = _run_logged_subprocess(
+        run_id,
+        [
+            python_exe,
+            "-u",
+            str(BACKEND_DIR / "fast_wrapper.py"),
+            str(project_id),
+            str(project_path),
+            str(name),
+            str(description or ""),
+            str(template_id or ""),
+        ],
+        env=env,
+        timeout=int(os.getenv("PROJECT_CREATION_FAST_TIMEOUT", "3600")),
+        prefix="[FAST-WRAPPER] ",
+    )
+    if fast_code != 0:
+        raise RuntimeError(f"fast_wrapper.py failed with exit code {fast_code}")
+
+    if initial_env_vars:
+        env_path = str(Path(project_path) / "backend" / ".env")
+        write_initial_environment_variables(env_path, initial_env_vars)
+        append_chunk(run_id, "log", f"Initial environment variables applied: {[item.get('key') for item in initial_env_vars]}")
+
+    openclaw_code = _run_logged_subprocess(
+        run_id,
+        [
+            python_exe,
+            "-u",
+            str(BACKEND_DIR / "openclaw_wrapper.py"),
+            str(project_id),
+            str(project_path),
+            str(name),
+            str(description or ""),
+            str(template_id or ""),
+        ],
+        env=env,
+        timeout=int(os.getenv("PROJECT_CREATION_OPENCLAW_TIMEOUT", "1800")),
+        prefix="[OPENCLAW] ",
+    )
+    if openclaw_code != 0:
+        raise RuntimeError(f"openclaw_wrapper.py failed with exit code {openclaw_code}")
+
+
+def _run_bot_or_scheduler_pipeline(
+    run_id: int,
+    project_id: int,
+    project_path: str,
+    payload: Dict[str, Any],
+    type_id: int,
+) -> Tuple[bool, Dict[str, Any]]:
+    name = payload.get("name") or "Untitled"
+    description = payload.get("description_for_worker") or payload.get("description") or ""
+    domain = payload.get("domain") or ""
+    initial_env_vars = payload.get("initial_environment_variables") or []
+
+    if type_id == 2:
+        from services.telegram.worker import run_telegram_bot_pipeline
+
+        append_chunk(run_id, "log", "Starting Telegram bot creation pipeline")
+        return run_telegram_bot_pipeline(
+            project_id=project_id,
+            project_name=name,
+            description=description,
+            bot_token=payload.get("bot_token"),
+            project_path=project_path,
+            domain=domain,
+            port=8000 + (project_id % 1000),
+            database_url=_database_url(),
+            initial_environment_variables=initial_env_vars,
+        )
+
+    if type_id == 3:
+        from services.discord.worker import run_discord_bot_pipeline
+
+        append_chunk(run_id, "log", "Starting Discord bot creation pipeline")
+        return run_discord_bot_pipeline(
+            project_id=project_id,
+            project_name=name,
+            description=description,
+            bot_token=payload.get("bot_token"),
+            project_path=project_path,
+            domain=domain,
+            port=8000 + (project_id % 1000),
+            database_url=_database_url(),
+            initial_environment_variables=initial_env_vars,
+        )
+
+    if type_id == 5:
+        from services.scheduler.worker import run_scheduler_pipeline
+
+        append_chunk(run_id, "log", "Starting scheduler project creation pipeline")
+        return run_scheduler_pipeline(
+            project_id=project_id,
+            project_name=name,
+            description=description,
+            project_path=project_path,
+            backend_url=f"http://localhost:{os.getenv('PORT', '8002')}",
+            telegram_bot_token=payload.get("telegram_bot_token"),
+            telegram_chat_id=payload.get("telegram_chat_id"),
+            discord_webhook_url=payload.get("discord_webhook_url"),
+            email_to=payload.get("email_to"),
+            api_endpoint=payload.get("api_endpoint"),
+            initial_environment_variables=initial_env_vars,
+        )
+
+    return False, {"errors": [f"Unsupported project type: {type_id}"]}
+
+
+def _refund_if_needed(user_id: int, operation_code: Optional[str], charge_payload: Any) -> None:
+    charge = _json_loads(charge_payload, {})
+    charged = charge.get("charged") if isinstance(charge, dict) else None
+    if not user_id or not operation_code or not charged:
+        return
+    try:
+        from services.billing_service import refund_credits
+
+        with get_db() as conn:
+            refund_credits(conn, user_id, operation_code, charged)
+            conn.commit()
+        logger.info("[PROJECT-RUN] refunded creation credits user=%s operation=%s", user_id, operation_code)
+    except Exception as exc:
+        logger.warning("[PROJECT-RUN] failed to refund creation credits: %s", exc)
+
+
+def execute_run(run_id: int) -> Dict[str, Any]:
+    run = None
+    project_id = None
+    user_id = None
+    project_path = ""
+    charged = False
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT * FROM project_creation_runs WHERE id = %s", (run_id,)).fetchone()
+        if not row:
+            return {"status": "error", "message": "Project creation run not found"}
+
+        run = dict(row)
+        project_id = int(run["project_id"])
+        user_id = int(run["user_id"])
+        type_id = int(run.get("type_id") or 1)
+        payload = _json_loads(run.get("payload"), {})
+        name = payload.get("name") or "Untitled Project"
+        description = payload.get("description_for_worker") or payload.get("description") or ""
+
+        append_chunk(run_id, "log", f"Starting durable project creation for {name}")
+
+        from services.billing_service import charge_project_creation
+
+        with get_db() as conn:
+            charge_result = charge_project_creation(
+                conn,
+                user_id,
+                project_type_id=type_id,
+                project_id=project_id,
+            )
+            if not charge_result.get("success"):
+                conn.rollback()
+                error = charge_result.get("error", "insufficient_credits")
+                mark_failed(run_id, "failed", f"Project creation billing failed: {error}", project_id)
+                append_chunk(run_id, "error", f"Billing failed: {error}")
+                return {"status": "error", "message": error}
+
+            operation_code = (charge_result.get("operation") or {}).get("code") or "WEBSITE"
+            charge = charge_result.get("charged", [])
+            conn.commit()
+        charged = True
+        _record_charge(run_id, operation_code, charge, charge_result)
+
+        project_path = _create_project_folder(run_id, project_id, name, type_id)
+        _create_github_repo(run_id, project_id, project_path, payload.get("domain") or "", name)
+        selected_template_id = _select_template(
+            run_id,
+            project_id,
+            name,
+            payload.get("description") or "",
+            type_id,
+            payload.get("template_id"),
+        )
+
+        if type_id == 1:
+            _run_website_pipeline(
+                run_id,
+                project_id,
+                project_path,
+                name,
+                description,
+                selected_template_id,
+                payload.get("initial_environment_variables") or [],
+            )
+            project = _get_project(project_id)
+            if project and project.get("status") == "creating":
+                _set_project_status(project_id, "ready")
+        else:
+            success, result = _run_bot_or_scheduler_pipeline(run_id, project_id, project_path, payload, type_id)
+            if success:
+                _set_project_status(project_id, "ready")
+            else:
+                errors = result.get("errors") if isinstance(result, dict) else None
+                raise RuntimeError("; ".join(errors or ["Project pipeline failed"]))
+
+        record_usage(
+            user_id=user_id,
+            usage_type="project_create",
+            total_tokens=1,
+            project_id=project_id,
+            description=f"Created project: {name} (domain: {payload.get('domain')})",
+        )
+        mark_completed(run_id, has_writes=True)
+        append_chunk(run_id, "log", "Project creation completed")
+        return {"status": "success", "project_id": project_id}
+
+    except Exception as exc:
+        logger.error("[PROJECT-RUN] run %s failed: %s", run_id, exc, exc_info=True)
+        append_chunk(run_id, "error", f"Project creation failed: {exc}")
+        if project_id:
+            _set_project_status(project_id, "failed", "creation_worker_failed")
+        if charged and run:
+            with get_db() as conn:
+                latest = conn.execute(
+                    "SELECT operation_code, charge FROM project_creation_runs WHERE id = %s",
+                    (run_id,),
+                ).fetchone()
+            _refund_if_needed(user_id, _row_value(latest, "operation_code"), _row_value(latest, "charge", 1))
+        mark_failed(run_id, "failed", str(exc), project_id)
+        return {"status": "error", "message": str(exc)}
+
+
+def recover_stale_runs(stale_after_minutes: int = 20) -> int:
+    cutoff = datetime.utcnow() - timedelta(minutes=stale_after_minutes)
+    recovered = 0
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, project_id, user_id, operation_code, charge
+            FROM project_creation_runs
+            WHERE status = 'running'
+              AND (heartbeat_at IS NULL OR heartbeat_at < %s)
+            """,
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            run_id = _row_value(row, "id")
+            project_id = _row_value(row, "project_id", 1)
+            user_id = _row_value(row, "user_id", 2)
+            operation_code = _row_value(row, "operation_code", 3)
+            charge = _row_value(row, "charge", 4)
+            message = "Project creation was interrupted because the worker stopped before this run finished."
+            conn.execute(
+                """
+                UPDATE project_creation_runs
+                SET status = 'interrupted',
+                    error = %s,
+                    completed_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (message, run_id),
+            )
+            conn.execute(
+                "UPDATE projects SET status = 'failed', error_code = 'creation_worker_interrupted' WHERE id = %s AND status = 'creating'",
+                (project_id,),
+            )
+            recovered += 1
+            _refund_if_needed(user_id, operation_code, charge)
+        conn.commit()
+    if recovered:
+        logger.warning("[PROJECT-RUN] recovered %s stale project creation runs", recovered)
+    return recovered
+
+
+def worker_id() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}"

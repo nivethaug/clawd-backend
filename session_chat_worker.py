@@ -10,6 +10,12 @@ import asyncio
 import logging
 import os
 import signal
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env.postgres")
+load_dotenv()
 
 from database_postgres import init_schema
 from services.session_chat_runs import claim_next_run, execute_run, recover_stale_runs, worker_id

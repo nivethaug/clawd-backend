@@ -404,6 +404,11 @@ def init_schema():
                 logger.info("✓ Added repo_url column for GitHub repository URL")
             _run_migration(migrate_repo_url)
 
+            def migrate_template_id():
+                cur.execute("ALTER TABLE projects ADD COLUMN template_id TEXT")
+                logger.info("✓ Added template_id column for selected frontend templates")
+            _run_migration(migrate_template_id)
+
             # Backfill repo_url for existing projects that have a git remote but empty repo_url
             try:
                 import subprocess
@@ -559,6 +564,44 @@ def init_schema():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_session_chat_chunks_lookup ON session_chat_chunks(run_id, seq)")
             conn.commit()
             logger.info("Added durable session chat run tables")
+
+            # Durable project creation runs. The API queues work here and a
+            # separate worker executes creation so backend restarts do not
+            # strand projects in the creating lifecycle.
+            cur.execute("""CREATE TABLE IF NOT EXISTS project_creation_runs (
+                id SERIAL PRIMARY KEY,
+                run_uuid TEXT UNIQUE NOT NULL,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                type_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'queued',
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                charge JSONB,
+                operation_code TEXT,
+                worker_id TEXT,
+                error TEXT,
+                has_writes BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                started_at TIMESTAMP,
+                heartbeat_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS project_creation_chunks (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER NOT NULL REFERENCES project_creation_runs(id) ON DELETE CASCADE,
+                seq INTEGER NOT NULL,
+                chunk_type TEXT DEFAULT 'log',
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(run_id, seq)
+            )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_project_creation_runs_project_status ON project_creation_runs(project_id, status, created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_project_creation_runs_user_status ON project_creation_runs(user_id, status, created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_project_creation_runs_queue ON project_creation_runs(status, created_at ASC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_project_creation_chunks_lookup ON project_creation_chunks(run_id, seq)")
+            conn.commit()
+            logger.info("Added durable project creation run tables")
 
             # Commit log table — persistent commit history (survives session/message deletion)
             try:

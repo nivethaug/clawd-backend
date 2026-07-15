@@ -27,6 +27,22 @@
       "error_file": "/root/clawd-backend/logs/session-chat-worker-error.log",
       "out_file": "/root/clawd-backend/logs/session-chat-worker-out.log",
       "log_date_format": "YYYY-MM-DD HH:mm:ss"
+    },
+    {
+      "name": "clawd-project-creation-worker",
+      "script": "/root/clawd-backend/venv/bin/python",
+      "args": "project_creation_worker.py",
+      "cwd": "/root/clawd-backend",
+      "instances": 1,
+      "exec_mode": "fork",
+      "autorestart": true,
+      "watch": false,
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "error_file": "/root/clawd-backend/logs/project-creation-worker-error.log",
+      "out_file": "/root/clawd-backend/logs/project-creation-worker-out.log",
+      "log_date_format": "YYYY-MM-DD HH:mm:ss"
     }
   ]
 }

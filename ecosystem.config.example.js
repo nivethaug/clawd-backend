@@ -29,6 +29,38 @@ module.exports = {
       kill_timeout: 5000,
       wait_ready: true,
       listen_timeout: 10000
+    },
+    {
+      name: 'clawd-session-chat-worker',
+      script: './venv/bin/python',
+      args: 'session_chat_worker.py',
+      cwd: '/root/clawd-backend',
+      autorestart: true,
+      watch: false,
+      env: {
+        PYTHONUNBUFFERED: '1',
+        USE_POSTGRES: 'true'
+      },
+      error_file: './logs/session-chat-worker-error.log',
+      out_file: './logs/session-chat-worker-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      merge_logs: true
+    },
+    {
+      name: 'clawd-project-creation-worker',
+      script: './venv/bin/python',
+      args: 'project_creation_worker.py',
+      cwd: '/root/clawd-backend',
+      autorestart: true,
+      watch: false,
+      env: {
+        PYTHONUNBUFFERED: '1',
+        USE_POSTGRES: 'true'
+      },
+      error_file: './logs/project-creation-worker-error.log',
+      out_file: './logs/project-creation-worker-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      merge_logs: true
     }
   ]
 };
