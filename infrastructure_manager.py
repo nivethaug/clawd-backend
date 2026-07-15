@@ -17,7 +17,18 @@ import logging
 import os
 import time
 import asyncio
+import sys
+import builtins
 from dotenv import load_dotenv
+
+def _safe_print(*args, **kwargs):
+    """Best-effort diagnostic output; stdout pipe loss must not fail deployment."""
+    try:
+        builtins.print(*args, **kwargs)
+    except BrokenPipeError:
+        pass
+
+print = _safe_print
 
 # Load environment variables from .env file
 load_dotenv()
