@@ -189,6 +189,11 @@ from template_selector import TemplateSelector
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from services.sentry_config import capture_message as sentry_capture_message
+from services.sentry_config import configure_sentry, scoped_context as sentry_scoped_context
+
+configure_sentry("backend")
+
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -996,6 +1001,36 @@ app.add_middleware(
 )
 
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
+
+
+@app.middleware("http")
+async def sentry_context_middleware(request: Request, call_next):
+    with sentry_scoped_context(
+        tags={
+            "service": "backend",
+            "http.method": request.method,
+            "http.path": request.url.path,
+        },
+        contexts={
+            "request": {
+                "method": request.method,
+                "path": request.url.path,
+                "client": request.client.host if request.client else None,
+            }
+        },
+    ):
+        response = await call_next(request)
+        if response.status_code >= 500:
+            sentry_capture_message(
+                f"HTTP {response.status_code} response",
+                tags={
+                    "service": "backend",
+                    "http.method": request.method,
+                    "http.path": request.url.path,
+                    "http.status_code": response.status_code,
+                },
+            )
+        return response
 
 # Register AI Chat routers
 app.include_router(ai_chat_router, prefix="/api/ai", tags=["ai-chat"])

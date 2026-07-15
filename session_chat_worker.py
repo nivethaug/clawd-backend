@@ -18,6 +18,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env.postgres")
 load_dotenv()
 
 from database_postgres import init_schema
+from services.sentry_config import capture_exception, configure_sentry, scoped_context
 from services.session_chat_runs import claim_next_run, execute_run, recover_stale_runs, worker_id
 
 logging.basicConfig(
@@ -25,6 +26,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s:%(name)s:%(message)s",
 )
 logger = logging.getLogger("session_chat_worker")
+configure_sentry("session-chat-worker")
 
 POLL_SECONDS = float(os.getenv("SESSION_CHAT_WORKER_POLL_SECONDS", "2"))
 STALE_AFTER_MINUTES = int(os.getenv("SESSION_CHAT_RUN_STALE_MINUTES", "20"))
@@ -56,9 +58,19 @@ async def main() -> None:
 
             run_id = int(run["id"])
             logger.info("[SESSION-WORKER] claimed run=%s session=%s channel=%s", run_id, run.get("session_id"), run.get("channel"))
-            await execute_run(run_id)
+            with scoped_context(
+                tags={
+                    "service": "session-chat-worker",
+                    "run_id": run_id,
+                    "session_id": run.get("session_id"),
+                    "project_id": run.get("project_id"),
+                    "channel": run.get("channel"),
+                }
+            ):
+                await execute_run(run_id)
         except Exception as e:
             logger.error("[SESSION-WORKER] loop error: %s", e, exc_info=True)
+            capture_exception(e, tags={"service": "session-chat-worker", "worker_id": wid})
             await asyncio.sleep(POLL_SECONDS)
 
     logger.info("[SESSION-WORKER] stopped")

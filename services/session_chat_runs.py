@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from database_postgres import get_db, get_connection_pool
 from services.session_lock_service import SessionLockService
+from services.sentry_config import capture_exception
 
 logger = logging.getLogger(__name__)
 
@@ -477,6 +478,20 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
         return {"status": "cancelled", "message": "Session chat was cancelled."}
     except Exception as e:
         logger.error("[SESSION-RUN] run %s failed: %s", run_id, e, exc_info=True)
+        capture_exception(
+            e,
+            tags={
+                "service": "session-chat-worker",
+                "run_id": run_id,
+                "session_id": session_id,
+                "project_id": project_id,
+                "channel": run.get("channel"),
+            },
+            context={
+                "mode": run.get("mode"),
+                "has_image": bool(image_attachment),
+            },
+        )
         if not assistant_saved:
             try:
                 from services.external_session_chat import refund_session_chat_credits

@@ -27,6 +27,7 @@ from github_service import get_github_service
 from project_initial_env import write_initial_environment_variables
 from project_manager import ProjectFileManager
 from services.token_tracker import record_usage
+from services.sentry_config import capture_exception
 from template_selector import TemplateSelector
 
 logger = logging.getLogger(__name__)
@@ -785,6 +786,20 @@ def execute_run(run_id: int) -> Dict[str, Any]:
 
     except Exception as exc:
         logger.error("[PROJECT-RUN] run %s failed: %s", run_id, exc, exc_info=True)
+        capture_exception(
+            exc,
+            tags={
+                "service": "project-creation-worker",
+                "run_id": run_id,
+                "project_id": project_id,
+                "user_id": user_id,
+                "type_id": run.get("type_id") if run else None,
+            },
+            context={
+                "project_path": project_path,
+                "charged": charged,
+            },
+        )
         append_chunk(run_id, "error", f"Project creation failed: {exc}")
         if project_id:
             _set_project_status(project_id, "failed", "creation_worker_failed")
