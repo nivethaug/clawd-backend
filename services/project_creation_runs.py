@@ -318,7 +318,10 @@ def _run_logged_subprocess(
                     continue
                 text = f"{stream_prefix}{line.rstrip()}"
                 logger.info("%s", text)
-                append_chunk(run_id, "log", text)
+                try:
+                    append_chunk(run_id, "log", text)
+                except Exception as exc:
+                    logger.warning("[PROJECT-RUN] append chunk failed; continuing stream: %s", exc)
         except Exception as exc:
             logger.warning("[PROJECT-RUN] stream error: %s", exc)
         finally:

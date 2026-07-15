@@ -16,8 +16,24 @@ Phases:
 
 # BOOT DIAGNOSTIC - Must be BEFORE any imports to detect blocking imports
 import sys
+import builtins
+
+def _safe_print(*args, **kwargs):
+    """Best-effort diagnostic output; stdout pipe loss must not fail creation."""
+    try:
+        builtins.print(*args, **kwargs)
+    except BrokenPipeError:
+        pass
+
+def _safe_stdout_flush():
+    try:
+        sys.stdout.flush()
+    except BrokenPipeError:
+        pass
+
+print = _safe_print
 print("OPENCLAW_WRAPPER_BOOT", flush=True)
-sys.stdout.flush()
+_safe_stdout_flush()
 
 import signal
 import json
@@ -36,7 +52,7 @@ def _signal_handler(signum, frame):
     print(f"🔴 Stack trace:", flush=True)
     import traceback
     traceback.print_stack(frame)
-    sys.stdout.flush()
+    _safe_stdout_flush()
     # Re-raise to allow default handler
     signal.signal(signum, signal.SIG_DFL)
     os.kill(os.getpid(), signum)
