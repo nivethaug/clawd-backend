@@ -50,14 +50,14 @@ UNLIMITED = RateLimit(max_requests=0)
 TIERS: Dict[str, TierLimits] = {
     "free": TierLimits(
         name="Free",
-        general_api=RateLimit(max_requests=60, window_seconds=3600),
+        general_api=RateLimit(max_requests=600, window_seconds=3600),
         ai_chat=RateLimit(max_requests=10, window_seconds=3600),
         project_create=RateLimit(max_requests=3, window_seconds=86400),
         max_projects=3,
     ),
     "pro": TierLimits(
         name="Pro",
-        general_api=RateLimit(max_requests=300, window_seconds=3600),
+        general_api=RateLimit(max_requests=3000, window_seconds=3600),
         ai_chat=RateLimit(max_requests=100, window_seconds=3600),
         project_create=RateLimit(max_requests=25, window_seconds=86400),
         max_projects=25,

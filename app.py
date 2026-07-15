@@ -9820,6 +9820,53 @@ async def rollback_commit_by_log_id(
 # Rate Limiting Middleware & User Limits Endpoint
 # ============================================================================
 
+SAFE_RATE_LIMIT_EXEMPT_GET_PATHS = {
+    "/api/billing/balances",
+    "/api/billing/summary",
+    "/api/bot/link/status",
+    "/dashboard/home",
+    "/chat/chunks",
+    "/projects/recent-activity",
+    "/projects/recent-activity/simple",
+}
+
+
+def _is_active_session_poll_path(path: str) -> bool:
+    """Return True for GET /projects/{id}/active-session polling."""
+    parts = path.strip("/").split("/")
+    return (
+        len(parts) == 3
+        and parts[0] == "projects"
+        and parts[2] == "active-session"
+        and parts[1].isdigit()
+    )
+
+
+def _classify_rate_limit(request: Request) -> Optional[str]:
+    """
+    Classify a request into a rate-limit bucket.
+
+    Returns None for safe polling/read endpoints that are intentionally excluded
+    from user-facing quota consumption.
+    """
+    path = request.url.path
+    method = request.method.upper()
+
+    if method == "GET" and (
+        path in SAFE_RATE_LIMIT_EXEMPT_GET_PATHS
+        or _is_active_session_poll_path(path)
+    ):
+        return None
+
+    if path.startswith("/chat") or path.startswith("/ai/"):
+        return "ai_chat"
+
+    if path == "/projects" and method == "POST":
+        return "project_create"
+
+    return "general_api"
+
+
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     """
@@ -9854,13 +9901,9 @@ async def rate_limit_middleware(request: Request, call_next):
     if not user_id:
         return await call_next(request)
 
-    # Determine limit type based on path
-    if path.startswith("/chat") or path.startswith("/ai/"):
-        limit_type = "ai_chat"
-    elif path == "/projects" and request.method == "POST":
-        limit_type = "project_create"
-    else:
-        limit_type = "general_api"
+    limit_type = _classify_rate_limit(request)
+    if limit_type is None:
+        return await call_next(request)
 
     # Check rate limit
     try:
