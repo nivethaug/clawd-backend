@@ -1,7 +1,7 @@
 # DreamAgent Backend Documentation
 
 > Purpose: help maintainers and AI agents navigate the current backend quickly.
-> Last updated: 2026-07-12
+> Last updated: 2026-07-15
 
 ## Start Here
 
@@ -36,7 +36,7 @@
 | AI workspace chat | `app.py`, `chat_handlers.py`, `acp_chat_handler.py`, `claude_code_agent.py` |
 | Prompt Assistant | `completion_service.py`, `services/ai/openrouter_client.py` |
 | AI chat assistant APIs | `api/ai_chat.py`, `api/ai_selection.py`, `api/ai_confirm.py`, `services/ai/*` |
-| Project creation | `app.py`, `project_manager.py`, `claude_code_worker.py`, `fast_wrapper.py`, `infrastructure_manager.py` |
+| Project creation | `app.py`, `project_creation_worker.py`, `services/project_creation_runs.py`, `project_manager.py`, `fast_wrapper.py`, `infrastructure_manager.py` |
 | Telegram projects | `services/telegram/*`, `api/telegram_webhook.py`, `templates/telegram-bot-template/*` |
 | Telegram session chat | `api/telegram_webhook.py`, `utils/devops_session_context.py`, `acp_chat_handler.py` |
 | Discord session chat | `api/discord_webhook.py`, `services/discord_client.py`, `services/external_session_chat.py` |
@@ -72,5 +72,6 @@ Expected public or webhook-style routes are limited to auth bootstrap, stateless
 
 - When routes change, update [backend_api_reference.md](./backend_api_reference.md).
 - When request/response behavior changes, update the feature-specific doc, not only this TOC.
+- Durable Claude/session and project-creation work requires the PM2 workers `clawd-session-chat-worker` and `clawd-project-creation-worker`; deploys should reload `ecosystem.config.json`.
 - Keep docs focused on current runtime behavior. Avoid preserving stale line numbers when code is moving quickly.
 - The frontend app lives outside this repository; backend docs should describe API contracts, persistence, auth, workers, and operational behavior.
