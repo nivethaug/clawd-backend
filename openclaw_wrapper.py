@@ -1683,9 +1683,23 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 logger.error("❌ Initialization failed at phase 9")
                 return
 
-            # All phases completed!
-            if phases_succeeded == total_phases:
+            # All required phases completed. ACPX is allowed to fail/rollback because
+            # infrastructure deployment can still produce a valid template project.
+            non_critical_failures = {"ACPX Frontend Editor"}
+            critical_failed_phases = [
+                phase for phase in self.failed_phases
+                if phase not in non_critical_failures
+            ]
+            acpx_warning_only = (
+                not critical_failed_phases
+                and "ACPX Frontend Editor" in self.failed_phases
+                and phases_succeeded >= total_phases - 1
+            )
+            if phases_succeeded == total_phases or acpx_warning_only:
                 logger.info(f"✅ All {total_phases} infrastructure provisioning phases completed successfully!")
+
+                if acpx_warning_only:
+                    logger.warning("OPENCLAW_FINAL_SUCCESS_WITH_WARNINGS: ACPX failed/rolled back, deployment succeeded")
 
                 # Get domain for final logging
                 domain = self.get_project_domain()
@@ -1707,7 +1721,13 @@ Execute the refinement now and make this template production-ready for: {self.pr
             else:
                 logger.error(f"❌ Initialization incomplete. Succeeded: {phases_succeeded}/{total_phases}, Failed: {', '.join(self.failed_phases)}")
                 self.update_status("failed")
-                
+                logger.error(
+                    "OPENCLAW_FINAL_FAILURE: current_phase=%s completed=%s failed=%s",
+                    self.current_phase,
+                    self.completed_phases,
+                    self.failed_phases,
+                )
+
                 # Log pipeline status on failure
                 progress = self.status_tracker.get_progress_summary()
                 logger.error(f"📉 Pipeline Progress: {progress['progress_percent']}% - {progress['overall_status']}")

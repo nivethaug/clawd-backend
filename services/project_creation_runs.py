@@ -345,6 +345,7 @@ def _run_logged_subprocess(
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
 
+    logger.info("[PROJECT-RUN] process exited with code %s: %s", return_code, " ".join(args))
     append_chunk(run_id, "log", f"Process exited with code {return_code}")
     return return_code
 
