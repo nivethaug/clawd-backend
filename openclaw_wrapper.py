@@ -527,7 +527,9 @@ That's all. Execute Phase {phase} now.
             infra = InfrastructureManager(self.project_name, self.project_path, domain=domain, project_id=self.project_id)
 
             # Provision all infrastructure (DB, ports, service, nginx)
+            logger.info("INFRA_MANAGER_HANDOFF_START: starting InfrastructureManager.provision_all()")
             success = infra.provision_all()
+            logger.info(f"INFRA_MANAGER_HANDOFF_RESULT: success={success}")
 
             if success:
                 logger.info("✓ Service setup complete")
@@ -1542,14 +1544,14 @@ Execute the refinement now and make this template production-ready for: {self.pr
             logger.info(f"🤖 Phase 3/{total_phases}: ACPX Frontend Refinement")
             self.status_tracker.start_phase(PipelinePhase.ACPX)
             
-            print("PIPELINE TRACE: entering Phase 9 (ACPX Frontend Refinement)")
+            print("PIPELINE TRACE: entering Phase 3 ACPX Frontend Refinement")
             try:
                 import asyncio
                 result_phase9 = asyncio.run(self.phase_9_acp_frontend_editor())
-                print("PIPELINE TRACE: exiting Phase 9")
-                print("PIPELINE TRACE: Phase 9 result =", result_phase9)
+                print("PIPELINE TRACE: exiting Phase 3 ACPX")
+                print("PIPELINE TRACE: Phase 3 ACPX result =", result_phase9)
             except Exception as e:
-                print("PHASE_9_ERROR:", str(e))
+                print("PHASE_3_ACPX_ERROR:", str(e))
                 import traceback
                 traceback.print_exc()
                 result_phase9 = False

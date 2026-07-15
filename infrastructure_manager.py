@@ -1838,6 +1838,12 @@ class InfrastructureManager:
 
             # Save allocated ports to database so future allocations don't reuse them
             self._save_ports_to_db()
+            logger.info(
+                "INFRA_PHASE_1_PORTS_COMPLETE: frontend=%s backend=%s domain=%s",
+                self.ports["frontend"],
+                self.ports["backend"],
+                self.domain,
+            )
 
             # Log API URL creation
             api_url = f"http://{self.domain}.{BASE_DOMAIN}/api"
@@ -1848,6 +1854,11 @@ class InfrastructureManager:
             # Phase 2: Provision database
             logger.info("Phase 2/8: Database provisioning")
             self.database_info = self.db_provisioner.create_database_and_user(self.domain)
+            logger.info(
+                "INFRA_PHASE_2_DATABASE_COMPLETE: database=%s user=%s",
+                self.database_info.get("database_name"),
+                self.database_info.get("username"),
+            )
             # logger.info(f"✓ Database created: {self.database_info['database_name']}")  # Commented for cleaner logs
 
             # Phase 3: Configure backend environment
@@ -1856,6 +1867,7 @@ class InfrastructureManager:
             self._update_agent_readme()
             self._update_buildpublish()
             self._update_frontend_api_config()
+            logger.info("INFRA_PHASE_3_ENV_COMPLETE: backend/frontend environment updated")
             # logger.info("✓ Backend environment configured")  # Commented for cleaner logs
 
             # Phase 4: Create service config
@@ -1866,6 +1878,7 @@ class InfrastructureManager:
                 self.project_path,
                 domain=self.domain  # Use domain for PM2 app name
             )
+            logger.info("INFRA_PHASE_4_SERVICE_CONFIG_COMPLETE: service=%s", self.service_name)
             # logger.info(f"✓ Service configured: {self.service_name}")  # Commented for cleaner logs
 
             # Phase 5: Build frontend (BUILD PHASE ONLY - no service creation)
@@ -1874,6 +1887,7 @@ class InfrastructureManager:
             build_success = self._phase_5_build()
             if build_success:
                 logger.info("PHASE_5_BUILD_COMPLETE: success")
+                logger.info("INFRA_PHASE_5_BUILD_COMPLETE: frontend build ready")
                 # logger.info("✓ Frontend build phase completed")  # Commented for cleaner logs
             else:
                 logger.error("PHASE_5_BUILD_COMPLETE: failed")
@@ -1934,6 +1948,11 @@ class InfrastructureManager:
                 logger.error("PHASE_6_NGINX_COMPLETE: failed (reload)")
                 return False
             logger.info("PHASE_6_NGINX_COMPLETE: success")
+            logger.info(
+                "INFRA_PHASE_6_NGINX_COMPLETE: frontend=%s backend=%s",
+                self.domains.get("frontend"),
+                self.domains.get("backend"),
+            )
             # logger.info(f"✓ Nginx configured with SPA routing: {self.domains}")  # Commented for cleaner logs
 
             # Phase 7: Start services (PM2) - SERVICE PHASE ONLY
@@ -1942,6 +1961,12 @@ class InfrastructureManager:
             service_success = self._phase_6_service()
             if service_success:
                 logger.info("PHASE_6_SERVICE_COMPLETE: success")
+                logger.info(
+                    "INFRA_PHASE_7_SERVICE_COMPLETE: service=%s frontend_port=%s backend_port=%s",
+                    self.service_name,
+                    self.ports["frontend"],
+                    self.ports["backend"],
+                )
                 # logger.info("✓ Service phase completed")  # Commented for cleaner logs
             else:
                 logger.error("PHASE_6_SERVICE_COMPLETE: failed")
@@ -2056,6 +2081,13 @@ class InfrastructureManager:
 
             logger.info("[VERIFY] ✓ Deployment verified successfully")
             logger.info("PHASE_9_VERIFY_COMPLETE: success")
+            logger.info(
+                "INFRA_PHASE_8_VERIFY_COMPLETE: frontend_port=%s backend_port=%s frontend_domain=%s backend_domain=%s",
+                self.ports["frontend"],
+                self.ports["backend"],
+                self.domains.get("frontend"),
+                self.domains.get("backend"),
+            )
             
             # PHASE_10: Final Cleanup (node_modules removal)
             logger.info("Phase 8/8: Final cleanup")
@@ -2095,6 +2127,7 @@ class InfrastructureManager:
             logger.info("DEPLOY: Project READY")
             logger.info("✅ All infrastructure provisioned and verified successfully!")
             self._save_metadata()
+            logger.info("INFRA_MANAGER_COMPLETE: infrastructure provisioned, verified, and metadata saved")
             return True
 
         except Exception as e:
