@@ -3514,6 +3514,49 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
     return cleanup_results
 
 
+def _get_active_project_session_chat(project_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Return one active/processing project session chat for a project.
+
+    Deleting a project while an ACP/session chat is running can remove the
+    session/messages that the durable worker still needs for finalization.
+    """
+    with get_db() as conn:
+        processing_session = conn.execute(
+            """
+            SELECT id, label, channel, processing_channel, processing_started_at
+            FROM sessions
+            WHERE project_id = ?
+              AND processing = TRUE
+            ORDER BY processing_started_at DESC, last_used_at DESC, id DESC
+            LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
+        if processing_session:
+            return dict(processing_session)
+
+        active_run = conn.execute(
+            """
+            SELECT r.id AS run_id,
+                   r.status AS run_status,
+                   r.channel AS processing_channel,
+                   r.started_at AS processing_started_at,
+                   s.id,
+                   s.label,
+                   s.channel
+            FROM session_chat_runs r
+            JOIN sessions s ON s.id = r.session_id
+            WHERE r.project_id = ?
+              AND r.status IN ('queued', 'running', 'cancel_requested')
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
+        return dict(active_run) if active_run else None
+
+
 @app.delete("/projects/{project_id}")
 async def delete_project(
     project_id: int,
@@ -3562,6 +3605,36 @@ async def delete_project(
                 raise HTTPException(status_code=403, detail=error_msg)
         else:
             logger.info("✓ Master database validation passed (SQLite mode)")
+
+        active_session_chat = _get_active_project_session_chat(project_id)
+        if active_session_chat:
+            session_label = active_session_chat.get("label") or f"Session #{active_session_chat.get('id')}"
+            processing_channel = (
+                active_session_chat.get("processing_channel")
+                or active_session_chat.get("channel")
+                or "unknown"
+            )
+            logger.warning(
+                "[DELETE] Blocked project deletion while session chat is active project=%s session=%s run=%s channel=%s",
+                project_id,
+                active_session_chat.get("id"),
+                active_session_chat.get("run_id"),
+                processing_channel,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "success": False,
+                    "error": "project_session_chat_in_progress",
+                    "message": "Project cannot be deleted while a project session chat is in progress. Wait for it to finish or cancel/complete the session first.",
+                    "session_id": active_session_chat.get("id"),
+                    "session_label": session_label,
+                    "processing_channel": processing_channel,
+                    "processing_started_at": str(active_session_chat.get("processing_started_at") or ""),
+                    "run_id": active_session_chat.get("run_id"),
+                    "run_status": active_session_chat.get("run_status"),
+                },
+            )
 
         # Validate project database deletion if in PostgreSQL mode
         if db_info["backend"] == "postgresql":
