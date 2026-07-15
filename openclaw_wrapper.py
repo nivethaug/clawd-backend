@@ -116,6 +116,7 @@ class OpenClawWrapper:
         
         # Track current phase for safety guard
         self.current_phase = 0
+        self.pipeline_success = False
 
         # Step 0: Select template if not provided
         if not template_id:
@@ -1678,6 +1679,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
 
                 logger.info(f"PROJECT STATUS UPDATE → ready")
                 self.update_status("ready")
+                self.pipeline_success = True
                 logger.info(f"✓ Project {self.project_id} status updated to 'ready'")
                 logger.info(f"📊 Completed phases: {', '.join(self.completed_phases)}")
                 
@@ -1696,6 +1698,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
 
         except Exception as e:
             logger.error(f"💥 Unexpected error in OpenClaw wrapper: {e}")
+            self.failed_phases.append(f"Unexpected error: {e}")
             self.update_status("failed")
             self.status_tracker.fail_phase(PipelinePhase.DEPLOY, ErrorCode.UNKNOWN_ERROR, str(e))
 
@@ -1736,6 +1739,9 @@ def main():
     )
 
     wrapper.run_all_phases()
+    if not wrapper.pipeline_success:
+        print("OPENCLAW_WRAPPER_FAILED", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
