@@ -1778,6 +1778,13 @@ def main():
 
     wrapper.run_all_phases()
     if not wrapper.pipeline_success:
+        print(
+            "OPENCLAW_WRAPPER_FAILED_STATE "
+            f"current_phase={wrapper.current_phase} "
+            f"completed={wrapper.completed_phases} "
+            f"failed={wrapper.failed_phases}",
+            flush=True,
+        )
         print("OPENCLAW_WRAPPER_FAILED", flush=True)
         sys.exit(1)
 

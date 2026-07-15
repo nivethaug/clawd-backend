@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -299,6 +300,8 @@ def _run_logged_subprocess(
 ) -> int:
     logger.info("[PROJECT-RUN] executing: %s", " ".join(args))
     append_chunk(run_id, "log", f"Executing: {' '.join(args)}")
+    stdout_tail = deque(maxlen=30)
+    stderr_tail = deque(maxlen=30)
 
     process = subprocess.Popen(
         args,
@@ -317,6 +320,10 @@ def _run_logged_subprocess(
                 if not line:
                     continue
                 text = f"{stream_prefix}{line.rstrip()}"
+                if stream_prefix:
+                    stderr_tail.append(text)
+                else:
+                    stdout_tail.append(text)
                 logger.info("%s", text)
                 try:
                     append_chunk(run_id, "log", text)
@@ -346,6 +353,13 @@ def _run_logged_subprocess(
         stderr_thread.join(timeout=5)
 
     logger.info("[PROJECT-RUN] process exited with code %s: %s", return_code, " ".join(args))
+    if return_code != 0:
+        if stdout_tail:
+            logger.error("[PROJECT-RUN] stdout tail before failure:\n%s", "\n".join(stdout_tail))
+            append_chunk(run_id, "error", "stdout tail before failure:\n" + "\n".join(stdout_tail))
+        if stderr_tail:
+            logger.error("[PROJECT-RUN] stderr tail before failure:\n%s", "\n".join(stderr_tail))
+            append_chunk(run_id, "error", "stderr tail before failure:\n" + "\n".join(stderr_tail))
     append_chunk(run_id, "log", f"Process exited with code {return_code}")
     return return_code
 
