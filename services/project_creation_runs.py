@@ -128,6 +128,10 @@ def append_chunk(run_id: int, chunk_type: str, content: str) -> int:
     if not content:
         return -1
     with get_db() as conn:
+        conn.execute(
+            "SELECT id FROM project_creation_runs WHERE id = %s FOR UPDATE",
+            (run_id,),
+        ).fetchone()
         row = conn.execute(
             "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM project_creation_chunks WHERE run_id = %s",
             (run_id,),
