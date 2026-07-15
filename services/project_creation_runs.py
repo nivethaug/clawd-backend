@@ -34,6 +34,15 @@ logger = logging.getLogger(__name__)
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 TERMINAL_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
 ACTIVE_STATUSES = {"queued", "running"}
+DEFAULT_CHUNK_RETENTION_DAYS = 7
+DEFAULT_MAX_TERMINAL_CHUNKS_PER_RUN = 800
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def _row_value(row: Any, key: str, index: int = 0) -> Any:
@@ -127,33 +136,46 @@ def append_chunk(run_id: int, chunk_type: str, content: str) -> int:
     content = content or ""
     if not content:
         return -1
-    with get_db() as conn:
-        conn.execute(
-            "SELECT id FROM project_creation_runs WHERE id = %s FOR UPDATE",
-            (run_id,),
-        ).fetchone()
-        row = conn.execute(
-            "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM project_creation_chunks WHERE run_id = %s",
-            (run_id,),
-        ).fetchone()
-        seq = int(_row_value(row, "next_seq") or 0)
-        conn.execute(
-            """
-            INSERT INTO project_creation_chunks (run_id, seq, chunk_type, content, created_at)
-            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-            """,
-            (run_id, seq, chunk_type or "log", content[:8000]),
-        )
-        conn.execute(
-            """
-            UPDATE project_creation_runs
-            SET heartbeat_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
-            """,
-            (run_id,),
-        )
+    pool = get_connection_pool()
+    conn = pool.getconn()
+    previous_autocommit = getattr(conn, "autocommit", False)
+    try:
+        # Some infrastructure helpers temporarily enable autocommit on pooled
+        # connections. Chunk sequence assignment must always run in one explicit
+        # transaction so concurrent stdout/stderr reader threads cannot pick the
+        # same next seq value.
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (int(run_id),))
+            cur.execute(
+                "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM project_creation_chunks WHERE run_id = %s",
+                (run_id,),
+            )
+            row = cur.fetchone()
+            seq = int(_row_value(row, "next_seq") or 0)
+            cur.execute(
+                """
+                INSERT INTO project_creation_chunks (run_id, seq, chunk_type, content, created_at)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """,
+                (run_id, seq, chunk_type or "log", content[:8000]),
+            )
+            cur.execute(
+                """
+                UPDATE project_creation_runs
+                SET heartbeat_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (run_id,),
+            )
         conn.commit()
-    return seq
+        return seq
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.autocommit = previous_autocommit
+        pool.putconn(conn)
 
 
 def claim_next_run(worker_id: str) -> Optional[Dict[str, Any]]:
@@ -225,6 +247,7 @@ def mark_completed(run_id: int, has_writes: bool = False) -> None:
             (bool(has_writes), run_id),
         )
         conn.commit()
+    prune_terminal_chunks(run_id=run_id)
 
 
 def mark_failed(run_id: int, status: str, error: str, project_id: Optional[int] = None) -> None:
@@ -247,6 +270,93 @@ def mark_failed(run_id: int, status: str, error: str, project_id: Optional[int] 
                 ("failed", "creation_worker_failed", project_id),
             )
         conn.commit()
+    prune_terminal_chunks(run_id=run_id)
+
+
+def prune_terminal_chunks(run_id: Optional[int] = None) -> None:
+    """Bound durable project creation chunk growth for terminal runs.
+
+    Active runs keep all chunks so reconnect/polling remains complete. Once a
+    run completes or fails, keep a recent tail for troubleshooting and remove
+    terminal chunks after the retention window.
+    """
+    retention_days = max(
+        1,
+        _env_int("PROJECT_CREATION_CHUNK_RETENTION_DAYS", DEFAULT_CHUNK_RETENTION_DAYS),
+    )
+    max_chunks = max(
+        100,
+        _env_int("PROJECT_CREATION_CHUNK_MAX_TERMINAL_PER_RUN", DEFAULT_MAX_TERMINAL_CHUNKS_PER_RUN),
+    )
+
+    pool = get_connection_pool()
+    conn = pool.getconn()
+    previous_autocommit = getattr(conn, "autocommit", False)
+    try:
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            params: List[Any] = [list(TERMINAL_STATUSES)]
+            run_filter = ""
+            if run_id is not None:
+                run_filter = "AND c.run_id = %s"
+                params.append(int(run_id))
+
+            cur.execute(
+                f"""
+                DELETE FROM project_creation_chunks c
+                USING project_creation_runs r
+                WHERE c.run_id = r.id
+                  AND r.status = ANY(%s)
+                  {run_filter}
+                  AND COALESCE(r.completed_at, r.updated_at, r.created_at)
+                        < CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
+                """,
+                (*params, retention_days),
+            )
+            deleted_expired = cur.rowcount
+
+            cap_params: List[Any] = [list(TERMINAL_STATUSES)]
+            cap_run_filter = ""
+            if run_id is not None:
+                cap_run_filter = "AND c.run_id = %s"
+                cap_params.append(int(run_id))
+            cap_params.append(max_chunks)
+
+            cur.execute(
+                f"""
+                DELETE FROM project_creation_chunks
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT c.id,
+                               ROW_NUMBER() OVER (PARTITION BY c.run_id ORDER BY c.seq DESC) AS rn
+                        FROM project_creation_chunks c
+                        JOIN project_creation_runs r ON r.id = c.run_id
+                        WHERE r.status = ANY(%s)
+                          {cap_run_filter}
+                          AND c.chunk_type <> 'error'
+                    ) ranked
+                    WHERE ranked.rn > %s
+                )
+                """,
+                tuple(cap_params),
+            )
+            deleted_over_cap = cur.rowcount
+        conn.commit()
+        if deleted_expired or deleted_over_cap:
+            logger.info(
+                "[PROJECT-RUN] pruned creation chunks run=%s expired=%s over_cap=%s max_per_run=%s retention_days=%s",
+                run_id or "all",
+                deleted_expired,
+                deleted_over_cap,
+                max_chunks,
+                retention_days,
+            )
+    except Exception as exc:
+        conn.rollback()
+        logger.warning("[PROJECT-RUN] chunk pruning failed run=%s: %s", run_id or "all", exc)
+    finally:
+        conn.autocommit = previous_autocommit
+        pool.putconn(conn)
 
 
 def _record_charge(run_id: int, operation_code: str, charge: List[Dict[str, Any]], charge_result: Dict[str, Any]) -> None:
