@@ -508,6 +508,58 @@ def init_schema():
                 logger.info("✓ Added token_usage column to messages table")
             _run_migration(migrate_token_usage)
 
+            # Durable selected-session chat runs. The API enqueues these rows and
+            # a separate worker writes chunks/results so clients can reconnect
+            # after a backend restart.
+            cur.execute("""CREATE TABLE IF NOT EXISTS session_chat_runs (
+                id SERIAL PRIMARY KEY,
+                run_uuid TEXT UNIQUE NOT NULL,
+                session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                session_key TEXT NOT NULL,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                user_id INTEGER,
+                channel TEXT DEFAULT 'webchat',
+                mode TEXT DEFAULT 'dream',
+                status TEXT NOT NULL DEFAULT 'queued',
+                user_message TEXT NOT NULL,
+                session_context TEXT,
+                image_attachment JSONB,
+                billing_user_id INTEGER,
+                reserved_charges JSONB DEFAULT '[]'::jsonb,
+                token_usage JSONB,
+                has_writes BOOLEAN DEFAULT FALSE,
+                assistant_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+                worker_id TEXT,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                started_at TIMESTAMP,
+                heartbeat_at TIMESTAMP,
+                cancel_requested_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS session_chat_chunks (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER NOT NULL REFERENCES session_chat_runs(id) ON DELETE CASCADE,
+                seq INTEGER NOT NULL,
+                chunk_type TEXT DEFAULT 'text',
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(run_id, seq)
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS claude_session_resumes (
+                resume_key TEXT PRIMARY KEY,
+                claude_session_id TEXT NOT NULL,
+                project_path TEXT,
+                session_id INTEGER,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_session_chat_runs_session_status ON session_chat_runs(session_key, status, created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_session_chat_runs_queue ON session_chat_runs(status, created_at ASC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_session_chat_chunks_lookup ON session_chat_chunks(run_id, seq)")
+            conn.commit()
+            logger.info("Added durable session chat run tables")
+
             # Commit log table — persistent commit history (survives session/message deletion)
             try:
                 cur.execute("""CREATE TABLE IF NOT EXISTS commit_log (

@@ -5678,6 +5678,79 @@ async def chat_stream_endpoint(
                 )
             # ── END PREPROCESSOR CHECK ────────────────────────────────────────
             
+            if os.getenv("SESSION_CHAT_DURABLE_RUNS", "true").lower() not in {"0", "false", "no"}:
+                from services.session_chat_runs import create_run, get_chunks
+
+                try:
+                    run_info = create_run(
+                        session_id=session_id,
+                        session_key=request.session_key,
+                        project_id=project_id,
+                        user_id=_chat_user_id,
+                        channel="webchat",
+                        mode=msg_mode,
+                        user_message=acp_user_content,
+                        session_context=session_context,
+                        billing_user_id=_chat_user_id,
+                        reserved_charges=_chat_charged,
+                        image_attachment=image_attachment,
+                    )
+                    run_id = int(run_info["id"])
+                    logger.info("[ACP-STREAM] Durable session run queued: %s", run_id)
+                except Exception as enqueue_err:
+                    logger.error("[ACP-STREAM] Failed to queue durable session run: %s", enqueue_err, exc_info=True)
+                    cleanup_chat_image_attachment(image_attachment, "[ACP-STREAM]")
+                    if processing_acquired:
+                        SessionLockService.release_processing(session_id)
+                    if _chat_charged and _chat_user_id:
+                        try:
+                            from services.billing_service import refund_credits
+                            with get_db() as rconn:
+                                refund_credits(rconn, _chat_user_id, "ADD_FEATURE", _chat_charged)
+                                rconn.commit()
+                        except Exception as refund_err:
+                            logger.warning(f"[BILLING] Refund failed after durable enqueue error: {refund_err}")
+                    raise
+
+                async def durable_streaming_response():
+                    """Stream DB-backed chunks produced by session_chat_worker."""
+                    after = 0
+                    last_status = "queued"
+                    try:
+                        while True:
+                            chunk_result = get_chunks(run_id, after)
+                            last_status = chunk_result.get("status") or last_status
+                            for chunk in chunk_result.get("chunks", []):
+                                seq = int(chunk.get("seq", after))
+                                after = max(after, seq + 1)
+                                content = str(chunk.get("content") or "")
+                                if not content:
+                                    continue
+                                event_data = json.dumps({'choices': [{'delta': {'content': content + "\n"}}]})
+                                yield f"data: {event_data}\n\n"
+
+                            if last_status in {"completed", "failed", "cancelled", "interrupted"}:
+                                break
+                            await asyncio.sleep(0.75)
+                    except asyncio.CancelledError:
+                        logger.info("[ACP-STREAM] Client disconnected from durable run %s; worker continues", run_id)
+                        raise
+                    finally:
+                        logger.info("[ACP-STREAM] Durable stream finished/pause run=%s status=%s", run_id, last_status)
+
+                    yield "data: [DONE]\n\n"
+
+                return StreamingResponse(
+                    durable_streaming_response(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                        "X-Session-Run-Id": str(run_id),
+                    },
+                )
+
             # Run streaming with unified backend (ClaudeCodeAgent or ACPX fallback)
             logger.info(f"[ACP-STREAM] Starting unified streaming (timeout: 900s)...")
             
@@ -6090,6 +6163,16 @@ async def cancel_chat(
     except Exception as lookup_err:
         logger.warning(f"[CANCEL] Could not resolve session id for processing release: {lookup_err}")
 
+    try:
+        from services.session_chat_runs import mark_cancel_requested
+
+        durable_run = mark_cancel_requested(request.session_key)
+        if durable_run:
+            logger.info("[CANCEL] Durable run cancel requested for session_key: %s", request.session_key[:16])
+            return {"success": True, "message": "Cancellation requested"}
+    except Exception as durable_cancel_err:
+        logger.warning("[CANCEL] Durable cancel lookup failed: %s", durable_cancel_err)
+
     handler = active_handlers.get(request.session_key)
     if handler:
         logger.info(f"[CANCEL] Handler found. Agent active: {handler._active_agent is not None}, Query running: {handler.is_query_running()}")
@@ -6129,6 +6212,20 @@ async def chat_status(
     if handler and handler.is_query_running():
         return {"active": True, "session_key": session_key}
     try:
+        from services.session_chat_runs import get_active_run_for_session
+
+        active_run = get_active_run_for_session(session_key)
+        if active_run:
+            return {
+                "active": True,
+                "session_key": session_key,
+                "run_id": active_run.get("id"),
+                "status": active_run.get("status"),
+                "recovered": True,
+            }
+    except Exception as run_status_err:
+        logger.warning(f"[STATUS] Could not read durable session run state: {run_status_err}")
+    try:
         with get_db() as conn:
             row = conn.execute(
                 "SELECT id FROM sessions WHERE session_key = ?",
@@ -6164,7 +6261,32 @@ async def chat_chunks(
     _require_session_key_owner(session_key, authorization)
     handler = active_handlers.get(session_key)
     if not handler:
-        return {"chunks": [], "total": 0, "active": False}
+        try:
+            from services.session_chat_runs import get_active_run_for_session, get_latest_run_for_session, get_chunks as get_run_chunks
+
+            run = get_active_run_for_session(session_key) or get_latest_run_for_session(session_key)
+            if not run:
+                return {"chunks": [], "total": 0, "active": False}
+            durable = get_run_chunks(int(run["id"]), after)
+            filtered = []
+            for chunk in durable.get("chunks", []):
+                content = str(chunk.get("content") or "")
+                if content.startswith('PROGRESS:') or content.startswith('TOOL:'):
+                    continue
+                if content.startswith('TEXT:'):
+                    filtered.append(content[5:])
+                elif content.strip() and content not in ['null', '{}', '[]', '---']:
+                    filtered.append(content)
+            return {
+                "chunks": filtered,
+                "total": durable.get("total", 0),
+                "active": bool(durable.get("active")),
+                "run_id": run.get("id"),
+                "status": durable.get("status"),
+            }
+        except Exception as durable_chunks_err:
+            logger.warning(f"[CHUNKS] Could not read durable chunks: {durable_chunks_err}")
+            return {"chunks": [], "total": 0, "active": False}
 
     all_chunks = getattr(handler, '_last_query_chunks', []) or []
     new_chunks = all_chunks[after:] if after < len(all_chunks) else []

@@ -1,16 +1,36 @@
 {
-  "name": "clawd-backend",
-  "script": "/root/clawd-backend/start-backend.sh",
-  "cwd": "/root/clawd-backend",
-  "instances": 1,
-  "exec_mode": "fork",
-  "autorestart": true,
-  "watch": false,
-  "env": {
-    "DB_PATH": "/root/clawd-backend/clawdbot_adapter.db",
-    "PYTHONUNBUFFERED": "1",
-    "LEMONSQUEEZY_API_KEY": "PASTE_FULL_API_KEY_HERE",
-    "LEMONSQUEEZY_STORE_ID": "419675",
-    "LEMONSQUEEZY_WEBHOOK_SECRET": "Na@3117"
-  }
+  "apps": [
+    {
+      "name": "clawd-backend",
+      "script": "/root/clawd-backend/start-backend.sh",
+      "cwd": "/root/clawd-backend",
+      "instances": 1,
+      "exec_mode": "fork",
+      "autorestart": true,
+      "watch": false,
+      "env": {
+        "DB_PATH": "/root/clawd-backend/clawdbot_adapter.db",
+        "PYTHONUNBUFFERED": "1",
+        "LEMONSQUEEZY_API_KEY": "PASTE_FULL_API_KEY_HERE",
+        "LEMONSQUEEZY_STORE_ID": "419675",
+        "LEMONSQUEEZY_WEBHOOK_SECRET": "Na@3117"
+      }
+    },
+    {
+      "name": "clawd-session-chat-worker",
+      "script": "/root/clawd-backend/venv/bin/python",
+      "args": "session_chat_worker.py",
+      "cwd": "/root/clawd-backend",
+      "instances": 1,
+      "exec_mode": "fork",
+      "autorestart": true,
+      "watch": false,
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "error_file": "/root/clawd-backend/logs/session-chat-worker-error.log",
+      "out_file": "/root/clawd-backend/logs/session-chat-worker-out.log",
+      "log_date_format": "YYYY-MM-DD HH:mm:ss"
+    }
+  ]
 }

@@ -3070,6 +3070,18 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 # of history.  Now: each chat gets its own Claude CLI session.
                 resume_key = f"{repo_path}:{self.session_id}"
                 prev_sid = _claude_session_ids.get(resume_key)
+                try:
+                    from database_postgres import get_db
+
+                    with get_db() as resume_conn:
+                        resume_row = resume_conn.execute(
+                            "SELECT claude_session_id FROM claude_session_resumes WHERE resume_key = %s",
+                            (resume_key,),
+                        ).fetchone()
+                        if resume_row:
+                            prev_sid = resume_row["claude_session_id"] if isinstance(resume_row, dict) else resume_row[0]
+                except Exception as resume_err:
+                    logger.warning(f"[ACP-CHAT] Failed to load durable Claude resume id: {resume_err}")
                 logger.info(f"[ACP-CHAT] resume_key={resume_key} has_prev_session={'yes' if prev_sid else 'no (fresh)'}")
                 async with ClaudeCodeAgent(
                     repo_path,
@@ -3082,6 +3094,25 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                     response = await agent.query(prompt)
                     if agent.last_session_id:
                         _claude_session_ids[resume_key] = agent.last_session_id
+                        try:
+                            from database_postgres import get_db
+
+                            with get_db() as resume_conn:
+                                resume_conn.execute(
+                                    """
+                                    INSERT INTO claude_session_resumes (resume_key, claude_session_id, project_path, session_id, updated_at)
+                                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                                    ON CONFLICT (resume_key) DO UPDATE
+                                    SET claude_session_id = EXCLUDED.claude_session_id,
+                                        project_path = EXCLUDED.project_path,
+                                        session_id = EXCLUDED.session_id,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    """,
+                                    (resume_key, agent.last_session_id, repo_path, self.session_id),
+                                )
+                                resume_conn.commit()
+                        except Exception as resume_err:
+                            logger.warning(f"[ACP-CHAT] Failed to persist durable Claude resume id: {resume_err}")
                     logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars (extracted answer)")
 
                     # Capture token usage from the agent

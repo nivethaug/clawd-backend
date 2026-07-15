@@ -285,58 +285,37 @@ async def run_selected_session_chat(
             )
             conn.commit()
 
-        from acp_chat_handler import get_acp_chat_handler
+        from services.session_chat_runs import create_run, wait_for_run
 
-        handler = get_acp_chat_handler(session_key)
-        if not handler:
-            assistant_content = "Error: Could not initialize the project session chat handler."
-        else:
-            handler.set_session_id(session_id)
-            session_context = load_session_context(session_id)
-            logger.info(
-                "[%s-SESSION] Routing chat to selected session id=%s label=%s project_id=%s user=%s via web streaming handler",
-                channel_label.upper(),
-                session_id,
-                session_label,
-                project_id,
-                user_id,
-            )
-            assistant_content = await run_handler_like_web_session(handler, text, session_context)
-            if not assistant_content:
-                assistant_content = "Session chat completed, but no response text was returned."
-
-        token_usage_json = finalize_session_token_usage(
-            handler=handler,
-            project_id=project_id,
+        session_context = load_session_context(session_id)
+        run_info = create_run(
             session_id=session_id,
+            session_key=session_key,
+            project_id=project_id,
+            user_id=user_id,
+            channel=channel,
+            mode="dream",
+            user_message=text,
+            session_context=session_context,
             billing_user_id=billing_user_id,
-            precharged_amount=sum(abs(c.get("amount", 0)) for c in reserved_charges),
-            channel_label=channel_label,
+            reserved_charges=reserved_charges,
         )
-
-        with get_db() as conn:
-            if token_usage_json:
-                conn.execute(
-                    "INSERT INTO messages (session_id, role, content, token_usage) VALUES (%s, %s, %s, %s)",
-                    (session_id, "assistant", assistant_content, token_usage_json),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO messages (session_id, role, content) VALUES (%s, %s, %s)",
-                    (session_id, "assistant", assistant_content),
-                )
-            conn.execute("UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE id = %s", (session_id,))
-            conn.commit()
-        assistant_saved = True
-        await auto_commit_selected_session_change(project_id, session_id, handler, channel_label)
-
+        logger.info(
+            "[%s-SESSION] Queued durable selected-session run id=%s session=%s label=%s",
+            channel_label.upper(),
+            run_info.get("id"),
+            session_id,
+            session_label,
+        )
+        result = await wait_for_run(int(run_info["id"]))
+        assistant_saved = result.get("status") == "success"
         return {
-            "status": "success",
-            "message": assistant_content,
+            "status": result.get("status") or "success",
+            "message": result.get("message") or "Session chat completed.",
             "result": {
                 "project_id": project_id,
                 "session_id": session_id,
-                "token_usage_json": token_usage_json,
+                "run_id": run_info.get("id"),
             },
         }
 
@@ -346,13 +325,18 @@ async def run_selected_session_chat(
             refund_session_chat_credits(billing_user_id, reserved_charges, channel_label)
         return {"status": "error", "message": f"Session chat failed: {str(e)}"}
     finally:
-        if handler:
+        # Durable worker releases processing when the queued run finishes. If an
+        # exception happened before enqueueing/saving a run, release it here.
+        if processing_acquired and not assistant_saved:
+            active_or_recent = False
             try:
-                handler.kill_orphan_processes()
-            except Exception as cleanup_error:
-                logger.warning("[%s-SESSION] Cleanup failed: %s", channel_label.upper(), cleanup_error)
-        if processing_acquired:
-            SessionLockService.release_processing(session_id)
+                from services.session_chat_runs import get_active_run_for_session
+
+                active_or_recent = bool(get_active_run_for_session(session_key))
+            except Exception:
+                active_or_recent = False
+            if not active_or_recent:
+                SessionLockService.release_processing(session_id)
 
 
 def truncate_for_transport(text: str, limit: int) -> str:
