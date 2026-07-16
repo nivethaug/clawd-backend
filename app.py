@@ -3557,6 +3557,78 @@ def _get_active_project_session_chat(project_id: int) -> Optional[Dict[str, Any]
         return dict(active_run) if active_run else None
 
 
+def _get_active_session_chat(session_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Return active/processing chat state for a specific project session.
+
+    Deleting a session while the durable session-chat worker is running would
+    remove the messages/session rows needed for finalization, billing, and
+    auto-commit.
+    """
+    with get_db() as conn:
+        processing_session = conn.execute(
+            """
+            SELECT id,
+                   project_id,
+                   label,
+                   channel,
+                   processing_channel,
+                   processing_started_at
+            FROM sessions
+            WHERE id = ?
+              AND processing = TRUE
+            LIMIT 1
+            """,
+            (session_id,),
+        ).fetchone()
+        if processing_session:
+            return dict(processing_session)
+
+        active_run = conn.execute(
+            """
+            SELECT r.id AS run_id,
+                   r.status AS run_status,
+                   r.channel AS processing_channel,
+                   r.started_at AS processing_started_at,
+                   s.id,
+                   s.project_id,
+                   s.label,
+                   s.channel
+            FROM session_chat_runs r
+            JOIN sessions s ON s.id = r.session_id
+            WHERE r.session_id = ?
+              AND r.status IN ('queued', 'running', 'cancel_requested')
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT 1
+            """,
+            (session_id,),
+        ).fetchone()
+        return dict(active_run) if active_run else None
+
+
+def _raise_session_delete_in_progress(active_session_chat: Dict[str, Any]) -> None:
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "success": False,
+            "error": "session_chat_in_progress",
+            "message": (
+                "This session cannot be deleted while chat is in progress. "
+                "Wait for it to finish, or cancel/complete the session first."
+            ),
+            "session_id": active_session_chat.get("id"),
+            "session_label": active_session_chat.get("label"),
+            "project_id": active_session_chat.get("project_id"),
+            "processing_channel": active_session_chat.get("processing_channel") or active_session_chat.get("channel"),
+            "processing_started_at": str(active_session_chat.get("processing_started_at"))
+            if active_session_chat.get("processing_started_at") is not None
+            else None,
+            "run_id": active_session_chat.get("run_id"),
+            "run_status": active_session_chat.get("run_status"),
+        },
+    )
+
+
 @app.delete("/projects/{project_id}")
 async def delete_project(
     project_id: int,
@@ -5458,6 +5530,9 @@ async def delete_session(
     authorization: Optional[str] = Header(None),
 ):
     _require_session_owner(session_id, authorization)
+    active_session_chat = _get_active_session_chat(session_id)
+    if active_session_chat:
+        _raise_session_delete_in_progress(active_session_chat)
 
     # Get project_id before deletion to release lock
     with get_db() as conn:
@@ -5487,9 +5562,6 @@ async def delete_project_session(
     _require_project_owner(project_id, authorization)
     _require_session_owner(session_id, authorization)
 
-    # Release lock if held by this session
-    SessionLockService.release_lock(project_id, session_id)
-    
     # Step 1: Get session_key before deletion (needed for OpenClaw cleanup)
     with get_db() as conn:
         session_info = conn.execute(
@@ -5502,7 +5574,15 @@ async def delete_project_session(
 
         session_key = session_info['session_key']
 
-        # Step 2: Delete messages and session from backend database
+    active_session_chat = _get_active_session_chat(session_id)
+    if active_session_chat:
+        _raise_session_delete_in_progress(active_session_chat)
+
+    # Release lock if held by this session
+    SessionLockService.release_lock(project_id, session_id)
+
+    # Step 2: Delete messages and session from backend database
+    with get_db() as conn:
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE id = ? AND project_id = ?", (session_id, project_id))
         conn.commit()
