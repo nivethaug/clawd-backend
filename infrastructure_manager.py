@@ -77,7 +77,7 @@ POSTGRES_CONTAINER = "dreampilot-postgres"
 POSTGRES_HOST = "localhost"
 POSTGRES_PORT = 5432
 POSTGRES_USER = "admin"
-POSTGRES_PASSWORD = "StrongAdminPass123"  # TODO: Load from secure config
+POSTGRES_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 # Port ranges
 FRONTEND_PORT_MIN = 3010

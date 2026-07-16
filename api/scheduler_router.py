@@ -10,7 +10,7 @@ Prefix: /api/scheduler
 
 import logging
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from services.scheduler import (
@@ -26,10 +26,55 @@ from services.scheduler import (
 )
 from services.scheduler.logger import log_job
 from database_postgres import get_db
+from utils.auth_helpers import get_user_id_from_token
 
 logger = logging.getLogger('api.scheduler')
 
 router = APIRouter()
+
+
+def _row_value(row: Any, key: str, index: int = 0) -> Any:
+    if isinstance(row, dict):
+        return row.get(key)
+    return row[index]
+
+
+def _require_project_owner(project_id: int, authorization: Optional[str]) -> int:
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as cur:
+        cur.execute("SELECT user_id FROM projects WHERE id = %s", (project_id,))
+        row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    owner_id = _row_value(row, "user_id", 0)
+    if int(owner_id) != int(user_id):
+        raise HTTPException(status_code=403, detail="Not authorized for this project")
+    return int(user_id)
+
+
+def _require_job_owner(job_id: int, authorization: Optional[str]) -> int:
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as cur:
+        cur.execute(
+            """
+            SELECT sj.id, sj.project_id, p.user_id
+            FROM scheduler_jobs sj
+            JOIN projects p ON p.id = sj.project_id
+            WHERE sj.id = %s
+            """,
+            (job_id,),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    owner_id = _row_value(row, "user_id", 2)
+    if int(owner_id) != int(user_id):
+        raise HTTPException(status_code=403, detail="Not authorized for this job")
+    return int(user_id)
 
 
 # ============================================================================
@@ -75,8 +120,13 @@ class LogsResponse(BaseModel):
 # ============================================================================
 
 @router.post("/projects/{project_id}/jobs", response_model=JobResponse)
-async def api_create_job(project_id: int, request: JobCreateRequest):
+async def api_create_job(
+    project_id: int,
+    request: JobCreateRequest,
+    authorization: Optional[str] = Header(None),
+):
     """Create a new scheduled job for a project."""
+    _require_project_owner(project_id, authorization)
     try:
         job = create_job(project_id=project_id, job_data={
             "job_type": request.job_type,
@@ -96,8 +146,9 @@ async def api_create_job(project_id: int, request: JobCreateRequest):
 
 
 @router.get("/projects/{project_id}/jobs", response_model=JobResponse)
-async def api_list_jobs(project_id: int):
+async def api_list_jobs(project_id: int, authorization: Optional[str] = Header(None)):
     """List all jobs for a project."""
+    _require_project_owner(project_id, authorization)
     try:
         jobs = list_jobs(project_id)
         return JobResponse(success=True, jobs=jobs, count=len(jobs))
@@ -107,8 +158,9 @@ async def api_list_jobs(project_id: int):
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-async def api_get_job(job_id: int):
+async def api_get_job(job_id: int, authorization: Optional[str] = Header(None)):
     """Get a specific job by ID."""
+    _require_job_owner(job_id, authorization)
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -116,8 +168,13 @@ async def api_get_job(job_id: int):
 
 
 @router.put("/jobs/{job_id}", response_model=JobResponse)
-async def api_update_job(job_id: int, request: JobUpdateRequest):
+async def api_update_job(
+    job_id: int,
+    request: JobUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
     """Update a job's schedule, payload, or status."""
+    _require_job_owner(job_id, authorization)
     try:
         updates = {}
         if request.schedule_value is not None:
@@ -140,8 +197,9 @@ async def api_update_job(job_id: int, request: JobUpdateRequest):
 
 
 @router.delete("/jobs/{job_id}", response_model=JobResponse)
-async def api_delete_job(job_id: int):
+async def api_delete_job(job_id: int, authorization: Optional[str] = Header(None)):
     """Delete a job and its execution logs."""
+    _require_job_owner(job_id, authorization)
     deleted = delete_job(job_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -149,8 +207,9 @@ async def api_delete_job(job_id: int):
 
 
 @router.post("/jobs/{job_id}/pause", response_model=JobResponse)
-async def api_pause_job(job_id: int):
+async def api_pause_job(job_id: int, authorization: Optional[str] = Header(None)):
     """Pause an active job."""
+    _require_job_owner(job_id, authorization)
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -161,8 +220,9 @@ async def api_pause_job(job_id: int):
 
 
 @router.post("/jobs/{job_id}/resume", response_model=JobResponse)
-async def api_resume_job(job_id: int):
+async def api_resume_job(job_id: int, authorization: Optional[str] = Header(None)):
     """Resume a paused job."""
+    _require_job_owner(job_id, authorization)
     try:
         resume_job(job_id)
         return JobResponse(success=True, message="Job resumed")
@@ -171,8 +231,9 @@ async def api_resume_job(job_id: int):
 
 
 @router.post("/jobs/{job_id}/run", response_model=JobResponse)
-async def api_run_job_now(job_id: int):
+async def api_run_job_now(job_id: int, authorization: Optional[str] = Header(None)):
     """Trigger a job to run immediately."""
+    _require_job_owner(job_id, authorization)
     try:
         job = run_job_now(job_id)
         return JobResponse(success=True, message="Job triggered for immediate execution", job=job)
@@ -181,8 +242,9 @@ async def api_run_job_now(job_id: int):
 
 
 @router.delete("/projects/{project_id}/jobs", response_model=JobResponse)
-async def api_clear_project_jobs(project_id: int):
+async def api_clear_project_jobs(project_id: int, authorization: Optional[str] = Header(None)):
     """Delete all jobs for a project."""
+    _require_project_owner(project_id, authorization)
     count = clear_jobs(project_id)
     return JobResponse(success=True, message=f"Cleared {count} jobs")
 
@@ -192,8 +254,9 @@ async def api_clear_project_jobs(project_id: int):
 # ============================================================================
 
 @router.get("/jobs/{job_id}/logs", response_model=LogsResponse)
-async def api_get_job_logs(job_id: int):
+async def api_get_job_logs(job_id: int, authorization: Optional[str] = Header(None)):
     """Get execution logs for a specific job."""
+    _require_job_owner(job_id, authorization)
     try:
         with get_db() as cur:
             cur.execute("""
@@ -212,8 +275,9 @@ async def api_get_job_logs(job_id: int):
 
 
 @router.get("/projects/{project_id}/logs", response_model=LogsResponse)
-async def api_get_project_logs(project_id: int):
+async def api_get_project_logs(project_id: int, authorization: Optional[str] = Header(None)):
     """Get all execution logs for a project's jobs."""
+    _require_project_owner(project_id, authorization)
     try:
         with get_db() as cur:
             cur.execute("""

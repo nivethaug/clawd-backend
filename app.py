@@ -200,7 +200,7 @@ configure_sentry("backend")
 
 CLAWDBOT_BASE_URL = os.getenv("CLAWDBOT_BASE_URL", "http://localhost:18789")
 CLAWDBOT_TIMEOUT = int(os.getenv("CLAWDBOT_TIMEOUT", "300"))
-CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a")
+CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "")
 
 DB_PATH = os.getenv("DB_PATH", "/root/clawd-backend/clawdbot_adapter.db")
 
@@ -1572,7 +1572,7 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                 db_port = os.getenv("DB_PORT", "5432")
                 db_name = os.getenv("DB_NAME", "dreampilot")
                 db_user = os.getenv("DB_USER", "admin")
-                db_password = os.getenv("DB_PASSWORD", "StrongAdminPass123")
+                db_password = os.getenv("DB_PASSWORD", "")
                 bot_database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
                 logger.info(f"   - bot_database_url: postgresql://{db_user}:***@{db_host}:{db_port}/{db_name}")
             
@@ -1699,7 +1699,7 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                 db_port = os.getenv("DB_PORT", "5432")
                 db_name = os.getenv("DB_NAME", "dreampilot")
                 db_user = os.getenv("DB_USER", "admin")
-                db_password = os.getenv("DB_PASSWORD", "StrongAdminPass123")
+                db_password = os.getenv("DB_PASSWORD", "")
                 bot_database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
             # Run discord bot pipeline in background thread
@@ -6277,7 +6277,7 @@ async def chat_stream_endpoint(
     context_injector = ContextInjector()
     
     CLAWDBOT_BASE_URL = os.getenv("CLAWDBOT_BASE_URL", "http://localhost:18789")
-    CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a")
+    CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "")
     
     user_field = f"adapter-session-{request.session_key}"
     user_messages = [{"role": "user", "content": user_content}]

@@ -5,8 +5,9 @@ LemonSqueezy Webhook Router — Receives payment events from LemonSqueezy.
 Mounted at: /webhooks/lemonsqueezy
 Auth: HMAC-SHA256 signature verification (X-Signature header).
 
-If LEMONSQUEZY_WEBHOOK_SECRET is not set, signature verification is skipped
-(DEV MODE ONLY — never use in production).
+Verification fails closed: if LEMONSQUEEZY_WEBHOOK_SECRET is not set, every
+request is rejected (401). For local development only, set WEBHOOK_DEV_BYPASS=1
+to accept unverified webhooks — never enable this in production.
 """
 
 import logging

@@ -20,12 +20,16 @@ Usage:
     }
 """
 
+import ipaddress
+import socket
 from typing import Optional
+from urllib.parse import urlparse
 from pydantic import BaseModel
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 
 import logging
 from utils.logger import logger  # noqa: F811 — reassign below
+from utils.auth_helpers import get_user_id_from_token
 logger = logging.getLogger("api.validate_router")
 
 router = APIRouter()
@@ -186,8 +190,83 @@ class TestApiCallRequest(BaseModel):
     timeout: int = 10
 
 
+BLOCKED_HEADER_NAMES = {
+    "authorization",
+    "cookie",
+    "host",
+    "x-forwarded-for",
+    "x-real-ip",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "connection",
+    "content-length",
+}
+
+
+def _is_blocked_ip(ip_address: str) -> bool:
+    parsed = ipaddress.ip_address(ip_address)
+    return any([
+        parsed.is_private,
+        parsed.is_loopback,
+        parsed.is_link_local,
+        parsed.is_multicast,
+        parsed.is_reserved,
+        parsed.is_unspecified,
+    ])
+
+
+def _validate_safe_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="Only http and https URLs are allowed")
+    if not parsed.hostname:
+        raise HTTPException(status_code=400, detail="URL must include a hostname")
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="Credentials in URLs are not allowed")
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        resolved = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail="Unable to resolve target host")
+
+    blocked_ips = sorted({
+        addr[4][0]
+        for addr in resolved
+        if _is_blocked_ip(addr[4][0])
+    })
+    if blocked_ips:
+        logger.warning(
+            "Blocked unsafe API validation target host=%s ips=%s",
+            parsed.hostname,
+            blocked_ips,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Private, local, reserved, or link-local targets are not allowed",
+        )
+
+    return url
+
+
+def _sanitize_headers(headers: Optional[dict]) -> dict:
+    safe_headers = {}
+    for key, value in (headers or {}).items():
+        header_name = str(key).strip()
+        header_key = header_name.lower()
+        if not header_name:
+            continue
+        if header_key in BLOCKED_HEADER_NAMES or header_key.startswith("proxy-"):
+            continue
+        safe_headers[header_name] = str(value)
+    return safe_headers
+
+
 @router.post("/api-call")
-async def test_api_call(request: TestApiCallRequest):
+async def test_api_call(
+    request: TestApiCallRequest,
+    authorization: Optional[str] = Header(None),
+):
     """
     Test an API endpoint using the same payload format as scheduler executor.
 
@@ -212,12 +291,22 @@ async def test_api_call(request: TestApiCallRequest):
     import requests as http
 
     try:
+        get_user_id_from_token(authorization)
+        method = request.method.upper()
+        if method not in {"GET", "POST"}:
+            raise HTTPException(status_code=400, detail="Only GET and POST methods are allowed")
+
+        safe_url = _validate_safe_url(request.url)
+        safe_headers = _sanitize_headers(request.headers)
+        timeout = max(1, min(int(request.timeout or 10), 15))
+
         response = http.request(
-            method=request.method.upper(),
-            url=request.url,
-            headers=request.headers or {},
+            method=method,
+            url=safe_url,
+            headers=safe_headers,
             json=request.body if request.body else None,
-            timeout=request.timeout,
+            timeout=timeout,
+            allow_redirects=False,
         )
 
         is_valid = response.status_code < 400
@@ -231,8 +320,8 @@ async def test_api_call(request: TestApiCallRequest):
         result = {
             "valid": is_valid,
             "status": response.status_code,
-            "method": request.method.upper(),
-            "url": request.url,
+            "method": method,
+            "url": safe_url,
         }
 
         if resp_body is not None:
@@ -240,14 +329,16 @@ async def test_api_call(request: TestApiCallRequest):
             body_str = str(resp_body)
             if len(body_str) > 2000:
                 body_str = body_str[:2000] + "... (truncated)"
-            result["response"] = resp_body
+            result["response"] = body_str
 
-        logger.info(f"✅ API call test: {request.method.upper()} {request.url} -> {response.status_code}")
+        logger.info("API call test: method=%s host=%s status=%s", method, urlparse(safe_url).hostname, response.status_code)
         return result
 
     except http.exceptions.Timeout:
-        return {"valid": False, "error": f"Request timed out after {request.timeout}s", "url": request.url}
+        return {"valid": False, "error": "Request timed out", "url": request.url}
     except http.exceptions.ConnectionError:
         return {"valid": False, "error": "Connection failed", "url": request.url}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"valid": False, "error": str(e), "url": request.url}

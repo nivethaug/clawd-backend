@@ -14,8 +14,8 @@ from domain_config import CONTROL_API_HOST
 IMAGES_DIR = "/root/clawd/public/images"
 WORKSPACE_IMAGES_DIR = "/root/.openclaw/workspace/clawd-images"
 IMAGES_BASE_URL = f"https://{CONTROL_API_HOST}/images"
-CHAT_COMPLETION_API_URL = "http://localhost:18789"
-CHAT_COMPLETION_TOKEN = "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a"
+CHAT_COMPLETION_API_URL = os.getenv("CHAT_COMPLETION_API_URL", "http://localhost:18789")
+CHAT_COMPLETION_TOKEN = os.getenv("CHAT_COMPLETION_TOKEN", "")
 
 # Initialize context injector
 context_injector = ContextInjector()

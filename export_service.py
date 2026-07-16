@@ -357,13 +357,29 @@ def prepare_export_directory(
 
     copied = 0
     skipped = 0
-    for root, dirs, files in os.walk(project_path):
-        # Filter directories in-place so os.walk doesn't descend into them
-        dirs[:] = [d for d in dirs if d not in EXPORT_EXCLUDE_DIRS]
+    symlink_skipped = 0
+    for root, dirs, files in os.walk(project_path, followlinks=False):
+        # Filter directories in-place so os.walk doesn't descend into them.
+        # followlinks=False already prevents descending into symlinked dirs,
+        # but drop any symlinked dir explicitly so it isn't recreated below.
+        dirs[:] = [
+            d for d in dirs
+            if d not in EXPORT_EXCLUDE_DIRS and not os.path.islink(os.path.join(root, d))
+        ]
 
         for fname in files:
             src = os.path.join(root, fname)
             rel = os.path.relpath(src, project_path)
+
+            # Reject symlinks: a symlinked file could point outside the project
+            # (e.g. at a host secret) and shutil.copy2 would follow it.
+            if os.path.islink(src):
+                symlink_skipped += 1
+                logger.warning(
+                    "Export prep: skipped symlink outside project tree: %s", rel
+                )
+                continue
+
             if _path_is_excluded(rel):
                 skipped += 1
                 continue
@@ -381,8 +397,8 @@ def prepare_export_directory(
             copied += 1
 
     logger.info(
-        "Export prep: copied %d files, skipped %d (type_id=%s)",
-        copied, skipped, type_id,
+        "Export prep: copied %d files, skipped %d, symlink_skipped %d (type_id=%s)",
+        copied, skipped, symlink_skipped, type_id,
     )
 
     # Write generated artifacts (overwrite any stale copies)

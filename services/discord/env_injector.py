@@ -68,7 +68,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=dreampilot
 DB_USER=admin
-DB_PASSWORD=StrongAdminPass123
+DB_PASSWORD=
 
 # Server Configuration
 PORT=8010

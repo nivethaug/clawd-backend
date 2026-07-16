@@ -173,13 +173,24 @@ def create_checkout_url(
 def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
     """Verify the X-Signature header from a LemonSqueezy webhook.
 
-    Uses HMAC-SHA256 with the webhook secret.
-    In dev mode (no secret), returns True (INSECURE — never use in production).
+    Uses HMAC-SHA256 with the webhook secret. Fails closed by default: if no
+    secret is configured the signature is rejected unless an explicit
+    WEBHOOK_DEV_BYPASS=1 override is set for local development.
     """
     webhook_secret = os.getenv("LEMONSQUEEZY_WEBHOOK_SECRET", "")
     if not webhook_secret:
-        logger.warning("[LEMONSQUEZY] No webhook secret set — skipping verification (DEV ONLY)")
-        return True
+        if os.getenv("WEBHOOK_DEV_BYPASS", "").lower() in ("1", "true", "yes"):
+            logger.warning(
+                "[LEMONSQUEEZY] LEMONSQUEEZY_WEBHOOK_SECRET not set and "
+                "WEBHOOK_DEV_BYPASS=1 — accepting unverified webhook "
+                "(DEV ONLY, never in production)"
+            )
+            return True
+        logger.error("[LEMONSQUEEZY] LEMONSQUEEZY_WEBHOOK_SECRET not configured — rejecting webhook")
+        return False
+
+    if not signature:
+        return False
 
     expected = hmac.new(
         webhook_secret.encode(),

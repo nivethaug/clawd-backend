@@ -44,7 +44,7 @@ if USE_POSTGRES:
     DB_PORT = os.getenv("DB_PORT", "5432")
     DB_NAME = os.getenv("DB_NAME", "dreampilot")
     DB_USER = os.getenv("DB_USER", "admin")
-    DB_PASSWORD = os.getenv("DB_PASSWORD", "StrongAdminPass123")
+    DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 
 class FastWrapper:

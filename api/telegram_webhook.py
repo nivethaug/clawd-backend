@@ -4,8 +4,10 @@ Receives Telegram updates via webhook, routes messages to the AI chat engine.
 """
 
 import asyncio
+import hmac
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Optional, Any
 
@@ -38,11 +40,33 @@ router = APIRouter()
 # We verify it matches our configured secret.
 
 
+def _webhook_dev_bypass() -> bool:
+    """Explicit, off-by-default escape hatch for local development only.
+
+    Production must never set this. When unset (the default), webhook
+    verification fails closed.
+    """
+    return os.getenv("WEBHOOK_DEV_BYPASS", "").lower() in ("1", "true", "yes")
+
+
 def _verify_secret(token: Optional[str]) -> bool:
-    """Verify the Telegram webhook secret token."""
+    """Verify the Telegram webhook secret token. Fails closed by default.
+
+    If no secret is configured the request is rejected unless an explicit
+    WEBHOOK_DEV_BYPASS=1 override is set for local development.
+    """
     if not WEBHOOK_SECRET:
-        return True  # No secret configured — skip check
-    return token == WEBHOOK_SECRET
+        if _webhook_dev_bypass():
+            logger.warning(
+                "[TELEGRAM-CONTROL] WEBHOOK_SECRET not set and WEBHOOK_DEV_BYPASS=1 "
+                "— accepting unverified webhook (DEV ONLY, never in production)"
+            )
+            return True
+        logger.error("[TELEGRAM-CONTROL] WEBHOOK_SECRET not configured — rejecting webhook")
+        return False
+    if not token:
+        return False
+    return hmac.compare_digest(token, WEBHOOK_SECRET)
 
 
 # ── Database helpers ────────────────────────────────────────

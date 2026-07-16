@@ -1,9 +1,10 @@
+import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 conn = psycopg2.connect(
     host='localhost', port=5432, dbname='dreampilot',
-    user='admin', password='StrongAdminPass123'
+    user='admin', password=os.getenv('DB_PASSWORD', '')
 )
 cur = conn.cursor(cursor_factory=RealDictCursor)
 
