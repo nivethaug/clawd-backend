@@ -28,6 +28,20 @@ logging.basicConfig(
 logger = logging.getLogger("session_chat_worker")
 configure_sentry("session-chat-worker")
 
+# Startup diagnostic: confirm env vars are reaching the worker process and
+# whether Sentry actually enabled. Logs PRESENCE only, never values.
+try:
+    from services.sentry_config import is_enabled as _sentry_is_enabled
+    if _sentry_is_enabled():
+        logger.info("[STARTUP-ENV] Sentry ENABLED for session-chat-worker")
+    else:
+        logger.warning(
+            "[STARTUP-ENV] Sentry DISABLED for session-chat-worker — SENTRY_DSN %s",
+            "set-but-invalid" if os.getenv("SENTRY_DSN") else "missing from env",
+        )
+except Exception as _e:
+    logger.warning("[STARTUP-ENV] diagnostic failed: %s", _e)
+
 POLL_SECONDS = float(os.getenv("SESSION_CHAT_WORKER_POLL_SECONDS", "2"))
 STALE_AFTER_MINUTES = int(os.getenv("SESSION_CHAT_RUN_STALE_MINUTES", "20"))
 

@@ -195,6 +195,46 @@ from services.sentry_config import configure_sentry, scoped_context as sentry_sc
 configure_sentry("backend")
 
 # ============================================================================
+# Startup diagnostic: confirm security/billing-critical env vars are present
+# in the running process (env comes from PM2's env block). Logs PRESENCE only,
+# never values, so it is safe to ship to pm2 logs / Sentry.
+# ============================================================================
+try:
+    from services.sentry_config import is_enabled as _sentry_is_enabled
+
+    _diag_vars = [
+        "SENTRY_DSN",
+        "SENTRY_ENVIRONMENT",
+        "LEMONSQUEEZY_API_KEY",
+        "LEMONSQUEEZY_STORE_ID",
+        "LEMONSQUEEZY_WEBHOOK_SECRET",
+        "WEBHOOK_DEV_BYPASS",
+        "USE_POSTGRES",
+        "DB_HOST",
+    ]
+    _present = []
+    _missing = []
+    for _v in _diag_vars:
+        (_present if os.getenv(_v) else _missing).append(_v)
+    logger.info(
+        "[STARTUP-ENV] present=%s missing=%s sentry_enabled=%s",
+        ",".join(_present) or "(none)",
+        ",".join(_missing) or "(none)",
+        _sentry_is_enabled(),
+    )
+    if _sentry_is_enabled():
+        logger.info("[STARTUP-ENV] Sentry is ENABLED for backend")
+    else:
+        logger.warning(
+            "[STARTUP-ENV] Sentry is DISABLED — SENTRY_DSN is %s. "
+            "Add SENTRY_DSN to the PM2 env block (ecosystem.backend.json) "
+            "and `pm2 restart` to enable error/audit capture.",
+            "set-but-invalid" if os.getenv("SENTRY_DSN") else "missing",
+        )
+except Exception as _diag_err:
+    logger.warning("[STARTUP-ENV] diagnostic failed: %s", _diag_err)
+
+# ============================================================================
 # Configuration
 # ============================================================================
 
