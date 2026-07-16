@@ -28,6 +28,34 @@ def _get_user_id(authorization: Optional[str] = None) -> int:
     return get_user_id_from_token(authorization)
 
 
+def _audit(event: str, action: str, *, user_id: int, reason: Optional[str] = None, **ctx: Any) -> None:
+    """Emit a PAYMENT_AUDIT line for the buy/checkout side of the flow.
+
+    Imported lazily so a broken payment_sentry import never blocks checkout.
+    Failure-class actions route to capture_payment_failure (which requires a
+    reason); success-class actions route to capture_payment_success.
+    """
+    try:
+        from services.payment_sentry import capture_payment_success, capture_payment_failure
+    except Exception:
+        return
+    is_failure = action in {"checkout_failed", "provider_not_configured"}
+    if is_failure:
+        capture_payment_failure(
+            event="checkout_" + action,
+            reason=reason or action,
+            user_id=user_id,
+            **ctx,
+        )
+    else:
+        capture_payment_success(
+            event="checkout_" + action,
+            action=action,
+            user_id=user_id,
+            **ctx,
+        )
+
+
 def _require_admin(user_id: int):
     from app import require_admin
     require_admin(user_id)
@@ -212,6 +240,7 @@ async def create_plan_checkout(
                 f"STORE_ID={_store_id or 'MISSING'}, "
                 f"is_configured={_configured}")
     if not _configured:
+        _audit("checkout", "provider_not_configured", user_id=user_id, plan=plan_slug, variant_id=variant_id)
         raise HTTPException(status_code=503, detail="Payment provider not configured")
 
     result = create_checkout_url(
@@ -222,8 +251,12 @@ async def create_plan_checkout(
     )
 
     if result.get("error"):
+        _audit("checkout", "checkout_failed", user_id=user_id, plan=plan_slug,
+               variant_id=variant_id, reason=str(result.get("error"))[:120])
         raise HTTPException(status_code=502, detail=result["error"])
 
+    _audit("checkout", "plan_checkout_created", user_id=user_id, plan=plan_slug,
+           variant_id=variant_id, checkout_id=str(result.get("checkout_id", ""))[:40])
     return {"url": result.get("url"), "plan": plan_slug}
 
 
@@ -263,6 +296,7 @@ async def create_credits_checkout(
                 f"STORE_ID={_store_id or 'MISSING'}, "
                 f"is_configured={_configured}")
     if not _configured:
+        _audit("checkout", "provider_not_configured", user_id=user_id, pack_id=request.pack_id, variant_id=variant_id)
         raise HTTPException(status_code=503, detail="Payment provider not configured")
 
     result = create_checkout_url(
@@ -273,8 +307,12 @@ async def create_credits_checkout(
     )
 
     if result.get("error"):
+        _audit("checkout", "checkout_failed", user_id=user_id, pack_id=request.pack_id,
+               variant_id=variant_id, reason=str(result.get("error"))[:120])
         raise HTTPException(status_code=502, detail=result["error"])
 
+    _audit("checkout", "credit_checkout_created", user_id=user_id, pack_id=request.pack_id,
+           variant_id=variant_id, checkout_id=str(result.get("checkout_id", ""))[:40])
     return {"url": result.get("url"), "pack": pack.get("name")}
 
 
