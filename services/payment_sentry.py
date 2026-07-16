@@ -1,16 +1,18 @@
+import logging
 import os
 from typing import Any, Dict, Optional
 
-from services.sentry_config import capture_exception, capture_message
+from services.sentry_config import capture_exception, capture_message, is_enabled
 
+logger = logging.getLogger("payment.audit")
 
-def _success_events_enabled() -> bool:
-    value = os.getenv("PAYMENT_SENTRY_SUCCESS_EVENTS", "")
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+# Payment outcomes are an audit trail: success AND failure must always be
+# recorded. They are emitted to PM2 logs unconditionally, and forwarded to
+# Sentry whenever Sentry is configured.
 
 
 def _clean_context(**kwargs: Any) -> Dict[str, Any]:
-    """Keep payment Sentry context useful but intentionally non-sensitive."""
+    """Keep payment audit context useful but intentionally non-sensitive."""
     allowed = {
         "provider",
         "event",
@@ -31,6 +33,22 @@ def _clean_context(**kwargs: Any) -> Dict[str, Any]:
     return {key: value for key, value in kwargs.items() if key in allowed and value not in (None, "")}
 
 
+def _sentry_on() -> bool:
+    return is_enabled()
+
+
+def _fmt_audit(kind: str, provider: str, event: str, detail: str, ctx: Dict[str, Any]) -> str:
+    """Single structured line for PM2 logs (grep-able: 'PAYMENT_AUDIT')."""
+    # Drop fields already shown as top-level keys to avoid duplication.
+    deduped = {k: v for k, v in ctx.items() if k not in {"provider", "event"}}
+    ctx_str = " ".join(f"{k}={v}" for k, v in sorted(deduped.items()))
+    sentry_state = "sentry=on" if _sentry_on() else "sentry=off"
+    return (
+        f"PAYMENT_AUDIT kind={kind} provider={provider} event={event} "
+        f"{sentry_state} detail={detail} {ctx_str}".rstrip()
+    )
+
+
 def capture_payment_success(
     *,
     event: str,
@@ -38,17 +56,24 @@ def capture_payment_success(
     provider: str = "lemonsqueezy",
     **context: Any,
 ) -> None:
-    """Capture successful payment events only when explicitly enabled."""
-    if not _success_events_enabled():
-        return
+    """Audit a successful payment event.
 
-    safe_context = _clean_context(provider=provider, event=event, action=action, handled=True, **context)
-    capture_message(
-        f"Payment event succeeded: {provider}.{event}.{action}",
-        level="info",
-        tags={"area": "billing", "provider": provider, "payment_event": event, "payment_action": action},
-        context=safe_context,
+    Always logged to PM2 logs. Forwarded to Sentry when configured. (Success
+    capture is unconditional — payment outcomes are a mandatory audit trail.)
+    """
+    safe_ctx = _clean_context(provider=provider, event=event, action=action, handled=True, **context)
+
+    logger.info(
+        _fmt_audit("success", provider, event, action, safe_ctx)
     )
+
+    if _sentry_on():
+        capture_message(
+            f"Payment event succeeded: {provider}.{event}.{action}",
+            level="info",
+            tags={"area": "billing", "provider": provider, "payment_event": event, "payment_action": action},
+            context=safe_ctx,
+        )
 
 
 def capture_payment_failure(
@@ -59,23 +84,30 @@ def capture_payment_failure(
     exc: Optional[BaseException] = None,
     **context: Any,
 ) -> None:
-    """Capture payment failures/anomalies without raw payloads or secrets."""
-    safe_context = _clean_context(
+    """Audit a failed/anomalous payment event.
+
+    Always logged to PM2 logs (warning). Forwarded to Sentry when configured.
+    """
+    safe_ctx = _clean_context(
         provider=provider,
         event=event,
         reason=reason,
         handled=False,
         **context,
     )
-    tags = {"area": "billing", "provider": provider, "payment_event": event}
 
-    if exc is not None:
-        capture_exception(exc, tags=tags, context=safe_context)
-        return
-
-    capture_message(
-        f"Payment event failed: {provider}.{event} - {reason}",
-        level="error",
-        tags=tags,
-        context=safe_context,
+    logger.warning(
+        _fmt_audit("failure", provider, event or "unknown", reason, safe_ctx)
     )
+
+    if _sentry_on():
+        tags = {"area": "billing", "provider": provider, "payment_event": event}
+        if exc is not None:
+            capture_exception(exc, tags=tags, context=safe_ctx)
+        else:
+            capture_message(
+                f"Payment event failed: {provider}.{event} - {reason}",
+                level="error",
+                tags=tags,
+                context=safe_ctx,
+            )
