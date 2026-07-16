@@ -1049,6 +1049,10 @@ app.include_router(validate_router, prefix="/api/validate", tags=["validation"])
 from api.billing_router import router as billing_router
 app.include_router(billing_router, prefix="/api/billing", tags=["billing"])
 
+# Register payment provider webhooks
+from api.lemonsqueezy_webhook import router as lemonsqueezy_webhook_router
+app.include_router(lemonsqueezy_webhook_router, prefix="/webhooks", tags=["webhooks"])
+
 # Register Telegram bot routers
 from api.bot_link import router as bot_link_router
 app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])
