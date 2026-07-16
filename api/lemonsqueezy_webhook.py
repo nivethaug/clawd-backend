@@ -12,6 +12,7 @@ If LEMONSQUEZY_WEBHOOK_SECRET is not set, signature verification is skipped
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Header, Request
+from services.payment_sentry import capture_payment_failure
 
 logger = logging.getLogger("api.webhook.lemonsqueezy")
 
@@ -50,6 +51,7 @@ async def lemonsqueezy_webhook(
     # Verify signature
     if not verify_webhook_signature(raw_body, x_signature or ""):
         logger.warning("[WEBHOOK-LM] Invalid signature — rejecting")
+        capture_payment_failure(event="webhook_signature", reason="invalid_signature")
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     # Parse JSON
@@ -58,6 +60,7 @@ async def lemonsqueezy_webhook(
         event_data = json.loads(raw_body)
     except Exception as e:
         logger.error(f"[WEBHOOK-LM] Failed to parse JSON: {e}")
+        capture_payment_failure(event="webhook_parse", reason="invalid_json", exc=e)
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     event_name = event_data.get("meta", {}).get("event_name", "unknown")
@@ -70,6 +73,7 @@ async def lemonsqueezy_webhook(
         return {"status": "ok", "event": event_name, "result": result}
     except Exception as e:
         logger.error(f"[WEBHOOK-LM] Failed to process event {event_name}: {e}", exc_info=True)
+        capture_payment_failure(event=event_name, reason="processing_exception", exc=e)
         # Return 200 anyway so LemonSqueezy doesn't retry endlessly
         # (we've logged the error; investigate manually)
         return {"status": "error", "event": event_name, "error": str(e)}

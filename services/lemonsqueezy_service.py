@@ -16,6 +16,7 @@ import hashlib
 import logging
 import json
 from typing import Optional, Dict, Any, List
+from services.payment_sentry import capture_payment_failure, capture_payment_success
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,12 @@ def create_checkout_url(
 
     if not api_key or not store_id:
         logger.warning(f"[LEMONSQUEEZY] Not configured — api_key={len(api_key)} chars, store_id={store_id or 'EMPTY'}")
+        capture_payment_failure(
+            event="checkout_create",
+            reason="provider_not_configured",
+            user_id=user_id,
+            variant_id=variant_id,
+        )
         return {
             "error": "Payment provider not configured",
             "url": None,
@@ -79,6 +86,12 @@ def create_checkout_url(
         import httpx
     except ImportError:
         logger.error("[LEMONSQUEZY] httpx not installed")
+        capture_payment_failure(
+            event="checkout_create",
+            reason="httpx_not_installed",
+            user_id=user_id,
+            variant_id=variant_id,
+        )
         return {"error": "httpx not installed"}
 
     payload = {
@@ -127,6 +140,13 @@ def create_checkout_url(
         if resp.status_code >= 400:
             error_body = resp.text
             logger.error(f"[LEMONSQUEEZY] API error {resp.status_code}: {error_body}")
+            capture_payment_failure(
+                event="checkout_create",
+                reason="provider_api_error",
+                user_id=user_id,
+                variant_id=variant_id,
+                status_code=resp.status_code,
+            )
             return {"error": f"LemonSqueezy API error {resp.status_code}: {error_body[:200]}"}
         data = resp.json()
         attrs = data.get("data", {}).get("attributes", {})
@@ -136,6 +156,13 @@ def create_checkout_url(
         }
     except Exception as e:
         logger.error(f"[LEMONSQUEZY] Checkout creation failed: {e}")
+        capture_payment_failure(
+            event="checkout_create",
+            reason="checkout_exception",
+            user_id=user_id,
+            variant_id=variant_id,
+            exc=e,
+        )
         return {"error": str(e)}
 
 
@@ -189,9 +216,21 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
 
     if not user_id:
         logger.warning(f"[LEMONSQUEZY] Webhook has no user_id in custom_data: {event_name}")
+        capture_payment_failure(event=event_name or "unknown", reason="no_user_id")
         return {"handled": False, "reason": "no user_id"}
 
     attrs = event_data.get("data", {}).get("attributes", {})
+    data_id = str(event_data.get("data", {}).get("id", "") or "")
+
+    if "failed" in event_name.lower():
+        capture_payment_failure(
+            event=event_name,
+            reason="provider_payment_failed",
+            user_id=user_id,
+            variant_id=str(attrs.get("variant_id", "") or ""),
+            order_id=data_id,
+        )
+        return {"handled": True, "action": "payment_failed"}
 
     # --- Subscription events ---
     if event_name in ("subscription_created", "subscription_updated"):
@@ -205,6 +244,13 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
 
         if not plan:
             logger.warning(f"[LEMONSQUEZY] No plan matches variant_id={variant_id}")
+            capture_payment_failure(
+                event=event_name,
+                reason="no_matching_plan",
+                user_id=user_id,
+                variant_id=variant_id,
+                subscription_id=data_id,
+            )
             return {"handled": False, "reason": "no matching plan"}
 
         # Record subscription + assign plan
@@ -240,6 +286,14 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
 
         invalidate("all")
         logger.info(f"[LEMONSQUEZY] Assigned plan {plan['slug']} to user {user_id}")
+        capture_payment_success(
+            event=event_name,
+            action="plan_assigned",
+            user_id=user_id,
+            variant_id=variant_id,
+            plan=plan["slug"],
+            subscription_id=data_id,
+        )
         return {"handled": True, "action": "plan_assigned", "plan": plan["slug"]}
 
     # --- Subscription cancelled ---
@@ -260,6 +314,11 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
 
         invalidate("all")
         logger.info(f"[LEMONSQUEZY] Downgraded user {user_id} to free (cancelled)")
+        capture_payment_success(
+            event=event_name,
+            action="downgraded_to_free",
+            user_id=user_id,
+        )
         return {"handled": True, "action": "downgraded_to_free"}
 
     # --- Order created (one-time purchase: credit pack) ---
@@ -293,6 +352,14 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
                     f"[LEMONSQUEEZY] No credit pack for variant_id={variant_id}, "
                     f"pack_id={pack_id} (user {user_id})"
                 )
+                capture_payment_failure(
+                    event=event_name,
+                    reason="no_matching_credit_pack",
+                    user_id=user_id,
+                    variant_id=variant_id,
+                    pack_id=pack_id,
+                    order_id=data_id,
+                )
                 return {"handled": False, "reason": "no matching credit pack",
                         "variant_id": variant_id, "pack_id": pack_id}
 
@@ -302,6 +369,16 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
 
         invalidate("all")
         logger.info(f"[LEMONSQUEEZY] Added {d['credits']} {d['credit_type']} credits to user {user_id}")
+        capture_payment_success(
+            event=event_name,
+            action="credits_added",
+            user_id=user_id,
+            variant_id=variant_id,
+            pack_id=pack_id,
+            credits=int(d["credits"]),
+            credit_type=d["credit_type"],
+            order_id=data_id,
+        )
         return {"handled": True, "action": "credits_added", "credits": int(d["credits"])}
 
     logger.info(f"[LEMONSQUEZY] Unhandled event: {event_name}")
