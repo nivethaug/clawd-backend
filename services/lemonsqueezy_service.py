@@ -190,6 +190,10 @@ def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
         return False
 
     if not signature:
+        logger.warning(
+            "[LEMONSQUEEZY] Webhook rejected: missing X-Signature header "
+            "(body_bytes=%s)", len(raw_body or b"")
+        )
         return False
 
     expected = hmac.new(
@@ -198,7 +202,24 @@ def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
         hashlib.sha256,
     ).hexdigest()
 
-    return hmac.compare_digest(expected, signature)
+    # Normalize both sides: hexdigest() is lowercase ASCII with no whitespace,
+    # but the X-Signature header may arrive uppercased or with trailing
+    # whitespace/newline from the HTTP layer. Compare on equal footing so a
+    # valid signature is never rejected purely on casing/whitespace.
+    try:
+        sig_norm = str(signature).strip().lower()
+    except Exception:
+        logger.warning("[LEMONSQUEEZY] Webhook rejected: malformed X-Signature header")
+        return False
+    if not hmac.compare_digest(expected, sig_norm):
+        # Diagnostic: show why it failed WITHOUT leaking the secret or full sig.
+        logger.warning(
+            "[LEMONSQUEEZY] Webhook rejected: signature mismatch "
+            "(expected_prefix=%s got_prefix=%s len_expected=%d len_got=%d)",
+            expected[:8], sig_norm[:8], len(expected), len(sig_norm),
+        )
+        return False
+    return True
 
 
 # ======================================================================
