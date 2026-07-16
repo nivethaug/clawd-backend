@@ -83,28 +83,15 @@ def _before_send(event: Dict[str, Any], _hint: Dict[str, Any]) -> Dict[str, Any]
 
 
 def _validate_dsn(dsn: str) -> bool:
-    """Quick structural check that SENTRY_DSN looks like a real Sentry DSN.
+    """Minimal check: SENTRY_DSN is present and uses an http(s) scheme.
 
-    Real DSN format: https://<public-key>@o<org>.ingest.sentry.io/<project>
-    Catches the common paste failures (missing scheme, no ingest host,
-    truncated values) that silently disable Sentry.
+    sentry_sdk.init() is the source of truth for full DSN validity; this only
+    rejects the obviously-empty / wrong-scheme case so a helpful message can be
+    logged before handing off to the SDK.
     """
     if not dsn:
         return False
-    if not dsn.startswith(("http://", "https://")):
-        return False
-    # A DSN always carries credentials: https://<key>@<host>/<project>
-    if "@" not in dsn:
-        return False
-    # Must point at an ingest host with an org id and project path.
-    if "ingest.sentry.io" not in dsn and "ingest.sentry-saas.io" not in dsn:
-        # Allow self-hosted Sentry (already confirmed has @ above).
-        pass
-    # Must have a path segment after the host (the project id).
-    host_part = dsn.split("@", 1)[-1]
-    if "/" not in host_part:
-        return False
-    return True
+    return dsn.startswith(("http://", "https://"))
 
 
 def configure_sentry(service_name: str) -> bool:

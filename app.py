@@ -228,14 +228,14 @@ try:
         _dsn = os.getenv("SENTRY_DSN", "")
         if not _dsn:
             _why = "missing"
-        elif not _dsn.startswith(("http://", "https://")) or "ingest.sentry.io" not in _dsn:
-            _why = f"INVALID (value_prefix={_dsn[:12]}... len={len(_dsn)}; expected https://<key>@o<org>.ingest.sentry.io/<project>)"
+        elif not _dsn.startswith(("http://", "https://")):
+            _why = f"INVALID scheme (value_prefix={_dsn[:12]}... len={len(_dsn)}; must start with http:// or https://)"
         else:
-            _why = "set-but-failed-to-init"
+            _why = f"set but failed to init (value_prefix={_dsn[:12]}... len={len(_dsn)}; check the value matches Sentry -> Settings -> Client Keys)"
         logger.warning(
             "[STARTUP-ENV] Sentry is DISABLED for backend — SENTRY_DSN is %s. "
-            "Add a VALID SENTRY_DSN (from Sentry -> Settings -> Client Keys) to "
-            "the PM2 env, then `pm2 restart 1 --update-env && pm2 save`.",
+            "Add a VALID SENTRY_DSN to the PM2 env, then "
+            "`pm2 restart 1 --update-env && pm2 save`.",
             _why,
         )
 except Exception as _diag_err:
