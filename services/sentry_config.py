@@ -147,6 +147,9 @@ def configure_sentry(service_name: str) -> bool:
         except Exception:
             logger.debug("[SENTRY] FastAPI integration unavailable; continuing with default integrations")
 
+        # sentry_sdk.init parses+validates the DSN itself; if it's malformed
+        # (e.g. "Missing hostname") it raises here. The except block below
+        # reports the parsed components so the exact defect is visible.
         sentry_sdk.init(
             dsn=dsn,
             environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
@@ -164,7 +167,26 @@ def configure_sentry(service_name: str) -> bool:
         logger.info("[SENTRY] initialized for %s", service_name)
         return True
     except Exception as exc:
-        logger.warning("[SENTRY] initialization failed for %s: %s", service_name, exc)
+        # Most common cause: DSN parses structurally but sentry_sdk rejects it
+        # (e.g. "Missing hostname"). Show parsed components so the exact defect
+        # is visible without guessing.
+        from urllib.parse import urlparse
+        try:
+            _parsed = urlparse(dsn)
+            _host = _parsed.hostname or "(NONE)"
+            _scheme = _parsed.scheme or "(NONE)"
+            _has_at = "@" in dsn
+            _user = _parsed.username or "(NONE)"
+        except Exception:
+            _host = _scheme = _user = "(parse failed)"
+            _has_at = "@" in dsn
+        logger.warning(
+            "[SENTRY] initialization failed for %s: %s | parsed: scheme=%s host=%s "
+            "has_at=%s user_prefix=%s | expected https://<key>@o<org>.ingest.sentry.io/<project> | value_prefix=%s len=%d",
+            service_name, exc, _scheme, _host, _has_at,
+            (str(_user)[:8]) if _user and _user != "(NONE)" else "(NONE)",
+            dsn[:12], len(dsn),
+        )
         _enabled = False
         return False
 
