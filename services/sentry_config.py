@@ -82,6 +82,31 @@ def _before_send(event: Dict[str, Any], _hint: Dict[str, Any]) -> Dict[str, Any]
     return _scrub(event)
 
 
+def _validate_dsn(dsn: str) -> bool:
+    """Quick structural check that SENTRY_DSN looks like a real Sentry DSN.
+
+    Real DSN format: https://<public-key>@o<org>.ingest.sentry.io/<project>
+    Catches the common paste failures (missing scheme, no ingest host,
+    truncated values) that silently disable Sentry.
+    """
+    if not dsn:
+        return False
+    if not dsn.startswith(("http://", "https://")):
+        return False
+    # A DSN always carries credentials: https://<key>@<host>/<project>
+    if "@" not in dsn:
+        return False
+    # Must point at an ingest host with an org id and project path.
+    if "ingest.sentry.io" not in dsn and "ingest.sentry-saas.io" not in dsn:
+        # Allow self-hosted Sentry (already confirmed has @ above).
+        pass
+    # Must have a path segment after the host (the project id).
+    host_part = dsn.split("@", 1)[-1]
+    if "/" not in host_part:
+        return False
+    return True
+
+
 def configure_sentry(service_name: str) -> bool:
     """Initialize Sentry once for the current process if SENTRY_DSN is present."""
     global _sentry_sdk, _enabled, _configured_service
@@ -89,6 +114,16 @@ def configure_sentry(service_name: str) -> bool:
     dsn = os.getenv("SENTRY_DSN")
     if not dsn:
         logger.info("[SENTRY] disabled for %s (SENTRY_DSN not set)", service_name)
+        return False
+
+    if not _validate_dsn(dsn):
+        logger.error(
+            "[SENTRY] DISABLED for %s: SENTRY_DSN is set but INVALID "
+            "(expected https://<key>@o<org>.ingest.sentry.io/<project>). "
+            "Copy the real DSN from Sentry -> Settings -> Client Keys. "
+            "value_prefix=%s len=%d",
+            service_name, dsn[:12], len(dsn),
+        )
         return False
 
     if _enabled:

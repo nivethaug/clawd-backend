@@ -35,10 +35,10 @@ try:
     if _sentry_is_enabled():
         logger.info("[STARTUP-ENV] Sentry ENABLED for session-chat-worker")
     else:
-        logger.warning(
-            "[STARTUP-ENV] Sentry DISABLED for session-chat-worker — SENTRY_DSN %s",
-            "set-but-invalid" if os.getenv("SENTRY_DSN") else "missing from env",
-        )
+        _dsn = os.getenv("SENTRY_DSN", "")
+        _why = ("INVALID (expected https://<key>@o<org>.ingest.sentry.io/<project>)"
+                if _dsn else "missing from env")
+        logger.warning("[STARTUP-ENV] Sentry DISABLED for session-chat-worker — SENTRY_DSN %s", _why)
 except Exception as _e:
     logger.warning("[STARTUP-ENV] diagnostic failed: %s", _e)
 

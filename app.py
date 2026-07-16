@@ -225,11 +225,18 @@ try:
     if _sentry_is_enabled():
         logger.info("[STARTUP-ENV] Sentry is ENABLED for backend")
     else:
+        _dsn = os.getenv("SENTRY_DSN", "")
+        if not _dsn:
+            _why = "missing"
+        elif not _dsn.startswith(("http://", "https://")) or "ingest.sentry.io" not in _dsn:
+            _why = f"INVALID (value_prefix={_dsn[:12]}... len={len(_dsn)}; expected https://<key>@o<org>.ingest.sentry.io/<project>)"
+        else:
+            _why = "set-but-failed-to-init"
         logger.warning(
-            "[STARTUP-ENV] Sentry is DISABLED — SENTRY_DSN is %s. "
-            "Add SENTRY_DSN to the PM2 env block (ecosystem.backend.json) "
-            "and `pm2 restart` to enable error/audit capture.",
-            "set-but-invalid" if os.getenv("SENTRY_DSN") else "missing",
+            "[STARTUP-ENV] Sentry is DISABLED for backend — SENTRY_DSN is %s. "
+            "Add a VALID SENTRY_DSN (from Sentry -> Settings -> Client Keys) to "
+            "the PM2 env, then `pm2 restart 1 --update-env && pm2 save`.",
+            _why,
         )
 except Exception as _diag_err:
     logger.warning("[STARTUP-ENV] diagnostic failed: %s", _diag_err)
