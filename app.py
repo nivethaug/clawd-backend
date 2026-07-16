@@ -3937,6 +3937,8 @@ class BuildPublishResponse(BaseModel):
     message: str
     output: Optional[str] = None
     error: Optional[str] = None
+    build_time: Optional[float] = None
+    url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -9907,6 +9909,126 @@ def _rebuild_after_rollback(project_id: int, project_path: str, project_name: st
         rebuild_status["backend"] = {"success": True, "skipped": True, "reason": "No backend directory"}
 
     return rebuild_status
+
+
+def _build_publish_status_success(status: dict) -> bool:
+    """Return whether a build/publish status dict represents a successful run."""
+    if not isinstance(status, dict):
+        return False
+
+    if status.get("type") == "website":
+        frontend = status.get("frontend") or {}
+        backend = status.get("backend") or {}
+        return bool(frontend.get("success")) and bool(backend.get("success"))
+
+    if status.get("type") == "scheduler":
+        return not status.get("error")
+
+    if "restarted" in status:
+        return bool(status.get("restarted"))
+
+    return not status.get("error")
+
+
+def _build_publish_error(status: dict) -> Optional[str]:
+    """Extract a concise error from a build/publish status dict."""
+    if not isinstance(status, dict):
+        return "Unknown build/publish failure"
+
+    errors: List[str] = []
+    top_level_error = status.get("error")
+    if top_level_error:
+        errors.append(str(top_level_error))
+
+    for key in ("frontend", "backend"):
+        step = status.get(key)
+        if isinstance(step, dict) and not step.get("success", True):
+            step_error = step.get("error") or step.get("reason") or "failed"
+            errors.append(f"{key}: {step_error}")
+
+    return "\n".join(errors) if errors else None
+
+
+def _project_public_url(domain: Optional[str]) -> Optional[str]:
+    """Build the public project URL from the DB domain value."""
+    if not domain:
+        return None
+    if domain.startswith("http://") or domain.startswith("https://"):
+        return domain
+    if "." in domain:
+        return f"https://{domain}"
+    return f"https://{domain}.{BASE_DOMAIN}"
+
+
+@app.post("/projects/{project_id}/editor/build-publish", response_model=BuildPublishResponse)
+async def editor_build_publish(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Build and publish from the code editor.
+
+    The code editor intentionally sends an empty body, so this endpoint derives
+    the project path, name, domain, and type from the database and then reuses
+    the same project-type-aware rebuild/restart logic used after rollback.
+    """
+    _require_project_owner(project_id, authorization)
+
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, name, domain, project_path, type_id, status FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    project_path = project["project_path"]
+    project_name = project["name"]
+    domain = project["domain"]
+
+    if not project_path:
+        raise HTTPException(status_code=400, detail="Project path is not available yet")
+
+    started_at = datetime.utcnow()
+    logger.info("[EDITOR-BUILD] Starting build/publish for project %s", project_id)
+
+    try:
+        status = _rebuild_after_rollback(project_id, project_path, project_name)
+        success = _build_publish_status_success(status)
+        elapsed = (datetime.utcnow() - started_at).total_seconds()
+        output = json.dumps(status, indent=2, default=str)
+        error = None if success else _build_publish_error(status)
+
+        if success:
+            logger.info("[EDITOR-BUILD] Build/publish succeeded for project %s in %.2fs", project_id, elapsed)
+            return BuildPublishResponse(
+                success=True,
+                message="Build and publish completed successfully",
+                output=output[-4000:],
+                build_time=elapsed,
+                url=_project_public_url(domain),
+            )
+
+        logger.error("[EDITOR-BUILD] Build/publish failed for project %s: %s", project_id, error or output[-500:])
+        return BuildPublishResponse(
+            success=False,
+            message="Build and publish failed",
+            output=output[-4000:],
+            error=error,
+            build_time=elapsed,
+            url=_project_public_url(domain),
+        )
+    except Exception as e:
+        elapsed = (datetime.utcnow() - started_at).total_seconds()
+        logger.exception("[EDITOR-BUILD] Build/publish error for project %s", project_id)
+        return BuildPublishResponse(
+            success=False,
+            message="Build and publish failed",
+            error=str(e),
+            build_time=elapsed,
+            url=_project_public_url(domain),
+        )
 
 
 @app.post("/projects/{project_id}/commits/{message_id}/rollback")
