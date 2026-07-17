@@ -5,47 +5,239 @@ Seed Templates + Gallery for v1.0 Release.
 Creates real projects using the DreamAgent API, waits for completion,
 then marks them as templates and publishes to gallery.
 
+Features:
+  - Resume support (seed_progress.json)
+  - Retry with exponential backoff
+  - Duplicate protection
+  - Configurable polling (env vars)
+  - Timestamped logging to logs/
+  - Dry-run mode
+  - Batch limit (--limit N)
+  - Environment validation
+  - Detailed final summary
+
 Usage:
-    # Set these env vars first:
     export API_URL=https://api.dreamagent.cloud
     export AUTH_TOKEN=<your_bearer_token>
-    export ADMIN_USER_ID=<your_user_id>
 
-    python scripts/seed_templates.py --templates    # create templates only
-    python scripts/seed_templates.py --gallery      # create gallery only
-    python scripts/seed_templates.py --all           # create both
+    python scripts/seed_templates.py --templates           # create templates
+    python scripts/seed_templates.py --gallery             # create gallery
+    python scripts/seed_templates.py --all                 # both (default)
+    python scripts/seed_templates.py --templates --limit 5 # first 5 only
+    python scripts/seed_templates.py --templates --dry-run # preview only
+    python scripts/seed_templates.py --templates --fresh   # ignore progress
 
-Each project takes ~5 minutes to generate. 15 templates + 20 gallery = ~35 projects.
-Run in batches if needed.
+Environment variables:
+    API_URL           API base URL (default: https://api.dreamagent.cloud)
+    AUTH_TOKEN        Bearer token (required)
+    POLL_INTERVAL     Status poll interval in seconds (default: 20)
+    PROJECT_TIMEOUT   Max wait per project in seconds (default: 1800)
+
+Each project takes ~5 minutes to generate. 20 templates + 15 gallery = ~35 projects.
 """
+
+from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import requests
 
-API_URL = os.getenv("API_URL", "https://api.dreamagent.cloud")
+# ──────────────────────────────────────────────────────────────────────
+# Configuration
+# ──────────────────────────────────────────────────────────────────────
+
+API_URL = os.getenv("API_URL", "https://api.dreamagent.cloud").rstrip("/")
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "1"))
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "20"))
+PROJECT_TIMEOUT = int(os.getenv("PROJECT_TIMEOUT", "1800"))
 
-if not AUTH_TOKEN:
-    print("ERROR: Set AUTH_TOKEN env var (your Bearer token)")
-    sys.exit(1)
+MAX_RETRIES = 5
+RETRY_BASE_DELAY = 1.5  # seconds, exponential: delay * (RETRY_BASE_DELAY ^ attempt)
 
-HEADERS = {
-    "Authorization": f"Bearer {AUTH_TOKEN}",
-    "Content-Type": "application/json",
-}
+# States that mean generation is truly complete
+COMPLETED_STATES = frozenset({"ready", "completed", "success"})
+# States that mean generation failed
+FAILED_STATES = frozenset({"failed", "error"})
+# States that mean generation is still in progress
+IN_PROGRESS_STATES = frozenset({
+    "running", "queued", "generating", "building", "creating",
+    "scaffolded", "initializing", "deploying",
+})
+
+PROGRESS_FILE = Path(__file__).parent / "seed_progress.json"
+LOG_DIR = Path(__file__).parent.parent / "logs"
 
 # ──────────────────────────────────────────────────────────────────────
-# TEMPLATE DEFINITIONS
-# Each is a prompt that produces a high-quality, distinct result.
+# Logging setup
 # ──────────────────────────────────────────────────────────────────────
 
-TEMPLATES = [
+
+def _setup_logging() -> logging.Logger:
+    """Configure console + timestamped file logging."""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    log_file = LOG_DIR / f"seed_{ts}.log"
+
+    logger = logging.getLogger("seed")
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+
+    # Console handler — concise INFO
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(ch)
+
+    # File handler — detailed DEBUG
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logger.addHandler(fh)
+
+    logger.info(f"📋 Log file: {log_file}")
+    return logger
+
+
+log = _setup_logging()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Progress tracking (resume support)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _load_progress() -> Dict[str, Any]:
+    """Load progress from seed_progress.json."""
+    if not PROGRESS_FILE.exists():
+        return {"templates": {}, "gallery": {}}
+    try:
+        data = json.loads(PROGRESS_FILE.read_text(encoding="utf-8"))
+        if "templates" not in data:
+            data["templates"] = {}
+        if "gallery" not in data:
+            data["gallery"] = {}
+        return data
+    except (json.JSONDecodeError, OSError) as exc:
+        log.warning(f"Could not load progress file: {exc} — starting fresh")
+        return {"templates": {}, "gallery": {}}
+
+
+def _save_progress(progress: Dict[str, Any]) -> None:
+    """Save progress to seed_progress.json."""
+    try:
+        PROGRESS_FILE.write_text(
+            json.dumps(progress, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        log.warning(f"Could not save progress file: {exc}")
+
+
+def _is_completed(progress: Dict[str, Any], section: str, name: str) -> bool:
+    """Check if an item is already completed in progress."""
+    entry = progress.get(section, {}).get(name)
+    return entry is not None and entry.get("status") == "completed"
+
+
+def _mark_completed(
+    progress: Dict[str, Any],
+    section: str,
+    name: str,
+    project_id: Optional[int],
+    detail: str = "",
+) -> None:
+    """Record a completed item in progress and save immediately."""
+    progress.setdefault(section, {})[name] = {
+        "status": "completed",
+        "project_id": project_id,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "detail": detail,
+    }
+    _save_progress(progress)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# HTTP retry helper
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _request(
+    method: str,
+    url: str,
+    *,
+    headers: Optional[dict] = None,
+    json_body: Optional[dict] = None,
+    timeout: int = 30,
+) -> Optional[requests.Response]:
+    """Make an HTTP request with exponential backoff retry.
+
+    Retries on: connection errors, timeouts, HTTP 500+, and Cloudflare
+    transient errors (502, 503, 504, 520-526).
+
+    Returns the Response on success, or None if all retries are exhausted.
+    """
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = requests.request(
+                method,
+                url,
+                headers=headers,
+                json=json_body,
+                timeout=timeout,
+            )
+
+            # Retry on server errors and Cloudflare transient codes
+            if resp.status_code >= 500 or resp.status_code in (408, 429):
+                delay = min(RETRY_BASE_DELAY ** attempt, 30)
+                log.debug(
+                    f"  ↻ Retry {attempt}/{MAX_RETRIES}: HTTP {resp.status_code} "
+                    f"from {method} {url} — waiting {delay:.1f}s"
+                )
+                if attempt < MAX_RETRIES:
+                    time.sleep(delay)
+                    continue
+
+            return resp
+
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            delay = min(RETRY_BASE_DELAY ** attempt, 30)
+            log.debug(
+                f"  ↻ Retry {attempt}/{MAX_RETRIES}: {type(exc).__name__} "
+                f"on {method} {url} — waiting {delay:.1f}s"
+            )
+            if attempt < MAX_RETRIES:
+                time.sleep(delay)
+                continue
+
+        except requests.RequestException as exc:
+            log.error(f"  ❌ Request failed: {exc}")
+            return None
+
+    log.error(f"  ❌ All {MAX_RETRIES} retries exhausted for {method} {url}")
+    return None
+
+
+def _ok(resp: Optional[requests.Response]) -> bool:
+    """Check if a response is successful (200 or 201)."""
+    return resp is not None and resp.status_code in (200, 201)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Template definitions (unchanged from original)
+# ──────────────────────────────────────────────────────────────────────
+
+TEMPLATES: List[Dict[str, Any]] = [
     # ── Website (6) ──────────────────────────────────────────────
     {
         "name": "SaaS Landing Page",
@@ -193,11 +385,10 @@ TEMPLATES = [
 ]
 
 # ──────────────────────────────────────────────────────────────────────
-# GALLERY DEFINITIONS (subset of templates + extras)
-# Gallery items are polished examples that inspire users.
+# Gallery definitions (unchanged from original)
 # ──────────────────────────────────────────────────────────────────────
 
-GALLERY = [
+GALLERY: List[Dict[str, Any]] = [
     {"name": "CRM Dashboard", "type_id": 1, "description": "A modern CRM dashboard with contact management, deal pipeline (kanban), activity timeline, and sales metrics. Drag-and-drop deals between stages. Premium dark UI with data tables and charts."},
     {"name": "Restaurant Website", "type_id": 1, "description": "An elegant restaurant website with a full-screen hero image, menu cards with prices, reservation form, photo gallery, and location map. Warm, appetizing design with elegant typography."},
     {"name": "Gym Fitness", "type_id": 1, "description": "A high-energy gym website with bold hero section, class schedule table, trainer cards, membership pricing tiers, and a BMI calculator widget. Dark theme with neon accents, motivational imagery."},
@@ -216,148 +407,455 @@ GALLERY = [
 ]
 
 
-def create_project(name: str, description: str, type_id: int) -> dict:
-    """Create a project via the API."""
-    resp = requests.post(
+# ──────────────────────────────────────────────────────────────────────
+# Environment validation
+# ──────────────────────────────────────────────────────────────────────
+
+
+def validate_environment() -> bool:
+    """Validate API_URL, AUTH_TOKEN, and key endpoints before starting."""
+    if not AUTH_TOKEN:
+        log.error("❌ AUTH_TOKEN is not set. Export it: export AUTH_TOKEN=<token>")
+        return False
+
+    headers = {"Authorization": f"Bearer {AUTH_TOKEN}", "Content-Type": "application/json"}
+
+    # 1. Check API reachable
+    log.info(f"🔍 Validating environment: {API_URL}")
+    resp = _request("GET", f"{API_URL}/project-types", headers=headers, timeout=15)
+    if resp is None:
+        log.error("❌ API is not reachable. Check API_URL and network.")
+        return False
+    if resp.status_code == 401:
+        log.error("❌ AUTH_TOKEN is invalid or expired. Get a fresh token.")
+        return False
+    if resp.status_code not in (200, 201):
+        log.error(f"❌ Unexpected response from API: HTTP {resp.status_code}")
+        return False
+
+    # 2. Check key endpoints respond
+    endpoints_ok = True
+    for endpoint in ["/templates/my-templates", "/gallery/my-published"]:
+        resp = _request("GET", f"{API_URL}{endpoint}", headers=headers, timeout=15)
+        if resp is None or resp.status_code not in (200, 201, 404):
+            log.warning(f"⚠️ Endpoint {endpoint} returned HTTP {resp.status_code if resp else 'None'}")
+            endpoints_ok = False
+
+    if endpoints_ok:
+        log.info("✅ Environment validated — API reachable, auth valid, endpoints responding")
+    else:
+        log.warning("⚠️ Some endpoints returned unexpected status — continuing anyway")
+
+    return True
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Duplicate protection
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _check_existing_templates() -> set[str]:
+    """Fetch existing template titles to prevent duplicates."""
+    headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
+    resp = _request("GET", f"{API_URL}/templates/my-templates", headers=headers, timeout=15)
+    if resp is None or resp.status_code not in (200, 201):
+        log.debug("  Could not fetch existing templates — duplicate check disabled")
+        return set()
+    try:
+        data = resp.json()
+        titles = {t.get("title", "") for t in data.get("templates", [])}
+        log.debug(f"  Found {len(titles)} existing templates")
+        return titles
+    except (json.JSONDecodeError, KeyError):
+        return set()
+
+
+def _check_existing_gallery() -> set[str]:
+    """Fetch existing gallery titles to prevent duplicates."""
+    headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
+    resp = _request("GET", f"{API_URL}/gallery/my-published", headers=headers, timeout=15)
+    if resp is None or resp.status_code not in (200, 201):
+        log.debug("  Could not fetch existing gallery — duplicate check disabled")
+        return set()
+    try:
+        data = resp.json()
+        titles = {g.get("title", "") for g in data.get("gallery_projects", [])}
+        log.debug(f"  Found {len(titles)} existing gallery items")
+        return titles
+    except (json.JSONDecodeError, KeyError):
+        return set()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Core API operations
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _headers() -> dict:
+    return {"Authorization": f"Bearer {AUTH_TOKEN}", "Content-Type": "application/json"}
+
+
+def create_project(name: str, description: str, type_id: int) -> Optional[dict]:
+    """Create a project via the API. Returns project dict or None."""
+    resp = _request(
+        "POST",
         f"{API_URL}/projects",
-        headers=HEADERS,
-        json={"name": name, "description": description, "type_id": type_id},
+        headers=_headers(),
+        json_body={"name": name, "description": description, "type_id": type_id},
         timeout=30,
     )
-    if resp.status_code == 402:
-        print(f"  ❌ BLOCKED: insufficient credits. Buy credits and retry.")
+    if resp is None:
         return None
-    if resp.status_code != 200:
-        print(f"  ❌ Error {resp.status_code}: {resp.text[:200]}")
+    if resp.status_code == 402:
+        log.error("  ❌ BLOCKED: insufficient credits. Buy credits and retry.")
+        return None
+    if resp.status_code not in (200, 201):
+        log.error(f"  ❌ Error {resp.status_code}: {resp.text[:200]}")
         return None
     return resp.json()
 
 
-def wait_for_completion(project_id: int, timeout: int = 600) -> str:
-    """Poll project status until ready/failed."""
+def wait_for_completion(project_id: int) -> str:
+    """Poll project status until truly complete, failed, or timeout.
+
+    Returns: 'completed' | 'failed' | 'timeout'
+    """
     start = time.time()
-    while time.time() - start < timeout:
-        resp = requests.get(
+    headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
+
+    while time.time() - start < PROJECT_TIMEOUT:
+        resp = _request(
+            "GET",
             f"{API_URL}/projects/{project_id}/status",
-            headers=HEADERS,
-            timeout=10,
+            headers=headers,
+            timeout=15,
         )
-        if resp.status_code == 200:
-            status = resp.json().get("status", "unknown")
+        if resp is not None and resp.status_code in (200, 201):
+            status = resp.json().get("status", "unknown").lower()
             elapsed = int(time.time() - start)
-            if status in ("ready", "running"):
-                print(f"  ✅ Completed in {elapsed}s")
-                return status
-            if status in ("failed", "error"):
-                print(f"  ❌ Failed after {elapsed}s")
-                return status
-            if elapsed % 60 == 0 and elapsed > 0:
-                print(f"  ⏳ Still {status} after {elapsed}s...")
-        time.sleep(10)
-    print(f"  ⏰ Timeout after {timeout}s")
+
+            if status in COMPLETED_STATES:
+                log.info(f"  ✅ Completed ({status}) in {elapsed}s")
+                log.debug(f"  Final status: {status}")
+                return "completed"
+
+            if status in FAILED_STATES:
+                log.error(f"  ❌ Failed ({status}) after {elapsed}s")
+                return "failed"
+
+            # Still in progress — log periodically
+            if elapsed > 0 and elapsed % 60 == 0:
+                log.info(f"  ⏳ Still '{status}' after {elapsed}s...")
+
+        time.sleep(POLL_INTERVAL)
+
+    log.error(f"  ⏰ Timeout after {int(time.time() - start)}s")
     return "timeout"
 
 
 def mark_as_template(project_id: int, title: str, category: str, featured: bool) -> bool:
     """Mark a completed project as a template."""
-    resp = requests.post(
+    resp = _request(
+        "POST",
         f"{API_URL}/projects/{project_id}/mark-as-template",
-        headers=HEADERS,
-        json={
+        headers=_headers(),
+        json_body={
             "title": title,
             "description": f"Template: {title}",
             "category": category,
             "is_featured": featured,
         },
-        timeout=10,
+        timeout=15,
     )
-    return resp.status_code == 201
+    return _ok(resp)
 
 
 def publish_to_gallery(project_id: int, title: str, description: str, featured: bool) -> bool:
     """Publish a completed project to the gallery."""
-    resp = requests.post(
+    resp = _request(
+        "POST",
         f"{API_URL}/projects/{project_id}/publish-to-gallery",
-        headers=HEADERS,
-        json={
+        headers=_headers(),
+        json_body={
             "title": title,
             "description": description,
             "is_featured": featured,
         },
-        timeout=10,
+        timeout=15,
     )
-    return resp.status_code == 201
+    return _ok(resp)
 
 
-def run_templates():
-    """Create all template projects."""
-    print(f"\n{'='*60}")
-    print(f"CREATE TEMPLATES ({len(TEMPLATES)} items)")
-    print(f"{'='*60}\n")
+# ──────────────────────────────────────────────────────────────────────
+# Result tracking for final summary
+# ──────────────────────────────────────────────────────────────────────
 
-    success = 0
-    for i, tmpl in enumerate(TEMPLATES, 1):
-        print(f"[{i}/{len(TEMPLATES)}] {tmpl['name']} ({tmpl['category']})")
-        project = create_project(tmpl["name"], tmpl["description"], tmpl["type_id"])
-        if not project:
+
+class RunStats:
+    """Tracks outcomes for the final summary."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.created: int = 0
+        self.skipped: int = 0
+        self.failed: int = 0
+        self.timeout: int = 0
+        self.already_exists: int = 0
+        self.start_time: float = 0.0
+        self.end_time: float = 0.0
+
+    @property
+    def duration(self) -> str:
+        secs = int(self.end_time - self.start_time)
+        if secs < 60:
+            return f"{secs}s"
+        return f"{secs // 60}m {secs % 60}s"
+
+    def summary(self) -> str:
+        total = self.created + self.skipped + self.failed + self.timeout + self.already_exists
+        return (
+            f"\n{self.label}\n"
+            f"{'─' * len(self.label)}\n"
+            f"  Created:       {self.created}\n"
+            f"  Skipped:       {self.skipped}\n"
+            f"  Failed:        {self.failed}\n"
+            f"  Timeout:       {self.timeout}\n"
+            f"  Already Exists:{self.already_exists}\n"
+            f"  Total:         {total}\n"
+            f"  Duration:      {self.duration}\n"
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Main runners
+# ──────────────────────────────────────────────────────────────────────
+
+
+def run_templates(
+    progress: Dict[str, Any],
+    limit: Optional[int] = None,
+    dry_run: bool = False,
+) -> RunStats:
+    """Create all template projects with resume + duplicate protection."""
+    stats = RunStats("Templates")
+    stats.start_time = time.time()
+
+    items = TEMPLATES
+    if limit:
+        items = items[:limit]
+
+    existing = _check_existing_templates() if not dry_run else set()
+
+    if dry_run:
+        log.info(f"\n{'=' * 60}")
+        log.info(f"DRY RUN — Templates ({len(items)} items)")
+        log.info(f"{'=' * 60}")
+        for i, tmpl in enumerate(items, 1):
+            log.info(f"  [{i}/{len(items)}] {tmpl['name']} ({tmpl['category']}) featured={tmpl.get('featured', False)}")
+        stats.end_time = time.time()
+        return stats
+
+    log.info(f"\n{'=' * 60}")
+    log.info(f"CREATE TEMPLATES ({len(items)} items, poll={POLL_INTERVAL}s, timeout={PROJECT_TIMEOUT}s)")
+    log.info(f"{'=' * 60}")
+
+    for i, tmpl in enumerate(items, 1):
+        name = tmpl["name"]
+        log.info(f"\n[{i}/{len(items)}] {name} ({tmpl['category']})")
+
+        # Resume check
+        if _is_completed(progress, "templates", name):
+            log.info(f"  ⏭️ Skipped (already in progress file)")
+            stats.skipped += 1
             continue
-        pid = project.get("id")
-        print(f"  Created project {pid}, waiting for completion...")
-        status = wait_for_completion(pid)
-        if status in ("ready", "running"):
-            ok = mark_as_template(pid, tmpl["name"], tmpl["category"], tmpl.get("featured", False))
-            if ok:
-                print(f"  📋 Marked as template")
-                success += 1
-            else:
-                print(f"  ⚠️ Failed to mark as template")
-        print()
 
-    print(f"\nTemplates created: {success}/{len(TEMPLATES)}")
-
-
-def run_gallery():
-    """Create all gallery projects."""
-    print(f"\n{'='*60}")
-    print(f"CREATE GALLERY ({len(GALLERY)} items)")
-    print(f"{'='*60}\n")
-
-    success = 0
-    for i, item in enumerate(GALLERY, 1):
-        print(f"[{i}/{len(GALLERY)}] {item['name']}")
-        project = create_project(item["name"], item["description"], item["type_id"])
-        if not project:
+        # Duplicate check
+        if name in existing:
+            log.info(f"  ⏭️ Skipped (already exists on server)")
+            _mark_completed(progress, "templates", name, None, "already exists")
+            stats.already_exists += 1
             continue
-        pid = project.get("id")
-        print(f"  Created project {pid}, waiting for completion...")
-        status = wait_for_completion(pid)
-        if status in ("ready", "running"):
-            ok = publish_to_gallery(pid, item["name"], item["description"], i <= 5)
-            if ok:
-                print(f"  🖼️ Published to gallery")
-                success += 1
-            else:
-                print(f"  ⚠️ Failed to publish to gallery")
-        print()
 
-    print(f"\nGallery items created: {success}/{len(GALLERY)}")
+        # Create + wait + mark
+        project = create_project(name, tmpl["description"], tmpl["type_id"])
+        if not project:
+            stats.failed += 1
+            continue
+
+        pid = project.get("id")
+        log.info(f"  Created project {pid}, waiting for completion...")
+        log.debug(f"  Project response: {json.dumps(project)[:200]}")
+
+        status = wait_for_completion(pid)
+        if status == "completed":
+            ok = mark_as_template(pid, name, tmpl["category"], tmpl.get("featured", False))
+            if ok:
+                log.info(f"  📋 Marked as template")
+                _mark_completed(progress, "templates", name, pid, "template published")
+                stats.created += 1
+            else:
+                log.error(f"  ⚠️ Failed to mark as template")
+                stats.failed += 1
+        elif status == "timeout":
+            stats.timeout += 1
+        else:
+            stats.failed += 1
+
+    stats.end_time = time.time()
+    return stats
+
+
+def run_gallery(
+    progress: Dict[str, Any],
+    limit: Optional[int] = None,
+    dry_run: bool = False,
+) -> RunStats:
+    """Create all gallery projects with resume + duplicate protection."""
+    stats = RunStats("Gallery")
+    stats.start_time = time.time()
+
+    items = GALLERY
+    if limit:
+        items = items[:limit]
+
+    existing = _check_existing_gallery() if not dry_run else set()
+
+    if dry_run:
+        log.info(f"\n{'=' * 60}")
+        log.info(f"DRY RUN — Gallery ({len(items)} items)")
+        log.info(f"{'=' * 60}")
+        for i, item in enumerate(items, 1):
+            log.info(f"  [{i}/{len(items)}] {item['name']}")
+        stats.end_time = time.time()
+        return stats
+
+    log.info(f"\n{'=' * 60}")
+    log.info(f"CREATE GALLERY ({len(items)} items, poll={POLL_INTERVAL}s, timeout={PROJECT_TIMEOUT}s)")
+    log.info(f"{'=' * 60}")
+
+    for i, item in enumerate(items, 1):
+        name = item["name"]
+        log.info(f"\n[{i}/{len(items)}] {name}")
+
+        # Resume check
+        if _is_completed(progress, "gallery", name):
+            log.info(f"  ⏭️ Skipped (already in progress file)")
+            stats.skipped += 1
+            continue
+
+        # Duplicate check
+        if name in existing:
+            log.info(f"  ⏭️ Skipped (already exists on server)")
+            _mark_completed(progress, "gallery", name, None, "already exists")
+            stats.already_exists += 1
+            continue
+
+        # Create + wait + publish
+        project = create_project(name, item["description"], item["type_id"])
+        if not project:
+            stats.failed += 1
+            continue
+
+        pid = project.get("id")
+        log.info(f"  Created project {pid}, waiting for completion...")
+        log.debug(f"  Project response: {json.dumps(project)[:200]}")
+
+        status = wait_for_completion(pid)
+        if status == "completed":
+            ok = publish_to_gallery(pid, name, item["description"], i <= 5)
+            if ok:
+                log.info(f"  🖼️ Published to gallery")
+                _mark_completed(progress, "gallery", name, pid, "gallery published")
+                stats.created += 1
+            else:
+                log.error(f"  ⚠️ Failed to publish to gallery")
+                stats.failed += 1
+        elif status == "timeout":
+            stats.timeout += 1
+        else:
+            stats.failed += 1
+
+    stats.end_time = time.time()
+    return stats
+
+
+# ──────────────────────────────────────────────────────────────────────
+# CLI
+# ──────────────────────────────────────────────────────────────────────
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Seed templates + gallery for v1.0")
-    parser.add_argument("--templates", action="store_true", help="Create templates only")
-    parser.add_argument("--gallery", action="store_true", help="Create gallery only")
-    parser.add_argument("--all", action="store_true", help="Create both (default)")
+    parser = argparse.ArgumentParser(
+        description="Seed templates + gallery for v1.0",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python scripts/seed_templates.py --templates\n"
+            "  python scripts/seed_templates.py --gallery --limit 5\n"
+            "  python scripts/seed_templates.py --all --dry-run\n"
+            "  python scripts/seed_templates.py --templates --fresh\n"
+        ),
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--templates", action="store_true", help="Create templates only")
+    mode.add_argument("--gallery", action="store_true", help="Create gallery only")
+    mode.add_argument("--all", action="store_true", help="Create both (default)")
+    parser.add_argument("--limit", type=int, default=None, help="Process only first N items")
+    parser.add_argument("--dry-run", action="store_true", help="Preview without calling API")
+    parser.add_argument("--fresh", action="store_true", help="Ignore previous progress (no resume)")
+    parser.add_argument("--resume", action="store_true", default=True, help="Resume from progress (default)")
     args = parser.parse_args()
 
+    # Default to --all if no mode specified
     if not args.templates and not args.gallery and not args.all:
         args.all = True
 
-    if args.all or args.templates:
-        run_templates()
-    if args.all or args.gallery:
-        run_gallery()
+    overall_start = time.time()
 
-    print(f"\n{'='*60}")
-    print("SEED COMPLETE")
-    print(f"{'='*60}")
+    log.info(f"{'=' * 60}")
+    log.info(f"DreamAgent Seed Script — {datetime.now(timezone.utc).isoformat()}")
+    log.info(f"API: {API_URL}")
+    log.info(f"Poll: {POLL_INTERVAL}s  Timeout: {PROJECT_TIMEOUT}s  Retries: {MAX_RETRIES}")
+    log.info(f"Mode: {'templates' if args.templates else 'gallery' if args.gallery else 'all'}"
+             f"{' (dry-run)' if args.dry_run else ''}"
+             f"{' (fresh)' if args.fresh else ' (resume)'}")
+    log.info(f"{'=' * 60}")
+
+    # Environment validation (skip for dry-run)
+    if not args.dry_run:
+        if not validate_environment():
+            log.error("Environment validation failed. Exiting.")
+            sys.exit(1)
+
+    # Load or reset progress
+    if args.fresh:
+        progress: Dict[str, Any] = {"templates": {}, "gallery": {}}
+        _save_progress(progress)
+        log.info("📂 Started fresh (progress file reset)")
+    else:
+        progress = _load_progress()
+        completed_t = len(progress.get("templates", {}))
+        completed_g = len(progress.get("gallery", {}))
+        if completed_t or completed_g:
+            log.info(f"📂 Resuming: {completed_t} templates + {completed_g} gallery already done")
+
+    # Run
+    all_stats: List[RunStats] = []
+    if args.all or args.templates:
+        all_stats.append(run_templates(progress, args.limit, args.dry_run))
+    if args.all or args.gallery:
+        all_stats.append(run_gallery(progress, args.limit, args.dry_run))
+
+    # Final summary
+    overall_end = time.time()
+    overall_secs = int(overall_end - overall_start)
+    overall_str = f"{overall_secs}s" if overall_secs < 60 else f"{overall_secs // 60}m {overall_secs % 60}s"
+
+    log.info(f"\n{'=' * 60}")
+    log.info("FINAL SUMMARY")
+    log.info(f"{'=' * 60}")
+    for s in all_stats:
+        log.info(s.summary())
+    log.info(f"Overall runtime: {overall_str}")
+    log.info(f"Progress file: {PROGRESS_FILE}")
+    log.info(f"{'=' * 60}")
