@@ -1307,7 +1307,7 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         _cost = int(_op.get("credit_cost", 1)) if _op else 1
 
         with get_db() as conn:
-            _credit_check = can_afford(conn, user_id, _op_code, _cost)
+            _credit_check = can_afford(conn, user_id, _op_code, 1)  # amount=1 (one creation)
         if not _credit_check.get("can_afford"):
             logger.info("[PROJECT] blocking creation for user=%s: insufficient credits (available=%s, cost=%s)",
                         user_id, _credit_check.get("total_available", 0), _cost)
