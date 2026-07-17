@@ -42,17 +42,18 @@ _PROJECT_PATH_RE = re.compile(
     r"^/(?:projects|apps|plans)/(\d+)(?:/|$)"
 )
 
-# ALLOWLIST
-# worker (they read/write project files on disk). Everything else (sessions,
-# status, env, custom-domain, gallery, usage, clone, etc.) stays on main —
-# those only need the DB, not the filesystem.
+# ALLOWLIST — routes that read/write project files on disk or manage PM2/nginx
+# on the worker. Everything else (sessions, status, custom-domain metadata,
+# gallery, usage, etc.) stays on main — those only need the DB, not the filesystem.
 _PROXY_SUBROUTES = (
-    "files",               # GET/PUT project files
-    "github-export",       # read files → push to GitHub
-    "download",            # read files → ZIP
-    "logs",                # read PM2 logs (worker runs the project)
-    "commits",             # git log/diff/rollback (worker has the repo)
+    "files",                 # GET/PUT project files
+    "github-export",         # read files → push to GitHub
+    "download",              # read files → ZIP
+    "logs",                  # read PM2 logs (worker runs the project)
+    "commits",               # git log/diff/rollback (worker has the repo)
     "editor/build-publish",  # rebuild + redeploy (worker serves it)
+    "env",                   # GET/PUT .env file on disk
+    "clone",                 # reads source project files
 )
 
 # Chat routes — MUST proxy because the ACP handler reads frontend/src from disk.
@@ -108,19 +109,37 @@ def _parse_project_id(path: str) -> Optional[int]:
         return None
 
 
-def _is_proxyable_project_route(path: str) -> bool:
-    """Check if a /projects/{id}/* route is in the proxy allowlist.
+def _is_proxyable_project_route(path: str, method: str = "") -> bool:
+    """Check if a route should be proxied to the worker.
 
-    Only file-dependent sub-routes should be proxied. Session/status/env/
-    gallery/clone routes stay on main (they only need the DB).
+    Handles three cases:
+    1. /projects/{id}/{sub} where sub is in _PROXY_SUBROUTES (files, env, etc.)
+    2. DELETE /projects/{id} (base path — deletes files + PM2 + nginx)
+    3. POST /apps/{id}/action (runs PM2 start/stop/restart on the worker)
     """
-    # Strip /projects/{id}/ prefix to get the sub-route
     m = _PROJECT_PATH_RE.match(path)
     if not m:
         return False
+
     sub = path[m.end():]
-    # Check if any allowlisted keyword matches the sub-route prefix
-    return any(sub.startswith(sr) or sub == sr for sr in _PROXY_SUBROUTES)
+
+    # Case 2: DELETE /projects/{id} — base path, removes files + PM2 + nginx
+    if method.upper() == "DELETE" and not sub:
+        return True
+
+    # Case 3: POST /apps/{id}/action — PM2 control of deployed services
+    if path.startswith("/apps/") and sub.startswith("action"):
+        return True
+
+    # Case 1: sub-route in the allowlist.
+    # Exact match for "env" (so env/reveal stays on main); prefix match for others.
+    for sr in _PROXY_SUBROUTES:
+        if sr == "env":
+            if sub == "env":
+                return True
+        elif sub == sr or sub.startswith(sr + "/"):
+            return True
+    return False
 
 
 async def _resolve_project_id_from_request(request: Request) -> Optional[int]:
@@ -128,16 +147,19 @@ async def _resolve_project_id_from_request(request: Request) -> Optional[int]:
 
     Only routes in the proxy allowlist are considered:
     - File routes: /projects/{id}/files, /download, /github-export, /logs,
-      /commits, /editor/build-publish
+      /commits, /editor/build-publish, /env, /clone
+    - DELETE /projects/{id} (removes files + PM2 + nginx)
+    - POST /apps/{id}/action (PM2 start/stop/restart)
     - Chat routes: /chat/*, /sessions/details (session_key → project_id)
 
-    Everything else (sessions, status, env, gallery, clone, etc.) returns None
-    and stays on main.
+    Everything else (sessions, status, custom-domain, gallery, usage, etc.)
+    returns None and stays on main.
     """
     path = request.url.path
+    method = request.method
 
-    # 1. Path-based project routes — ONLY if in the proxy allowlist.
-    if _is_proxyable_project_route(path):
+    # 1. Path-based project/apps routes — ONLY if in the proxy allowlist.
+    if _is_proxyable_project_route(path, method):
         return _parse_project_id(path)
 
     # 2. /chat/* and /sessions/details → session_key from query or body.
