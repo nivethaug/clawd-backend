@@ -136,10 +136,15 @@ async def _resolve_project_id_from_request(request: Request) -> Optional[int]:
                     data = json.loads(body)
                     if isinstance(data, dict):
                         session_key = data.get("session_key")
-            except Exception:
-                pass
+            except Exception as body_err:
+                logger.warning(
+                    "project_proxy: failed to read body for session_key on %s: %s",
+                    path, body_err,
+                )
         if session_key:
             return _project_id_for_session("session_key", session_key)
+        logger.warning("project_proxy: no session_key found for %s (query=%s)",
+                       path, dict(request.query_params))
 
     return None
 
@@ -224,13 +229,8 @@ async def project_proxy_middleware(request: Request, call_next):
     - Path-based routes (/projects/{id}, /apps/{id}, /plans/{id}) — id from path
     - Session-based routes (/chat/*, /sessions/{id}/*, /sessions/details) —
       project_id resolved from session_key/session_id via DB lookup
-
-    This is critical: the ACP chat handler reads frontend/src from disk, so a
-    chat request for a worker-hosted project MUST be proxied to the worker,
-    not handled on main (which has no files).
     """
     worker_url = _get_worker_url()
-    # No worker configured → behave exactly as before (backward compatible).
     if not worker_url:
         return await call_next(request)
 
@@ -239,7 +239,7 @@ async def project_proxy_middleware(request: Request, call_next):
     _is_chat = _path in _CHAT_ROUTES or _path.startswith("/chat") or _path.startswith("/sessions")
     if _is_chat:
         logger.warning(
-            "project_proxy DEBUG: %s %s (chat/sessions route) query=%s body_len=?",
+            "project_proxy DEBUG: %s %s query=%s",
             request.method, _path, dict(request.query_params),
         )
 
@@ -247,14 +247,11 @@ async def project_proxy_middleware(request: Request, call_next):
     project_id = await _resolve_project_id_from_request(request)
     if project_id is None:
         if _is_chat:
-            logger.warning(
-                "project_proxy DEBUG: %s -> project_id=None (pass-through, no session found)",
-                _path,
-            )
+            logger.warning("project_proxy DEBUG: %s -> project_id=None (pass-through)", _path)
         return await call_next(request)
 
     if _is_chat:
-        logger.warning("project_proxy DEBUG: %s -> resolved project_id=%s", _path, project_id)
+        logger.warning("project_proxy DEBUG: %s -> project_id=%s", _path, project_id)
 
     # Decide where this project lives.
     is_on_worker, project_path = _project_lives_on_worker(project_id)
@@ -321,3 +318,12 @@ async def project_proxy_middleware(request: Request, call_next):
 
 
 __all__ = ["project_proxy_middleware"]
+
+# Startup log — confirms the module loaded (visible in pm2 logs on first request
+# cycle; also emitted at import time so we know registration happened).
+_wu = _get_worker_url()
+logger.warning(
+    "project_proxy LOADED — worker_url=%s, chat_routes=%s",
+    _wu or "(unset, no-op mode)",
+    sorted(_CHAT_ROUTES),
+)
