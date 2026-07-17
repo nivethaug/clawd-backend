@@ -1079,6 +1079,13 @@ async def sentry_context_middleware(request: Request, call_next):
             )
         return response
 
+# Project reverse-proxy middleware (Option B for worker VPS split).
+# Forwards project-scoped requests to the worker when the project's files are
+# not present locally. No-op when WORKER_VPS_URL is unset (backward compatible).
+from services.project_proxy import project_proxy_middleware  # noqa: E402
+
+app.middleware("http")(project_proxy_middleware)
+
 # Register AI Chat routers
 app.include_router(ai_chat_router, prefix="/api/ai", tags=["ai-chat"])
 app.include_router(ai_selection_router, prefix="/api/ai", tags=["ai-selection"])
