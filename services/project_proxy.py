@@ -287,12 +287,31 @@ async def project_proxy_middleware(request: Request, call_next):
         target_url = f"{target_url}?{request.url.query}"
 
     headers = _forwardable_headers(request)
+
+    # Resolve user_id from main's AUTH_TOKENS and pass it as a trusted header.
+    # The worker's API has its OWN in-memory AUTH_TOKENS (empty) — it can't
+    # validate the user's Bearer token. Since port 8003 is firewalled to main's
+    # IP only, we pass the authenticated user_id via a trusted internal header.
+    # The worker must accept this header as proof of identity (see TRUST_PROXY).
+    try:
+        from app import get_user_id_from_token
+        auth_header = request.headers.get("authorization", "")
+        proxy_user_id = get_user_id_from_token(auth_header) if auth_header else None
+    except Exception:
+        proxy_user_id = None
+    if proxy_user_id:
+        headers["X-Proxy-User-Id"] = str(proxy_user_id)
+        # Remove the original Authorization so the worker doesn't try to
+        # validate a token it doesn't know about.
+        headers.pop("authorization", None)
+        headers.pop("Authorization", None)
+
     body = await request.body()
 
     method = request.method
     logger.info(
-        "project_proxy: forwarding %s %s (project=%s path=%s) -> %s",
-        method, request.url.path, project_id, (project_path or "")[:60], worker_url,
+        "project_proxy: forwarding %s %s (project=%s user=%s) -> %s",
+        method, request.url.path, project_id, proxy_user_id, worker_url,
     )
 
     client = _get_client()
@@ -302,11 +321,11 @@ async def project_proxy_middleware(request: Request, call_next):
         req = client.build_request(method, target_url, headers=headers, content=body)
         worker_resp = await client.send(req, stream=True)
 
-        # Strip hop-by-hop headers from the response too.
-        resp_headers = [
-            (k, v) for k, v in worker_resp.headers.items()
+        # Build response headers as a dict (StreamingResponse expects dict, not list).
+        resp_headers = {
+            k: v for k, v in worker_resp.headers.items()
             if k.lower() not in _HOP_BY_HOP
-        ]
+        }
 
         async def body_iterator():
             try:
@@ -335,7 +354,57 @@ async def project_proxy_middleware(request: Request, call_next):
         raise HTTPException(status_code=502, detail="Failed to reach project host.")
 
 
-__all__ = ["project_proxy_middleware"]
+async def proxy_auth_middleware(request: Request, call_next):
+    """Worker-side middleware: translate X-Proxy-User-Id into a valid auth token.
+
+    When the main VPS proxies a request, it resolves the user_id and passes it
+    via X-Proxy-User-Id. This middleware injects a synthetic Bearer token into
+    AUTH_TOKENS and rewrites the Authorization header, so every existing endpoint
+    (which calls get_user_id_from_token) works without modification.
+
+    Only active when TRUST_PROXY_AUTH is set (worker API on port 8003, firewalled
+    to main's IP only — never public).
+    """
+    import os as _os
+    if _os.getenv("TRUST_PROXY_AUTH", "").lower() not in ("1", "true", "yes"):
+        return await call_next(request)
+
+    proxy_uid = request.headers.get("X-Proxy-User-Id")
+    if not proxy_uid:
+        return await call_next(request)
+
+    try:
+        uid = int(proxy_uid)
+    except (TypeError, ValueError):
+        return await call_next(request)
+
+    # Inject a synthetic token for this user_id. The token is deterministic
+    # (proxy-<uid>) so repeated requests reuse the same entry.
+    synthetic_token = f"proxy-{uid}"
+    try:
+        from app import AUTH_TOKENS
+        AUTH_TOKENS[synthetic_token] = uid
+    except Exception:
+        pass
+
+    # Rewrite the Authorization header so downstream auth sees a valid Bearer.
+    # Starlette Request headers are immutable, so we can't modify in-place.
+    # Instead, the get_user_id_from_token reads from the Header param which
+    # FastAPI injects from the original request. We need to modify at the ASGI
+    # scope level.
+    scope = request.scope
+    raw_headers = scope.get("headers", [])
+    new_headers = [
+        (k, v) for k, v in raw_headers
+        if k.lower() != b"authorization"
+    ]
+    new_headers.append((b"authorization", f"Bearer {synthetic_token}".encode()))
+    scope["headers"] = new_headers
+
+    return await call_next(request)
+
+
+__all__ = ["project_proxy_middleware", "proxy_auth_middleware"]
 
 # Startup log — confirms the module loaded (visible in pm2 logs on first request
 # cycle; also emitted at import time so we know registration happened).
