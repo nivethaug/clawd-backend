@@ -43,6 +43,12 @@ _PROJECT_PATH_RE = re.compile(
     r"^/(?:projects|apps|plans)/(\d+)(?:/|$)"
 )
 
+# Session-key-based routes (chat + sessions). These resolve project_id via a
+# sessions table lookup, not from the path. They MUST be proxied too, because
+# the ACP handler reads project files (frontend/src) — same locality problem.
+_SESSION_PATH_RE = re.compile(r"^/sessions/(\d+)(?:/|$)")
+_CHAT_ROUTES = {"/chat", "/chat/stream", "/chat/cancel", "/chat/status", "/chat/chunks", "/sessions/details"}
+
 # Hop-by-hop headers that must not be forwarded (HTTP spec).
 _HOP_BY_HOP = {
     "connection",
@@ -91,6 +97,68 @@ def _parse_project_id(path: str) -> Optional[int]:
         return int(m.group(1))
     except (TypeError, ValueError):
         return None
+
+
+async def _resolve_project_id_from_request(request: Request) -> Optional[int]:
+    """Resolve project_id for ANY proxiable route (path-based OR session-based).
+
+    - /projects/{id}, /apps/{id}, /plans/{id}  → id from path
+    - /sessions/{session_id}...                → project_id from sessions table
+    - /chat/*, /sessions/details               → project_id from session_key
+      (session_key comes from query param or JSON body)
+    """
+    path = request.url.path
+
+    # 1. Path-based project id (fast path, no DB).
+    pid = _parse_project_id(path)
+    if pid is not None:
+        return pid
+
+    # 2. /sessions/{session_id}... → resolve project_id from session_id.
+    m = _SESSION_PATH_RE.match(path)
+    if m:
+        try:
+            session_id = int(m.group(1))
+        except (TypeError, ValueError):
+            return None
+        return _project_id_for_session("id", session_id)
+
+    # 3. /chat/* and /sessions/details → session_key from query or body.
+    if path in _CHAT_ROUTES:
+        session_key = request.query_params.get("session_key")
+        if not session_key:
+            # POST bodies carry session_key as JSON. Read+cache the body so the
+            # downstream handler can still read it (FastAPI caches request.body).
+            try:
+                body = await request.body()
+                if body:
+                    import json
+                    data = json.loads(body)
+                    if isinstance(data, dict):
+                        session_key = data.get("session_key")
+            except Exception:
+                pass
+        if session_key:
+            return _project_id_for_session("session_key", session_key)
+
+    return None
+
+
+def _project_id_for_session(key_field: str, key_value) -> Optional[int]:
+    """Look up project_id from the sessions table by session_key or id."""
+    from database_postgres import get_db
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT project_id FROM sessions WHERE {key_field} = %s LIMIT 1",
+                (key_value,),
+            ).fetchone()
+    except Exception as exc:
+        logger.warning("project_proxy session lookup failed (%s=%s): %s", key_field, key_value, exc)
+        return None
+    if not row:
+        return None
+    return int(row.get("project_id") if isinstance(row, dict) else row[0])
 
 
 def _project_lives_on_worker(project_id: int) -> Tuple[bool, Optional[str]]:
@@ -149,16 +217,25 @@ def _forwardable_headers(request: Request) -> dict:
 
 
 async def project_proxy_middleware(request: Request, call_next):
-    """FastAPI/Starlette HTTP middleware: proxy project-scoped requests to the worker
-    when the project's files are not present locally.
+    """FastAPI/Starlette HTTP middleware: proxy project/session-scoped requests
+    to the worker when the project's files are not present locally.
+
+    Covers BOTH:
+    - Path-based routes (/projects/{id}, /apps/{id}, /plans/{id}) — id from path
+    - Session-based routes (/chat/*, /sessions/{id}/*, /sessions/details) —
+      project_id resolved from session_key/session_id via DB lookup
+
+    This is critical: the ACP chat handler reads frontend/src from disk, so a
+    chat request for a worker-hosted project MUST be proxied to the worker,
+    not handled on main (which has no files).
     """
     worker_url = _get_worker_url()
     # No worker configured → behave exactly as before (backward compatible).
     if not worker_url:
         return await call_next(request)
 
-    # Only consider project-scoped routes.
-    project_id = _parse_project_id(request.url.path)
+    # Resolve project_id from ANY proxiable route (path or session based).
+    project_id = await _resolve_project_id_from_request(request)
     if project_id is None:
         return await call_next(request)
 
