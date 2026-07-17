@@ -234,13 +234,35 @@ async def project_proxy_middleware(request: Request, call_next):
     if not worker_url:
         return await call_next(request)
 
+    # DEBUG: trace every decision for proxiable routes
+    _path = request.url.path
+    _is_chat = _path in _CHAT_ROUTES or _path.startswith("/chat") or _path.startswith("/sessions")
+    if _is_chat:
+        logger.warning(
+            "project_proxy DEBUG: %s %s (chat/sessions route) query=%s body_len=?",
+            request.method, _path, dict(request.query_params),
+        )
+
     # Resolve project_id from ANY proxiable route (path or session based).
     project_id = await _resolve_project_id_from_request(request)
     if project_id is None:
+        if _is_chat:
+            logger.warning(
+                "project_proxy DEBUG: %s -> project_id=None (pass-through, no session found)",
+                _path,
+            )
         return await call_next(request)
+
+    if _is_chat:
+        logger.warning("project_proxy DEBUG: %s -> resolved project_id=%s", _path, project_id)
 
     # Decide where this project lives.
     is_on_worker, project_path = _project_lives_on_worker(project_id)
+    if _is_chat:
+        logger.warning(
+            "project_proxy DEBUG: %s -> project_id=%s is_on_worker=%s path=%s",
+            _path, project_id, is_on_worker, project_path,
+        )
     if not is_on_worker:
         return await call_next(request)
 
