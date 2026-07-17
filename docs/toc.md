@@ -25,6 +25,8 @@
 | [recent_activity.md](./recent_activity.md) | Activity feed APIs |
 | [dashboard.md](./dashboard.md) | Home dashboard API |
 | [sentry_monitoring.md](./sentry_monitoring.md) | Optional Sentry error monitoring for backend and workers |
+| [worker_vps_migration.md](./worker_vps_migration.md) | Plan for moving Claude Code/project workers to a separate VPS |
+| [worker_vps_setup.md](./worker_vps_setup.md) | Step-by-step worker VPS provisioning guide (with gotchas) |
 | [DOMAIN_MIGRATION.md](./DOMAIN_MIGRATION.md) | Domain migration notes |
 | [TOKEN_USAGE_TRACKING.md](./TOKEN_USAGE_TRACKING.md) | Token and usage tracking notes |
 | [ADMIN_USER_MANAGEMENT.md](./ADMIN_USER_MANAGEMENT.md) | Admin user controls |
