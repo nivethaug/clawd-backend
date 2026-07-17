@@ -488,6 +488,23 @@ def _run_best_effort_command(args: List[str], path: str) -> None:
         logger.debug("[PROJECT-RUN] best-effort command failed %s: %s", args, exc)
 
 
+def _fix_project_ownership(project_path: str) -> None:
+    """Ensure the dreampilot user owns the scaffolded project tree.
+
+    fast_wrapper rsyncs the template into project_path as root; the files arrive
+    owned by root:root. Claude Code runs as the dreampilot user and cannot write
+    to root-owned files, so ownership MUST be transferred to dreampilot AFTER
+    the scaffold copy completes and BEFORE openclaw invokes claude.
+    """
+    # Remove any immutable flags first (would block chown/chmod).
+    _run_best_effort_command(["chattr", "-R", "-i"], project_path)
+    # Transfer ownership to the user claude runs as.
+    _run_best_effort_command(["chown", "-R", "dreampilot:dreampilot"], project_path)
+    # Ensure the tree is writable + traversable by the owner.
+    _run_best_effort_command(["chmod", "-R", "u+rwX"], project_path)
+    logger.info("[PROJECT-RUN] ownership transferred to dreampilot for %s", project_path)
+
+
 def _create_project_folder(run_id: int, project_id: int, name: str, type_id: int) -> str:
     append_chunk(run_id, "log", "Creating project folder and Git repository")
     project_manager = ProjectFileManager()
@@ -590,6 +607,11 @@ def _run_website_pipeline(
     )
     if fast_code != 0:
         raise RuntimeError(f"fast_wrapper.py failed with exit code {fast_code}")
+
+    # fast_wrapper has just rsync'd the template into project_path (as root).
+    # Claude Code runs as the dreampilot user, so transfer ownership now —
+    # before openclaw invokes claude, which needs write access to every file.
+    _fix_project_ownership(project_path)
 
     if initial_env_vars:
         env_path = str(Path(project_path) / "backend" / ".env")
