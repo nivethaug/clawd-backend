@@ -253,12 +253,30 @@ class ACPChatHandler:
         try:
             from database_adapter import get_db
             with get_db() as conn:
-                # Query domain column from projects table
-                conn.execute("""
-                    SELECT domain
-                    FROM projects
-                    WHERE name = %s
-                """, (self.project_name,))
+                # Query domain by project id (deterministic). Looking up by
+                # `name` is non-deterministic because the projects table
+                # allows duplicate names (e.g. clones), and the UNIQUE
+                # constraint is on `domain`, not `name`. A name lookup can
+                # silently return another project's domain — the root cause
+                # of the dashboard incident where the chat handler tested
+                # against the wrong (stale) live domain for ~1.5M tokens.
+                # Fall back to name only if project_id is unavailable.
+                if self.project_id:
+                    conn.execute("""
+                        SELECT domain
+                        FROM projects
+                        WHERE id = %s
+                    """, (self.project_id,))
+                else:
+                    logger.warning(
+                        "[ACP-CHAT] No project_id; falling back to non-unique "
+                        "name lookup for domain"
+                    )
+                    conn.execute("""
+                        SELECT domain
+                        FROM projects
+                        WHERE name = %s
+                    """, (self.project_name,))
                 row = conn.fetchone()
 
             if row and row['domain']:
