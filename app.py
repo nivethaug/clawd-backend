@@ -1292,6 +1292,35 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         )
 
     if os.getenv("PROJECT_CREATION_DURABLE_RUNS", "true").lower() not in {"0", "false", "no"}:
+        # ── Credit check BEFORE enqueuing ──────────────────────────────────
+        # Block early so the user gets an immediate 402 (not a delayed worker failure).
+        # This prevents creating a project record + queue entry for users without credits.
+        from services.billing_service import can_afford
+        from services.plan_cache import get_operation, get_operation_for_type
+
+        _fb_types = {1: "WEBSITE", 2: "TELEGRAM_BOT", 3: "DISCORD_BOT", 5: "SCHEDULER"}
+        _op_code = _fb_types.get(type_id, "WEBSITE")
+        _op = get_operation_for_type(type_id) if type_id else None
+        if _op:
+            _op_code = _op["code"]
+        _op = get_operation(_op_code)
+        _cost = int(_op.get("credit_cost", 1)) if _op else 1
+
+        with get_db() as conn:
+            _credit_check = can_afford(conn, user_id, _op_code, _cost)
+        if not _credit_check.get("can_afford"):
+            logger.info("[PROJECT] blocking creation for user=%s: insufficient credits (available=%s, cost=%s)",
+                        user_id, _credit_check.get("total_available", 0), _cost)
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "error": "insufficient_credits",
+                    "message": "You don't have enough AI credits to create this project.",
+                    "cost": _cost,
+                    "available": _credit_check.get("total_available", 0),
+                },
+            )
+
         try:
             from services.project_creation_runs import enqueue_project_creation_run
 
