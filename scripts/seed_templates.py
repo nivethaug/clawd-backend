@@ -238,7 +238,7 @@ def _ok(resp: Optional[requests.Response]) -> bool:
 # ──────────────────────────────────────────────────────────────────────
 
 TEMPLATES: List[Dict[str, Any]] = [
-    # ── Website (6) ──────────────────────────────────────────────
+    # ── Website (10) ─────────────────────────────────────────────
     {
         "name": "SaaS Landing Page",
         "type_id": 1,
@@ -281,107 +281,37 @@ TEMPLATES: List[Dict[str, Any]] = [
         "description": "A personal blog with a featured post hero, post grid with categories, individual post page with reading time, and an about sidebar. Warm, readable typography with a focus on content. Magazine-style layout.",
         "featured": False,
     },
-    # ── Telegram (4) ─────────────────────────────────────────────
     {
-        "name": "AI Assistant Bot",
-        "type_id": 2,
-        "category": "Telegram",
-        "description": "A Telegram bot that acts as an AI assistant. It responds to user questions with helpful answers, can set reminders, and provides daily quotes. Include /start, /help, /ask, and /reminder commands.",
-        "featured": True,
-    },
-    {
-        "name": "Community Bot",
-        "type_id": 2,
-        "category": "Telegram",
-        "description": "A Telegram community management bot with welcome messages for new members, moderation commands (/ban, /mute, /warn), poll creation, and rules display. Include /start, /rules, /poll commands.",
+        "name": "Startup Coming Soon",
+        "type_id": 1,
+        "category": "Website",
+        "description": "A captivating 'coming soon' landing page for a tech startup. Include an animated hero with countdown timer, email capture form with notification, social media links, and a minimal feature teaser. Gradient background with glassmorphism card. Dark theme with vibrant accent.",
         "featured": False,
     },
     {
-        "name": "Alert Bot",
-        "type_id": 2,
-        "category": "Telegram",
-        "description": "A Telegram bot that sends alerts and notifications. Monitor a URL for changes, send price alerts for cryptocurrencies, and schedule recurring reminders. Include /alert, /price, /subscribe commands.",
+        "name": "Event Landing",
+        "type_id": 1,
+        "category": "Website",
+        "description": "An event landing page for a tech conference. Include hero with event date + location, speaker grid with photos and bios, schedule timeline, sponsor logos, and registration form with ticket tiers. Bold, energetic design with a focus on urgency.",
         "featured": False,
     },
     {
-        "name": "Support Bot",
-        "type_id": 2,
-        "category": "Telegram",
-        "description": "A Telegram customer support bot with a ticket system, FAQ responses, and escalation to human agents. Include /ticket, /faq, /status commands with inline keyboard buttons.",
-        "featured": False,
-    },
-    # ── Discord (5) ──────────────────────────────────────────────
-    {
-        "name": "Moderation Bot",
-        "type_id": 3,
-        "category": "Discord",
-        "description": "A Discord moderation bot with slash commands for ban, kick, mute, warn, and purge. Include logging channel, auto-role on join, and a case tracking system. Slash commands: /ban, /kick, /warn, /purge.",
-        "featured": True,
-    },
-    {
-        "name": "Ticket System",
-        "type_id": 3,
-        "category": "Discord",
-        "description": "A Discord ticket bot that allows users to create support tickets via a button panel. Tickets create private channels, assign staff, and close with a transcript. Include /ticket panel setup and /close command.",
-        "featured": True,
-    },
-    {
-        "name": "AI Knowledge Base",
-        "type_id": 3,
-        "category": "Discord",
-        "description": "A Discord bot that answers questions from a knowledge base using AI. It searches documentation, provides code examples, and learns from user feedback. Slash command: /ask with autocomplete.",
+        "name": "Podcast Website",
+        "type_id": 1,
+        "category": "Website",
+        "description": "A podcast website with a featured latest episode player, episode list with play buttons, host bios, subscribe links (Apple, Spotify, Google), and a contact form. Warm, audio-focused design with waveform visuals.",
         "featured": False,
     },
     {
-        "name": "Community Engagement",
-        "type_id": 3,
-        "category": "Discord",
-        "description": "A Discord community bot with leveling system, XP tracking, reaction roles, and giveaway management. Include /rank, /leaderboard, /giveaway, /reaction-role commands.",
+        "name": "Non-Profit Website",
+        "type_id": 1,
+        "category": "Website",
+        "description": "A non-profit organization website with a mission hero, impact statistics counters, programs section with images, donation form with progress bar, volunteer signup, and stories section. Warm, hopeful design with a focus on community.",
         "featured": False,
     },
-    {
-        "name": "Server Logger",
-        "type_id": 3,
-        "category": "Discord",
-        "description": "A Discord logging bot that tracks member joins/leaves, message edits/deletes, role changes, and channel updates. Sends formatted embed logs to a designated channel. Slash command: /log-config.",
-        "featured": False,
-    },
-    # ── Scheduler (5) ────────────────────────────────────────────
-    {
-        "name": "Daily Report",
-        "type_id": 5,
-        "category": "Scheduler",
-        "description": "A scheduler that generates a daily summary report from multiple data sources (mock metrics), formats it as an HTML email, and sends it at 9 AM every day. Include metrics dashboard, trend arrows, and key highlights.",
-        "featured": True,
-    },
-    {
-        "name": "Email Scheduler",
-        "type_id": 5,
-        "category": "Scheduler",
-        "description": "A scheduler that sends automated email sequences. Users define a sequence of emails with delays (e.g., welcome email, day 3 tutorial, day 7 tips). Track open rates and send-time optimization.",
-        "featured": False,
-    },
-    {
-        "name": "Price Monitor",
-        "type_id": 5,
-        "category": "Scheduler",
-        "description": "A scheduler that monitors cryptocurrency prices every 5 minutes, sends an alert when a price crosses a threshold, and maintains a price history chart. Include configurable alerts and a dashboard.",
-        "featured": False,
-    },
-    {
-        "name": "Webhook Automation",
-        "type_id": 5,
-        "category": "Scheduler",
-        "description": "A scheduler that listens for webhooks, transforms the payload, and forwards to multiple destinations (Slack, email, Discord). Include retry logic, rate limiting, and a transformation editor.",
-        "featured": False,
-    },
-    {
-        "name": "Social Media Scheduler",
-        "type_id": 5,
-        "category": "Scheduler",
-        "description": "A scheduler that queues social media posts across platforms, schedules them at optimal times, and tracks engagement. Include a content calendar view and post preview.",
-        "featured": False,
-    },
+    # ── Telegram, Discord, Scheduler templates — add tomorrow ──
+    # The script will skip these types if they're not in the list.
+    # To add them, append entries with type_id 2 (Telegram), 3 (Discord), 5 (Scheduler).
 ]
 
 # ──────────────────────────────────────────────────────────────────────
@@ -392,17 +322,12 @@ GALLERY: List[Dict[str, Any]] = [
     {"name": "CRM Dashboard", "type_id": 1, "description": "A modern CRM dashboard with contact management, deal pipeline (kanban), activity timeline, and sales metrics. Drag-and-drop deals between stages. Premium dark UI with data tables and charts."},
     {"name": "Restaurant Website", "type_id": 1, "description": "An elegant restaurant website with a full-screen hero image, menu cards with prices, reservation form, photo gallery, and location map. Warm, appetizing design with elegant typography."},
     {"name": "Gym Fitness", "type_id": 1, "description": "A high-energy gym website with bold hero section, class schedule table, trainer cards, membership pricing tiers, and a BMI calculator widget. Dark theme with neon accents, motivational imagery."},
-    {"name": "School Portal", "type_id": 1, "description": "A school management portal with course catalog, student dashboard, grade tracking, assignment submission, and announcements feed. Clean, friendly design with a focus on usability."},
-    {"name": "HR Dashboard", "type_id": 1, "description": "An HR management dashboard with employee directory, leave request tracking, performance review cycle, and org chart. Professional design with charts and data tables."},
-    {"name": "Crypto Dashboard", "type_id": 1, "description": "A real-time crypto tracking dashboard with price tickers, portfolio allocation pie chart, recent transactions, and price alerts setup. Dark theme with green/red price indicators."},
     {"name": "Analytics Dashboard", "type_id": 1, "description": "A web analytics dashboard with traffic sources, visitor map, conversion funnel, top pages, and real-time active users. Data-dense but clean, inspired by Plausible Analytics."},
-    {"name": "Agency Website", "type_id": 1, "description": "A creative agency website with portfolio grid, services with hover effects, team bios, client logos carousel, and a contact form with project type selector. Bold, modern design with smooth animations."},
     {"name": "AI Chat Interface", "type_id": 1, "description": "A sleek AI chat interface with conversation history sidebar, streaming message display, model selector, and code block syntax highlighting. Dark theme inspired by ChatGPT."},
     {"name": "Booking System", "type_id": 1, "description": "An appointment booking system with calendar view, time slot selection, service menu, booking confirmation, and reminder settings. Clean, trustworthy design with clear CTAs."},
-    {"name": "Inventory Manager", "type_id": 1, "description": "An inventory management system with product table, stock level indicators, low-stock alerts, category filters, and barcode placeholder. Data-dense table with inline editing."},
     {"name": "Invoice System", "type_id": 1, "description": "An invoicing system with invoice list, create-invoice form with line items, PDF preview, payment status tracking, and client management. Professional, clean design with print-ready invoices."},
-    {"name": "Helpdesk", "type_id": 1, "description": "A customer helpdesk with ticket inbox, priority queues, agent assignment, canned responses, and SLA timers. Split-panel design with ticket list + detail view."},
-    {"name": "ERP System", "type_id": 1, "description": "A mini ERP dashboard with modules for sales, inventory, finance, and HR. Tabbed interface with summary cards, data tables, and export buttons. Professional enterprise design."},
+    {"name": "Crypto Dashboard", "type_id": 1, "description": "A real-time crypto tracking dashboard with price tickers, portfolio allocation pie chart, recent transactions, and price alerts setup. Dark theme with green/red price indicators."},
+    {"name": "Agency Website", "type_id": 1, "description": "A creative agency website with portfolio grid, services with hover effects, team bios, client logos carousel, and a contact form with project type selector. Bold, modern design with smooth animations."},
     {"name": "Real Estate Listings", "type_id": 1, "description": "A real estate listing site with property search filters, map view, property cards with photos, detail page with gallery, and agent contact form. Clean, aspirational design."},
 ]
 
