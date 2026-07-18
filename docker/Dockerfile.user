@@ -30,6 +30,7 @@ ARG NODE_MAJOR=22
 # ─────────────────────────────────────────────────────────────────────
 # Base packages: required for Claude CLI, npm, pip, git, build toolchain.
 # Kept minimal — every extra package is attack surface.
+# gosu is used by entrypoint.sh to drop privileges (lighter than sudo).
 # ─────────────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -37,12 +38,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gnupg \
         git \
         bash \
+        gosu \
         build-essential \
         libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # python:3.12-slim already provides python3, python, pip — no build-from-source needed.
-# Verify the toolchain is intact before proceeding.
 RUN python3 --version && pip3 --version
 
 # ─────────────────────────────────────────────────────────────────────
@@ -71,45 +72,48 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
 RUN groupadd --system --gid 1001 dreampilot \
     && useradd --system --uid 1001 --gid 1001 --create-home \
               --shell /bin/bash dreampilot \
-    && mkdir -p /workspace /cache \
+    && mkdir -p /workspace /cache /opt/claude-config \
     && chown -R dreampilot:dreampilot /home/dreampilot /workspace
 
 # ─────────────────────────────────────────────────────────────────────
-# Claude config. On the host this lives at /etc/claude/settings.json +
-# ~/.claude.json (docs/worker_vps_setup.md §4.2). Inside the container
-# we bake a minimal settings.json that points Claude at the host wrapper-v2
-# proxy. The proxy is reachable at host.docker.internal:7861 because
-# dreamagent-net is a bridge with a gateway.
+# Claude config templates. Baked into /opt/claude-config/ (read-only).
+# The entrypoint.sh copies them into the writable /home/dreampilot tmpfs
+# on every container start. This keeps the rootfs read-only (security)
+# while giving Claude a writable home dir (functional requirement).
 #
-# We also bake ~/.claude.json with hasCompletedOnboarding=true (Gotcha #8).
-# Without this Claude 2.1.83 refuses to run ("Not logged in") even when
-# ANTHROPIC_AUTH_TOKEN is set via env. This is onboarding STATE, not a
-# credential — the actual auth token is injected at runtime via -e flags.
+# Templates include:
+#   - settings.json: ANTHROPIC_BASE_URL → host.docker.internal:7861 (proxy)
+#   - .claude.json: hasCompletedOnboarding=true (Gotcha #8 — Claude 2.1.83
+#     refuses to run without this onboarding state)
 #
-# NOTE: secrets (ANTHROPIC_AUTH_TOKEN, ZAI_API_KEY) are NOT baked in here.
+# NOTE: secrets (ANTHROPIC_AUTH_TOKEN, Z_AI_API_KEY) are NOT baked in here.
 # They are injected at `docker run` time via -e flags from the worker's
 # .env.postgres, so a leaked image contains no credentials.
 # ─────────────────────────────────────────────────────────────────────
-COPY docker/claude.settings.json /home/dreampilot/.claude/settings.json
-COPY docker/claude.onboarding.json /home/dreampilot/.claude.json
-RUN chmod 600 /home/dreampilot/.claude/settings.json \
-    && chmod 600 /home/dreampilot/.claude.json \
-    && chown dreampilot:dreampilot /home/dreampilot/.claude/settings.json /home/dreampilot/.claude.json
+COPY docker/claude.settings.json /opt/claude-config/settings.json
+COPY docker/claude.onboarding.json /opt/claude-config/.claude.json
 
 # ─────────────────────────────────────────────────────────────────────
-# Final setup. USER drops privileges — every subsequent CMD/ENTRYPOINT
-# runs as dreampilot. The default command is a sleep so `docker run -d`
-# keeps the container alive between docker exec invocations.
+# Entrypoint: copies config templates to writable home, drops privileges,
+# then runs the main command as dreampilot.
+# ─────────────────────────────────────────────────────────────────────
+COPY docker/entrypoint.sh /opt/entrypoint.sh
+RUN chmod +x /opt/entrypoint.sh
+
+# ─────────────────────────────────────────────────────────────────────
+# Final setup.
 # ─────────────────────────────────────────────────────────────────────
 ENV PATH="/usr/local/bin:/usr/bin:/usr/local/lib/node_modules/.bin:${PATH}"
 ENV NPM_CONFIG_CACHE=/cache/npm
 ENV PIP_CACHE_DIR=/cache/pip
 
-USER dreampilot
 WORKDIR /workspace
 
 # Healthcheck — claude --version must succeed and exit 0.
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
     CMD claude --version || exit 1
 
+# Entrypoint runs as root (to chown the tmpfs), then drops to dreampilot via gosu.
+# The default CMD keeps the container alive between docker exec invocations.
+ENTRYPOINT ["/opt/entrypoint.sh"]
 CMD ["sleep", "infinity"]

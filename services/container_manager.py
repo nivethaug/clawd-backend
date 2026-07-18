@@ -225,12 +225,16 @@ class ContainerManager:
             "--security-opt=no-new-privileges",
             "--read-only",
             "--tmpfs", "/tmp:rw,size=64m,mode=1777",
+            # Writable home dir for Claude (session state, .claude.json updates).
+            # The rootfs is read-only, but Claude needs to write to ~/.claude/.
+            # Entrypoint.sh copies config templates from /opt/claude-config/ into
+            # this tmpfs on every start.
+            "--tmpfs", "/home/dreampilot:rw,size=128m,mode=0700,uid=1001,gid=1001",
             # Resource limits
             "--memory", CONTAINER_MEMORY,
             "--cpus", CONTAINER_CPUS,
             "--pids-limit", str(CONTAINER_PIDS_LIMIT),
-            # User mapping
-            "--user", f"{CONTAINER_USER_UID}:{CONTAINER_USER_GID}",
+            # Workdir (entrypoint handles the user drop via gosu)
             "--workdir", CONTAINER_MOUNT_TARGET,
             # Bind mounts
             "--mount", f"type=bind,source={self.workspace_host_path},target={CONTAINER_MOUNT_TARGET}",
