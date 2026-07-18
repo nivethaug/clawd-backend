@@ -1083,6 +1083,7 @@ async def sentry_context_middleware(request: Request, call_next):
 # Forwards project-scoped requests to the worker when the project's files are
 # not present locally. No-op when WORKER_VPS_URL is unset (backward compatible).
 from services.project_proxy import project_proxy_middleware, proxy_auth_middleware  # noqa: E402
+from services.system_metrics import collect as collect_system_metrics  # noqa: E402
 
 # Worker-side: translate X-Proxy-User-Id into valid auth (only when TRUST_PROXY_AUTH set)
 app.middleware("http")(proxy_auth_middleware)
@@ -7093,10 +7094,17 @@ async def save_file_content(
 # ============================================================================
 
 import bcrypt
+import hmac
 import secrets
 
 # In-memory token store (token -> user_id)
 AUTH_TOKENS: Dict[str, int] = {}
+
+# Long-lived token for service-to-service admin calls (e.g. monitoring dashboard).
+# Unlike AUTH_TOKENS entries, this survives backend restarts and never expires.
+# Set in .env.postgres; maps to the configured admin user id below.
+ADMIN_METRICS_TOKEN = os.getenv("ADMIN_METRICS_TOKEN", "").strip()
+ADMIN_METRICS_USER_ID = int(os.getenv("ADMIN_METRICS_USER_ID", "0") or "0")
 
 
 class LoginRequest(BaseModel):
@@ -7159,6 +7167,12 @@ def get_user_id_from_token(authorization: Optional[str] = None) -> int:
     """
     Extract and validate user_id from Authorization header.
     Returns user_id if valid token, raises HTTPException if not.
+
+    Accepts two token types:
+      1. Long-lived service token (ADMIN_METRICS_TOKEN) — constant-time compared,
+         maps to ADMIN_METRICS_USER_ID. Survives restarts, used by the monitoring
+         dashboard and other service-to-service admin calls.
+      2. Session token from AUTH_TOKENS (created at login, in-memory).
     """
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing authorization header")
@@ -7168,6 +7182,13 @@ def get_user_id_from_token(authorization: Optional[str] = None) -> int:
         raise HTTPException(status_code=401, detail="Invalid authorization format")
 
     token = parts[1]
+
+    # 1) Long-lived service token (constant-time)
+    if ADMIN_METRICS_TOKEN and ADMIN_METRICS_USER_ID and \
+            hmac.compare_digest(token, ADMIN_METRICS_TOKEN):
+        return ADMIN_METRICS_USER_ID
+
+    # 2) Session token
     user_id = AUTH_TOKENS.get(token)
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
@@ -10704,6 +10725,19 @@ async def admin_stats(authorization: Optional[str] = Header(None)):
             for r in role_counts
         },
     }
+
+
+@app.get("/admin/system-metrics")
+async def admin_system_metrics(authorization: Optional[str] = Header(None)):
+    """Live host metrics for the VPS monitoring dashboard. Admin only.
+
+    On-demand only — no daemon, no polling. Each block is isolated so a
+    failing collector (e.g. Docker not installed) returns `{"error": ...}`
+    without breaking the rest of the response.
+    """
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+    return collect_system_metrics()
 
 
 @app.get("/admin/tiers")
