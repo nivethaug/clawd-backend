@@ -433,23 +433,39 @@ def _headers() -> dict:
 
 
 def create_project(name: str, description: str, type_id: int) -> Optional[dict]:
-    """Create a project via the API. Returns project dict or None."""
-    resp = _request(
-        "POST",
-        f"{API_URL}/projects",
-        headers=_headers(),
-        json_body={"name": name, "description": description, "type_id": type_id},
-        timeout=30,
-    )
-    if resp is None:
-        return None
-    if resp.status_code == 402:
-        log.error("  ❌ BLOCKED: insufficient credits. Buy credits and retry.")
-        return None
-    if resp.status_code not in (200, 201):
-        log.error(f"  ❌ Error {resp.status_code}: {resp.text[:200]}")
-        return None
-    return resp.json()
+    """Create a project via the API. Returns project dict or None.
+
+    Handles 409 (another creation in progress) by waiting and retrying up to
+    PROJECT_TIMEOUT seconds — the API enforces one creation at a time per user.
+    """
+    start = time.time()
+    while time.time() - start < PROJECT_TIMEOUT:
+        resp = _request(
+            "POST",
+            f"{API_URL}/projects",
+            headers=_headers(),
+            json_body={"name": name, "description": description, "type_id": type_id},
+            timeout=30,
+        )
+        if resp is None:
+            return None
+        if resp.status_code == 402:
+            log.error("  ❌ BLOCKED: insufficient credits. Buy credits and retry.")
+            return None
+        if resp.status_code == 409:
+            # Another project is still creating — wait and retry
+            elapsed = int(time.time() - start)
+            if elapsed % 60 == 0 and elapsed > 0:
+                log.info(f"  ⏳ Waiting for previous creation to finish ({elapsed}s)...")
+            time.sleep(POLL_INTERVAL)
+            continue
+        if resp.status_code not in (200, 201):
+            log.error(f"  ❌ Error {resp.status_code}: {resp.text[:200]}")
+            return None
+        return resp.json()
+
+    log.error(f"  ⏰ Timed out waiting for previous creation to finish")
+    return None
 
 
 def wait_for_completion(project_id: int) -> str:
