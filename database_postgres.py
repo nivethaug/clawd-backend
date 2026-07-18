@@ -1293,6 +1293,29 @@ def init_schema():
             logger.info("✓ Added billing_config table")
 
             # ----------------------------------------------------------------
+            # CONTAINER ISOLATION (Phase 3)
+            # ----------------------------------------------------------------
+            # One row per user with a workspace container. Tracks lifecycle state
+            # so the reaper (scripts/container_reaper.py) knows what to stop, and
+            # the monitoring dashboard can report per-container status.
+            cur.execute("""CREATE TABLE IF NOT EXISTS user_containers (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                container_name TEXT NOT NULL,
+                workspace_path TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'created',
+                created_at TIMESTAMP DEFAULT NOW(),
+                last_used_at TIMESTAMP DEFAULT NOW()
+            )""")
+            # Index the reaper scans on — status + last_used_at.
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS user_containers_status_last_used_idx
+                ON user_containers (status, last_used_at)
+                WHERE status = 'running'
+            """)
+            conn.commit()
+            logger.info("✓ Added user_containers table (Phase 3)")
+
+            # ----------------------------------------------------------------
             # BILLING: migrations on existing tables
             # ----------------------------------------------------------------
 

@@ -1,0 +1,133 @@
+# DreamAgent per-user workspace container image.
+#
+# One image, shared across all per-user containers (dreamagent-user-<id>).
+# Built once on the worker VPS via scripts/build_user_image.sh.
+#
+# Design constraints (see docs/container_isolation.md §5 Container contract):
+#   - Runs as uid 1001 (dreampilot), NO sudo, NO root capabilities.
+#   - Contains ONLY what Claude + npm + pip need to edit/build user projects.
+#   - Does NOT contain: docker CLI, PM2, nginx, the DreamAgent backend source.
+#   - /workspace is the bind-mount target (per-user project dir).
+#   - /cache is the read-only shared npm/pip cache mount.
+#
+# Runtime flags applied at `docker run` time (NOT in this Dockerfile):
+#   --cap-drop=ALL --security-opt=no-new-privileges
+#   --read-only --tmpfs /tmp
+#   --memory=2g --cpus=2 --pids-limit=256
+#   --network=dreamagent-net
+#   -v /workspaces/user_<id>:/workspace:rw
+#   -v /srv/cache:/cache:ro
+#
+# Build args (override via scripts/build_user_image.sh):
+#   CLAUDE_CODE_VERSION  — pinned @anthropic-ai/claude-code version (default 2.1.83)
+#   NODE_MAJOR           — Node major version (default 22)
+#   PYTHON_VERSION       — Python version (default 3.12)
+
+FROM debian:bookworm-slim
+
+ARG CLAUDE_CODE_VERSION=2.1.83
+ARG NODE_MAJOR=22
+ARG PYTHON_VERSION=3.12
+
+# ─────────────────────────────────────────────────────────────────────
+# Base packages: required for Claude CLI, npm, pip, git, build toolchain.
+# Kept minimal — every extra package is attack surface.
+# ─────────────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        git \
+        bash \
+        build-essential \
+        libpq-dev \
+        libssl-dev \
+        zlib1g-dev \
+        libffi-dev \
+        libbz2-dev \
+        libreadline-dev \
+        libsqlite3-dev \
+        libncursesw5-dev \
+        xz-utils \
+        tk-dev \
+        llvm \
+    && rm -rf /var/lib/apt/lists/*
+
+# ─────────────────────────────────────────────────────────────────────
+# Python (built from source to match the worker's 3.12 exactly — same
+# approach as docs/worker_vps_setup.md §1.2; avoids Debian's 3.11 default
+# which would break wheels compiled against 3.12 on the host).
+# ─────────────────────────────────────────────────────────────────────
+ENV PYTHON_VERSION=${PYTHON_VERSION}
+RUN curl -fsSL https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz -o /tmp/python.tgz \
+    && tar xzf /tmp/python.tgz -C /tmp \
+    && cd /tmp/Python-${PYTHON_VERSION} \
+    && ./configure --quiet \
+    && make -j"$(nproc)" --quiet \
+    && make altinstall --quiet \
+    && rm -rf /tmp/python.tgz /tmp/Python-${PYTHON_VERSION} \
+    && ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python3 \
+    && ln -sf /usr/local/bin/python3 /usr/local/bin/python \
+    && python3 -m ensurepip --upgrade
+
+# ─────────────────────────────────────────────────────────────────────
+# Node.js (via NodeSource — matches docs/worker_vps_setup.md §1.3).
+# Required for Claude CLI (it's a Node package) and for user npm installs.
+# ─────────────────────────────────────────────────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g npm@latest pnpm@10
+
+# ─────────────────────────────────────────────────────────────────────
+# Claude CLI. Pinned to the same version as the worker host
+# (docs/worker_vps_setup.md §4.1). Phase 4 will invoke this inside the
+# container via `docker exec ... claude -p ...`.
+# ─────────────────────────────────────────────────────────────────────
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+    && claude --version
+
+# ─────────────────────────────────────────────────────────────────────
+# Non-root user. Matches worker's dreampilot uid/gid (1001) so bind-mounted
+# files from /workspaces/user_<id> are owned by the same uid inside and
+# outside the container. NO sudo, NO shadowutils — privilege escalation
+# must be impossible from inside.
+# ─────────────────────────────────────────────────────────────────────
+RUN groupadd --system --gid 1001 dreampilot \
+    && useradd --system --uid 1001 --gid 1001 --create-home \
+              --shell /bin/bash dreampilot \
+    && mkdir -p /workspace /cache \
+    && chown -R dreampilot:dreampilot /home/dreampilot /workspace
+
+# ─────────────────────────────────────────────────────────────────────
+# Claude config. On the host this lives at /etc/claude/settings.json +
+# ~/.claude.json (docs/worker_vps_setup.md §4.2). Inside the container
+# we bake a minimal settings.json that points Claude at the host wrapper-v2
+# proxy. The proxy is reachable at host.docker.internal:7861 because
+# dreamagent-net is a bridge with a gateway.
+#
+# NOTE: secrets (ANTHROPIC_AUTH_TOKEN, ZAI_API_KEY) are NOT baked in here.
+# They are injected at `docker run` time via -e flags from the worker's
+# .env.postgres, so a leaked image contains no credentials.
+# ─────────────────────────────────────────────────────────────────────
+COPY docker/claude.settings.json /home/dreampilot/.claude/settings.json
+RUN chmod 600 /home/dreampilot/.claude/settings.json \
+    && chown dreampilot:dreampilot /home/dreampilot/.claude/settings.json
+
+# ─────────────────────────────────────────────────────────────────────
+# Final setup. USER drops privileges — every subsequent CMD/ENTRYPOINT
+# runs as dreampilot. The default command is a sleep so `docker run -d`
+# keeps the container alive between docker exec invocations.
+# ─────────────────────────────────────────────────────────────────────
+ENV PATH="/usr/local/bin:/usr/bin:/usr/local/lib/node_modules/.bin:${PATH}"
+ENV NPM_CONFIG_CACHE=/cache/npm
+ENV PIP_CACHE_DIR=/cache/pip
+
+USER dreampilot
+WORKDIR /workspace
+
+# Healthcheck — claude --version must succeed and exit 0.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD claude --version || exit 1
+
+CMD ["sleep", "infinity"]
