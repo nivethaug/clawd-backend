@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from typing import Any, Dict, Optional, Sequence
 
 
@@ -33,6 +34,11 @@ def _clean_path(value: Optional[Any]) -> Optional[str]:
     text = str(value).strip()
     if not text:
         return None
+    # Container mode: translate host workspace paths to in-container paths
+    # so Claude sees /workspace/... instead of /workspaces/user_<id>/...
+    if os.getenv("EXECUTION_MODE", "local").lower() == "container":
+        from services.container_storage import to_container_path
+        text = to_container_path(text)
     return text
 
 
