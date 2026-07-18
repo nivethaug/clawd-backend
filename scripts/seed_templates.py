@@ -757,6 +757,7 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true", help="Preview without calling API")
     parser.add_argument("--fresh", action="store_true", help="Ignore previous progress (no resume)")
     parser.add_argument("--resume", action="store_true", default=True, help="Resume from progress (default)")
+    parser.add_argument("--parallel", type=int, default=1, help="Number of parallel workers (requires admin role)")
     args = parser.parse_args()
 
     # Default to --all if no mode specified
@@ -794,9 +795,138 @@ if __name__ == "__main__":
 
     # Run
     all_stats: List[RunStats] = []
-    if args.all or args.templates:
+
+    if args.parallel > 1:
+        # Parallel mode: interleave templates + gallery, process with N threads.
+        # Requires admin role on the API (bypasses one-creation-at-a-time guard).
+        import threading
+
+        all_items = []
+        if args.all or args.templates:
+            for t in TEMPLATES[:args.limit]:
+                all_items.append(("template", t))
+        if args.all or args.gallery:
+            for g in GALLERY[:args.limit]:
+                all_items.append(("gallery", g))
+
+        # Interleave: template, gallery, template, gallery...
+        interleaved = []
+        t_items = [i for i in all_items if i[0] == "template"]
+        g_items = [i for i in all_items if i[0] == "gallery"]
+        max_len = max(len(t_items), len(g_items))
+        for idx in range(max_len):
+            if idx < len(t_items):
+                interleaved.append(t_items[idx])
+            if idx < len(g_items):
+                interleaved.append(g_items[idx])
+
+        # Filter out completed
+        pending = [
+            (kind, item) for kind, item in interleaved
+            if not _is_completed(progress, kind + "s", item["name"])
+        ]
+
+        log.info(f"\n{'=' * 60}")
+        log.info(f"PARALLEL MODE ({args.parallel} workers, {len(pending)} pending)")
+        log.info(f"⚠️  Requires admin role on API (bypasses 1-at-a-time guard)")
+        log.info(f"{'=' * 60}")
+
+        if args.dry_run:
+            for kind, item in pending:
+                log.info(f"  [{kind}] {item['name']}")
+            sys.exit(0)
+
+        t_stats = RunStats("Templates")
+        g_stats = RunStats("Gallery")
+        t_stats.start_time = g_stats.start_time = time.time()
+        lock = threading.Lock()
+        item_idx = [0]  # mutable counter for thread-safe queue position
+
+        def worker(worker_id: int) -> None:
+            while True:
+                with lock:
+                    if item_idx[0] >= len(pending):
+                        break
+                    idx = item_idx[0]
+                    item_idx[0] += 1
+                    kind, item = pending[idx]
+
+                name = item["name"]
+                log.info(f"\n[W{worker_id}] [{idx+1}/{len(pending)}] {name}")
+
+                # Duplicate check
+                if kind == "template":
+                    existing = _check_existing_templates()
+                else:
+                    existing = _check_existing_gallery()
+                if name in existing:
+                    log.info(f"  [W{worker_id}] ⏭️ Skipped (already exists on server)")
+                    with lock:
+                        _mark_completed(progress, kind + "s", name, None, "already exists")
+                        if kind == "template":
+                            t_stats.already_exists += 1
+                        else:
+                            g_stats.already_exists += 1
+                    continue
+
+                project = create_project(name, item["description"], item["type_id"])
+                if not project:
+                    with lock:
+                        if kind == "template":
+                            t_stats.failed += 1
+                        else:
+                            g_stats.failed += 1
+                    continue
+
+                pid = project.get("id")
+                log.info(f"  [W{worker_id}] Created project {pid}, waiting...")
+                status = wait_for_completion(pid)
+
+                if status == "completed":
+                    if kind == "template":
+                        ok = mark_as_template(pid, name, item.get("category", "Website"), item.get("featured", False))
+                    else:
+                        ok = publish_to_gallery(pid, name, item["description"], False)
+                    if ok:
+                        log.info(f"  [W{worker_id}] ✅ Done: {name}")
+                        with lock:
+                            _mark_completed(progress, kind + "s", name, pid, "published")
+                            if kind == "template":
+                                t_stats.created += 1
+                            else:
+                                g_stats.created += 1
+                    else:
+                        log.error(f"  [W{worker_id}] ⚠️ Publish failed: {name}")
+                        with lock:
+                            if kind == "template":
+                                t_stats.failed += 1
+                            else:
+                                g_stats.failed += 1
+                elif status == "timeout":
+                    with lock:
+                        if kind == "template":
+                            t_stats.timeout += 1
+                        else:
+                            g_stats.timeout += 1
+                else:
+                    with lock:
+                        if kind == "template":
+                            t_stats.failed += 1
+                        else:
+                            g_stats.failed += 1
+
+        threads = [threading.Thread(target=worker, args=(i + 1,)) for i in range(args.parallel)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        t_stats.end_time = g_stats.end_time = time.time()
+        all_stats.extend([t_stats, g_stats])
+
+    elif args.all or args.templates:
         all_stats.append(run_templates(progress, args.limit, args.dry_run))
-    if args.all or args.gallery:
+    if (args.parallel <= 1 and args.all) or args.gallery:
         all_stats.append(run_gallery(progress, args.limit, args.dry_run))
 
     # Final summary

@@ -1174,15 +1174,21 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
 
     active_creation = _get_active_project_creation(user_id)
     if active_creation:
-        active_project_name = _creation_project_field(active_creation, "name", 1) or "another project"
-        active_project_status = _creation_project_field(active_creation, "status", 2) or "creating"
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Project creation is already in progress for '{active_project_name}' "
-                f"({active_project_status}). Please wait until it finishes before creating another project."
-            ),
-        )
+        # Admin users can create multiple projects in parallel (bypasses the
+        # one-at-a-time guard — useful for seeding templates/gallery).
+        with get_db() as conn:
+            user_row = conn.execute("SELECT role FROM users WHERE id = %s", (user_id,)).fetchone()
+        user_role = (user_row.get("role") if isinstance(user_row, dict) else user_row[0]) if user_row else "user"
+        if user_role != "admin":
+            active_project_name = _creation_project_field(active_creation, "name", 1) or "another project"
+            active_project_status = _creation_project_field(active_creation, "status", 2) or "creating"
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Project creation is already in progress for '{active_project_name}' "
+                    f"({active_project_status}). Please wait until it finishes before creating another project."
+                ),
+            )
 
     # Check project count limit for user's tier
     proj_limit = check_project_limit(user_id)
