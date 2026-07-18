@@ -1073,7 +1073,7 @@ class NginxConfigurator:
     WILDCARD_SSL_CERT = _WC_CERT
     WILDCARD_SSL_KEY = _WC_KEY
 
-    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = True, project_path: str = None, additional_domains: list = None) -> Tuple[str, str]:
+    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = True, project_path: str = None, additional_domains: list = None, dist_path: str = None) -> Tuple[str, str]:
         """
         Generate nginx configuration for project with wildcard SSL.
 
@@ -1082,11 +1082,14 @@ class NginxConfigurator:
             frontend_port: Frontend service port
             backend_port: Backend service port
             enable_ssl: Whether to generate SSL config (default: True, uses wildcard cert)
-            project_path: Actual project folder path (e.g., "686_test_20260313_142220"). 
+            project_path: Actual project folder path (e.g., "686_test_20260313_142220").
                           If not provided, falls back to domain name.
             additional_domains: List of custom domains (e.g. ["www.clientsite.com"])
                                 to append to server_name. Each must have its own SSL
                                 cert provisioned via certbot beforehand.
+            dist_path: Full absolute path to the frontend dist directory. If provided,
+                       used directly as the nginx root. If not provided, falls back to
+                       constructing from project_path (legacy behavior).
 
         Returns:
             Tuple of (frontend_domain, backend_domain, config)
@@ -1094,11 +1097,15 @@ class NginxConfigurator:
         try:
             frontend_domain = f"{domain}.{BASE_DOMAIN}"
             backend_domain = f"{domain}-api.{BASE_DOMAIN}"
-            
-            # Use project_path if provided, otherwise fall back to domain
-            # The actual folder is like "686_test778786_20260313_142220"
-            # but domain is like "test778786-7hbrzr"
-            website_folder = project_path if project_path else domain
+
+            # Resolve the dist path: prefer explicit dist_path (correct for both
+            # legacy /root/dreampilot/... and container /workspaces/user_X/... layouts),
+            # fall back to constructing from project_path + hardcoded prefix (legacy).
+            if dist_path:
+                frontend_root = dist_path
+            else:
+                website_folder = project_path if project_path else domain
+                frontend_root = f"/root/dreampilot/projects/website/{website_folder}/frontend/dist"
 
             # Custom domains get appended to server_name as aliases.
             # These use their own SSL certs (provisioned by certbot), which
@@ -1131,7 +1138,7 @@ server {{
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
 
-    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
+    root {frontend_root};
     index index.html;
 
     # SPA routing - serve index.html for all routes
@@ -1226,7 +1233,7 @@ server {{
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
 
-    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
+    root {frontend_root};
     index index.html;
 
     location / {{
@@ -1254,7 +1261,7 @@ server {{
     listen 80;
     server_name {cd};
 
-    root /root/dreampilot/projects/website/{website_folder}/frontend/dist;
+    root {frontend_root};
     index index.html;
 
     location / {{
@@ -1426,7 +1433,7 @@ server {{
 
     def regenerate_with_custom_domains(self, project_subdomain: str, frontend_port: int,
                                        backend_port: int, project_folder: str,
-                                       custom_domains: list) -> bool:
+                                       custom_domains: list, dist_path: str = None) -> bool:
         """
         Regenerate and install nginx config for a project, including any
         custom (verified) domains.
@@ -1437,6 +1444,7 @@ server {{
             backend_port: Backend service port
             project_folder: Actual folder name on disk
             custom_domains: List of verified custom domain names to add
+            dist_path: Full absolute path to frontend dist (container-aware)
 
         Returns:
             True if config was regenerated and nginx reloaded successfully.
@@ -1448,6 +1456,7 @@ server {{
                 backend_port,
                 project_path=project_folder,
                 additional_domains=custom_domains,
+                dist_path=dist_path,
             )
             self.install_config(project_subdomain, config)
             return self.reload_nginx()
@@ -1940,11 +1949,16 @@ class InfrastructureManager:
             project_folder_name = self.project_path.name if hasattr(self.project_path, 'name') else str(self.project_path).split('/')[-1]
             # logger.info(f"Using project folder for nginx: {project_folder_name}")  # Commented for cleaner logs
             
+            # Build the absolute dist path from project_path (works for both
+            # legacy /root/dreampilot/... and container /workspaces/user_X/... layouts)
+            frontend_dist_path = str(self.project_path) + "/frontend/dist"
+
             frontend_domain, backend_domain, config = self.nginx_configurator.generate_config(
                 self.domain,
                 self.ports["frontend"],
                 self.ports["backend"],
-                project_path=project_folder_name
+                project_path=project_folder_name,
+                dist_path=frontend_dist_path
             )
             self.domains = {
                 "frontend": frontend_domain,
