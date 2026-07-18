@@ -3193,6 +3193,87 @@ def cleanup_postgresql_database(db_name: str, db_user: str) -> Dict[str, Any]:
     return results
 
 
+def _cleanup_user_container_if_empty(project_id: int) -> Dict[str, Any]:
+    """Remove the user's Docker container + workspace if no projects remain.
+
+    Called after a project is deleted. Checks if the owning user has any
+    remaining projects. If not, removes the container (docker rm -f) and
+    the workspace directory (/workspaces/user_<id>/).
+
+    In EXECUTION_MODE=local this is a no-op (no containers exist).
+    """
+    result = {"cleaned": False, "reason": None}
+
+    # Only runs in container mode
+    if os.getenv("EXECUTION_MODE", "local").lower() != "container":
+        result["reason"] = "local mode (no containers)"
+        return result
+
+    if not project_id:
+        result["reason"] = "no project_id"
+        return result
+
+    try:
+        # Look up the user_id for this project
+        with get_db() as conn:
+            proj_row = conn.execute(
+                "SELECT user_id FROM projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+
+        # Project row may already be deleted at this point in the cleanup flow.
+        # If so, we can't determine the user — skip container cleanup.
+        if not proj_row:
+            result["reason"] = "project row already deleted (cannot determine user_id)"
+            return result
+
+        user_id = proj_row["user_id"] if isinstance(proj_row, dict) else proj_row[0]
+        if not user_id:
+            result["reason"] = "no user_id for project"
+            return result
+
+        # Check if user has any OTHER projects
+        with get_db() as conn:
+            remaining = conn.execute(
+                "SELECT COUNT(*) as cnt FROM projects WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        count = remaining["cnt"] if isinstance(remaining, dict) else remaining[0]
+
+        if count > 0:
+            result["reason"] = f"user {user_id} still has {count} project(s)"
+            return result
+
+        # User has no remaining projects — clean up container + workspace
+        from services.container_manager import ContainerManager, WORKSPACE_ROOT, _docker_available
+
+        if not _docker_available():
+            result["reason"] = "docker not available"
+            return result
+
+        cm = ContainerManager(user_id)
+        logger.info(f"[CLEANUP] removing container for user {user_id} (no projects remain)")
+
+        # Remove the container (force stop + remove)
+        cm.remove(force=True)
+
+        # Remove the workspace directory
+        import shutil
+        workspace_dir = os.path.join(WORKSPACE_ROOT, f"user_{user_id}")
+        if os.path.exists(workspace_dir):
+            shutil.rmtree(workspace_dir, ignore_errors=True)
+            logger.info(f"[CLEANUP] removed workspace dir: {workspace_dir}")
+
+        result["cleaned"] = True
+        result["reason"] = f"removed container + workspace for user {user_id}"
+        return result
+
+    except Exception as exc:
+        logger.warning(f"[CLEANUP] container cleanup failed (non-fatal): {exc}")
+        result["reason"] = f"error: {exc}"
+        return result
+
+
 def cleanup_project_directory(project_path: str) -> Dict[str, Any]:
     """
     Remove project directory safely with validation.
@@ -3616,6 +3697,16 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
     except Exception as e:
         logger.error(f"Error in directory cleanup: {e}")
         cleanup_results["steps"]["directory"] = {"error": str(e)}
+
+    # STEP 7: Container cleanup (if this was the user's last project)
+    # In EXECUTION_MODE=container, each user has a persistent Docker container.
+    # When they delete their last project, remove the container + workspace dir
+    # to free resources. If they still have other projects, keep the container.
+    try:
+        cleanup_results["steps"]["container"] = _cleanup_user_container_if_empty(project_id)
+    except Exception as e:
+        logger.error(f"Error in container cleanup: {e}")
+        cleanup_results["steps"]["container"] = {"error": str(e)}
 
     # Log final status
     logger.info(f"Infrastructure cleanup completed for {project_name}")
