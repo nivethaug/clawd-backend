@@ -388,10 +388,16 @@ def _check_existing_templates() -> set[str]:
         return set()
     try:
         data = resp.json()
-        titles = {t.get("title", "") for t in data.get("templates", [])}
+        items = data.get("templates", []) if isinstance(data, dict) else data if isinstance(data, list) else []
+        titles = set()
+        for t in items:
+            if isinstance(t, dict):
+                titles.add(t.get("title", ""))
+            elif isinstance(t, str):
+                titles.add(t)
         log.debug(f"  Found {len(titles)} existing templates")
         return titles
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, TypeError):
         return set()
 
 
@@ -404,10 +410,16 @@ def _check_existing_gallery() -> set[str]:
         return set()
     try:
         data = resp.json()
-        titles = {g.get("title", "") for g in data.get("gallery_projects", [])}
+        items = data.get("gallery_projects", []) if isinstance(data, dict) else data if isinstance(data, list) else []
+        titles = set()
+        for g in items:
+            if isinstance(g, dict):
+                titles.add(g.get("title", ""))
+            elif isinstance(g, str):
+                titles.add(g)
         log.debug(f"  Found {len(titles)} existing gallery items")
         return titles
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, TypeError):
         return set()
 
 
