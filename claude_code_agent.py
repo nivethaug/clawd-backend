@@ -814,6 +814,12 @@ class ClaudeCodeAgent:
         command.append("--verbose")
         logger.debug("Output format: stream-json with verbose")
 
+        # Run subprocess with cwd set to repo_path
+        # Defensive init BEFORE the spawn — the finally block at the end checks
+        # `if process and ...` and must not raise NameError if spawn fails.
+        process = None
+        process_group_id: Optional[int] = None
+
         # Phase 1: spawn through ProjectRuntimeManager. In EXECUTION_MODE=local (default)
         # this performs the same `sudo -E -H -u dreampilot` wrapping when EUID==0 and the
         # same asyncio.create_subprocess_exec(...) call that this file did inline before.
@@ -835,10 +841,6 @@ class ClaudeCodeAgent:
             cmd_display = cmd_display[:200] + '...(truncated)'
         logger.info(f"[CLAUDE-AGENT] Executing: {cmd_display}")
         logger.info(f"[CLAUDE-AGENT] Working directory: {self.repo_path}")
-
-        # Run subprocess with cwd set to repo_path
-        process = None  # Defensive init — finally block at the end checks `if process and ...`
-        process_group_id: Optional[int] = None
 
         try:
             # process was spawned above via ProjectRuntimeManager; the remainder of this
