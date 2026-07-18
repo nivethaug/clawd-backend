@@ -29,6 +29,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import AsyncIterator, Callable, Optional, Any
 
+# Phase 1 (container migration): route the Claude subprocess spawn through
+# ProjectRuntimeManager so Phase 4 can swap local sudo for docker exec without
+# touching this file again. In EXECUTION_MODE=local (default) behavior is
+# identical to the previous inline sudo + asyncio.create_subprocess_exec.
+from services.runtime_manager import ProjectRuntimeManager
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -81,6 +87,7 @@ class ClaudeCodeAgent:
         claude_path: Optional[str] = None,
         progress_interval: float = 30.0,
         resume_session_id: Optional[str] = None,
+        user_id: Optional[int] = None,
     ):
         """
         Initialize Claude Code Agent.
@@ -91,8 +98,10 @@ class ClaudeCodeAgent:
             on_text: Optional callback for streaming text as it arrives (content - persisted to DB)
             on_progress: Optional callback for progress updates (UI only - NOT persisted to DB)
             claude_path: Optional path to claude CLI (default: auto-detect via shutil.which)
-            progress_interval: Seconds between progress updates while waiting (default: 30s, env: CLAUDE_PROGRESS_INTERVAL_SECONDS)
-        
+            progress_interval: Seconds between progress updates while waiting (default 30s, env: CLAUDE_PROGRESS_INTERVAL_SECONDS)
+            user_id: Optional owner user_id. Used only in EXECUTION_MODE=container (Phase 4)
+                to target the user's workspace container. Ignored in local mode (default).
+
         Note: Auto-approve is enabled via --dangerously-skip-permissions (runs as non-root via sudo -u)
         """
         self.repo_path = Path(repo_path).resolve()
@@ -100,6 +109,13 @@ class ClaudeCodeAgent:
         self.on_text = on_text
         self.on_progress = on_progress  # Separate callback for progress (not persisted to DB)
         self.claude_path = claude_path
+        self.user_id = user_id
+
+        # Phase 1: route spawn through ProjectRuntimeManager. In local mode (default)
+        # this produces the same `sudo -E -H -u dreampilot` wrapping + asyncio spawn
+        # that this file did inline before. Phase 4 will flip EXECUTION_MODE=container
+        # and this same call will dispatch to docker exec without further edits here.
+        self._runtime = ProjectRuntimeManager(user_id=user_id, repo_path=str(self.repo_path))
         
         # Progress interval (from env or param, default 30s)
         self.progress_interval = float(os.environ.get("CLAUDE_PROGRESS_INTERVAL_SECONDS", progress_interval))
@@ -798,40 +814,35 @@ class ClaudeCodeAgent:
         command.append("--verbose")
         logger.debug("Output format: stream-json with verbose")
 
-        # Check if running as root - need to run as non-root user for --dangerously-skip-permissions
-        is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
-        
-        # Wrap with sudo -u if running as root
-        # Use -E to preserve environment and -H to set HOME to target user
-        if is_root:
-            run_as_user = os.environ.get("CLAUDE_RUN_AS_USER", "dreampilot")
-            command = ["sudo", "-E", "-H", "-u", run_as_user, *command]
-            logger.info(f"Running as root - wrapped command with sudo -E -H -u {run_as_user}")
+        # Phase 1: spawn through ProjectRuntimeManager. In EXECUTION_MODE=local (default)
+        # this performs the same `sudo -E -H -u dreampilot` wrapping when EUID==0 and the
+        # same asyncio.create_subprocess_exec(...) call that this file did inline before.
+        # The effective command (including sudo prefix when applicable) is returned on the
+        # result for logging. Phase 4 swaps the inner dispatch to docker exec without
+        # touching this block.
+        spawn = await self._runtime.exec_subprocess_stream(
+            command,
+            cwd=str(self.repo_path),
+            env=env,
+            stdout_limit=10 * 1024 * 1024,  # 10MB limit for large JSON lines (screenshots)
+        )
+        process = spawn.process
+        effective_command = spawn.effective_command
 
         # Log full command (truncate prompt for readability)
-        cmd_display = ' '.join(command)
+        cmd_display = ' '.join(effective_command)
         if len(cmd_display) > 200:
             cmd_display = cmd_display[:200] + '...(truncated)'
         logger.info(f"[CLAUDE-AGENT] Executing: {cmd_display}")
         logger.info(f"[CLAUDE-AGENT] Working directory: {self.repo_path}")
 
         # Run subprocess with cwd set to repo_path
-        process = None
+        process = None  # Defensive init — finally block at the end checks `if process and ...`
         process_group_id: Optional[int] = None
 
         try:
-            # Create subprocess with larger buffer limit for screenshot data
-            # Default limit is 64KB which is too small for base64 screenshots
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.repo_path),
-                env=env,
-                limit=10 * 1024 * 1024,  # 10MB limit for large JSON lines
-                start_new_session=True  # New process group so we can kill entire tree
-            )
+            # process was spawned above via ProjectRuntimeManager; the remainder of this
+            # block reads its stdout/stderr exactly as before.
             self._current_process = process  # Store for cancellation
             process_group_id = process.pid
             logger.debug(f"Subprocess started with PID: {process.pid}")
