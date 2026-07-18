@@ -390,21 +390,20 @@ def process_items(items: List[Dict], item_type: str, update_fn) -> None:
             skipped += 1
             continue
 
-        # Get the project's domain → URL
-        # We need to fetch the project to get its domain
-        headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
-        proj_resp = requests.get(f"{API_URL}/projects/{project_id}", headers=headers, timeout=10)
-        if proj_resp.status_code != 200:
-            log.warning(f"[{i}/{len(items)}] {title} — could not fetch project {project_id}")
-            failed += 1
-            continue
-
-        project = proj_resp.json()
-        domain = project.get("domain", "")
-        if not domain:
-            log.warning(f"[{i}/{len(items)}] {title} — no domain for project {project_id}")
-            failed += 1
-            continue
+        # Get the deployed URL directly from the template/gallery record
+        # (frontend_url field already contains the full URL)
+        frontend_url = item.get("frontend_url", "")
+        if frontend_url and frontend_url.startswith("http"):
+            url = frontend_url
+        else:
+            # Fallback: try to build from domain in the projects table
+            domain = item.get("domain", "")
+            if domain:
+                url = f"https://{domain}.dreamagent.cloud" if "." not in domain else f"https://{domain}"
+            else:
+                log.warning(f"[{i}/{len(items)}] {title} — no frontend_url or domain found")
+                failed += 1
+                continue
 
         url = get_project_url(domain)
         log.info(f"[{i}/{len(items)}] {title} → {url}")
