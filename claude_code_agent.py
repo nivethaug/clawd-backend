@@ -63,6 +63,35 @@ def configure_logging(
     logger.setLevel(level)
 
 
+def resolve_user_id_for_project(project_id: Optional[int]) -> Optional[int]:
+    """Look up the owner user_id for a project from the DB.
+
+    Phase 4 helper for the container-execution path: ContainerManager needs to
+    know which user's workspace container to target, and the 4 ClaudeCodeAgent
+    call sites all have project_id in scope but not always user_id.
+
+    Returns None if the lookup fails or project_id is None. In EXECUTION_MODE=local
+    the return value is irrelevant (user_id is ignored), so a None result is safe.
+    In EXECUTION_MODE=container a None user_id will cause ProjectRuntimeManager to
+    raise a clear ValueError rather than silently spawning on host.
+    """
+    if project_id is None:
+        return None
+    try:
+        from database_adapter import get_db
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+        if row:
+            return row["user_id"] if isinstance(row, dict) else row[0]
+    except Exception as exc:
+        logger.warning(f"[CLAUDE-AGENT] resolve_user_id_for_project({project_id}) failed: {exc}")
+    return None
+
+
+
 class ClaudeCodeAgent:
     """
     An async context manager that runs Claude Code queries via the claude CLI.

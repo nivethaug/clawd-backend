@@ -17,18 +17,28 @@ per-user Docker containers, every call site would otherwise need a fork:
     else:
         # sudo -u dreampilot ...
 
-ProjectRuntimeManager absorbs that fork in one place. Today (Phase 1) it only
-ever executes locally — the container branch is a stub. Phase 4 will flesh out
-the container branch without touching any caller.
+ProjectRuntimeManager absorbs that fork in one place.
 
 API
 ---
-- `exec_subprocess(...)`        → sync subprocess.run equivalent
+- `exec_subprocess(...)`        → sync subprocess.run equivalent (Phase 5)
 - `exec_subprocess_stream(...)` → async subprocess stream equivalent (for Claude)
+- `wrap_command(...)`           → pure function form, returns effective command
 
 Both build the right command (local `sudo -u dreampilot` vs container
 `docker exec -u 1001:1001`) based on `EXECUTION_MODE` and `user_id`, then hand
 off to `subprocess` or `ContainerManager` respectively.
+
+Environment handling (security-critical)
+-----------------------------------------
+In LOCAL mode, the caller's full `os.environ.copy()` is passed to the subprocess
+(today's behavior — host inherits everything).
+
+In CONTAINER mode, only an allowlisted set of env vars is forwarded. Forwarding
+the full host env would leak DB credentials, Hostinger/GitHub tokens, and the
+DREAMAGENT backend's own secrets into the user's container — exactly what the
+isolation layer exists to prevent. The allowlist contains only what Claude +
+builds need: provider keys, model config, and PATH.
 
 Backward compatibility
 ----------------------
@@ -55,6 +65,41 @@ EXECUTION_MODE: str = os.getenv("EXECUTION_MODE", "local").lower().strip()
 # The host user that claude/npm/pip historically run as. Only used in local mode.
 # Mirrors claude_code_agent.py:134 / 807 (CLAUDE_RUN_AS_USER env, default "dreampilot").
 LOCAL_RUN_AS_USER: str = os.getenv("CLAUDE_RUN_AS_USER", "dreampilot")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Container env allowlist (security-critical)
+# ─────────────────────────────────────────────────────────────────────
+# In container mode, ONLY these env vars are forwarded from the host into the
+# container. The container's claude.settings.json already pins ANTHROPIC_BASE_URL
+# to host.docker.internal:7861 (the wrapper-v2 proxy). Anything not in this set
+# is dropped — protecting DB_PASSWORD, LEMONSQUEEZY_WEBHOOK_SECRET, etc.
+#
+# To add a new forwarded env var (e.g. a new provider key), add its name here.
+# Never add secrets that aren't meant to be visible inside the user's workspace.
+_CONTAINER_ENV_ALLOWLIST = frozenset({
+    # Anthropic / Claude routing (proxy URL set in settings.json, but token needed)
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    # OpenRouter (wrapper-v2 may use this as the upstream provider)
+    "OPENROUTER_API_KEY",
+    # Z.AI (zai-mcp-server injected by Claude's settings.json)
+    "ZAI_API_KEY",
+    # PATH must be present so claude/node/npm/pip resolve inside the container
+    "PATH",
+    # Home directory (some Node tools consult $HOME for caches)
+    "HOME",
+})
+
+
+def _filter_env_for_container(env: Dict[str, str]) -> Dict[str, str]:
+    """Return only the allowlisted env vars (container mode).
+
+    This is the security chokepoint between host env and container env. If a
+    caller tries to pass DB creds or other secrets, they will be dropped here.
+    """
+    return {k: v for k, v in env.items() if k in _CONTAINER_ENV_ALLOWLIST}
 
 
 @dataclass
@@ -97,6 +142,8 @@ class ProjectRuntimeManager:
         self,
         command: List[str],
         *,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
         run_as_root: bool = False,
     ) -> List[str]:
         """Wrap a base command for the active execution mode.
@@ -107,27 +154,43 @@ class ProjectRuntimeManager:
         Local mode:
             If the current process is root and the command isn't explicitly
             requested as root, wraps with `sudo -E -H -u <LOCAL_RUN_AS_USER>`.
-            Identical to claude_code_agent.py:806-808 today.
+            Identical to claude_code_agent.py:806-808 today. `cwd`/`env` are
+            ignored here — they go to the subprocess directly at spawn time.
 
-        Container mode (stub until Phase 4):
-            Returns the command unchanged — Phase 4 will return the
-            `docker exec -u 1001:1001 ...` form. Raising here would be wrong
-            because Phase 1 callers may run before any container exists.
+        Container mode (Phase 4):
+            Returns the full `docker exec -u 1001:1001 -w <container-path>
+            -e KEY=val ... dreamagent-user-<uid> <command>` list. Path
+            translation + env allowlist filtering happen here. Raises if
+            user_id is not set.
 
         Args:
             command: The base command list, e.g. ["claude", "-p", "...", ...].
+            cwd: Required in container mode (for path translation). Ignored
+                in local mode.
+            env: Environment dict. In container mode, filtered to the
+                allowlist (see _CONTAINER_ENV_ALLOWLIST). Ignored in local
+                mode (caller passes full env to subprocess separately).
             run_as_root: If True, skip the sudo wrapping even in local mode
                 (matches the legacy "is_root" gate being inverted).
         """
         if self.mode == "container":
-            # Phase 4 will implement: ContainerManager(self.user_id).wrap_exec(command, cwd)
-            # For Phase 1 we never reach here because EXECUTION_MODE defaults to "local".
-            # If someone flips the flag before Phase 4 ships, fail loudly rather than
-            # silently running on host.
-            raise NotImplementedError(
-                "EXECUTION_MODE=container is not implemented until Phase 4. "
-                "Set EXECUTION_MODE=local (or unset it) to use today's behavior."
-            )
+            if self.user_id is None or self.user_id <= 0:
+                raise ValueError(
+                    "EXECUTION_MODE=container requires a valid user_id on "
+                    f"ProjectRuntimeManager (got {self.user_id!r})"
+                )
+            if cwd is None and self.repo_path:
+                cwd = self.repo_path
+            if cwd is None:
+                raise ValueError(
+                    "EXECUTION_MODE=container requires cwd (or repo_path on the manager)"
+                )
+            # Defer import so the module loads even if container_manager has issues
+            # during dev (and to avoid circular imports at module load time).
+            from services.container_manager import ContainerManager
+            cm = ContainerManager(self.user_id)
+            filtered_env = _filter_env_for_container(env or {})
+            return cm.wrap_exec(command, cwd=cwd, env=filtered_env)
 
         # Local mode — mirror claude_code_agent.py:802-808 exactly.
         is_root = os.geteuid() == 0 if hasattr(os, "geteuid") else False
@@ -157,24 +220,54 @@ class ProjectRuntimeManager:
 
         Local mode: spawns the command directly (after sudo wrapping if root).
             Identical behavior to today.
-        Container mode: not implemented until Phase 4.
+
+        Container mode (Phase 4): ensures the user's container is running,
+            then spawns `docker exec ... claude ...` as the effective command.
+            stdout streaming passes through `docker exec`'s pipe unchanged.
 
         Args:
             command: Base command (e.g. ["claude", "-p", prompt, ...]).
             cwd: Working directory (host path).
             env: Full environment dict (already merged with settings/env).
+                In container mode, this gets filtered to the allowlist.
             stdout_limit: asyncio pipe line limit (10MB default matches
                 claude_code_agent.py:832 to handle base64 screenshots).
             run_as_root: Skip sudo wrapping even if EUID is 0.
         """
-        effective = self.wrap_command(command, run_as_root=run_as_root)
-
         if self.mode == "container":
-            # Phase 4 will hand off to ContainerManager.exec_stream here.
-            raise NotImplementedError(
-                "EXECUTION_MODE=container stream path is Phase 4 work."
+            if self.user_id is None or self.user_id <= 0:
+                raise ValueError(
+                    "EXECUTION_MODE=container requires user_id on ProjectRuntimeManager"
+                )
+            from services.container_manager import ContainerManager
+            cm = ContainerManager(self.user_id)
+            # Make sure the container exists + is running before exec.
+            # Idempotent — cheap if already up.
+            cm.ensure_container()
+            # Filter env to allowlist before constructing the docker exec command.
+            filtered_env = _filter_env_for_container(env)
+            effective = cm.wrap_exec(command, cwd=cwd, env=filtered_env)
+            logger.debug(
+                "RuntimeManager.exec_subprocess_stream container mode: container=%s cmd=%s",
+                cm.container_name,
+                " ".join(effective[:6]) + (" ..." if len(effective) > 6 else ""),
+            )
+            process = await asyncio.create_subprocess_exec(
+                *effective,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                limit=stdout_limit,
+                start_new_session=True,
+            )
+            return RuntimeSpawnResult(
+                process=process,
+                requested_cwd=str(cwd),
+                effective_command=effective,
             )
 
+        # Local mode — identical to pre-Phase-4 behavior.
+        effective = self.wrap_command(command, run_as_root=run_as_root)
         logger.debug(
             "RuntimeManager.exec_subprocess_stream local mode: cwd=%s cmd=%s",
             cwd,
@@ -217,15 +310,28 @@ class ProjectRuntimeManager:
         build calls through.
 
         Local mode: standard subprocess.run after sudo wrapping.
-        Container mode: Phase 5 will hand off to ContainerManager.exec.
+        Container mode (Phase 5): builds the docker exec command (with env
+        filtering + path translation) and runs it. The container must exist
+        before this is called — callers should ensure_container first.
         """
-        effective = self.wrap_command(command, run_as_root=run_as_root)
-
+        # In container mode, wrap_command returns the full docker exec list
+        # (no separate cwd/env on subprocess.run — they're baked into -w/-e).
         if self.mode == "container":
-            raise NotImplementedError(
-                "EXECUTION_MODE=container sync path is Phase 5 work."
+            from services.container_manager import ContainerManager
+            cm = ContainerManager(self.user_id)
+            cm.ensure_container()
+            filtered_env = _filter_env_for_container(env or {})
+            full_cmd = cm.wrap_exec(command, cwd=cwd or self.repo_path, env=filtered_env)
+            return subprocess.run(
+                full_cmd,
+                timeout=timeout,
+                capture_output=capture_output,
+                text=text,
+                check=check,
             )
 
+        # Local mode
+        effective = self.wrap_command(command, run_as_root=run_as_root)
         return subprocess.run(
             effective,
             cwd=cwd,

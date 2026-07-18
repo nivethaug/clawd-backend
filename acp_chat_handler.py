@@ -2648,9 +2648,13 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 friendly = self.progress_mapper.get_friendly_message(text)
             
             # Use ClaudeCodeAgent with project_path for MCP config lookup
+            # Phase 4: resolve user_id for container targeting (no-op in local mode).
+            from claude_code_agent import resolve_user_id_for_project
+            _user_id = resolve_user_id_for_project(self.project_id)
             async with ClaudeCodeAgent(
                 str(self.project_path),
-                on_text=on_text_callback
+                on_text=on_text_callback,
+                user_id=_user_id,
             ) as agent:
                 response = await agent.query(full_prompt)
 
@@ -3107,11 +3111,15 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 except Exception as resume_err:
                     logger.warning(f"[ACP-CHAT] Failed to load durable Claude resume id: {resume_err}")
                 logger.info(f"[ACP-CHAT] resume_key={resume_key} has_prev_session={'yes' if prev_sid else 'no (fresh)'}")
+                # Phase 4: resolve user_id for container targeting (no-op in local mode).
+                from claude_code_agent import resolve_user_id_for_project
+                _user_id = resolve_user_id_for_project(self.project_id)
                 async with ClaudeCodeAgent(
                     repo_path,
                     on_text=on_chunk,
                     on_progress=on_progress,
                     resume_session_id=prev_sid,
+                    user_id=_user_id,
                 ) as agent:
                     self._active_agent = agent  # Track for cancellation
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
