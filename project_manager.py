@@ -17,15 +17,13 @@ from database_adapter import get_db
 # instead of os.path.join keeps path output identical across dev platforms
 # (Windows os.path.join would insert backslashes). On Linux posixpath == os.path.
 
-# Phase 2 (container migration): route all project-path construction through
-# ContainerStorage so EXECUTION_MODE=container produces per-user paths under
-# /workspaces/user_<id>/... while EXECUTION_MODE=local (default) keeps today's
-# /root/dreampilot/projects/... layout. The constant below is kept for
-# backward compatibility with any external caller that imports it directly;
-# it matches what ContainerStorage.projects_root() returns in local mode.
-from services.container_storage import projects_root as _projects_root
+# Phase 2 (container migration): all project-path construction goes through
+# ContainerStorage. The constant below is the legacy fallback for
+# ProjectFileManager's default base_dir — only used when no user_id is
+# provided (CLI usage).
+from services.container_storage import projects_root as _projects_root, LEGACY_PROJECTS_ROOT
 
-BASE_PROJECTS_DIR = "/root/dreampilot/projects"
+BASE_PROJECTS_DIR = LEGACY_PROJECTS_ROOT
 
 # Type to folder name mapping
 TYPE_FOLDER_MAP = {

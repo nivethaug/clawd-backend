@@ -35,18 +35,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Project paths
-# Kept as a module-level constant for backward compat (some callers may import
-# it directly). Lazy: in EXECUTION_MODE=local this evaluates to the legacy path
-# immediately; in EXECUTION_MODE=container there is no single base path (it's
-# per-user), so we fall back to the legacy path and let BuildPublisher.__init__
-# resolve the real per-user base.
-from services.container_storage import EXECUTION_MODE as _EXEC_MODE
-if _EXEC_MODE == "local":
-    PROJECTS_BASE_PATH = Path(_website_root(user_id=None))
-else:
-    # Container mode — no global base path. Use legacy path as a sentinel;
-    # BuildPublisher.__init__ always overrides this with the per-user path.
-    PROJECTS_BASE_PATH = Path("/root/dreampilot/projects/website")
+# This module-level constant is only used as a CLI fallback (--project-name
+# without --user-id). BuildPublisher.__init__ always resolves the per-user
+# path at construction time via website_root(user_id=user_id).
+# Use the legacy path directly — in container mode this constant is never
+# reached because BuildPublisher always gets a user_id.
+from services.container_storage import LEGACY_PROJECTS_ROOT
+PROJECTS_BASE_PATH = Path(LEGACY_PROJECTS_ROOT) / "website"
 
 
 class BuildPublisher:

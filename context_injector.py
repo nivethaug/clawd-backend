@@ -22,16 +22,11 @@ from services.container_storage import (
 logger = logging.getLogger(__name__)
 
 # Configuration
-# Phase 2: lazy resolution. In EXECUTION_MODE=local this evaluates to the
-# legacy path. In container mode there is no single base path (per-user),
-# so use the legacy path as a sentinel — the actual containment check in
-# build_project_context_message() uses is_within_projects_root() which
-# handles both layouts correctly.
-from services.container_storage import EXECUTION_MODE as _EXEC_MODE_CI
-if _EXEC_MODE_CI == "local":
-    PROJECT_BASE_PATH = _projects_root(user_id=None)
-else:
-    PROJECT_BASE_PATH = "/root/dreampilot/projects"
+# The containment check in build_project_context_message() uses
+# is_within_projects_root() which handles both layouts correctly.
+# This constant is kept for backward compat but not used for actual checks.
+from services.container_storage import LEGACY_PROJECTS_ROOT
+PROJECT_BASE_PATH = LEGACY_PROJECTS_ROOT
 RULE_FILE_MAX_SIZE = 1024 * 50  # 50KB
 RULE_FILE_MAX_READ_SIZE = 1024 * 100  # 100KB
 

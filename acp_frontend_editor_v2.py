@@ -43,18 +43,7 @@ logger.setLevel(logging.INFO)  # Allow INFO for this module's logs
 # CONSTANTS
 # =============================================================================
 
-# Allowed paths
-# Phase 2 (container migration): the previous hardcoded
-# ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website" was defined but
-# never read in this module. In container mode there is no single base
-# (per-user), so keep the legacy path as a sentinel — any future code that
-# reads this should resolve per-user instead.
-from services.container_storage import EXECUTION_MODE as _EXEC_MODE
-if _EXEC_MODE == "local":
-    from services.container_storage import website_root as _website_root_v2
-    ALLOWED_PROJECTS_BASE = _website_root_v2(user_id=None)
-else:
-    ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
+# Forbidden paths (backend source must never be exposed to user code)
 FORBIDDEN_BACKEND = "/root/clawd-backend"
 
 # Allowed directories for ACPX editing (relative to frontend/src - no src/ prefix)
