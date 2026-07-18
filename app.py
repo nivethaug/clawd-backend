@@ -741,7 +741,7 @@ class InitialEnvironmentVariable(BaseModel):
 class CreateProjectRequest(BaseModel):
     model_config = {"populate_by_name": True}  # Allow both type_id and typeId
     
-    name: str
+    name: str = Field(..., min_length=1, max_length=30, description="Project name (max 30 chars; auto-truncated if longer)")
     domain: Optional[str] = Field(None, min_length=3, max_length=50)
     description: Optional[str] = None
     user_id: Optional[int] = None
@@ -1216,9 +1216,16 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
     if not domain or not domain.strip():
         # Sanitize project name for GitHub repo format
         domain = github.sanitize_repo_name(request.name)
-        
+
         # Add random suffix to ensure uniqueness
         random_suffix = ''.join(__import__('random').choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
+
+        # Safety: truncate domain base if needed so base + suffix stays under 50 chars
+        max_base = 50 - len(random_suffix) - 1  # -1 for the hyphen
+        if len(domain) > max_base:
+            domain = domain[:max_base]
+            logger.info(f"Truncated domain base to {max_base} chars to stay under 50-char limit")
+
         domain = f"{domain}-{random_suffix}"
         logger.info(f"Auto-generated domain for project '{request.name}': {domain}")
     else:
