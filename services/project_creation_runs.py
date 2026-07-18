@@ -505,10 +505,14 @@ def _fix_project_ownership(project_path: str) -> None:
     logger.info("[PROJECT-RUN] ownership transferred to dreampilot for %s", project_path)
 
 
-def _create_project_folder(run_id: int, project_id: int, name: str, type_id: int) -> str:
+def _create_project_folder(run_id: int, project_id: int, name: str, type_id: int, user_id: Optional[int] = None) -> str:
     append_chunk(run_id, "log", "Creating project folder and Git repository")
     project_manager = ProjectFileManager()
-    project_folder_path, folder_success = project_manager.create_project_with_git(project_id, name, type_id)
+    # Phase 4: pass user_id so container mode resolves the per-user workspace path.
+    # In local mode (default) user_id is ignored — behavior unchanged.
+    project_folder_path, folder_success = project_manager.create_project_with_git(
+        project_id, name, type_id, user_id=user_id,
+    )
     if not folder_success or not project_folder_path:
         raise RuntimeError("Failed to create project folder, Git repository, and required files")
 
@@ -763,7 +767,7 @@ def execute_run(run_id: int) -> Dict[str, Any]:
         charged = True
         _record_charge(run_id, operation_code, charge, charge_result)
 
-        project_path = _create_project_folder(run_id, project_id, name, type_id)
+        project_path = _create_project_folder(run_id, project_id, name, type_id, user_id=user_id)
         _create_github_repo(run_id, project_id, project_path, payload.get("domain") or "", name)
         selected_template_id = _select_template(
             run_id,
