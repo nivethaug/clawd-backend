@@ -265,7 +265,7 @@ CLAWDBOT_SESSIONS_PATH = os.path.expanduser("~/.clawdbot/agents/main/sessions/se
 IMAGES_DIR = "/root/clawd/public/images"
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
-IMAGES_BASE_URL = "http://195.200.14.37:8002/images"
+IMAGES_BASE_URL = os.getenv("IMAGES_BASE_URL", "https://api.dreamagent.cloud/images")
 
 IMAGE_MIME_EXTENSIONS = {
     "image/jpeg": ".jpg",
