@@ -22,6 +22,7 @@ CLAUDE_JSON="/home/dreampilot/.claude.json"
 
 # Ensure directories exist (tmpfs starts empty; dreampilot owns it via uid=1001 mount opt)
 mkdir -p "$CLAUDE_HOME"
+mkdir -p /home/dreampilot/.npm /home/dreampilot/.config
 
 # Copy settings template (preserves the baked config with correct proxy URL)
 if [[ -f "$CLAUDE_CONFIG_SRC/settings.json" ]]; then

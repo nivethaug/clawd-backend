@@ -422,9 +422,17 @@ class ContainerManager:
             args += ["--workdir", in_container_cwd]
 
         # Env vars: each as a separate -e flag.
+        # Always override HOME to /home/dreampilot (the writable tmpfs).
+        # The host's HOME (/root) is forwarded by the env allowlist but inside
+        # the container /root is on the read-only rootfs — Claude and npx
+        # need to write to $HOME for npm cache, MCP install, session state.
+        args += ["-e", "HOME=/home/dreampilot"]
         if env:
             for k, v in env.items():
                 # Skip empty/None values to avoid docker CLI quirks.
+                # Skip HOME — we override it above.
+                if k == "HOME":
+                    continue
                 if v is not None and v != "":
                     args += ["-e", f"{k}={v}"]
 
