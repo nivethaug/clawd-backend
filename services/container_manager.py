@@ -406,6 +406,7 @@ class ContainerManager:
         self.ensure_container()
 
         args: List[str] = [
+            "docker",
             "exec",
             "--user", f"{CONTAINER_USER_UID}:{CONTAINER_USER_GID}",
         ]
