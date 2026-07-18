@@ -108,8 +108,12 @@ def capture_screenshot(url: str, output_path: str) -> bool:
     """Capture a screenshot of a URL using Chromium headless.
 
     Uses the --screenshot flag which is the simplest approach — no CDP needed.
+    Captures raw screenshot, then post-processes with Pillow to add a
+    browser frame, rounded corners, shadow, and gradient background.
     """
     import subprocess
+
+    raw_path = output_path.replace(".png", "_raw.png")
 
     cmd = [
         "/usr/bin/chromium",
@@ -119,7 +123,7 @@ def capture_screenshot(url: str, output_path: str) -> bool:
         "--disable-gpu",
         "--hide-scrollbars",
         f"--window-size={VIEWPORT_WIDTH},{VIEWPORT_HEIGHT}",
-        "--screenshot=" + output_path,
+        "--screenshot=" + raw_path,
         "--virtual-time-budget=5000",  # wait 5s for JS to render
         url,
     ]
@@ -133,6 +137,16 @@ def capture_screenshot(url: str, output_path: str) -> bool:
         )
         if result.returncode != 0:
             log.warning(f"  Chromium returned {result.returncode}: {result.stderr[:200]}")
+
+        if not Path(raw_path).exists() or Path(raw_path).stat().st_size == 0:
+            return False
+
+        # Post-process: add browser frame + shadow + gradient background
+        _enhance_screenshot(raw_path, output_path)
+
+        # Clean up raw screenshot
+        Path(raw_path).unlink(missing_ok=True)
+
         return Path(output_path).exists() and Path(output_path).stat().st_size > 0
     except subprocess.TimeoutExpired:
         log.error(f"  Chromium timeout for {url}")
@@ -140,6 +154,127 @@ def capture_screenshot(url: str, output_path: str) -> bool:
     except Exception as exc:
         log.error(f"  Chromium error: {exc}")
         return False
+
+
+def _enhance_screenshot(raw_path: str, output_path: str) -> None:
+    """Post-process a raw screenshot into a polished thumbnail.
+
+    Adds:
+    - Browser chrome (fake address bar with URL)
+    - Rounded corners
+    - Drop shadow
+    - Gradient background
+    """
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+    try:
+        screenshot = Image.open(raw_path).convert("RGBA")
+    except Exception as exc:
+        log.warning(f"  Could not open screenshot for enhancement: {exc}")
+        # Just copy raw as fallback
+        import shutil
+        shutil.copy2(raw_path, output_path)
+        return
+
+    sw, sh = screenshot.size
+
+    # Browser chrome dimensions
+    chrome_h = 36
+    tab_w = min(sw - 20, 200)
+    corner_radius = 12
+    padding = 24
+    shadow_blur = 20
+    bg_w = sw + padding * 2
+    bg_h = sh + chrome_h + padding * 2
+
+    # Create gradient background (dark → slightly lighter)
+    bg = Image.new("RGBA", (bg_w, bg_h), (0, 0, 0, 0))
+    bg_draw = ImageDraw.Draw(bg)
+    for y in range(bg_h):
+        ratio = y / bg_h
+        r = int(15 + ratio * 8)
+        g = int(15 + ratio * 6)
+        b = int(20 + ratio * 10)
+        bg_draw.line([(0, y), (bg_w, y)], fill=(r, g, b, 255))
+
+    # Create the browser frame (chrome bar + screenshot combined)
+    frame = Image.new("RGBA", (sw, sh + chrome_h), (0, 0, 0, 0))
+    frame_draw = ImageDraw.Draw(frame)
+
+    # Browser chrome background (slightly lighter than screenshot)
+    frame_draw.rectangle([(0, 0), (sw, chrome_h)], fill=(30, 30, 35, 255))
+
+    # Traffic light dots (red, yellow, green)
+    dot_y = chrome_h // 2
+    for i, color in enumerate([(255, 95, 86), (255, 189, 46), (39, 201, 63)]):
+        cx = 18 + i * 22
+        frame_draw.ellipse([(cx - 6, dot_y - 6), (cx + 6, dot_y + 6)], fill=color + (255,))
+
+    # Fake address bar
+    bar_x = 90
+    bar_w = min(sw - bar_x - 16, 400)
+    frame_draw.rounded_rectangle(
+        [(bar_x, 8), (bar_x + bar_w, chrome_h - 8)],
+        radius=6,
+        fill=(50, 50, 55, 255),
+    )
+
+    # URL text in address bar (try a font, fallback to default)
+    url_text = "dreamagent.cloud"
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
+    except (IOError, OSError):
+        font = ImageFont.load_default()
+
+    # Draw URL text centered in address bar
+    try:
+        bbox = frame_draw.textbbox((0, 0), url_text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        tx = bar_x + (bar_w - tw) // 2
+        ty = 8 + (chrome_h - 16 - th) // 2
+        frame_draw.text((tx, ty), url_text, fill=(180, 180, 185, 255), font=font)
+    except Exception:
+        pass
+
+    # Paste screenshot below chrome bar
+    frame.paste(screenshot, (0, chrome_h))
+
+    # Apply rounded corners to the frame
+    mask = Image.new("L", (sw, sh + chrome_h), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle([(0, 0), (sw - 1, sh + chrome_h - 1)], radius=corner_radius, fill=255)
+    frame.putalpha(mask)
+
+    # Create shadow (offset + blur)
+    shadow = Image.new("RGBA", (bg_w, bg_h), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_offset_x = 4
+    shadow_offset_y = 6
+    shadow_draw.rounded_rectangle(
+        [(padding + shadow_offset_x, padding + shadow_offset_y),
+         (padding + sw - 1 + shadow_offset_x, padding + sh + chrome_h - 1 + shadow_offset_y)],
+        radius=corner_radius,
+        fill=(0, 0, 0, 120),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(shadow_blur))
+
+    # Composite: background → shadow → frame
+    bg.alpha_composite(shadow)
+    bg.alpha_composite(frame, (padding, padding))
+
+    # Convert to RGB for final output (no alpha needed for thumbnail)
+    final = Image.new("RGB", (bg_w, bg_h), (15, 15, 20))
+    final.paste(bg, (0, 0), bg)
+
+    # Resize to a reasonable thumbnail size (preserve aspect ratio)
+    max_w = 1280
+    if final.width > max_w:
+        ratio = max_w / final.width
+        final = final.resize((max_w, int(final.height * ratio)), Image.LANCZOS)
+
+    final.save(output_path, "PNG", optimize=True)
+    log.info(f"  Enhanced: {final.width}x{final.height} → {output_path}")
 
 
 # ──────────────────────────────────────────────────────────────────────
