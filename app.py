@@ -1084,6 +1084,11 @@ async def sentry_context_middleware(request: Request, call_next):
 # not present locally. No-op when WORKER_VPS_URL is unset (backward compatible).
 from services.project_proxy import project_proxy_middleware, proxy_auth_middleware  # noqa: E402
 from services.system_metrics import collect as collect_system_metrics  # noqa: E402
+# Phase 2 (container migration): path-traversal guards + path construction route
+# through ContainerStorage so the same check works in both EXECUTION_MODE layouts.
+# In local mode (default) the behavior is identical to the inline abspath+startswith
+# checks that previously lived at this call site.
+from services.container_storage import is_within_website_root as _is_within_website_root  # noqa: E402
 
 # Worker-side: translate X-Proxy-User-Id into valid auth (only when TRUST_PROXY_AUTH set)
 app.middleware("http")(proxy_auth_middleware)
@@ -3205,12 +3210,12 @@ def cleanup_project_directory(project_path: str) -> Dict[str, Any]:
         "error": None
     }
 
-    # Validate path is within DreamPilot root
-    dreampilot_root = "/root/dreampilot/projects/website"
-    normalized_path = os.path.abspath(project_path)
-    normalized_root = os.path.abspath(dreampilot_root)
-
-    if not normalized_path.startswith(normalized_root):
+    # Validate path is within DreamPilot root.
+    # Phase 2: route through ContainerStorage.is_within_website_root so the
+    # check works in both layouts. In local mode this is equivalent to the
+    # previous abspath("/root/dreampilot/projects/website") startswith check.
+    # In container mode it accepts paths under /workspaces/user_<id>/website.
+    if not _is_within_website_root(project_path):
         error_msg = f"Path traversal attempt detected: {project_path}"
         results["error"] = error_msg
         logger.error(error_msg)

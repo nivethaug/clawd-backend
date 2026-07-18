@@ -20,6 +20,12 @@ import logging
 from pathlib import Path
 from typing import Optional, Tuple
 
+# Phase 2 (container migration): route the website-projects base path through
+# ContainerStorage so EXECUTION_MODE=container resolves to the per-user
+# workspace dir while EXECUTION_MODE=local keeps today's flat layout.
+# In local mode this returns exactly "/root/dreampilot/projects/website".
+from services.container_storage import website_root as _website_root
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -29,15 +35,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Project paths
-PROJECTS_BASE_PATH = Path("/root/dreampilot/projects/website")
+# Kept as a module-level constant for backward compat (some callers may import
+# it directly). Defaults to local-mode layout. Container mode resolves per-user
+# at BuildPublisher construction time via the user_id arg.
+PROJECTS_BASE_PATH = Path(_website_root(user_id=None))
 
 
 class BuildPublisher:
     """Handles building and publishing for frontend and backend projects."""
-    
-    def __init__(self, project_name: str):
+
+    def __init__(self, project_name: str, user_id: Optional[int] = None):
         self.project_name = project_name
-        self.project_path = PROJECTS_BASE_PATH / project_name
+        # Resolve base dynamically so container mode picks the per-user dir.
+        # Local mode (user_id ignored) returns the same path as PROJECTS_BASE_PATH above.
+        base = Path(_website_root(user_id=user_id))
+        self.project_path = base / project_name
         self.frontend_path = self.project_path / "frontend"
         self.backend_path = self.project_path / "backend"
         

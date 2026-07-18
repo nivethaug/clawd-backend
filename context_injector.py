@@ -10,11 +10,19 @@ from functools import lru_cache
 
 from database_adapter import get_db
 
+# Phase 2 (container migration): route path construction + containment check
+# through ContainerStorage. PROJECT_BASE_PATH below stays as a module constant
+# for backward compat (matches ContainerStorage.projects_root() in local mode).
+from services.container_storage import (
+    projects_root as _projects_root,
+    is_within_projects_root as _is_within_projects_root,
+)
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Configuration
-PROJECT_BASE_PATH = "/root/dreampilot/projects"
+PROJECT_BASE_PATH = _projects_root(user_id=None)  # local mode → /root/dreampilot/projects
 RULE_FILE_MAX_SIZE = 1024 * 50  # 50KB
 RULE_FILE_MAX_READ_SIZE = 1024 * 100  # 100KB
 
@@ -184,10 +192,14 @@ class ContextInjector:
             logger.error(f"Project path is not a directory: {project_path}")
             return None
 
-        # Security: Validate path is within allowed directory
-        real_path = os.path.realpath(project_path)
-        allowed_path = os.path.realpath(PROJECT_BASE_PATH)
-        if not real_path.startswith(allowed_path):
+        # Security: Validate path is within allowed directory.
+        # Phase 2: routes through ContainerStorage.is_within_projects_root so the
+        # check works in both layouts. In local mode this is equivalent to the
+        # previous `realpath(PROJECT_BASE_PATH)` startswith check. In container
+        # mode it accepts paths under /workspaces/user_<id>/ (the calling user's
+        # own workspace — project_path comes from the DB record which was set at
+        # creation time with the right user_id).
+        if not _is_within_projects_root(project_path):
             logger.error(f"Security: Project path outside allowed directory: {project_path}")
             return None
 

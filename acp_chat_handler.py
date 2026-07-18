@@ -49,7 +49,13 @@ _claude_session_ids: Dict[str, str] = {}
 
 # Configuration
 ACPX_TIMEOUT = 1800  # 15 minutes for interactive chat
-ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website"
+# Phase 2 (container migration): the previous hardcoded
+# ALLOWED_PROJECTS_BASE = "/root/dreampilot/projects/website" was defined but
+# never read in this module (no path-traversal check used it). Resolving it via
+# ContainerStorage keeps the constant consistent across layouts in case any
+# future code does reference it. In local mode this returns the same string.
+from services.container_storage import website_root as _website_root
+ALLOWED_PROJECTS_BASE = _website_root(user_id=None)
 USE_PREPROCESSOR = os.getenv("ACP_USE_PREPROCESSOR", "false").lower() == "true"  # DISABLED for ClaudeCodeAgent migration testing
 USE_CLAUDE_AGENT = os.getenv("ACP_USE_CLAUDE_AGENT", "true").lower() == "true" and CLAUDE_AGENT_AVAILABLE  # Prefer Claude Agent
 

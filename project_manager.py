@@ -4,12 +4,26 @@ Handles project folder creation, cleanup, and filesystem operations.
 """
 
 import os
+import posixpath
 import shutil
 import re
 import subprocess
 from datetime import datetime
 from typing import Optional
 from database_adapter import get_db
+
+# NOTE on posixpath: project paths target the Linux worker VPS
+# (/root/dreampilot/projects/...). Using posixpath.join (forward slashes)
+# instead of os.path.join keeps path output identical across dev platforms
+# (Windows os.path.join would insert backslashes). On Linux posixpath == os.path.
+
+# Phase 2 (container migration): route all project-path construction through
+# ContainerStorage so EXECUTION_MODE=container produces per-user paths under
+# /workspaces/user_<id>/... while EXECUTION_MODE=local (default) keeps today's
+# /root/dreampilot/projects/... layout. The constant below is kept for
+# backward compatibility with any external caller that imports it directly;
+# it matches what ContainerStorage.projects_root() returns in local mode.
+from services.container_storage import projects_root as _projects_root
 
 BASE_PROJECTS_DIR = "/root/dreampilot/projects"
 
@@ -103,17 +117,30 @@ class ProjectFileManager:
         """
         return TYPE_FOLDER_MAP.get(project_type, 'website')
 
-    def build_type_based_path(self, project_id: int, name: str, type_id: Optional[int]) -> str:
+    def build_type_based_path(
+        self,
+        project_id: int,
+        name: str,
+        type_id: Optional[int],
+        user_id: Optional[int] = None,
+    ) -> str:
         """
         Build full project path with type-based subfolder.
-        
+
         Args:
             project_id: Project ID from database
             name: Project name
             type_id: Project type ID from database
-            
+            user_id: Owner user ID. Required in EXECUTION_MODE=container (selects
+                the per-user workspace dir). Ignored in EXECUTION_MODE=local
+                (default) — paths stay flat under /root/dreampilot/projects.
+
         Returns:
-            Absolute path to project folder
+            Absolute path to project folder.
+
+        Path shape:
+            local mode:     /root/dreampilot/projects/{type}/{folder_name}
+            container mode: /workspaces/user_{user_id}/{type}/{folder_name}
         """
         # Get project type and map to folder name
         project_type = self.get_project_type(type_id)
@@ -122,12 +149,25 @@ class ProjectFileManager:
         # Generate folder name
         folder_name = self.generate_folder_name(project_id, name)
 
-        # Build full path: /root/dreampilot/projects/{type}/{folder_name}
-        folder_path = os.path.join(self.base_dir, type_folder, folder_name)
+        # Resolve root via ContainerStorage (handles local vs container layout).
+        # In local mode user_id is ignored and the root matches BASE_PROJECTS_DIR,
+        # preserving today's behavior exactly.
+        root = _projects_root(user_id)
+
+        # Build full path: <root>/{type}/{folder_name}
+        # Use posixpath so the constructed path uses forward slashes on every
+        # platform (these paths target the Linux worker).
+        folder_path = posixpath.join(root, type_folder, folder_name)
 
         return folder_path
 
-    def create_project_folder(self, project_id: int, name: str, type_id: Optional[int] = None) -> str:
+    def create_project_folder(
+        self,
+        project_id: int,
+        name: str,
+        type_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+    ) -> str:
         """
         Create project folder on filesystem with type-based subfolder.
 
@@ -135,6 +175,7 @@ class ProjectFileManager:
             project_id: Project ID from database
             name: Project name
             type_id: Project type ID from database (optional, defaults to website)
+            user_id: Owner user ID. Required in EXECUTION_MODE=container.
 
         Returns:
             Absolute path to created folder
@@ -142,7 +183,7 @@ class ProjectFileManager:
         Raises:
             OSError: If folder creation fails
         """
-        folder_path = self.build_type_based_path(project_id, name, type_id)
+        folder_path = self.build_type_based_path(project_id, name, type_id, user_id=user_id)
 
         # Ensure type-based parent directory exists
         type_based_dir = os.path.dirname(folder_path)
@@ -361,7 +402,13 @@ The absolute path to this project folder is available as system context.
             print(f"Failed to initialize Git repository: {e}")
             return False
 
-    def create_project_with_git(self, project_id: int, name: str, type_id: Optional[int] = None) -> tuple[str, bool]:
+    def create_project_with_git(
+        self,
+        project_id: int,
+        name: str,
+        type_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+    ) -> tuple[str, bool]:
         """
         Create project folder with README.md, .gitignore, changerule.md, and Git initialization.
 
@@ -369,6 +416,7 @@ The absolute path to this project folder is available as system context.
             project_id: Project ID from database
             name: Project name
             type_id: Project type ID from database (optional, defaults to website)
+            user_id: Owner user ID. Required in EXECUTION_MODE=container.
 
         Returns:
             Tuple of (project_path, success)
@@ -379,7 +427,7 @@ The absolute path to this project folder is available as system context.
 
         try:
             # Create folder
-            project_path = self.create_project_folder(project_id, name, type_id)
+            project_path = self.create_project_folder(project_id, name, type_id, user_id=user_id)
 
             # Create README
             if not self.create_readme(project_path):
@@ -424,7 +472,13 @@ The absolute path to this project folder is available as system context.
             print(f"Failed to delete project folder: {e}")
             return False
 
-    def create_project_with_readme(self, project_id: int, name: str, type_id: Optional[int] = None) -> tuple[str, bool]:
+    def create_project_with_readme(
+        self,
+        project_id: int,
+        name: str,
+        type_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+    ) -> tuple[str, bool]:
         """
         Create project folder and README.md atomically.
 
@@ -432,6 +486,7 @@ The absolute path to this project folder is available as system context.
             project_id: Project ID from database
             name: Project name
             type_id: Project type ID from database (optional, defaults to website)
+            user_id: Owner user ID. Required in EXECUTION_MODE=container.
 
         Returns:
             Tuple of (project_path, success)
@@ -442,7 +497,7 @@ The absolute path to this project folder is available as system context.
 
         try:
             # Create folder
-            project_path = self.create_project_folder(project_id, name, type_id)
+            project_path = self.create_project_folder(project_id, name, type_id, user_id=user_id)
 
             # Create README
             readme_success = self.create_readme(project_path)
