@@ -86,6 +86,7 @@ _CONTAINER_ENV_ALLOWLIST = frozenset({
     "OPENROUTER_API_KEY",
     # Z.AI (zai-mcp-server injected by Claude's settings.json)
     "ZAI_API_KEY",
+    "Z_AI_API_KEY",
     # PATH must be present so claude/node/npm/pip resolve inside the container
     "PATH",
     # Home directory (some Node tools consult $HOME for caches)

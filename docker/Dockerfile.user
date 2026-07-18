@@ -81,13 +81,20 @@ RUN groupadd --system --gid 1001 dreampilot \
 # proxy. The proxy is reachable at host.docker.internal:7861 because
 # dreamagent-net is a bridge with a gateway.
 #
+# We also bake ~/.claude.json with hasCompletedOnboarding=true (Gotcha #8).
+# Without this Claude 2.1.83 refuses to run ("Not logged in") even when
+# ANTHROPIC_AUTH_TOKEN is set via env. This is onboarding STATE, not a
+# credential — the actual auth token is injected at runtime via -e flags.
+#
 # NOTE: secrets (ANTHROPIC_AUTH_TOKEN, ZAI_API_KEY) are NOT baked in here.
 # They are injected at `docker run` time via -e flags from the worker's
 # .env.postgres, so a leaked image contains no credentials.
 # ─────────────────────────────────────────────────────────────────────
 COPY docker/claude.settings.json /home/dreampilot/.claude/settings.json
+COPY docker/claude.onboarding.json /home/dreampilot/.claude.json
 RUN chmod 600 /home/dreampilot/.claude/settings.json \
-    && chown dreampilot:dreampilot /home/dreampilot/.claude/settings.json
+    && chmod 600 /home/dreampilot/.claude.json \
+    && chown dreampilot:dreampilot /home/dreampilot/.claude/settings.json /home/dreampilot/.claude.json
 
 # ─────────────────────────────────────────────────────────────────────
 # Final setup. USER drops privileges — every subsequent CMD/ENTRYPOINT
