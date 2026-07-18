@@ -102,8 +102,8 @@ RUN chmod +x /opt/entrypoint.sh
 # Final setup.
 # ─────────────────────────────────────────────────────────────────────
 ENV PATH="/usr/local/bin:/usr/bin:/usr/local/lib/node_modules/.bin:${PATH}"
-ENV NPM_CONFIG_CACHE=/tmp/npm-cache
-ENV PIP_CACHE_DIR=/tmp/pip-cache
+ENV NPM_CONFIG_CACHE=/cache/npm
+ENV PIP_CACHE_DIR=/cache/pip
 
 WORKDIR /workspace
 

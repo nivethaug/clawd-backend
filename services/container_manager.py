@@ -224,12 +224,14 @@ class ContainerManager:
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges",
             "--read-only",
-            "--tmpfs", "/tmp:rw,size=64m,mode=1777",
+            # /tmp must be large enough for npm cache (~300MB) + build artifacts.
+            # 64MB was too small — caused "ENOSPC" during npm ci / vite build.
+            "--tmpfs", "/tmp:rw,size=512m,mode=1777",
             # Writable home dir for Claude (session state, .claude.json updates).
             # The rootfs is read-only, but Claude needs to write to ~/.claude/.
             # Entrypoint.sh copies config templates from /opt/claude-config/ into
-            # this tmpfs on every start.
-            "--tmpfs", "/home/dreampilot:rw,size=128m,mode=0700,uid=1001,gid=1001",
+            # this tmpfs on every start. 256MB allows npm to use ~/.npm as fallback.
+            "--tmpfs", "/home/dreampilot:rw,size=256m,mode=0700,uid=1001,gid=1001",
             # Resource limits
             "--memory", CONTAINER_MEMORY,
             "--cpus", CONTAINER_CPUS,
@@ -239,7 +241,9 @@ class ContainerManager:
             "--workdir", CONTAINER_MOUNT_TARGET,
             # Bind mounts
             "--mount", f"type=bind,source={self.workspace_host_path},target={CONTAINER_MOUNT_TARGET}",
-            "--mount", f"type=bind,source={SHARED_CACHE_HOST},target={SHARED_CACHE_TARGET},readonly",
+            # /cache is writable (rw) — npm and pip need to write cached packages.
+            # Making it read-only defeated the entire purpose of a shared cache.
+            "--mount", f"type=bind,source={SHARED_CACHE_HOST},target={SHARED_CACHE_TARGET}",
             # Add-host so host.docker.internal resolves to the bridge gateway.
             # Used by Claude settings.json to reach wrapper-v2 on :7861.
             "--add-host=host.docker.internal:host-gateway",
