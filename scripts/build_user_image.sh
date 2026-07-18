@@ -19,7 +19,7 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.83}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
-PYTHON_VERSION="${PYTHON_VERSION:-3.12.3}"
+# Python comes from the python:3.12-slim base image — no build-from-source.
 
 IMAGE_NAME="dreamagent/user-workspace"
 IMAGE_TAG_LATEST="${IMAGE_NAME}:latest"
@@ -65,7 +65,7 @@ echo " Building ${IMAGE_TAG_LATEST}"
 echo "=============================================="
 echo " Claude CLI : @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 echo " Node       : ${NODE_MAJOR}.x"
-echo " Python     : ${PYTHON_VERSION}"
+echo " Python     : 3.12 (from python:3.12-slim base)"
 echo " Git SHA    : ${GIT_SHA}"
 echo " Build date : ${BUILD_DATE}"
 echo " Context    : ${CONTEXT_DIR}"
@@ -78,12 +78,10 @@ docker build \
     --tag "${IMAGE_NAME}:${GIT_SHA}" \
     --build-arg CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION}" \
     --build-arg NODE_MAJOR="${NODE_MAJOR}" \
-    --build-arg PYTHON_VERSION="${PYTHON_VERSION}" \
     --label "org.opencontainers.image.title=${IMAGE_NAME}" \
     --label "org.opencontainers.image.version=${GIT_SHA}" \
     --label "org.opencontainers.image.created=${BUILD_DATE}" \
     --label "dreamagent.claude_code_version=${CLAUDE_CODE_VERSION}" \
-    --label "dreamagent.python_version=${PYTHON_VERSION}" \
     --label "dreamagent.node_major=${NODE_MAJOR}" \
     "${CONTEXT_DIR}"
 

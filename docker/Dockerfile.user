@@ -21,13 +21,11 @@
 # Build args (override via scripts/build_user_image.sh):
 #   CLAUDE_CODE_VERSION  — pinned @anthropic-ai/claude-code version (default 2.1.83)
 #   NODE_MAJOR           — Node major version (default 22)
-#   PYTHON_VERSION       — Python version (default 3.12)
 
-FROM debian:bookworm-slim
+FROM python:3.12-slim
 
 ARG CLAUDE_CODE_VERSION=2.1.83
 ARG NODE_MAJOR=22
-ARG PYTHON_VERSION=3.12
 
 # ─────────────────────────────────────────────────────────────────────
 # Base packages: required for Claude CLI, npm, pip, git, build toolchain.
@@ -41,34 +39,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         build-essential \
         libpq-dev \
-        libssl-dev \
-        zlib1g-dev \
-        libffi-dev \
-        libbz2-dev \
-        libreadline-dev \
-        libsqlite3-dev \
-        libncursesw5-dev \
-        xz-utils \
-        tk-dev \
-        llvm \
     && rm -rf /var/lib/apt/lists/*
 
-# ─────────────────────────────────────────────────────────────────────
-# Python (built from source to match the worker's 3.12 exactly — same
-# approach as docs/worker_vps_setup.md §1.2; avoids Debian's 3.11 default
-# which would break wheels compiled against 3.12 on the host).
-# ─────────────────────────────────────────────────────────────────────
-ENV PYTHON_VERSION=${PYTHON_VERSION}
-RUN curl -fsSL https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz -o /tmp/python.tgz \
-    && tar xzf /tmp/python.tgz -C /tmp \
-    && cd /tmp/Python-${PYTHON_VERSION} \
-    && ./configure --quiet \
-    && make -j"$(nproc)" --quiet \
-    && make altinstall --quiet \
-    && rm -rf /tmp/python.tgz /tmp/Python-${PYTHON_VERSION} \
-    && ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python3 \
-    && ln -sf /usr/local/bin/python3 /usr/local/bin/python \
-    && python3 -m ensurepip --upgrade
+# python:3.12-slim already provides python3, python, pip — no build-from-source needed.
+# Verify the toolchain is intact before proceeding.
+RUN python3 --version && pip3 --version
 
 # ─────────────────────────────────────────────────────────────────────
 # Node.js (via NodeSource — matches docs/worker_vps_setup.md §1.3).
