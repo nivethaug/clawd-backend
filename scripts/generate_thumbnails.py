@@ -405,7 +405,6 @@ def process_items(items: List[Dict], item_type: str, update_fn) -> None:
                 failed += 1
                 continue
 
-        url = get_project_url(domain)
         log.info(f"[{i}/{len(items)}] {title} → {url}")
 
         # Capture screenshot
