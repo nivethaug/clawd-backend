@@ -234,7 +234,8 @@ class ContainerManager:
             "--memory", CONTAINER_MEMORY,
             "--cpus", CONTAINER_CPUS,
             "--pids-limit", str(CONTAINER_PIDS_LIMIT),
-            # Workdir (entrypoint handles the user drop via gosu)
+            # User mapping (entrypoint runs AS this user — no gosu needed)
+            "--user", f"{CONTAINER_USER_UID}:{CONTAINER_USER_GID}",
             "--workdir", CONTAINER_MOUNT_TARGET,
             # Bind mounts
             "--mount", f"type=bind,source={self.workspace_host_path},target={CONTAINER_MOUNT_TARGET}",

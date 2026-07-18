@@ -30,7 +30,6 @@ ARG NODE_MAJOR=22
 # ─────────────────────────────────────────────────────────────────────
 # Base packages: required for Claude CLI, npm, pip, git, build toolchain.
 # Kept minimal — every extra package is attack surface.
-# gosu is used by entrypoint.sh to drop privileges (lighter than sudo).
 # ─────────────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -38,7 +37,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gnupg \
         git \
         bash \
-        gosu \
         build-essential \
         libpq-dev \
     && rm -rf /var/lib/apt/lists/*
