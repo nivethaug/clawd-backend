@@ -129,17 +129,41 @@ def start_bot_pm2(
         logger.info(f"📝 Updated .env file with {len(env_vars)} variables")
         
         # Build PM2 start command with explicit parameters (no ecosystem file)
-        # This avoids conflicts with other PM2 processes
-        pm2_cmd = [
-            "pm2", "start", "main.py",
-            "--name", process_name,
-            "--interpreter", interpreter,
-            "--cwd", telegram_dir,
-            "--log", f"{telegram_dir}/logs/out.log",
-            "--error", f"{telegram_dir}/logs/error.log",
-            "--time",
-            "--env", "production"
-        ]
+        # Phase 5: use bubblewrap sandbox when EXECUTION_MODE=container
+        sandbox_script = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "scripts", "bot-sandbox.sh"
+        )
+        use_sandbox = (
+            os.getenv("EXECUTION_MODE", "local").lower() == "container"
+            and os.path.exists(sandbox_script)
+        )
+
+        if use_sandbox:
+            pm2_cmd = [
+                "pm2", "start", sandbox_script,
+                "--name", process_name,
+                "--interpreter", "none",
+                "--cwd", telegram_dir,
+                "--log", f"{telegram_dir}/logs/out.log",
+                "--error", f"{telegram_dir}/logs/error.log",
+                "--time",
+                "--env", "production",
+                "--",
+                SHARED_VENV_PATH,
+                telegram_dir
+            ]
+        else:
+            pm2_cmd = [
+                "pm2", "start", "main.py",
+                "--name", process_name,
+                "--interpreter", interpreter,
+                "--cwd", telegram_dir,
+                "--log", f"{telegram_dir}/logs/out.log",
+                "--error", f"{telegram_dir}/logs/error.log",
+                "--time",
+                "--env", "production"
+            ]
         
         # Start PM2 with environment variables in the subprocess environment
         process_env = os.environ.copy()

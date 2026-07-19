@@ -111,16 +111,41 @@ def start_bot_pm2(
         logger.info(f"Updated .env file with {len(env_vars)} variables")
 
         # Build PM2 start command
-        pm2_cmd = [
-            "pm2", "start", "main.py",
-            "--name", process_name,
-            "--interpreter", interpreter,
-            "--cwd", discord_dir,
-            "--log", f"{discord_dir}/logs/out.log",
-            "--error", f"{discord_dir}/logs/error.log",
-            "--time",
-            "--env", "production"
-        ]
+        # Phase 5: use bubblewrap sandbox when EXECUTION_MODE=container
+        sandbox_script = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "scripts", "bot-sandbox.sh"
+        )
+        use_sandbox = (
+            os.getenv("EXECUTION_MODE", "local").lower() == "container"
+            and os.path.exists(sandbox_script)
+        )
+
+        if use_sandbox:
+            pm2_cmd = [
+                "pm2", "start", sandbox_script,
+                "--name", process_name,
+                "--interpreter", "none",
+                "--cwd", discord_dir,
+                "--log", f"{discord_dir}/logs/out.log",
+                "--error", f"{discord_dir}/logs/error.log",
+                "--time",
+                "--env", "production",
+                "--",
+                SHARED_VENV_PATH,
+                discord_dir
+            ]
+        else:
+            pm2_cmd = [
+                "pm2", "start", "main.py",
+                "--name", process_name,
+                "--interpreter", interpreter,
+                "--cwd", discord_dir,
+                "--log", f"{discord_dir}/logs/out.log",
+                "--error", f"{discord_dir}/logs/error.log",
+                "--time",
+                "--env", "production"
+            ]
 
         # Start PM2 with environment variables
         process_env = os.environ.copy()

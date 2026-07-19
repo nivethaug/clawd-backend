@@ -538,7 +538,7 @@ class ServiceManager:
             # FIX 1: Create ecosystem config with venv interpreter
             # Use uvicorn directly from venv for PM2 compatibility
             venv_uvicorn = f"{self.venv_path}/bin/uvicorn"
-            
+
             # Build environment variables
             env_vars = {
                 "PORT": str(backend_port),
@@ -546,25 +546,50 @@ class ServiceManager:
                 "BACKEND_PORT": str(backend_port),
                 "PROJECT_NAME": app_name.replace("-backend", "")
             }
-            
+
             # Add DATABASE_URL if provided
             if database_url:
                 env_vars["DATABASE_URL"] = database_url
-            
-            ecosystem_config = {
-                "apps": [{
-                    "name": app_name,
-                    "script": venv_uvicorn,
-                    "args": f"main:app --host 0.0.0.0 --port {backend_port}",
-                    "cwd": str(backend_path),
-                    "interpreter": "none",
-                    "instances": 1,
-                    "exec_mode": "fork",
-                    "watch": False,
-                    "max_memory_restart": "500M",
-                    "env": env_vars
-                }]
-            }
+
+            # Phase 5: use bubblewrap sandbox when EXECUTION_MODE=container
+            # The sandbox restricts the backend to its own directory only,
+            # preventing it from reading other users' files or platform secrets.
+            sandbox_script = str(Path(__file__).parent / "scripts" / "backend-sandbox.sh")
+            use_sandbox = (
+                os.getenv("EXECUTION_MODE", "local").lower() == "container"
+                and os.path.exists(sandbox_script)
+            )
+
+            if use_sandbox:
+                ecosystem_config = {
+                    "apps": [{
+                        "name": app_name,
+                        "script": sandbox_script,
+                        "args": f"{self.venv_path} {backend_path} {backend_port}",
+                        "cwd": str(backend_path),
+                        "interpreter": "none",
+                        "instances": 1,
+                        "exec_mode": "fork",
+                        "watch": False,
+                        "max_memory_restart": "500M",
+                        "env": env_vars
+                    }]
+                }
+            else:
+                ecosystem_config = {
+                    "apps": [{
+                        "name": app_name,
+                        "script": venv_uvicorn,
+                        "args": f"main:app --host 0.0.0.0 --port {backend_port}",
+                        "cwd": str(backend_path),
+                        "interpreter": "none",
+                        "instances": 1,
+                        "exec_mode": "fork",
+                        "watch": False,
+                        "max_memory_restart": "500M",
+                        "env": env_vars
+                    }]
+                }
 
             # Write ecosystem config file
             import json
@@ -2579,19 +2604,39 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
 
                 # Start PM2 service with npx serve -s dist -l port
                 logger.info(f"[SERVICE] Starting frontend service: {frontend_app_name}")
-                frontend_cmd = [
-                    "pm2",
-                    "start",
-                    "npx",
-                    "--name",
-                    frontend_app_name,
-                    "--",
-                    "serve",
-                    "-s",
-                    "dist",
-                    "-l",
-                    str(self.ports["frontend"])
-                ]
+
+                # Phase 5: use bubblewrap sandbox for frontend when EXECUTION_MODE=container
+                frontend_sandbox = str(Path(__file__).parent / "scripts" / "frontend-sandbox.sh")
+                use_frontend_sandbox = (
+                    os.getenv("EXECUTION_MODE", "local").lower() == "container"
+                    and os.path.exists(frontend_sandbox)
+                )
+
+                if use_frontend_sandbox:
+                    frontend_cmd = [
+                        "pm2",
+                        "start",
+                        frontend_sandbox,
+                        "--name",
+                        frontend_app_name,
+                        "--",
+                        str(self.project_path / "frontend"),
+                        str(self.ports["frontend"])
+                    ]
+                else:
+                    frontend_cmd = [
+                        "pm2",
+                        "start",
+                        "npx",
+                        "--name",
+                        frontend_app_name,
+                        "--",
+                        "serve",
+                        "-s",
+                        "dist",
+                        "-l",
+                        str(self.ports["frontend"])
+                    ]
 
                 # logger.info(f"[SERVICE] Frontend command: {' '.join(frontend_cmd)}")  # Commented for cleaner logs
                 # logger.info(f"[SERVICE] Frontend working directory: {self.project_path / 'frontend'}")  # Commented for cleaner logs
@@ -2697,7 +2742,7 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 'HOST': '0.0.0.0',
                 'PORT': str(backend_port),
                 'PROJECT_NAME': self.project_name,
-                'SECRET_KEY': f'dreampilot-{self.project_name}-secret-key',
+                'SECRET_KEY': secrets.token_urlsafe(32),
                 'DEBUG': 'false'
             }
 
