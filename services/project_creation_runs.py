@@ -436,7 +436,7 @@ def _run_logged_subprocess(
                     continue
                 text = f"{stream_prefix}{line.rstrip()}"
 
-                # Filter out noise — don't store in DB or stderr tail
+                # Filter out noise — don't store in DB or PM2
                 _is_noise = (
                     "Phase progress" in text
                     or "⏱️" in text
@@ -459,11 +459,30 @@ def _run_logged_subprocess(
                     stderr_tail.append(text)
                 else:
                     stdout_tail.append(text)
-                # Save to DB chunk only (UI shows progress).
+
+                # Save to DB chunk (UI shows progress).
                 try:
                     append_chunk(run_id, "log", text)
-                except Exception as exc:
-                    pass  # silently skip — chunk failures are non-fatal
+                except Exception:
+                    pass
+
+                # Log important milestones to PM2 only
+                _is_important = (
+                    "PHASE_" in text
+                    or "✅" in text
+                    or "❌" in text
+                    or "⚠️" in text
+                    or "ACPX:" in text
+                    or "completed" in text.lower()
+                    or "failed" in text.lower()
+                    or "READY" in text
+                    or "ERROR" in text
+                    or "Traceback" in text
+                    or "RuntimeError" in text
+                    or "ACP Frontend Editor" in text  # captures partial/fail status
+                )
+                if _is_important:
+                    logger.info("%s", text)
         except Exception as exc:
             logger.warning("[PROJECT-RUN] stream error: %s", exc)
         finally:
