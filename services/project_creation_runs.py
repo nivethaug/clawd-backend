@@ -439,27 +439,13 @@ def _run_logged_subprocess(
                     stderr_tail.append(text)
                 else:
                     stdout_tail.append(text)
-                # Save to DB chunk (UI shows progress) but skip PM2 log for
-                # noisy repetitive lines (phase progress pings every 30s,
-                # database placeholder conversions, httpx requests).
+                # Save to DB chunk only (UI shows progress).
+                # Do NOT log to PM2 — it's too noisy with ACPX progress pings,
+                # library debug output, and database internal logs.
                 try:
                     append_chunk(run_id, "log", text)
                 except Exception as exc:
-                    logger.warning("[PROJECT-RUN] append chunk failed; continuing stream: %s", exc)
-                # Only log important lines to PM2 — filter out progress pings
-                # and other repetitive noise
-                _is_noise = (
-                    "Phase progress" in text
-                    or "⏱️" in text
-                    or "Converted query placeholders" in text
-                    or "HTTP Request:" in text
-                    or "httpcore" in text
-                    or "pipeline_status" in text
-                    or "database_postgres" in text
-                    or "Working directory:" in text
-                )
-                if not _is_noise:
-                    logger.info("%s", text)
+                    pass  # silently skip — chunk failures are non-fatal
         except Exception as exc:
             logger.warning("[PROJECT-RUN] stream error: %s", exc)
         finally:
