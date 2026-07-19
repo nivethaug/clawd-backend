@@ -16,7 +16,7 @@
     "chrome-devtools": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--browserUrl", "http://host.docker.internal:9222"]
+      "args": ["-y", "chrome-devtools-mcp@latest", "--browserUrl", "http://172.17.0.1:9223"]
     }
   }
 }
