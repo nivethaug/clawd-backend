@@ -238,75 +238,75 @@ def _ok(resp: Optional[requests.Response]) -> bool:
 # ──────────────────────────────────────────────────────────────────────
 
 TEMPLATES: List[Dict[str, Any]] = [
-    # ── Website (10) ─────────────────────────────────────────────
+    # ── Website (10) — premium, immersive descriptions following Prompt Builder standards ──
     {
         "name": "SaaS Landing Page",
         "type_id": 1,
         "category": "Website",
-        "description": "A premium SaaS landing page for a fictional product called 'FlowAnalytics'. Include a hero section with gradient background and CTA button, feature grid with icons (3-4 features), pricing table with 3 tiers, testimonials carousel, and footer with social links. Modern, clean design inspired by Linear and Vercel. Dark theme with accent color.",
+        "description": "Build a premium SaaS landing page for 'FlowAnalytics,' a real-time analytics startup. The experience should feel like stepping into a control room — dark cinematic hero with live-updating metric cards, glassmorphism feature panels that glow on hover, pricing tiers presented as holographic cards, and testimonials that slide in with depth. Deep indigo and electric blue palette. Inspired by Linear, Vercel, and Stripe's premium marketing. Clean, confident, and futuristic.",
         "featured": True,
     },
     {
         "name": "Developer Portfolio",
         "type_id": 1,
         "category": "Website",
-        "description": "A minimalist developer portfolio with a hero section showing name + role, projects grid with hover cards, about section with skills, and a contact form. Clean typography, lots of whitespace, subtle animations on scroll. Light theme with dark accent.",
+        "description": "Create an immersive developer portfolio that feels like a personal command center. Hero section with a typing animation cycling through roles, projects displayed as interactive 3D hover cards with glow effects, skills visualized as an animated radar chart, and a contact form that feels like sending a transmission. Light theme with terminal-green accents, monospace details, and subtle particle effects. Inspired by Brittany Chiang and primevue portfolios.",
         "featured": True,
     },
     {
         "name": "Business Website",
         "type_id": 1,
         "category": "Website",
-        "description": "A professional business website for a consulting firm. Include a hero with company tagline, services section with 4 cards, about us with team photos placeholder, case studies section, and contact form with map placeholder. Corporate blue color scheme, trustworthy and professional.",
+        "description": "Build a corporate consulting website that radiates trust and sophistication. Full-screen hero with parallax cityscape, services presented as premium accordions with smooth slide reveals, case studies as cinematic cards with before/after metrics, team section with elegant hover-reveal bios, and a contact form with map integration. Deep navy blue and gold accents. Inspired by McKinsey and BCG's premium digital presence.",
         "featured": False,
     },
     {
         "name": "E-commerce Store",
         "type_id": 1,
         "category": "Website",
-        "description": "A modern e-commerce storefront for a boutique coffee brand. Product grid with add-to-cart buttons, product detail modal, shopping cart sidebar, and checkout form. Warm earth tones, premium feel, product photography placeholders.",
+        "description": "Create a boutique coffee brand storefront that feels like a luxury sensory experience. Cinematic hero with steam animation rising from a cup, product grid where each card tilts in 3D on hover with aroma description overlays, shopping cart that slides in as a premium drawer, and checkout with single-page flow. Warm earth tones, gold accents, product photography with depth-of-field blur. Inspired by Blue Bottle and Stumptown's premium e-commerce.",
         "featured": True,
     },
     {
         "name": "Documentation Site",
         "type_id": 1,
         "category": "Website",
-        "description": "A clean documentation site with a sidebar navigation, main content area with code blocks, search bar, and version switcher. Inspired by Stripe docs. Dark sidebar, light content area, syntax-highlighted code blocks.",
+        "description": "Build a developer documentation hub that feels like a premium IDE. Dark sidebar with tree-view navigation and search, main content with syntax-highlighted code blocks that have copy buttons and line numbers, interactive API playground with live request/response, and a version switcher that smoothly transitions content. Split-screen layout, dark sidebar with light content. Inspired by Stripe Docs, Linear Docs, and Mintlify.",
         "featured": False,
     },
     {
         "name": "Personal Blog",
         "type_id": 1,
         "category": "Website",
-        "description": "A personal blog with a featured post hero, post grid with categories, individual post page with reading time, and an about sidebar. Warm, readable typography with a focus on content. Magazine-style layout.",
+        "description": "Create a personal blog that feels like a premium digital magazine. Featured article hero with full-bleed image and elegant overlay text, article grid with magazine-style masonry layout, reading view with elegant serif typography and estimated read time, and an about sidebar with animated skill bars. Warm sepia tones with cream backgrounds. Inspired by Medium's premium publications and Ghost themes.",
         "featured": False,
     },
     {
         "name": "Startup Coming Soon",
         "type_id": 1,
         "category": "Website",
-        "description": "A captivating 'coming soon' landing page for a tech startup. Include an animated hero with countdown timer, email capture form with notification, social media links, and a minimal feature teaser. Gradient background with glassmorphism card. Dark theme with vibrant accent.",
+        "description": "Build a captivating 'coming soon' experience for 'Nexus AI,' a generative AI startup. Animated hero with particle network background that responds to mouse movement, countdown timer with smooth flip animations, email capture form that glows on focus and shows success confetti, and minimal feature teasers that fade in on scroll. Deep space gradient (purple to black) with neon cyan accents. Glassmorphism cards throughout.",
         "featured": False,
     },
     {
         "name": "Event Landing",
         "type_id": 1,
         "category": "Website",
-        "description": "An event landing page for a tech conference. Include hero with event date + location, speaker grid with photos and bios, schedule timeline, sponsor logos, and registration form with ticket tiers. Bold, energetic design with a focus on urgency.",
+        "description": "Create a tech conference landing page that pulses with energy. Bold hero with animated event date countdown and geometric background patterns, speaker grid where photos transform on hover with bio reveal, schedule timeline with horizontal scroll and session filtering, sponsor logos in an infinite marquee, and registration form with ticket tier comparison. Vibrant gradient theme (fuchsia to violet) with dark sections. Inspired by Web Summit and AWS re:Invent.",
         "featured": False,
     },
     {
         "name": "Podcast Website",
         "type_id": 1,
         "category": "Website",
-        "description": "A podcast website with a featured latest episode player, episode list with play buttons, host bios, subscribe links (Apple, Spotify, Google), and a contact form. Warm, audio-focused design with waveform visuals.",
+        "description": "Build a podcast website that feels like a premium audio studio. Featured episode hero with animated waveform visualization and play button that pulses, episode list with hover-play previews and duration badges, host bios with warm portrait cards, subscribe buttons for all platforms with branded colors, and a contact form styled as a 'send us a voice message' CTA. Warm amber and charcoal palette with audio-reactive visual elements.",
         "featured": False,
     },
     {
         "name": "Non-Profit Website",
         "type_id": 1,
         "category": "Website",
-        "description": "A non-profit organization website with a mission hero, impact statistics counters, programs section with images, donation form with progress bar, volunteer signup, and stories section. Warm, hopeful design with a focus on community.",
+        "description": "Create a non-profit website that inspires action through immersive storytelling. Full-screen hero with video background showing impact, animated statistics counters that count up on scroll, programs section with image cards that expand on hover revealing stories, donation form with progress bar that fills with warm gradient, volunteer signup with map of active locations, and a stories carousel with emotional photography. Warm, hopeful palette with earth greens and sky blues.",
         "featured": False,
     },
     # ── Telegram, Discord, Scheduler templates — add tomorrow ──
@@ -315,20 +315,20 @@ TEMPLATES: List[Dict[str, Any]] = [
 ]
 
 # ──────────────────────────────────────────────────────────────────────
-# Gallery definitions (unchanged from original)
+# Gallery definitions — premium descriptions following Prompt Builder standards
 # ──────────────────────────────────────────────────────────────────────
 
 GALLERY: List[Dict[str, Any]] = [
-    {"name": "CRM Dashboard", "type_id": 1, "description": "A modern CRM dashboard with contact management, deal pipeline (kanban), activity timeline, and sales metrics. Drag-and-drop deals between stages. Premium dark UI with data tables and charts."},
-    {"name": "Restaurant Website", "type_id": 1, "description": "An elegant restaurant website with a full-screen hero image, menu cards with prices, reservation form, photo gallery, and location map. Warm, appetizing design with elegant typography."},
-    {"name": "Gym Fitness", "type_id": 1, "description": "A high-energy gym website with bold hero section, class schedule table, trainer cards, membership pricing tiers, and a BMI calculator widget. Dark theme with neon accents, motivational imagery."},
-    {"name": "Analytics Dashboard", "type_id": 1, "description": "A web analytics dashboard with traffic sources, visitor map, conversion funnel, top pages, and real-time active users. Data-dense but clean, inspired by Plausible Analytics."},
-    {"name": "AI Chat Interface", "type_id": 1, "description": "A sleek AI chat interface with conversation history sidebar, streaming message display, model selector, and code block syntax highlighting. Dark theme inspired by ChatGPT."},
-    {"name": "Booking System", "type_id": 1, "description": "An appointment booking system with calendar view, time slot selection, service menu, booking confirmation, and reminder settings. Clean, trustworthy design with clear CTAs."},
-    {"name": "Invoice System", "type_id": 1, "description": "An invoicing system with invoice list, create-invoice form with line items, PDF preview, payment status tracking, and client management. Professional, clean design with print-ready invoices."},
-    {"name": "Crypto Dashboard", "type_id": 1, "description": "A real-time crypto tracking dashboard with price tickers, portfolio allocation pie chart, recent transactions, and price alerts setup. Dark theme with green/red price indicators."},
-    {"name": "Agency Website", "type_id": 1, "description": "A creative agency website with portfolio grid, services with hover effects, team bios, client logos carousel, and a contact form with project type selector. Bold, modern design with smooth animations."},
-    {"name": "Real Estate Listings", "type_id": 1, "description": "A real estate listing site with property search filters, map view, property cards with photos, detail page with gallery, and agent contact form. Clean, aspirational design."},
+    {"name": "CRM Dashboard", "type_id": 1, "description": "Build a premium CRM dashboard that feels like a command center. Dark theme with neon-accented data tables, kanban deal pipeline with smooth drag-and-drop between stages, activity timeline with real-time pulse indicators, and sales metrics with animated charts. Glassmorphism cards, sidebar navigation with icons, and a search bar that filters across all data. Inspired by Linear and Attio."},
+    {"name": "Restaurant Website", "type_id": 1, "description": "Create an immersive fine-dining restaurant website. Full-screen hero with cinematically blurred dish photography and elegant serif typography, menu presented as premium cards with hover-reveal ingredients, reservation form with date picker and time slot grid, photo gallery with lightbox, and location map with custom styling. Warm candlelit palette with gold accents."},
+    {"name": "Gym Fitness", "type_id": 1, "description": "Build a high-energy gym website that motivates instantly. Bold hero with athletic photography and motivational text overlay, class schedule with filterable week view, trainer cards with specialty badges, membership pricing with comparison table, and a BMI calculator widget with animated results. Dark theme with electric green and orange neon accents, sharp angles, and dynamic imagery."},
+    {"name": "Analytics Dashboard", "type_id": 1, "description": "Create a web analytics dashboard that turns data into visual art. Real-time traffic sources as animated flow diagram, visitor map with pulsing location dots, conversion funnel with step-through visualization, top pages with sparkline charts, and live active users counter. Clean, data-dense but breathable. Inspired by Plausible and Vercel Analytics."},
+    {"name": "AI Chat Interface", "type_id": 1, "description": "Build a sleek AI chat interface that feels like talking to the future. Conversation history sidebar with search, streaming message display with typing animation, model selector dropdown, code blocks with syntax highlighting and copy button, and a settings panel for temperature/max tokens. Dark theme with subtle glow effects on active elements. Inspired by ChatGPT and Claude's clean UI."},
+    {"name": "Booking System", "type_id": 1, "description": "Create an appointment booking system that makes scheduling feel effortless. Calendar view with available time slots highlighted, service menu with duration and pricing cards, booking confirmation with calendar add-to feature, reminder settings with notification preferences, and a dashboard for managing upcoming appointments. Clean, trustworthy design with clear CTAs and smooth transitions."},
+    {"name": "Invoice System", "type_id": 1, "description": "Build a professional invoicing system that makes billing feel premium. Invoice list with status badges and quick filters, create-invoice form with dynamic line items and auto-tax calculation, PDF preview with print-ready formatting, payment status tracking with timeline, and client management with contact cards. Professional design with clean tables, branded invoice templates, and subtle animations."},
+    {"name": "Crypto Dashboard", "type_id": 1, "description": "Create a real-time crypto tracking dashboard that feels like a trading terminal. Live price tickers with flash-on-update animation, portfolio allocation as interactive pie chart, recent transactions table with gas tracker, price alert setup with notification preferences, and candlestick charts with drawing tools. Dark theme with green/red indicators, monospace numbers, and data density inspired by TradingView."},
+    {"name": "Agency Website", "type_id": 1, "description": "Build a creative agency website that showcases bold imagination. Portfolio grid with case study cards that expand on hover revealing project metrics, services section with icon animations and capability descriptions, team bios with personality-reveal hover states, client logos in an elegant infinite scroll, and a contact form with project type selector and budget range slider. Bold, modern design with smooth scroll animations."},
+    {"name": "Real Estate Listings", "type_id": 1, "description": "Create a real estate site that makes property browsing feel aspirational. Search filters with map integration showing property pins, property cards with hero image carousels and key specs, detail page with full-gallery lightbox and mortgage calculator, agent contact form with availability matching, and saved favorites with comparison view. Clean, aspirational design with large imagery and premium typography."},
 ]
 
 
