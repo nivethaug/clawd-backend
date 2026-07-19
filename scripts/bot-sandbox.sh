@@ -26,8 +26,8 @@ BOT_DIR="${2:?Missing bot_dir}"
 cd "$BOT_DIR"
 
 # On Debian 13, /lib /bin /sbin /lib64 are symlinks into /usr.
+# NOTE: No --die-with-parent — PM2 owns lifecycle (see backend-sandbox.sh).
 BWRAP_ARGS=(
-  --die-with-parent
   --share-net
   --dev /dev
   --proc /proc

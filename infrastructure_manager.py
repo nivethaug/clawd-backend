@@ -2120,6 +2120,18 @@ class InfrastructureManager:
                 logger.error(f"[VERIFY] PM2 logs for {self.service_name}:\n{pm2_logs.stdout[:2000]}")
                 if pm2_logs.stderr:
                     logger.error(f"[VERIFY] PM2 stderr:\n{pm2_logs.stderr[:500]}")
+
+                # Phase 5: when bwrap sandbox is in use, PM2 logs are often
+                # empty because bwrap forks + execs. Read the sandbox's own
+                # debug log so we can see what failed.
+                sandbox_debug = self.project_path / "backend" / ".sandbox-debug.log"
+                if sandbox_debug.exists():
+                    try:
+                        debug_tail = sandbox_debug.read_text()[-2000:]
+                        logger.error(f"[VERIFY] Sandbox debug log tail:\n{debug_tail}")
+                    except Exception:
+                        pass
+
                 
                 # Also check PM2 status
                 pm2_status = subprocess.run(

@@ -19,20 +19,60 @@
 #
 # Requires: apt install -y bubblewrap
 
-set -euo pipefail
+set -uo pipefail
 
 VENV="${1:?Missing venv_path}"
 PROJECT_DIR="${2:?Missing backend_path}"
 PORT="${3:?Missing port}"
 ENTRY="${4:-main:app}"
 
-cd "$PROJECT_DIR"
+# Validate required inputs FIRST so subsequent debug logging can write.
+if [ ! -d "$VENV" ]; then
+  echo "FATAL: venv not found: $VENV" >&2
+  exit 3
+fi
+if [ ! -d "$PROJECT_DIR" ]; then
+  echo "FATAL: project dir not found: $PROJECT_DIR" >&2
+  exit 4
+fi
+if ! command -v bwrap >/dev/null 2>&1; then
+  echo "FATAL: bwrap not installed" >&2
+  exit 5
+fi
+
+cd "$PROJECT_DIR" || {
+  echo "FATAL: cannot cd to $PROJECT_DIR" >&2
+  exit 2
+}
+
+# Debug log — write startup diagnostics so the "PM2-empty-logs" failure mode
+# is diagnosable. Disable with SANDBOX_DEBUG=0 in env.
+SANDBOX_DEBUG="${SANDBOX_DEBUG:-1}"
+DEBUG_LOG="$PROJECT_DIR/.sandbox-debug.log"
+if [ "$SANDBOX_DEBUG" = "1" ]; then
+  {
+    echo "=== backend-sandbox.sh $(date -Is) ==="
+    echo "VENV=$VENV"
+    echo "PROJECT_DIR=$PROJECT_DIR"
+    echo "PORT=$PORT"
+    echo "ENTRY=$ENTRY"
+    echo "PWD=$(pwd)"
+    echo "whoami=$(whoami 2>&1)"
+    echo "args=$*"
+    echo "DATABASE_URL_set=${DATABASE_URL:+yes}"
+    echo "---"
+  } >> "$DEBUG_LOG" 2>&1
+fi
 
 # On Debian 13, /lib /bin /sbin /lib64 are symlinks into /usr.
 # We mount /usr (which contains everything) and recreate the symlinks
 # at the sandbox root so ELF binaries can find their dynamic linker.
+#
+# NOTE: We intentionally do NOT use --die-with-parent. When PM2 spawns this
+# script, PM2's launcher thread exits after fork/exec, which would trigger
+# parent-death signal and kill the sandbox before uvicorn binds the port.
+# PM2 itself owns the lifecycle (it restarts on crash, stops on delete).
 BWRAP_ARGS=(
-  --die-with-parent
   --share-net
   --dev /dev
   --proc /proc
@@ -56,9 +96,35 @@ if [ -f /etc/ca-certificates.conf ]; then
   BWRAP_ARGS+=(--ro-bind /etc/ca-certificates.conf /etc/ca-certificates.conf)
 fi
 
+if [ "$SANDBOX_DEBUG" = "1" ]; then
+  echo "--- preflight: test bwrap can spawn python+uvicorn ---" >> "$DEBUG_LOG" 2>&1
+fi
+
+# Preflight: verify the sandbox can actually import uvicorn from the venv.
+# If this fails we get a clean error in the debug log + stderr instead of
+# PM2 swallowing the failure and producing empty logs downstream.
+PREFLIGHT=$(bwrap "${BWRAP_ARGS[@]}" -- "$VENV/bin/python3" -c 'import sys,uvicorn; print("py_ok", sys.version.split()[0], "uvicorn", uvicorn.__version__)' 2>&1)
+PREFLIGHT_RC=$?
+if [ "$SANDBOX_DEBUG" = "1" ]; then
+  echo "preflight_rc=$PREFLIGHT_RC" >> "$DEBUG_LOG" 2>&1
+  echo "preflight_out=$PREFLIGHT" >> "$DEBUG_LOG" 2>&1
+fi
+if [ "$PREFLIGHT_RC" != "0" ]; then
+  echo "FATAL: bwrap preflight failed (rc=$PREFLIGHT_RC):" >&2
+  echo "$PREFLIGHT" >&2
+  exit 6
+fi
+
+if [ "$SANDBOX_DEBUG" = "1" ]; then
+  echo "--- launching bwrap uvicorn on port $PORT ---" >> "$DEBUG_LOG" 2>&1
+fi
+
+# exec replaces this shell with bwrap. PM2 then tracks the bwrap process.
+# Unbuffered python (-u) ensures uvicorn output flushes to PM2's log capture.
 exec bwrap "${BWRAP_ARGS[@]}" \
   --setenv PYTHONPATH "$PROJECT_DIR" \
+  --setenv PYTHONUNBUFFERED "1" \
   -- \
-  "$VENV/bin/python3" -m uvicorn "$ENTRY" \
+  "$VENV/bin/python3" -u -m uvicorn "$ENTRY" \
   --host 0.0.0.0 \
   --port "$PORT"
