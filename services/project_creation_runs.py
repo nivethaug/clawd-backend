@@ -784,6 +784,21 @@ def execute_run(run_id: int) -> Dict[str, Any]:
 
         append_chunk(run_id, "log", f"Starting durable project creation for {name}")
 
+        # Clean up orphaned processes in the user's container before starting
+        # a new project creation. Previous ACPX/build/MCP processes accumulate
+        # (orphaned npm, esbuild, node, chrome-devtools). This prevents PID
+        # exhaustion that causes build failures and rollbacks.
+        try:
+            if os.getenv("EXECUTION_MODE", "local").lower() == "container":
+                from services.container_manager import ContainerManager
+                cm = ContainerManager(user_id)
+                if cm._container_exists():
+                    killed = cm.cleanup_processes()
+                    if killed:
+                        logger.info("[PROJECT-RUN] pre-run cleanup: killed %d orphaned processes", killed)
+        except Exception as exc:
+            logger.debug("[PROJECT-RUN] container pre-cleanup skipped: %s", exc)
+
         from services.billing_service import charge_project_creation
 
         with get_db() as conn:

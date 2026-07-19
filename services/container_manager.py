@@ -478,6 +478,35 @@ class ContainerManager:
         ])
         return r.returncode == 0 and self.container_name in r.stdout.strip().splitlines()
 
+    def cleanup_processes(self) -> int:
+        """Kill ALL processes inside the container except PID 1.
+
+        Previous ACPX/build/MCP processes accumulate inside the container
+        (orphaned npm, esbuild, node, chrome-devtools processes). This
+        cleans them up before starting a new exec session.
+
+        Returns the number of processes killed.
+        """
+        # List all PIDs except PID 1
+        r = _run_docker([
+            "exec", self.container_name,
+            "sh", "-c",
+            "for p in /proc/[0-9]*; do pid=$(basename $p); [ $pid -gt 1 ] && echo $pid; done 2>/dev/null",
+        ], timeout=10)
+        if r.returncode != 0 or not r.stdout.strip():
+            return 0
+
+        pids = [p.strip() for p in r.stdout.strip().splitlines() if p.strip().isdigit()]
+        killed = 0
+        for pid in pids:
+            kr = _run_docker(["exec", self.container_name, "kill", "-9", pid], timeout=5)
+            if kr.returncode == 0:
+                killed += 1
+
+        if killed:
+            logger.info("[CONTAINER] cleaned up %d orphaned processes in %s", killed, self.container_name)
+        return killed
+
     def health(self) -> Dict[str, Any]:
         """Return CPU/mem/uptime via `docker inspect` + `docker stats`.
 
