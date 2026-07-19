@@ -435,13 +435,31 @@ def _run_logged_subprocess(
                 if not line:
                     continue
                 text = f"{stream_prefix}{line.rstrip()}"
+
+                # Filter out noise — don't store in DB or stderr tail
+                _is_noise = (
+                    "Phase progress" in text
+                    or "⏱️" in text
+                    or "Converted query placeholders" in text
+                    or "HTTP Request:" in text
+                    or "httpcore" in text
+                    or "pipeline_status" in text
+                    or "database_postgres" in text
+                    or "asyncio" in text.lower()
+                    or "docker exec:" in text
+                    or "container_manager" in text
+                    or "runtime_manager" in text
+                    or text.strip() == ""
+                    or len(text) > 2000  # skip huge tool result dumps
+                )
+                if _is_noise:
+                    continue
+
                 if stream_prefix:
                     stderr_tail.append(text)
                 else:
                     stdout_tail.append(text)
                 # Save to DB chunk only (UI shows progress).
-                # Do NOT log to PM2 — it's too noisy with ACPX progress pings,
-                # library debug output, and database internal logs.
                 try:
                     append_chunk(run_id, "log", text)
                 except Exception as exc:
