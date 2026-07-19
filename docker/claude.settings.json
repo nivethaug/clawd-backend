@@ -3,20 +3,5 @@
     "ANTHROPIC_BASE_URL": "http://host.docker.internal:7861/anthropic-compat",
     "ANTHROPIC_MODEL": "z-ai/glm-4.7-flash",
     "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "true"
-  },
-  "mcpServers": {
-    "zai-mcp-server": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@z_ai/mcp-server"],
-      "env": {
-        "Z_AI_MODE": "ZAI"
-      }
-    },
-    "chrome-devtools": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--browserUrl", "http://172.17.0.1:9223"]
-    }
   }
 }
