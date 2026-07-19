@@ -935,12 +935,6 @@ class ACPFrontendEditorV2:
             max_new_files: Maximum number of new files allowed per execution
             project_id: Optional database project ID for workflow metadata
         """
-        # Phase 5: translate host path to container path so ALL references
-        # (metadata, prompt text, file operations, ClaudeCodeAgent cwd) use
-        # /workspace/... instead of /workspaces/user_24/... when in container.
-        from services.container_storage import to_container_path, EXECUTION_MODE
-        if EXECUTION_MODE == "container":
-            frontend_src_path = to_container_path(frontend_src_path)
         self.frontend_src_path = Path(frontend_src_path).resolve()
         self.frontend_path = self.frontend_src_path.parent
         self.project_path = self.frontend_path.parent
@@ -1538,6 +1532,9 @@ class ACPFrontendEditorV2:
         # Determine which page should be the default route (clean name for JSX component)
         default_page = clean_page_names[0] if clean_page_names else "Dashboard"
 
+        # Translate host paths to container paths for Claude's metadata.
+        # Claude sees /workspace/... (its cwd), not /workspaces/user_24/... (host path).
+        from services.container_storage import to_container_path
         meta_block = build_workflow_meta_block(
             project_type_id=1,
             project_type="website",
@@ -1545,8 +1542,8 @@ class ACPFrontendEditorV2:
             workflow="website_create",
             project_name=self.project_name,
             project_id=self.project_id,
-            project_path=self.project_path,
-            frontend_path=self.frontend_path,
+            project_path=to_container_path(str(self.project_path)),
+            frontend_path=to_container_path(str(self.frontend_path)),
             prompt_kind="website_create",
             pages=required_pages_list,
         )
