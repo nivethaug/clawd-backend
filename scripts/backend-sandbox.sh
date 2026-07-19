@@ -60,6 +60,6 @@ fi
 exec bwrap "${BWRAP_ARGS[@]}" \
   --setenv PYTHONPATH "$PROJECT_DIR" \
   -- \
-  "$VENV/bin/uvicorn" "$ENTRY" \
+  "$VENV/bin/python3" -m uvicorn "$ENTRY" \
   --host 0.0.0.0 \
   --port "$PORT"
