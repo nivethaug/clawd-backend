@@ -1569,8 +1569,15 @@ mobile-only output.
 4. Integrate navigation into `Layout.tsx`
 5. Run `npm run build` only after router validation passes
 6. Serve dist: `npx serve -s dist -l 3004`
-7. Quick HTTP check — curl/Node.js verify status 200, not starter scaffold, kill server
-8. Update AI index files (symbols, files, dependencies, summaries)
+7. Verify the served page using curl (run inside the container via Bash):
+   ```
+   curl -s http://localhost:3004/ | grep -E '<title>|<div id="root">|<script'
+   ```
+   The page must have: a `<title>` tag (not "DreamPilot"), a `<div id="root">`
+   for React mounting, and at least one `<script>` tag for the JS bundle.
+   If curl returns a non-starter HTML with these elements, verification passes.
+8. Kill the serve process: `pkill -f "serve -s dist" 2>/dev/null`
+9. Update AI index files (symbols, files, dependencies, summaries)
 
 Wrapper compatibility: if required page files already exist as one-line scaffolds, overwrite all non-Welcome required page files with complete implementations first. Do not edit `src/pages/Welcome.tsx`.
 
@@ -1642,58 +1649,30 @@ Do not run build, serve, or browser verification until this router check is comp
 
 ---
 
-## POST-BUILD VISIBILITY CHECK (MANDATORY — runs after build succeeds)
+## POST-BUILD VERIFICATION (curl-based — runs after build succeeds)
 
-A successful build does NOT mean the page works. The #1 create-mode failure is
-"build passed, but the browser shows a blank/starter page." After your build
-finishes, you MUST prove the served page is actually visible with the check
-below. This is the only verification create-mode requires.
+A successful build does NOT mean the page works. After your build finishes,
+verify the served page using curl (via Bash tool). This is the primary
+verification gate.
 
-Use exactly these three tool calls (you have new_page, evaluate_script,
-close_page available — nothing else is needed):
-
-```
-Step 1: mcp__chrome-devtools__new_page(url: "http://localhost:<FRONTEND_PORT>/")
-
-Step 2: mcp__chrome-devtools__evaluate_script — copy this function verbatim.
-  The 1.5s sleep bakes in hydration time; do NOT remove it or you'll read an
-  empty DOM and false-fail. Return one `ok` boolean plus diagnostic widths.
-  NOTE on nav: layouts are allowed to use <nav>, <aside> (sidebar), <header>,
-  or any element containing links. The check accepts any of these — do NOT
-  require a literal <nav> element.
-  async () => {{
-    await new Promise(r => setTimeout(r, 1500));
-    const m = document.querySelector('main')?.getBoundingClientRect();
-    // Nav can be <nav>, <aside> (sidebar layouts), or <header> with links.
-    const navEl = document.querySelector('nav') || document.querySelector('aside') || document.querySelector('header');
-    const n = navEl?.getBoundingClientRect();
-    const visibleLinks = Array.from(document.querySelectorAll('a, button')).filter(a => {{
-      const r = a.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    }}).length;
-    return JSON.stringify({{
-      // ok = main has width AND (some nav-shaped element has width OR there
-      // are visible links/buttons) AND at least one heading exists.
-      ok: !!(m && m.width > 0 && ((n?.width ?? 0) > 0 || visibleLinks > 0) && document.querySelectorAll('h1,h2,h3').length > 0),
-      mainW: m?.width || 0,
-      navW: n?.width || 0,
-      links: visibleLinks,
-      headings: document.querySelectorAll('h1,h2,h3').length
-    }});
-  }}
-
-Step 3: mcp__chrome-devtools__close_page
+After serving dist on a local port, run this curl check:
+```bash
+HTML=$(curl -s http://localhost:<PORT>/)
+echo "$HTML" | grep -qE '<title>.*</title>' && echo "TITLE: OK" || echo "TITLE: MISSING"
+echo "$HTML" | grep -q 'id="root"' && echo "ROOT DIV: OK" || echo "ROOT DIV: MISSING"
+echo "$HTML" | grep -qE '<script.*src=.*\.js' && echo "JS BUNDLE: OK" || echo "JS BUNDLE: MISSING"
+# Check it's NOT the starter template (should not contain "DreamPilot Generated" or "Start building")
+echo "$HTML" | grep -qi "DreamPilot Generated\|Start building" && echo "WARNING: STARTER TEMPLATE DETECTED" || echo "NOT STARTER: OK"
 ```
 
-**Pass**: `ok === true`. That means `<main>` has non-zero width, at least one
-nav-shaped element (`<nav>`, `<aside>`, or `<header>`) or visible links/buttons
-exist, AND at least one `<h1>/<h2>/<h3>` is present. If `ok === false`, the build
-is incomplete (blank/starter page or layout broken) — fix and rebuild. Do not
-declare success on a build that fails this check.
+**Pass criteria:** TITLE: OK + ROOT DIV: OK + JS BUNDLE: OK + NOT STARTER: OK.
+If all four pass, the build is verified. If any fail, fix and rebuild.
 
-Run this sequence at most TWICE per build. If the second attempt still returns
-`ok === false`, stop verifying — report the failure to the user instead of
-looping.
+The browser-based visibility check (chrome-devtools new_page → evaluate_script)
+is OPTIONAL and supplementary. Use it only if curl passes but you want to
+visually confirm the layout. The browser may show stale tabs or error pages
+from the shared Chrome instance — do NOT treat browser failures as ground
+truth when curl succeeds.
 
 ---
 
