@@ -2606,38 +2606,24 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 # Start PM2 service with npx serve -s dist -l port
                 logger.info(f"[SERVICE] Starting frontend service: {frontend_app_name}")
 
-                # Phase 5: use bubblewrap sandbox for frontend when EXECUTION_MODE=container
-                frontend_sandbox = str(Path(__file__).parent / "scripts" / "frontend-sandbox.sh")
-                use_frontend_sandbox = (
-                    os.getenv("EXECUTION_MODE", "local").lower() == "container"
-                    and os.path.exists(frontend_sandbox)
-                )
-
-                if use_frontend_sandbox:
-                    frontend_cmd = [
-                        "pm2",
-                        "start",
-                        frontend_sandbox,
-                        "--name",
-                        frontend_app_name,
-                        "--",
-                        str(self.project_path / "frontend"),
-                        str(self.ports["frontend"])
-                    ]
-                else:
-                    frontend_cmd = [
-                        "pm2",
-                        "start",
-                        "npx",
-                        "--name",
-                        frontend_app_name,
-                        "--",
-                        "serve",
-                        "-s",
-                        "dist",
-                        "-l",
-                        str(self.ports["frontend"])
-                    ]
+                # NOTE: Frontend is NOT sandboxed via bwrap because npx serve
+                # needs access to npm cache and global node_modules to resolve
+                # the 'serve' package. Frontend only serves static dist/ files
+                # (no user code execution) so the risk is minimal.
+                # Backend and bots ARE sandboxed (they run user code).
+                frontend_cmd = [
+                    "pm2",
+                    "start",
+                    "npx",
+                    "--name",
+                    frontend_app_name,
+                    "--",
+                    "serve",
+                    "-s",
+                    "dist",
+                    "-l",
+                    str(self.ports["frontend"])
+                ]
 
                 # logger.info(f"[SERVICE] Frontend command: {' '.join(frontend_cmd)}")  # Commented for cleaner logs
                 # logger.info(f"[SERVICE] Frontend working directory: {self.project_path / 'frontend'}")  # Commented for cleaner logs
