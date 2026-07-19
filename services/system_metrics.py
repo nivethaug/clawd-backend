@@ -271,14 +271,33 @@ def _network() -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────
 
 def _docker() -> Dict[str, Any]:
-    """Container list with status + per-container stats."""
+    """Container list with status + per-container stats + pids + user mapping."""
     if not shutil.which("docker"):
         return {"available": False, "containers": []}
 
-    # `docker ps` for the basic list (no formatting surprises, widely available)
+    # `docker ps` for the basic list
     raw = _run(["docker", "ps", "--all", "--format", "{{json .}}"])
     if raw is None:
         return {"available": True, "error": "docker ps failed", "containers": []}
+
+    # Load user_containers mapping from DB for user ID annotation
+    user_container_map: Dict[str, Dict[str, Any]] = {}
+    try:
+        from database_adapter import get_db
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT user_id, container_name, workspace_path, status, last_used_at FROM user_containers"
+            ).fetchall()
+        for row in rows:
+            name = row["container_name"] if isinstance(row, dict) else row[1]
+            user_container_map[name] = {
+                "user_id": row["user_id"] if isinstance(row, dict) else row[0],
+                "workspace_path": row["workspace_path"] if isinstance(row, dict) else row[2],
+                "db_status": row["status"] if isinstance(row, dict) else row[3],
+                "last_used_at": str(row["last_used_at"]) if (row["last_used_at"] if isinstance(row, dict) else row[4]) else None,
+            }
+    except Exception:
+        pass
 
     containers: List[Dict[str, Any]] = []
     for line in raw.strip().splitlines():
@@ -289,14 +308,33 @@ def _docker() -> Dict[str, Any]:
             c = json.loads(line)
         except json.JSONDecodeError:
             continue
-        containers.append({
+        name = c.get("Names", "")
+        entry = {
             "id": c.get("ID", ""),
-            "name": c.get("Names", ""),
+            "name": name,
             "image": c.get("Image", ""),
             "status": c.get("Status", ""),
             "state": c.get("State", ""),
             "running": c.get("State", "").lower() == "running",
-        })
+        }
+        # Annotate with user info from DB if this is a user container
+        if name in user_container_map:
+            uc = user_container_map[name]
+            entry["user_id"] = uc["user_id"]
+            entry["workspace_path"] = uc["workspace_path"]
+            entry["last_used_at"] = uc["last_used_at"]
+            # Get PID count for running user containers
+            if entry["running"]:
+                pid_count_raw = _run([
+                    "docker", "exec", name,
+                    "sh", "-c", "ls /proc/[0-9]*/comm 2>/dev/null | wc -l"
+                ])
+                if pid_count_raw:
+                    try:
+                        entry["pid_count"] = int(pid_count_raw.strip())
+                    except ValueError:
+                        entry["pid_count"] = None
+        containers.append(entry)
 
     # Per-container CPU/RAM via `docker stats --no-stream`
     stats_raw = _run(["docker", "stats", "--no-stream", "--format", "{{json .}}"])
@@ -326,7 +364,24 @@ def _docker() -> Dict[str, Any]:
         for c in containers:
             c.update(stats_by_name.get(c["name"], {}))
 
-    return {"available": True, "containers": containers}
+    # Build summary stats
+    total_containers = len(containers)
+    running_containers = sum(1 for c in containers if c.get("running"))
+    user_containers = [c for c in containers if c.get("name", "").startswith("dreamagent-user-")]
+    running_user = sum(1 for c in user_containers if c.get("running"))
+    total_pids = sum(c.get("pid_count", 0) or 0 for c in user_containers if c.get("running"))
+
+    return {
+        "available": True,
+        "containers": containers,
+        "summary": {
+            "total": total_containers,
+            "running": running_containers,
+            "user_containers": len(user_containers),
+            "user_running": running_user,
+            "user_total_pids": total_pids,
+        },
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────
