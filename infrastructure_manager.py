@@ -2159,14 +2159,21 @@ class InfrastructureManager:
 
                 # Phase 5: when bwrap sandbox is in use, PM2 logs are often
                 # empty because bwrap forks + execs. Read the sandbox's own
-                # debug log so we can see what failed.
+                # debug log so we can see what failed. Always emit a line so
+                # we can tell "no debug log" from "filtered out by stream".
                 sandbox_debug = self.project_path / "backend" / ".sandbox-debug.log"
                 if sandbox_debug.exists():
                     try:
-                        debug_tail = sandbox_debug.read_text()[-2000:]
+                        debug_tail = sandbox_debug.read_text()[-2500:]
                         logger.error(f"[VERIFY] Sandbox debug log tail:\n{debug_tail}")
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.error(f"[VERIFY] Sandbox debug log read failed: {exc}")
+                else:
+                    logger.error(
+                        f"[VERIFY] No sandbox debug log at {sandbox_debug} — "
+                        "sandbox script never wrote one (script did not run, "
+                        "or SANDBOX_DEBUG=0, or EXECUTION_MODE != container)"
+                    )
 
                 
                 # Also check PM2 status — use both table format and JSON for

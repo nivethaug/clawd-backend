@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -430,6 +431,31 @@ def _run_logged_subprocess(
     )
 
     def stream(pipe, stream_prefix: str) -> None:
+        # Stateful passthrough: when we see a multi-line diagnostic block
+        # (e.g. "[VERIFY] PM2 jlist:\n{...}" or "Traceback ..."), keep forwarding
+        # the continuation lines to PM2 logs until the block ends. Otherwise the
+        # noise filter strips the JSON/error body and we only see the label.
+        # _diag_lines_remaining is decremented for each continuation line.
+        diag_state = {"remaining": 0}
+
+        # Markers that START a multi-line diagnostic block. When we see one of
+        # these we set a high passthrough counter so the next N lines flow
+        # through to PM2 logs (the content is small — capped by line length filter).
+        _DIAG_START_MARKERS = (
+            "[VERIFY] PM2 logs",
+            "[VERIFY] PM2 status",
+            "[VERIFY] PM2 jlist",
+            "[VERIFY] PM2 list stderr",
+            "[VERIFY] Ecosystem config",
+            "[VERIFY] Sandbox debug",
+            "[SERVICE] PM2 logs",
+            "[SERVICE] PM2 stderr",
+            "[SERVICE] PM2 error logs",
+            "[SERVICE] Sandbox debug",
+            "[SERVICE] ❌",
+            "Traceback (most recent call last)",
+        )
+
         try:
             for line in iter(pipe.readline, ""):
                 if not line:
@@ -466,6 +492,18 @@ def _run_logged_subprocess(
                 except Exception:
                     pass
 
+                # Detect start of a multi-line diagnostic block.
+                _starts_diag = any(m in text for m in _DIAG_START_MARKERS)
+                if _starts_diag:
+                    # 60 lines is plenty for PM2 jlist, ecosystem config, tracebacks.
+                    diag_state["remaining"] = 60
+                elif diag_state["remaining"] > 0:
+                    diag_state["remaining"] -= 1
+                    # Stop early if we hit the next log line (starts with timestamp
+                    # + loggername pattern like "... - infrastructure_manager -").
+                    if re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ - \w+ - ", text):
+                        diag_state["remaining"] = 0
+
                 # Log important milestones to PM2 only
                 _is_important = (
                     "PHASE_" in text
@@ -480,6 +518,7 @@ def _run_logged_subprocess(
                     or "Traceback" in text
                     or "RuntimeError" in text
                     or "ACP Frontend Editor" in text  # captures partial/fail status
+                    or diag_state["remaining"] > 0    # diagnostic continuation
                 )
                 if _is_important:
                     logger.info("%s", text)
