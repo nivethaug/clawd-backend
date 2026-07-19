@@ -575,6 +575,19 @@ class ServiceManager:
                 and os.path.exists(sandbox_script)
             )
 
+            # Defensive: ensure the sandbox script is executable. Git on Windows
+            # can lose the +x bit, and PM2 with 'interpreter: none' exec()s the
+            # file directly — without +x the script silently fails to start,
+            # producing empty PM2 logs with no error.
+            if use_sandbox:
+                try:
+                    st = os.stat(sandbox_script)
+                    if not (st.st_mode & 0o111):
+                        os.chmod(sandbox_script, 0o755)
+                        logger.info(f"[SERVICE] Set +x on sandbox script: {sandbox_script}")
+                except Exception as exc:
+                    logger.warning(f"[SERVICE] Could not chmod sandbox script: {exc}")
+
             if use_sandbox:
                 ecosystem_config = {
                     "apps": [{
@@ -582,11 +595,18 @@ class ServiceManager:
                         "script": sandbox_script,
                         "args": f"{self.venv_path} {backend_path} {backend_port}",
                         "cwd": str(backend_path),
-                        "interpreter": "none",
+                        # 'bash' (not 'none') so PM2 runs the .sh via bash explicitly.
+                        # With 'none' PM2 exec()s the file directly; if for any reason
+                        # the +x bit is missing or the shebang isn't honored, it fails
+                        # silently. 'bash' is robust.
+                        "interpreter": "/bin/bash",
                         "instances": 1,
                         "exec_mode": "fork",
                         "watch": False,
-                        "max_memory_restart": "500M",
+                        # bwrap + venv Python + uvicorn + SQLAlchemy init_db can peak
+                        # around 600-800MB during startup. Give headroom so PM2 does
+                        # not kill+restart the sandbox mid-init.
+                        "max_memory_restart": "900M",
                         "env": env_vars
                     }]
                 }
