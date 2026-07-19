@@ -57,7 +57,14 @@ if [ -f /etc/ca-certificates.conf ]; then
   BWRAP_ARGS+=(--ro-bind /etc/ca-certificates.conf /etc/ca-certificates.conf)
 fi
 
-exec bwrap "${BWRAP_ARGS[@]}" -- \
+# Change to project dir BEFORE bwrap — bwrap inherits cwd from parent.
+# Since $PROJECT_DIR is bind-mounted at the same path inside the sandbox,
+# the cwd resolves correctly inside the namespace.
+cd "$PROJECT_DIR"
+
+exec bwrap "${BWRAP_ARGS[@]}" \
+  --setenv PYTHONPATH "$PROJECT_DIR" \
+  -- \
   "$VENV/bin/uvicorn" "$ENTRY" \
   --host 0.0.0.0 \
   --port "$PORT"
