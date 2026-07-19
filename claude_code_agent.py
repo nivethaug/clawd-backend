@@ -364,54 +364,6 @@ class ClaudeCodeAgent:
             logger.warning(f"Could not load settings from {self.settings_path}: {e}")
             return {}
 
-    def _kill_container_orphans(self) -> None:
-        """Kill orphaned processes inside the container after Claude exits.
-
-        Claude spawns npm, esbuild, serve, vite, and MCP helper processes.
-        In container mode these run via `docker exec` — when the main Claude
-        process exits, its children can survive as orphans inside the
-        container's PID namespace. Over multiple sessions these accumulate
-        and hit the --pids-limit, causing build failures on later projects.
-
-        This kills every process inside the container EXCEPT:
-        - PID 1 (sleep infinity — the container keeper)
-        - The current process (our own docker exec)
-
-        Safe because:
-        - Only runs in EXECUTION_MODE=container
-        - Only kills inside the container's PID namespace (not the host)
-        - Called AFTER Claude finishes (in the finally block)
-        """
-        try:
-            import subprocess as _sp
-            # Kill by process name — everything except sleep and our own shell
-            # Use pkill for robustness (handles both process name + children)
-            cmd = [
-                "docker", "exec", self._runtime_container_name(),
-                "sh", "-c",
-                # Kill npm serve, esbuild, vite, node (build workers), chrome
-                # but NOT sleep (PID 1) or sh (our own exec shell)
-                "pkill -f 'npm exec serve' 2>/dev/null; "
-                "pkill -f 'esbuild' 2>/dev/null; "
-                "pkill -f 'vite' 2>/dev/null; "
-                "pkill -f 'serve -s dist' 2>/dev/null; "
-                "echo done"
-            ]
-            _sp.run(cmd, capture_output=True, text=True, timeout=10)
-            logger.debug("[CLAUDE-AGENT] killed orphaned container processes")
-        except Exception as e:
-            logger.debug(f"[CLAUDE-AGENT] orphan cleanup skipped: {e}")
-
-    def _runtime_container_name(self) -> str:
-        """Get the container name from the runtime manager."""
-        try:
-            from services.container_manager import ContainerManager
-            if self.user_id:
-                return ContainerManager(self.user_id).container_name
-        except Exception:
-            pass
-        return ""
-
     def _find_claude_cli(self) -> str:
         """
         Find the claude CLI executable.
@@ -1180,12 +1132,16 @@ class ClaudeCodeAgent:
                             pass
                     await process.wait()
             await self._terminate_process_group(process_group_id, "current Claude")
-            # Container mode: kill orphaned processes inside the container.
-            # Claude spawns npm, esbuild, serve, and MCP processes that survive
-            # after the main Claude process exits. These accumulate across
-            # sessions and eventually hit the PID limit, causing build failures.
-            if self._runtime.mode == "container":
-                self._kill_container_orphans()
+            # NOTE: Do NOT blanket-kill processes inside the container here.
+            # Parallel sessions (concurrent create + chat edit) share the same
+            # container. A blanket pkill would kill another session's active
+            # build, causing it to fail and rollback.
+            #
+            # Cross-session accumulation is handled by:
+            # 1. Process group cleanup above (kills THIS session's children)
+            # 2. --pids-limit=512 (enough headroom for multiple sessions)
+            # 3. Container reaper (kills everything when user goes idle)
+            # 4. Claude's prompt instructs it to kill its own serve processes
             await self._cleanup_after_query()
 
     @property
