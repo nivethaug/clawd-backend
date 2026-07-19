@@ -25,7 +25,7 @@ BOT_DIR="${2:?Missing bot_dir}"
 
 cd "$BOT_DIR"
 
-# On Debian 13, /lib /bin /sbin are symlinks into /usr — only mount /usr.
+# On Debian 13, /lib /bin /sbin /lib64 are symlinks into /usr.
 BWRAP_ARGS=(
   --die-with-parent
   --share-net
@@ -35,14 +35,13 @@ BWRAP_ARGS=(
   --bind "$BOT_DIR" "$BOT_DIR"
   --ro-bind "$VENV" "$VENV"
   --ro-bind /usr /usr
+  --symlink usr/lib /lib
+  --symlink usr/bin /bin
+  --symlink usr/sbin /sbin
+  --symlink usr/lib64 /lib64
   --ro-bind /etc/resolv.conf /etc/resolv.conf
   --ro-bind /etc/hosts /etc/hosts
 )
-
-# /lib64 is a real directory on x86_64
-if [ -d /lib64 ] && [ ! -L /lib64 ]; then
-  BWRAP_ARGS+=(--ro-bind /lib64 /lib64)
-fi
 
 # SSL certs
 if [ -d /etc/ssl ]; then

@@ -28,9 +28,9 @@ ENTRY="${4:-main:app}"
 
 cd "$PROJECT_DIR"
 
-# On Debian 13, /lib /bin /sbin are symlinks into /usr. We must NOT
-# mount them separately — only mount /usr (which contains everything).
-# Also mount /lib64 (not a symlink on most x86_64 systems).
+# On Debian 13, /lib /bin /sbin /lib64 are symlinks into /usr.
+# We mount /usr (which contains everything) and recreate the symlinks
+# at the sandbox root so ELF binaries can find their dynamic linker.
 BWRAP_ARGS=(
   --die-with-parent
   --share-net
@@ -40,14 +40,13 @@ BWRAP_ARGS=(
   --bind "$PROJECT_DIR" "$PROJECT_DIR"
   --ro-bind "$VENV" "$VENV"
   --ro-bind /usr /usr
+  --symlink usr/lib /lib
+  --symlink usr/bin /bin
+  --symlink usr/sbin /sbin
+  --symlink usr/lib64 /lib64
   --ro-bind /etc/resolv.conf /etc/resolv.conf
   --ro-bind /etc/hosts /etc/hosts
 )
-
-# /lib64 is a real directory (not symlink) on x86_64 — needed for ld-linux
-if [ -d /lib64 ] && [ ! -L /lib64 ]; then
-  BWRAP_ARGS+=(--ro-bind /lib64 /lib64)
-fi
 
 # SSL certs for HTTPS
 if [ -d /etc/ssl ]; then
