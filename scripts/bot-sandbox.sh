@@ -38,7 +38,7 @@ BWRAP_ARGS=(
   --ro-bind /etc/hosts /etc/hosts
 )
 
-for dir in /usr /lib /lib64 /bin /sbin; do
+for dir in /usr /usr/local /lib /lib64 /bin /sbin; do
   if [ -d "$dir" ]; then
     BWRAP_ARGS+=(--ro-bind "$dir" "$dir")
   fi

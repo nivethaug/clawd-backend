@@ -42,7 +42,8 @@ BWRAP_ARGS=(
 )
 
 # Mount system libraries (different distros have different layouts)
-for dir in /usr /lib /lib64 /bin /sbin; do
+# /usr/local is needed because the venv's python3.12 symlinks there
+for dir in /usr /usr/local /lib /lib64 /bin /sbin; do
   if [ -d "$dir" ]; then
     BWRAP_ARGS+=(--ro-bind "$dir" "$dir")
   fi
