@@ -553,6 +553,31 @@ class ContainerManager:
     # Execution
     # ─────────────────────────────────────────────────────────────────────
 
+    def get_container_ip(self) -> Optional[str]:
+        """Get the container's IP on the dreamagent-net bridge network.
+
+        This IP is reachable from the host and from Chrome on the host.
+        Used by Claude inside the container to construct URLs that the
+        shared Chrome DevTools MCP can actually reach (localhost inside
+        the container is NOT reachable from host Chrome).
+
+        Returns:
+            IP address string (e.g. "172.18.0.2") or None if unavailable.
+        """
+        try:
+            r = _run_docker([
+                "inspect", "--format",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                self.container_name,
+            ])
+            if r.returncode == 0 and r.stdout.strip():
+                ip = r.stdout.strip()
+                logger.debug("[CONTAINER] %s IP: %s", self.container_name, ip)
+                return ip
+        except Exception:
+            pass
+        return None
+
     def wrap_exec(
         self,
         command: List[str],
@@ -586,10 +611,16 @@ class ContainerManager:
 
         # Env vars: each as a separate -e flag.
         # Always override HOME to /home/dreampilot (the writable tmpfs).
-        # The host's HOME (/root) is forwarded by the env allowlist but inside
-        # the container /root is on the read-only rootfs — Claude and npx
-        # need to write to $HOME for npm cache, MCP install, session state.
         args += ["-e", "HOME=/home/dreampilot"]
+
+        # Inject CONTAINER_IP so Claude can construct URLs that host Chrome
+        # can reach. Without this, Claude uses localhost which only works
+        # inside the container — Chrome on the host can't connect.
+        container_ip = self.get_container_ip()
+        if container_ip:
+            args += ["-e", f"CONTAINER_IP={container_ip}"]
+            args += ["-e", f"CHROME_VERIFY_URL=http://{container_ip}"]
+
         if env:
             for k, v in env.items():
                 # Skip empty/None values to avoid docker CLI quirks.

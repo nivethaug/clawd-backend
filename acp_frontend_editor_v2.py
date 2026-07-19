@@ -1568,16 +1568,26 @@ mobile-only output.
 3. Create domain-appropriate navigation in `src/layout/Navbar.tsx`
 4. Integrate navigation into `Layout.tsx`
 5. Run `npm run build` only after router validation passes
-6. Serve dist: `npx serve -s dist -l 3004`
-7. Verify the served page using curl (run inside the container via Bash):
+6. Serve dist: `npx serve -s dist -l 3004` (binds to 0.0.0.0, reachable from host Chrome)
+7. Verify the served page using curl (run via Bash):
    ```
    curl -s http://localhost:3004/ | grep -E '<title>|<div id="root">|<script'
    ```
    The page must have: a `<title>` tag (not "DreamPilot"), a `<div id="root">`
    for React mounting, and at least one `<script>` tag for the JS bundle.
-   If curl returns a non-starter HTML with these elements, verification passes.
-8. Kill the serve process: `pkill -f "serve -s dist" 2>/dev/null`
-9. Update AI index files (symbols, files, dependencies, summaries)
+   If curl returns a non-starter HTML with these elements, curl verification passes.
+8. OPTIONAL browser verification (use $CHROME_VERIFY_URL, NOT localhost):
+   If $CHROME_VERIFY_URL is set, use it for browser checks:
+   - `new_page(url: "$CHROME_VERIFY_URL:3004/")` — this reaches the container
+   - `evaluate_script` — run the visibility check from POST-BUILD VERIFICATION below
+   - `close_page`
+   The env var $CHROME_VERIFY_URL contains the container's bridge IP (e.g. http://172.18.0.2)
+   which IS reachable from the host Chrome. Do NOT use http://localhost:3004 in the browser
+   — localhost inside the container is NOT reachable from host Chrome.
+   If browser verification fails but curl passed, trust curl — the browser may have
+   stale tabs or connectivity issues.
+9. Kill the serve process: `pkill -f "serve -s dist" 2>/dev/null`
+10. Update AI index files (symbols, files, dependencies, summaries)
 
 Wrapper compatibility: if required page files already exist as one-line scaffolds, overwrite all non-Welcome required page files with complete implementations first. Do not edit `src/pages/Welcome.tsx`.
 
@@ -1657,22 +1667,48 @@ verification gate.
 
 After serving dist on a local port, run this curl check:
 ```bash
-HTML=$(curl -s http://localhost:<PORT>/)
+HTML=$(curl -s http://localhost:3004/)
 echo "$HTML" | grep -qE '<title>.*</title>' && echo "TITLE: OK" || echo "TITLE: MISSING"
 echo "$HTML" | grep -q 'id="root"' && echo "ROOT DIV: OK" || echo "ROOT DIV: MISSING"
 echo "$HTML" | grep -qE '<script.*src=.*\.js' && echo "JS BUNDLE: OK" || echo "JS BUNDLE: MISSING"
-# Check it's NOT the starter template (should not contain "DreamPilot Generated" or "Start building")
-echo "$HTML" | grep -qi "DreamPilot Generated\|Start building" && echo "WARNING: STARTER TEMPLATE DETECTED" || echo "NOT STARTER: OK"
+# Check it's NOT the starter template
+echo "$HTML" | grep -qi "DreamPilot Generated\|Start building" && echo "WARNING: STARTER TEMPLATE" || echo "NOT STARTER: OK"
 ```
 
 **Pass criteria:** TITLE: OK + ROOT DIV: OK + JS BUNDLE: OK + NOT STARTER: OK.
 If all four pass, the build is verified. If any fail, fix and rebuild.
 
-The browser-based visibility check (chrome-devtools new_page → evaluate_script)
-is OPTIONAL and supplementary. Use it only if curl passes but you want to
-visually confirm the layout. The browser may show stale tabs or error pages
-from the shared Chrome instance — do NOT treat browser failures as ground
-truth when curl succeeds.
+### Browser Verification (OPTIONAL — use $CHROME_VERIFY_URL)
+
+If `$CHROME_VERIFY_URL` env var is set, you can do a supplementary browser check.
+The env var contains the container's bridge IP (e.g. `http://172.18.0.2`) which
+IS reachable from the shared Chrome on the host.
+
+```
+Step 1: mcp__chrome-devtools__new_page(url: "$CHROME_VERIFY_URL:3004/")
+         — Do NOT use localhost:3004 in the browser. Use $CHROME_VERIFY_URL:3004.
+
+Step 2: mcp__chrome-devtools__evaluate_script:
+  async () => {{
+    await new Promise(r => setTimeout(r, 1500));
+    const m = document.querySelector('main')?.getBoundingClientRect();
+    const navEl = document.querySelector('nav') || document.querySelector('aside') || document.querySelector('header');
+    const n = navEl?.getBoundingClientRect();
+    const visibleLinks = Array.from(document.querySelectorAll('a, button')).filter(a => {{
+      const r = a.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    }}).length;
+    return JSON.stringify({{
+      ok: !!(m && m.width > 0 && ((n?.width ?? 0) > 0 || visibleLinks > 0) && document.querySelectorAll('h1,h2,h3').length > 0),
+      mainW: m?.width || 0, navW: n?.width || 0, links: visibleLinks,
+      headings: document.querySelectorAll('h1,h2,h3').length
+    }});
+  }}
+
+Step 3: mcp__chrome-devtools__close_page
+```
+
+If browser fails but curl passed, trust curl. The browser may have stale tabs.
 
 ---
 
