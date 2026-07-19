@@ -98,6 +98,20 @@ HOSTINGER_DNS_SKILL = "/usr/lib/node_modules/openclaw/skills/hostinger-dns/hosti
 SHARED_VENV_PATH = "/root/dreampilot/dreampilotvenv"
 
 
+def _dump_sandbox_debug(backend_path) -> None:
+    """Emit the bwrap sandbox debug log (if present) so verify/startup failures
+    are diagnosable when PM2's own logs are empty."""
+    try:
+        debug_path = Path(backend_path) / ".sandbox-debug.log"
+        if debug_path.exists():
+            tail = debug_path.read_text()[-2500:]
+            logger.error(f"[SERVICE] Sandbox debug log tail:\n{tail}")
+        else:
+            logger.error(f"[SERVICE] No sandbox debug log at {debug_path} — preflight never ran")
+    except Exception as exc:
+        logger.error(f"[SERVICE] Could not read sandbox debug log: {exc}")
+
+
 class PortAllocator:
     """Manages port allocation for projects."""
 
@@ -617,9 +631,11 @@ class ServiceManager:
 
             logger.info(f"[SERVICE] Backend stdout: {result.stdout[:200]}")
 
-            # Add startup delay to ensure backend is ready
-            logger.info("[SERVICE] Waiting for backend to start (5s)...")
-            time.sleep(5)
+            # Add startup delay to ensure backend is ready.
+            # bwrap adds 1-2s of mount namespace setup overhead; uvicorn+init_db
+            # can take another 3-8s. Give it 10s.
+            logger.info("[SERVICE] Waiting for backend to start (10s)...")
+            time.sleep(10)
 
             # FIX 2: Enhanced PM2 status and error logging
             pm2_status = subprocess.run(
@@ -635,12 +651,12 @@ class ServiceManager:
                 capture_output=True,
                 text=True
             )
-            
+
             # Check for common error patterns in logs
             if pm2_logs.stdout:
                 error_patterns = ["Error", "Exception", "ModuleNotFoundError", "ImportError", "Traceback", "AssertionError", "FileNotFound"]
                 has_errors = any(pattern in pm2_logs.stdout for pattern in error_patterns)
-                
+
                 if has_errors:
                     logger.error(f"[SERVICE] ❌ Backend startup errors detected in PM2 logs:")
                     logger.error(f"[SERVICE] PM2 logs for {app_name}:\n{pm2_logs.stdout[:3000]}")
@@ -649,26 +665,46 @@ class ServiceManager:
                     return False
                 else:
                     logger.info(f"[SERVICE] ✓ No startup errors in PM2 logs")
-            
-            # Check PM2 process status (online/errored)
+
+            # Check PM2 process status (online/errored). Be strict: require "online"
+            # because "stopped" (e.g. bwrap exited immediately) is also a failure.
             pm2_jlist = subprocess.run(
                 ["pm2", "jlist"],
                 capture_output=True,
                 text=True
             )
+            found_proc = False
             if pm2_jlist.returncode == 0:
                 try:
                     pm2_processes = json.loads(pm2_jlist.stdout)
                     for proc in pm2_processes:
                         if proc.get("name") == app_name:
+                            found_proc = True
                             proc_status = proc.get("pm2_env", {}).get("status", "unknown")
+                            proc_restarts = proc.get("pm2_env", {}).get("restart_time", 0)
                             if proc_status == "errored":
                                 logger.error(f"[SERVICE] ❌ PM2 process {app_name} is in 'errored' state")
+                                # Dump sandbox debug log so we can see why bwrap failed
+                                _dump_sandbox_debug(backend_path)
                                 return False
-                            logger.info(f"[SERVICE] ✓ PM2 process {app_name} status: {proc_status}")
+                            if proc_status != "online":
+                                logger.error(f"[SERVICE] ❌ PM2 process {app_name} status is '{proc_status}' (expected 'online')")
+                                logger.error(f"[SERVICE] Restarts so far: {proc_restarts}")
+                                _dump_sandbox_debug(backend_path)
+                                return False
+                            if proc_restarts > 2:
+                                logger.error(f"[SERVICE] ❌ PM2 process {app_name} restarted {proc_restarts} times — unstable")
+                                _dump_sandbox_debug(backend_path)
+                                return False
+                            logger.info(f"[SERVICE] ✓ PM2 process {app_name} status: {proc_status} restarts={proc_restarts}")
                             break
                 except json.JSONDecodeError:
                     pass  # Fall through if JSON parsing fails
+
+            if not found_proc:
+                logger.error(f"[SERVICE] ❌ PM2 process {app_name} not found in jlist — it never registered")
+                _dump_sandbox_debug(backend_path)
+                return False
 
             return True
 
@@ -2133,13 +2169,35 @@ class InfrastructureManager:
                         pass
 
                 
-                # Also check PM2 status
+                # Also check PM2 status — use both table format and JSON for
+                # reliability (table format can be empty if PM2 has issues).
                 pm2_status = subprocess.run(
                     ["pm2", "list"],
                     capture_output=True,
                     text=True
                 )
-                logger.error(f"[VERIFY] PM2 status:\n{pm2_status.stdout}")
+                logger.error(f"[VERIFY] PM2 status (rc=%s):\n%s",
+                             pm2_status.returncode, pm2_status.stdout)
+                if pm2_status.stderr:
+                    logger.error(f"[VERIFY] PM2 list stderr:\n{pm2_status.stderr[:500]}")
+
+                # jlist is the canonical machine-readable form; use it as a fallback
+                pm2_jlist = subprocess.run(
+                    ["pm2", "jlist"],
+                    capture_output=True,
+                    text=True
+                )
+                if pm2_jlist.stdout:
+                    logger.error(f"[VERIFY] PM2 jlist:\n{pm2_jlist.stdout[:3000]}")
+
+                # Ecosystem file contents (so we can see exactly what PM2 was told to start)
+                eco_path = self.project_path / "backend" / "ecosystem.config.json"
+                if eco_path.exists():
+                    try:
+                        logger.error(f"[VERIFY] Ecosystem config:\n{eco_path.read_text()[:2000]}")
+                    except Exception:
+                        pass
+
                 raise RuntimeError("Backend verification failed")
 
             logger.info("[VERIFY] ✓ Deployment verified successfully")
