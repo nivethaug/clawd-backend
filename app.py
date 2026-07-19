@@ -3630,7 +3630,14 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
             cleanup_results["steps"]["scheduler_jobs"] = {"error": str(e)}
 
         try:
-            cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path, user_id)
+            # Extract user_id from path for container mode
+            _sched_user_id = None
+            if "/workspaces/user_" in project_path:
+                import re as _re
+                _m = _re.search(r'/workspaces/user_(\d+)/', project_path)
+                if _m:
+                    _sched_user_id = int(_m.group(1))
+            cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path, _sched_user_id)
         except Exception as e:
             logger.error(f"Error removing project directory: {e}")
             cleanup_results["steps"]["directory"] = {"error": str(e)}
@@ -3700,8 +3707,15 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
         cleanup_results["steps"]["database"] = {"error": str(e)}
 
     # STEP 6: Remove project directory
+    # Extract user_id from path for container mode (/workspaces/user_<id>/...)
+    _cleanup_user_id = None
+    if "/workspaces/user_" in project_path:
+        import re as _re
+        _m = _re.search(r'/workspaces/user_(\d+)/', project_path)
+        if _m:
+            _cleanup_user_id = int(_m.group(1))
     try:
-        cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path, user_id)
+        cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path, _cleanup_user_id)
     except Exception as e:
         logger.error(f"Error in directory cleanup: {e}")
         cleanup_results["steps"]["directory"] = {"error": str(e)}
