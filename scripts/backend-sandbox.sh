@@ -27,11 +27,17 @@ PROJECT_DIR="${2:?Missing backend_path}"
 PORT="${3:?Missing port}"
 ENTRY="${4:-main:app}"
 
+# Change to project dir BEFORE bwrap — bwrap inherits cwd from parent.
+# Since $PROJECT_DIR is bind-mounted at the same path inside the sandbox,
+# the cwd resolves correctly inside the namespace.
+cd "$PROJECT_DIR"
+
 # Build args dynamically — only mount directories that exist
+# DO NOT mount / (rootfs) — that exposes everything.
+# Only mount specific dirs needed for the backend to run.
 BWRAP_ARGS=(
-  --unshare-all
-  --share-net
   --die-with-parent
+  --share-net
   --dev /dev
   --proc /proc
   --tmpfs /tmp
@@ -57,10 +63,10 @@ if [ -f /etc/ca-certificates.conf ]; then
   BWRAP_ARGS+=(--ro-bind /etc/ca-certificates.conf /etc/ca-certificates.conf)
 fi
 
-# Change to project dir BEFORE bwrap — bwrap inherits cwd from parent.
-# Since $PROJECT_DIR is bind-mounted at the same path inside the sandbox,
-# the cwd resolves correctly inside the namespace.
-cd "$PROJECT_DIR"
+# Locale
+if [ -d /usr/share/locale ]; then
+  BWRAP_ARGS+=(--ro-bind /usr/share/locale /usr/share/locale)
+fi
 
 exec bwrap "${BWRAP_ARGS[@]}" \
   --setenv PYTHONPATH "$PROJECT_DIR" \
