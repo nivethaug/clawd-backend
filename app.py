@@ -1096,6 +1096,7 @@ from services.system_metrics import collect as collect_system_metrics  # noqa: E
 # In local mode (default) the behavior is identical to the inline abspath+startswith
 # checks that previously lived at this call site.
 from services.container_storage import is_within_website_root as _is_within_website_root  # noqa: E402
+from services.container_storage import is_within_projects_root as _is_within_projects_root  # noqa: E402
 
 # Worker-side: translate X-Proxy-User-Id into valid auth (only when TRUST_PROXY_AUTH set)
 app.middleware("http")(proxy_auth_middleware)
@@ -3281,7 +3282,7 @@ def _cleanup_user_container_if_empty(project_id: int) -> Dict[str, Any]:
         return result
 
 
-def cleanup_project_directory(project_path: str) -> Dict[str, Any]:
+def cleanup_project_directory(project_path: str, user_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Remove project directory safely with validation.
 
@@ -3299,11 +3300,12 @@ def cleanup_project_directory(project_path: str) -> Dict[str, Any]:
     }
 
     # Validate path is within DreamPilot root.
-    # Phase 2: route through ContainerStorage.is_within_website_root so the
-    # check works in both layouts. In local mode this is equivalent to the
-    # previous abspath("/root/dreampilot/projects/website") startswith check.
-    # In container mode it accepts paths under /workspaces/user_<id>/website.
-    if not _is_within_website_root(project_path):
+    # Validate path is within projects root (type-agnostic).
+    # Phase 2: route through ContainerStorage path guards.
+    # In container mode, pass user_id so the guard checks the right workspace.
+    # Use is_within_projects_root (accepts any type folder) since projects can
+    # be website, telegram, discord, or scheduler.
+    if not _is_within_projects_root(project_path, user_id):
         error_msg = f"Path traversal attempt detected: {project_path}"
         results["error"] = error_msg
         logger.error(error_msg)
@@ -3628,12 +3630,11 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
             cleanup_results["steps"]["scheduler_jobs"] = {"error": str(e)}
 
         try:
-            cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path)
+            cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path, user_id)
         except Exception as e:
             logger.error(f"Error removing project directory: {e}")
             cleanup_results["steps"]["directory"] = {"error": str(e)}
 
-        logger.info(f"Scheduler cleanup completed")
         return cleanup_results
 
     # STEP 1: Stop and remove PM2 services (for non-telegram projects)
@@ -3700,7 +3701,7 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
 
     # STEP 6: Remove project directory
     try:
-        cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path)
+        cleanup_results["steps"]["directory"] = cleanup_project_directory(project_path, user_id)
     except Exception as e:
         logger.error(f"Error in directory cleanup: {e}")
         cleanup_results["steps"]["directory"] = {"error": str(e)}
