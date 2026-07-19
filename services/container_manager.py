@@ -296,12 +296,49 @@ class ContainerManager:
         return self.container_name in r.stdout.strip().splitlines()
 
     def start(self) -> None:
-        """Start the container (no-op if already running)."""
+        """Start the container (no-op if already running).
+
+        Clears stale Claude session resume IDs for this user because the
+        tmpfs (/home/dreampilot) is wiped on every container restart.
+        Without this, Claude tries to --resume a non-existent session and
+        exits with code 1.
+        """
         r = _run_docker(["start", self.container_name])
         if r.returncode != 0:
             logger.warning("[CONTAINER] docker start failed: %s", r.stderr.strip())
         else:
             _set_container_status(self.user_id, "running")
+            self._clear_stale_session_ids()
+
+    def _clear_stale_session_ids(self) -> None:
+        """Delete claude_session_resumes rows for this user's projects.
+
+        Called after container (re)start. The tmpfs at /home/dreampilot is
+        ephemeral — Claude's session state files don't survive restarts, so
+        any stored session IDs are stale and must be cleared to prevent
+        'claude --resume <dead-id>' failures.
+        """
+        try:
+            from database_adapter import get_db
+            with get_db() as conn:
+                # Find all project paths for this user, then clear resume IDs
+                # that match those paths. Resume keys are formatted as
+                # "{project_path}:{session_id}".
+                rows = conn.execute(
+                    "SELECT project_path FROM projects WHERE user_id = %s",
+                    (self.user_id,),
+                ).fetchall()
+                for row in rows:
+                    project_path = row["project_path"] if isinstance(row, dict) else row[0]
+                    if project_path:
+                        conn.execute(
+                            "DELETE FROM claude_session_resumes WHERE resume_key LIKE %s",
+                            (f"{project_path}:%",),
+                        )
+                conn.commit()
+                logger.info("[CONTAINER] cleared stale Claude session IDs for user %s", self.user_id)
+        except Exception as exc:
+            logger.warning("[CONTAINER] session ID cleanup failed (non-fatal): %s", exc)
 
     def stop(self) -> None:
         """Stop the container (preserves volume, state survives)."""
