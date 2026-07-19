@@ -65,7 +65,7 @@ SHARED_CACHE_TARGET: str = os.getenv("SHARED_CACHE_TARGET", "/cache")
 # Resource limits — non-optional. Documented in docs/container_isolation.md §13.
 CONTAINER_MEMORY: str = os.getenv("CONTAINER_MEMORY", "2g")
 CONTAINER_CPUS: str = os.getenv("CONTAINER_CPUS", "2")
-CONTAINER_PIDS_LIMIT: int = int(os.getenv("CONTAINER_PIDS_LIMIT", "256"))
+CONTAINER_PIDS_LIMIT: int = int(os.getenv("CONTAINER_PIDS_LIMIT", "512"))
 
 # User mapping inside the container.
 CONTAINER_USER_UID: int = int(os.getenv("CONTAINER_USER_UID", "1001"))
