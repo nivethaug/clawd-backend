@@ -163,6 +163,12 @@ class ACPChatHandler:
             project_type_id: Project type ID from database (1=website, 2=telegrambot)
             project_id: Project ID from database (needed for telegram bot PM2 commands)
         """
+        # Phase 5: translate host path to container path so ALL references
+        # (metadata, prompt text, file operations) use /workspace/... instead
+        # of /workspaces/user_24/... when inside a container.
+        from services.container_storage import to_container_path, EXECUTION_MODE
+        if EXECUTION_MODE == "container":
+            project_path = to_container_path(project_path)
         self.project_path = Path(project_path)
         self.project_name = project_name
         self.project_id = project_id
