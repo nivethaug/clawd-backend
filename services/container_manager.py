@@ -255,6 +255,11 @@ class ContainerManager:
 
         Idempotent. Called by ProjectRuntimeManager before any exec. Updates
         `user_containers.last_used_at` on every call (heartbeat for the reaper).
+
+        Also detects container restarts (Docker daemon restart, VPS reboot)
+        by checking the container's actual start time. If the container was
+        recently restarted, clears stale Claude session IDs (tmpfs is wiped
+        on restart → old resume IDs are dead).
         """
         self.ensure_workspace()
 
@@ -263,6 +268,11 @@ class ContainerManager:
             if not self.is_running():
                 logger.info("[CONTAINER] starting existing stopped container: %s", self.container_name)
                 self.start()
+            else:
+                # Container is running — but was it recently restarted?
+                # (Docker daemon restart auto-starts containers via --restart
+                # unless-stopped, which bypasses our start() cleanup.)
+                self._check_restart_and_cleanup()
             _set_container_status(self.user_id, "running")
             return self.container_name
 
@@ -310,8 +320,76 @@ class ContainerManager:
             _set_container_status(self.user_id, "running")
             self._clear_stale_session_ids()
 
+    def _check_restart_and_cleanup(self) -> None:
+        """Detect if the container was restarted since last use.
+
+        Compares the container's actual start time (from docker inspect)
+        with the last_used_at timestamp in the DB. If the container started
+        AFTER the last use, the tmpfs was wiped → clear stale session IDs.
+
+        This catches Docker daemon restarts and VPS reboots where the
+        container auto-starts via --restart unless-stopped (bypassing our
+        start() cleanup).
+        """
+        try:
+            # Get the container's actual start time
+            r = _run_docker([
+                "inspect", "--format", "{{.State.StartedAt}}",
+                self.container_name,
+            ])
+            if r.returncode != 0 or not r.stdout.strip():
+                return
+
+            container_started_str = r.stdout.strip()
+            # Docker returns ISO 8601 format: 2026-07-19T02:11:34.123456789Z
+            # Parse it to a comparable value (strip nanoseconds to microseconds)
+            import datetime as _dt
+            try:
+                # Handle nanoseconds by truncating to 6 digits
+                if "." in container_started_str:
+                    parts = container_started_str.split(".")
+                    ts_part = parts[1].rstrip("Z")
+                    ts_part = ts_part[:6]  # microseconds max
+                    container_started_str = parts[0] + "." + ts_part + "Z"
+                container_started = _dt.datetime.fromisoformat(
+                    container_started_str.replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                return
+
+            # Get last_used_at from DB
+            from database_adapter import get_db
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT last_used_at FROM user_containers WHERE user_id = %s",
+                    (self.user_id,),
+                ).fetchone()
+
+            if not row:
+                return
+
+            last_used = row["last_used_at"] if isinstance(row, dict) else row[0]
+            if not last_used:
+                return
+
+            # last_used_at is timezone-naive (from PostgreSQL NOW()), convert to UTC
+            if last_used.tzinfo is None:
+                last_used = last_used.replace(tzinfo=_dt.timezone.utc)
+
+            # If container started AFTER the last use → it was restarted
+            if container_started > last_used:
+                logger.info(
+                    "[CONTAINER] detected restart for %s (started=%s, last_used=%s) — clearing session IDs",
+                    self.container_name,
+                    container_started_str,
+                    last_used.isoformat(),
+                )
+                self._clear_stale_session_ids()
+        except Exception as exc:
+            logger.debug("[CONTAINER] restart check failed (non-fatal): %s", exc)
+
     def _clear_stale_session_ids(self) -> None:
-        """Delete claude_session_resumes rows for this user's projects.
+        """Delete ALL claude_session_resumes rows for this user's projects.
 
         Called after container (re)start. The tmpfs at /home/dreampilot is
         ephemeral — Claude's session state files don't survive restarts, so
@@ -321,22 +399,37 @@ class ContainerManager:
         try:
             from database_adapter import get_db
             with get_db() as conn:
-                # Find all project paths for this user, then clear resume IDs
-                # that match those paths. Resume keys are formatted as
-                # "{project_path}:{session_id}".
+                # Get ALL project paths for this user
                 rows = conn.execute(
                     "SELECT project_path FROM projects WHERE user_id = %s",
                     (self.user_id,),
                 ).fetchall()
+                paths = []
                 for row in rows:
-                    project_path = row["project_path"] if isinstance(row, dict) else row[0]
-                    if project_path:
+                    p = row["project_path"] if isinstance(row, dict) else row[0]
+                    if p:
+                        paths.append(p)
+
+                if paths:
+                    # Delete ALL resume entries for ALL of this user's projects.
+                    # Simple and robust — no LIKE pattern matching issues.
+                    for path in paths:
                         conn.execute(
                             "DELETE FROM claude_session_resumes WHERE resume_key LIKE %s",
-                            (f"{project_path}:%",),
+                            (f"{path}%",),
                         )
-                conn.commit()
-                logger.info("[CONTAINER] cleared stale Claude session IDs for user %s", self.user_id)
+                    # Also clear by frontend_src_path variant (resume keys may use
+                    # /frontend/src instead of just the project root)
+                    for path in paths:
+                        conn.execute(
+                            "DELETE FROM claude_session_resumes WHERE resume_key LIKE %s",
+                            (f"{path}/frontend%",),
+                        )
+                    conn.commit()
+                    logger.info(
+                        "[CONTAINER] cleared stale Claude session IDs for user %s (%d projects)",
+                        self.user_id, len(paths),
+                    )
         except Exception as exc:
             logger.warning("[CONTAINER] session ID cleanup failed (non-fatal): %s", exc)
 
