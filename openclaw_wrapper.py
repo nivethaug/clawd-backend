@@ -78,10 +78,18 @@ print(f"CURRENT_TIME: {datetime.now()}", flush=True)
 # Configure logging
 logger = logging.getLogger(__name__)  # ← MUST BE FIRST
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     force=True  # ← Important: Force to use root logger configuration
 )
+
+# Silence noisy library loggers (they flood stderr at DEBUG/INFO level)
+for noisy in (
+    "httpx", "httpcore", "urllib3", "groq", "openai",
+    "psycopg2", "database_postgres",
+    "asyncio", "pipeline_status",
+):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 
 # Database configuration
 USE_POSTGRES = os.getenv("USE_POSTGRES", "true").lower() == "true"
