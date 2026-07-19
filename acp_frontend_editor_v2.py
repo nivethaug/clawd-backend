@@ -1532,6 +1532,14 @@ class ACPFrontendEditorV2:
         # Determine which page should be the default route (clean name for JSX component)
         default_page = clean_page_names[0] if clean_page_names else "Dashboard"
 
+        # Phase 5: translate host paths to container paths so Claude sees
+        # /workspace/... instead of /workspaces/user_24/... in metadata.
+        # Claude's working directory is the container path, and it gets
+        # confused when metadata paths don't match its cwd.
+        from services.container_storage import to_container_path
+        _meta_project_path = to_container_path(str(self.project_path))
+        _meta_frontend_path = to_container_path(str(self.frontend_path))
+
         meta_block = build_workflow_meta_block(
             project_type_id=1,
             project_type="website",
@@ -1539,8 +1547,8 @@ class ACPFrontendEditorV2:
             workflow="website_create",
             project_name=self.project_name,
             project_id=self.project_id,
-            project_path=self.project_path,
-            frontend_path=self.frontend_path,
+            project_path=_meta_project_path,
+            frontend_path=_meta_frontend_path,
             prompt_kind="website_create",
             pages=required_pages_list,
         )
