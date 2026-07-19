@@ -1569,27 +1569,44 @@ mobile-only output.
 4. Integrate navigation into `Layout.tsx`
 5. Run `npm run build` only after router validation passes
 6. Serve dist: `npx serve -s dist -l 3004` (binds to 0.0.0.0, reachable from host Chrome)
-7. Verify the served page using curl (run via Bash):
-   ```
-   curl -s http://localhost:3004/ | grep -E '<title>|<div id="root">|<script'
-   ```
-   The page must have: a `<title>` tag (not "DreamPilot"), a `<div id="root">`
-   for React mounting, and at least one `<script>` tag for the JS bundle.
-   If curl returns a non-starter HTML with these elements, curl verification passes.
-8. OPTIONAL browser verification (use $CHROME_VERIFY_URL, NOT localhost):
-   If $CHROME_VERIFY_URL is set, use it for browser checks:
-   - `new_page(url: "$CHROME_VERIFY_URL:3004/")` — this reaches the container
-   - `evaluate_script` — run the visibility check from POST-BUILD VERIFICATION below
+7. **BROWSER VERIFICATION (PRIMARY — runs first).** Use `$CHROME_VERIFY_URL`
+   (NOT localhost). Run the visibility check from the POST-BUILD VERIFICATION
+   section below:
+   - `new_page(url: "$CHROME_VERIFY_URL:3004/")`
+   - `evaluate_script` → returns `{{ok, mainW, navW, links, headings}}`
    - `close_page`
-   The env var $CHROME_VERIFY_URL contains the container's bridge IP (e.g. http://172.18.0.2)
-   which IS reachable from the host Chrome. Do NOT use http://localhost:3004 in the browser
-   — localhost inside the container is NOT reachable from host Chrome.
-   If browser verification fails but curl passed, trust curl — the browser may have
-   stale tabs or connectivity issues.
+   If `ok === true` → **verification passed.** Skip curl entirely. Kill the
+   serve process and proceed to update AI index files.
+8. **IF BROWSER FAILED — ONE FIX, THEN CURL FALLBACK.** Only enter this step
+   if step 7 returned `ok === false` (or the browser tools errored). Do exactly
+   ONE debug-and-fix cycle:
+   a. Read the error: if the browser reported `headings: 0` or `mainW: 0`, run
+      `get_console_message(types: ["error"])` to capture the JS runtime error.
+   b. Fix the reported error in source (e.g. undefined import, bad hook, route
+      mismatch). Make ONE fix — do not iterate.
+   c. Rebuild (`npm run build`) and re-serve.
+   d. Verify the rebuild with curl (run via Bash):
+      ```
+      curl -s http://localhost:3004/ | grep -E '<title>|<div id="root">|<script'
+      ```
+      The page must have a `<title>` (not "DreamPilot"), `<div id="root">`, and
+      at least one `<script>`. If curl returns these, **mark verified.** Do NOT
+      loop back to the browser. Do NOT attempt a second fix.
+
+**Hard rules:**
+- You get AT MOST ONE fix attempt in step 8. If curl still fails after the one
+  rebuild, report "build succeeded but verification failed — needs manual check"
+  and stop. Do not loop.
+- If the browser passed in step 7, do not run curl. Do not run a second browser
+  check. Verification is done.
+- `$CHROME_VERIFY_URL` (e.g. `http://172.18.0.2`) is the container's bridge IP
+  and IS reachable from host Chrome. NEVER use `http://localhost:3004` in the
+  browser — localhost inside the container is NOT reachable from host Chrome.
 9. Kill the serve process: `pkill -f "serve -s dist" 2>/dev/null`
 10. Update AI index files (symbols, files, dependencies, summaries)
 
 Wrapper compatibility: if required page files already exist as one-line scaffolds, overwrite all non-Welcome required page files with complete implementations first. Do not edit `src/pages/Welcome.tsx`.
+
 
 ---
 
@@ -1659,36 +1676,23 @@ Do not run build, serve, or browser verification until this router check is comp
 
 ---
 
-## POST-BUILD VERIFICATION (curl-based — runs after build succeeds)
+## POST-BUILD VERIFICATION (browser-first — see EXECUTION ORDER steps 7-8)
 
-A successful build does NOT mean the page works. After your build finishes,
-verify the served page using curl (via Bash tool). This is the primary
-verification gate.
+The EXECUTION ORDER above defines the flow: browser check first; if it fails,
+ONE fix attempt then curl as fallback. This section gives the exact tool bodies.
 
-After serving dist on a local port, run this curl check:
-```bash
-HTML=$(curl -s http://localhost:3004/)
-echo "$HTML" | grep -qE '<title>.*</title>' && echo "TITLE: OK" || echo "TITLE: MISSING"
-echo "$HTML" | grep -q 'id="root"' && echo "ROOT DIV: OK" || echo "ROOT DIV: MISSING"
-echo "$HTML" | grep -qE '<script.*src=.*\.js' && echo "JS BUNDLE: OK" || echo "JS BUNDLE: MISSING"
-# Check it's NOT the starter template
-echo "$HTML" | grep -qi "DreamPilot Generated\|Start building" && echo "WARNING: STARTER TEMPLATE" || echo "NOT STARTER: OK"
-```
-
-**Pass criteria:** TITLE: OK + ROOT DIV: OK + JS BUNDLE: OK + NOT STARTER: OK.
-If all four pass, the build is verified. If any fail, fix and rebuild.
-
-### Browser Verification (OPTIONAL — use $CHROME_VERIFY_URL)
-
-If `$CHROME_VERIFY_URL` env var is set, you can do a supplementary browser check.
-The env var contains the container's bridge IP (e.g. `http://172.18.0.2`) which
-IS reachable from the shared Chrome on the host.
+### PRIMARY: Browser visibility check (step 7)
 
 ```
 Step 1: mcp__chrome-devtools__new_page(url: "$CHROME_VERIFY_URL:3004/")
          — Do NOT use localhost:3004 in the browser. Use $CHROME_VERIFY_URL:3004.
 
-Step 2: mcp__chrome-devtools__evaluate_script:
+Step 2: mcp__chrome-devtools__evaluate_script — copy this function verbatim.
+  The 1.5s sleep bakes in hydration time; do NOT remove it or you'll read an
+  empty DOM and false-fail. Return one `ok` boolean plus diagnostic widths.
+  NOTE on nav: layouts are allowed to use <nav>, <aside> (sidebar), <header>,
+  or any element containing links. The check accepts any of these — do NOT
+  require a literal <nav> element.
   async () => {{
     await new Promise(r => setTimeout(r, 1500));
     const m = document.querySelector('main')?.getBoundingClientRect();
@@ -1700,7 +1704,9 @@ Step 2: mcp__chrome-devtools__evaluate_script:
     }}).length;
     return JSON.stringify({{
       ok: !!(m && m.width > 0 && ((n?.width ?? 0) > 0 || visibleLinks > 0) && document.querySelectorAll('h1,h2,h3').length > 0),
-      mainW: m?.width || 0, navW: n?.width || 0, links: visibleLinks,
+      mainW: m?.width || 0,
+      navW: n?.width || 0,
+      links: visibleLinks,
       headings: document.querySelectorAll('h1,h2,h3').length
     }});
   }}
@@ -1708,7 +1714,23 @@ Step 2: mcp__chrome-devtools__evaluate_script:
 Step 3: mcp__chrome-devtools__close_page
 ```
 
-If browser fails but curl passed, trust curl. The browser may have stale tabs.
+If `ok === true` → **verification passed.** Skip curl, go to AI index update.
+If `ok === false` → the page is blank or broken. Proceed to step 8 in EXECUTION
+ORDER: read the JS error with `get_console_message`, make ONE fix, rebuild, then
+verify with curl.
+
+### FALLBACK: curl check (step 8d — only after a failed browser check + one fix)
+
+```bash
+HTML=$(curl -s http://localhost:3004/)
+echo "$HTML" | grep -qE '<title>.*</title>' && echo "TITLE: OK" || echo "TITLE: MISSING"
+echo "$HTML" | grep -q 'id="root"' && echo "ROOT DIV: OK" || echo "ROOT DIV: MISSING"
+echo "$HTML" | grep -qE '<script.*src=.*\.js' && echo "JS BUNDLE: OK" || echo "JS BUNDLE: MISSING"
+echo "$HTML" | grep -qi "DreamPilot Generated\|Start building" && echo "WARNING: STARTER TEMPLATE" || echo "NOT STARTER: OK"
+```
+
+If all four pass → **mark verified.** Do not loop back to browser. Do not make
+a second fix attempt. Move to AI index update.
 
 ---
 
