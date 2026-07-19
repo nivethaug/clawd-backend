@@ -1642,6 +1642,59 @@ Do not run build, serve, or browser verification until this router check is comp
 
 ---
 
+## POST-BUILD VISIBILITY CHECK (MANDATORY — runs after build succeeds)
+
+A successful build does NOT mean the page works. The #1 create-mode failure is
+"build passed, but the browser shows a blank/starter page." After your build
+finishes, you MUST prove the served page is actually visible with the check
+below. This is the only verification create-mode requires.
+
+Use exactly these three tool calls (you have new_page, evaluate_script,
+close_page available — nothing else is needed):
+
+```
+Step 1: mcp__chrome-devtools__new_page(url: "http://localhost:<FRONTEND_PORT>/")
+
+Step 2: mcp__chrome-devtools__evaluate_script:
+  const headings = Array.from(document.querySelectorAll('h1,h2,h3'));
+  const visibleH = headings.filter(h => {{
+    const r = h.getBoundingClientRect();
+    const s = getComputedStyle(h);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
+  }});
+  const main = document.querySelector('main');
+  const mainRect = main?.getBoundingClientRect();
+  const nav = document.querySelector('nav') || document.querySelector('[data-testid*="navbar"]') || document.querySelector('[data-testid*="nav"]');
+  const navRect = nav?.getBoundingClientRect();
+  return JSON.stringify({{
+    visibleHeadings: visibleH.length,
+    mainVisible: !!(mainRect && mainRect.width > 0 && mainRect.height > 0),
+    mainOnScreen: !!(mainRect && mainRect.top >= 0 && mainRect.left >= 0 && mainRect.right <= window.innerWidth && mainRect.bottom <= window.innerHeight),
+    navVisible: !!(navRect && navRect.width > 0 && navRect.height > 0),
+    navOnScreen: !!(navRect && navRect.top >= 0 && navRect.left >= 0 && navRect.right <= window.innerWidth && navRect.bottom <= window.innerHeight),
+    viewport: {{w: window.innerWidth, h: window.innerHeight}},
+    isStarterPage: /<title>\s*Welcome|Vite \+ React/i.test(document.documentElement.outerHTML.slice(0, 2000))
+  }});
+
+Step 3: mcp__chrome-devtools__close_page
+```
+
+**Pass** requires ALL of:
+- `visibleHeadings > 0` (at least one real heading is rendered and visible)
+- `mainVisible === true` and `mainOnScreen === true`
+- `navVisible === true` and `navOnScreen === true`
+- `isStarterPage === false`
+
+"Content exists in the DOM" is NOT enough — elements must be visible (non-zero
+size, not display:none/opacity:0) and on-screen (inside the viewport). If any
+check fails, the build is incomplete: fix the routing/layout/nav and rebuild.
+Do not declare success on a build that fails this check.
+
+Do NOT run more than this one new_page → evaluate_script → close_page sequence.
+One verification attempt — then close the page and finish.
+
+---
+
 ## STEP 2 — NAVBAR
 
 Create `src/layout/Navbar.tsx` with these requirements:

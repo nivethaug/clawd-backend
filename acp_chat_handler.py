@@ -1010,16 +1010,22 @@ Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/ROUT
  
 Step 2: mcp__chrome-devtools__evaluate_script:
   const el = document.querySelector('[data-testid="TARGET"]');
+  const rect = el?.getBoundingClientRect();
+  const style = el ? getComputedStyle(el) : null;
   return JSON.stringify({{
     found: !!el,
     text: el?.textContent?.trim(),
     tag: el?.tagName,
-    total_testids: document.querySelectorAll('[data-testid]').length
+    total_testids: document.querySelectorAll('[data-testid]').length,
+    visible: !!(rect && rect.width > 0 && rect.height > 0 && style && style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity) > 0),
+    onScreen: !!(rect && rect.top >= 0 && rect.left >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight),
+    rect: rect ? {{x: rect.x, y: rect.y, w: rect.width, h: rect.height}} : null
   }});
- 
+
 Step 3: mcp__chrome-devtools__close_page
 ```
-**Pass**: `found === true`, `text` has content.
+**Pass**: `found === true`, `text` has content, `visible === true`, `onScreen === true`.
+A page passing "content exists" is NOT enough — the element must also be visible and on-screen (non-zero size, not display:none/opacity:0, inside the viewport).
  
 ---
  
@@ -1030,18 +1036,31 @@ Step 3: mcp__chrome-devtools__close_page
 Step 1: mcp__chrome-devtools__new_page(url: "https://{self.frontend_domain}/ROUTE")   ← use URL route e.g. "settings" not file name
  
 Step 2: mcp__chrome-devtools__evaluate_script:
+  const headings = Array.from(document.querySelectorAll('h1,h2,h3'));
+  const visibleH = headings.filter(h => {{
+    const r = h.getBoundingClientRect();
+    const s = getComputedStyle(h);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
+  }});
+  const main = document.querySelector('main');
+  const mainRect = main?.getBoundingClientRect();
   return JSON.stringify({{
     title: document.title,
     url: window.location.href,
-    headings: Array.from(document.querySelectorAll('h1,h2,h3')).map(h => h.textContent),
+    headings: headings.map(h => h.textContent),
+    visibleHeadings: visibleH.length,
     testIds: Array.from(document.querySelectorAll('[data-testid]')).map(e => e.getAttribute('data-testid')),
     hasMainLandmark: !!document.querySelector('main'),
+    mainVisible: !!(mainRect && mainRect.width > 0 && mainRect.height > 0),
+    mainOnScreen: !!(mainRect && mainRect.top >= 0 && mainRect.left >= 0 && mainRect.right <= window.innerWidth && mainRect.bottom <= window.innerHeight),
+    viewport: {{w: window.innerWidth, h: window.innerHeight}},
     bodyLength: document.body.innerText.length
   }});
- 
+
 Step 3: mcp__chrome-devtools__close_page
 ```
-**Pass**: `title` set, `headings` has items, `bodyLength > 100`, `testIds` includes expected ids.
+**Pass**: `title` set, `visibleHeadings > 0`, `bodyLength > 100`, `testIds` includes expected ids, `mainVisible === true`, `mainOnScreen === true`.
+Headings existing in the DOM is NOT enough — at least one must be visible, and the `<main>` landmark must have non-zero size and sit inside the viewport.
  
 ---
  
@@ -1064,7 +1083,13 @@ Step 2: mcp__chrome-devtools__evaluate_script — intercept fetch, trigger actio
   document.querySelector('[data-testid="TARGET_TRIGGER"]')?.click();
   await new Promise(r => setTimeout(r, 3000));
   const apiData = captured.find(c => c.url.includes('/api/'));
-  const uiElements = document.querySelectorAll('[data-testid*="TARGET_SECTION"]');
+  const uiElements = Array.from(document.querySelectorAll('[data-testid*="TARGET_SECTION"]'));
+  const visibleUi = uiElements.filter(e => {{
+    const r = e.getBoundingClientRect();
+    const s = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0
+      && r.top >= 0 && r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight;
+  }});
   return JSON.stringify({{
     api: {{
       called: !!apiData,
@@ -1076,17 +1101,19 @@ Step 2: mcp__chrome-devtools__evaluate_script — intercept fetch, trigger actio
     ui: {{
       rendered: uiElements.length > 0,
       count: uiElements.length,
-      texts: Array.from(uiElements).slice(0, 5).map(e => ({{
+      visibleCount: visibleUi.length,
+      texts: visibleUi.slice(0, 5).map(e => ({{
         testid: e.getAttribute('data-testid'),
         text: e.textContent?.substring(0, 80)
       }}))
     }},
-    binding: apiData && uiElements.length > 0 ? "PASS" : "FAIL"
+    binding: apiData && visibleUi.length > 0 ? "PASS" : "FAIL"
   }});
- 
+
 Step 3: mcp__chrome-devtools__close_page
 ```
-**Pass**: `api.called === true`, `api.status === 200`, `api.hasData === true`, `ui.rendered === true`, `binding === "PASS"`.
+**Pass**: `api.called === true`, `api.status === 200`, `api.hasData === true`, `ui.visibleCount > 0`, `binding === "PASS"`.
+Elements existing in the DOM after the API call is NOT enough — at least one bound UI element must be visible and on-screen. `binding` now requires visibility, not just presence.
  
 ---
  
