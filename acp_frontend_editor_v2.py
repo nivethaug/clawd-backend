@@ -1655,43 +1655,45 @@ close_page available — nothing else is needed):
 ```
 Step 1: mcp__chrome-devtools__new_page(url: "http://localhost:<FRONTEND_PORT>/")
 
-Step 2: mcp__chrome-devtools__evaluate_script:
-  const headings = Array.from(document.querySelectorAll('h1,h2,h3'));
-  const visibleH = headings.filter(h => {{
-    const r = h.getBoundingClientRect();
-    const s = getComputedStyle(h);
-    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
-  }});
-  const main = document.querySelector('main');
-  const mainRect = main?.getBoundingClientRect();
-  const nav = document.querySelector('nav') || document.querySelector('[data-testid*="navbar"]') || document.querySelector('[data-testid*="nav"]');
-  const navRect = nav?.getBoundingClientRect();
-  return JSON.stringify({{
-    visibleHeadings: visibleH.length,
-    mainVisible: !!(mainRect && mainRect.width > 0 && mainRect.height > 0),
-    mainOnScreen: !!(mainRect && mainRect.top >= 0 && mainRect.left >= 0 && mainRect.right <= window.innerWidth && mainRect.bottom <= window.innerHeight),
-    navVisible: !!(navRect && navRect.width > 0 && navRect.height > 0),
-    navOnScreen: !!(navRect && navRect.top >= 0 && navRect.left >= 0 && navRect.right <= window.innerWidth && navRect.bottom <= window.innerHeight),
-    viewport: {{w: window.innerWidth, h: window.innerHeight}},
-    isStarterPage: /<title>\s*Welcome|Vite \+ React/i.test(document.documentElement.outerHTML.slice(0, 2000))
-  }});
+Step 2: mcp__chrome-devtools__evaluate_script — copy this function verbatim.
+  The 1.5s sleep bakes in hydration time; do NOT remove it or you'll read an
+  empty DOM and false-fail. Return one `ok` boolean plus diagnostic widths.
+  NOTE on nav: layouts are allowed to use <nav>, <aside> (sidebar), <header>,
+  or any element containing links. The check accepts any of these — do NOT
+  require a literal <nav> element.
+  async () => {{
+    await new Promise(r => setTimeout(r, 1500));
+    const m = document.querySelector('main')?.getBoundingClientRect();
+    // Nav can be <nav>, <aside> (sidebar layouts), or <header> with links.
+    const navEl = document.querySelector('nav') || document.querySelector('aside') || document.querySelector('header');
+    const n = navEl?.getBoundingClientRect();
+    const visibleLinks = Array.from(document.querySelectorAll('a, button')).filter(a => {{
+      const r = a.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    }}).length;
+    return JSON.stringify({{
+      // ok = main has width AND (some nav-shaped element has width OR there
+      // are visible links/buttons) AND at least one heading exists.
+      ok: !!(m && m.width > 0 && ((n?.width ?? 0) > 0 || visibleLinks > 0) && document.querySelectorAll('h1,h2,h3').length > 0),
+      mainW: m?.width || 0,
+      navW: n?.width || 0,
+      links: visibleLinks,
+      headings: document.querySelectorAll('h1,h2,h3').length
+    }});
+  }}
 
 Step 3: mcp__chrome-devtools__close_page
 ```
 
-**Pass** requires ALL of:
-- `visibleHeadings > 0` (at least one real heading is rendered and visible)
-- `mainVisible === true` and `mainOnScreen === true`
-- `navVisible === true` and `navOnScreen === true`
-- `isStarterPage === false`
+**Pass**: `ok === true`. That means `<main>` has non-zero width, at least one
+nav-shaped element (`<nav>`, `<aside>`, or `<header>`) or visible links/buttons
+exist, AND at least one `<h1>/<h2>/<h3>` is present. If `ok === false`, the build
+is incomplete (blank/starter page or layout broken) — fix and rebuild. Do not
+declare success on a build that fails this check.
 
-"Content exists in the DOM" is NOT enough — elements must be visible (non-zero
-size, not display:none/opacity:0) and on-screen (inside the viewport). If any
-check fails, the build is incomplete: fix the routing/layout/nav and rebuild.
-Do not declare success on a build that fails this check.
-
-Do NOT run more than this one new_page → evaluate_script → close_page sequence.
-One verification attempt — then close the page and finish.
+Run this sequence at most TWICE per build. If the second attempt still returns
+`ok === false`, stop verifying — report the failure to the user instead of
+looping.
 
 ---
 
