@@ -189,6 +189,13 @@ from template_selector import TemplateSelector
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Silence noisy library loggers — same as openclaw_wrapper.py
+for _noisy in (
+    "httpx", "httpcore", "urllib3", "groq", "openai",
+    "psycopg2", "database_postgres", "asyncio", "pipeline_status",
+):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 from services.sentry_config import capture_message as sentry_capture_message
 from services.sentry_config import configure_sentry, scoped_context as sentry_scoped_context
 
