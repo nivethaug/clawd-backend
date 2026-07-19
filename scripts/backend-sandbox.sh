@@ -6,16 +6,17 @@
 # What the backend CAN see:
 #   - Own backend/ directory (read-write)
 #   - Shared venv (read-only)
-#   - System libraries /usr /lib /bin (read-only)
-#   - /tmp (tmpfs, ephemeral)
+#   - System libraries: /usr /lib /bin /sbin (read-only)
+#   - /etc/resolv.conf + /etc/hosts + /etc/ssl (DNS + TLS)
+#   - /dev, /proc, /tmp
 #   - localhost network (postgres, other services)
 #
 # What the backend CANNOT see:
-#   - Other users' projects
-#   - /root/clawd-backend (platform source + secrets)
-#   - .env.postgres (DB passwords)
-#   - Docker socket
-#   - nginx/PM2 configs
+#   - /root (platform source + secrets)
+#   - /workspaces (other users)
+#   - /etc/nginx, /etc/systemd (platform configs)
+#   - /var/run/docker.sock
+#   - Anything else on the host
 #
 # Requires: apt install -y bubblewrap
 
@@ -26,16 +27,36 @@ PROJECT_DIR="${2:?Missing backend_path}"
 PORT="${3:?Missing port}"
 ENTRY="${4:-main:app}"
 
-exec bwrap \
-  --ro-bind / / \
-  --bind "$PROJECT_DIR" "$PROJECT_DIR" \
-  --ro-bind "$VENV" "$VENV" \
-  --dev /dev \
-  --proc /proc \
-  --tmpfs /tmp \
-  --share-net \
-  --die-with-parent \
-  -- \
+# Build args dynamically — only mount directories that exist
+BWRAP_ARGS=(
+  --unshare-all
+  --share-net
+  --die-with-parent
+  --dev /dev
+  --proc /proc
+  --tmpfs /tmp
+  --bind "$PROJECT_DIR" "$PROJECT_DIR"
+  --ro-bind "$VENV" "$VENV"
+  --ro-bind /etc/resolv.conf /etc/resolv.conf
+  --ro-bind /etc/hosts /etc/hosts
+)
+
+# Mount system libraries (different distros have different layouts)
+for dir in /usr /lib /lib64 /bin /sbin; do
+  if [ -d "$dir" ]; then
+    BWRAP_ARGS+=(--ro-bind "$dir" "$dir")
+  fi
+done
+
+# SSL certs for HTTPS from the backend
+if [ -d /etc/ssl ]; then
+  BWRAP_ARGS+=(--ro-bind /etc/ssl /etc/ssl)
+fi
+if [ -f /etc/ca-certificates.conf ]; then
+  BWRAP_ARGS+=(--ro-bind /etc/ca-certificates.conf /etc/ca-certificates.conf)
+fi
+
+exec bwrap "${BWRAP_ARGS[@]}" -- \
   "$VENV/bin/uvicorn" "$ENTRY" \
   --host 0.0.0.0 \
   --port "$PORT"
