@@ -1,85 +1,167 @@
 #!/usr/bin/env python3
-"""Test bubblewrap sandbox isolation — verifies a sandboxed backend cannot
-read platform secrets or other users' files.
+"""In-sandbox isolation probe — runs INSIDE the bwrap sandbox and reports
+which paths and capabilities the deployed backend can reach.
 
-Usage:
-    python3 scripts/test_bwrap_isolation.py <backend_path> <venv_path>
+Invoked by scripts/verify_isolation.sh. Do NOT run directly with arbitrary
+bwrap args — use verify_isolation.sh which mirrors the real backend-sandbox.sh
+mount layout.
 
-This script runs INSIDE the bwrap sandbox and reports which paths are
-visible. Run it via:
-
-    bwrap --ro-bind / / \
-      --bind <backend_path> <backend_path> \
-      --ro-bind <venv_path> <venv_path> \
-      --dev /dev --proc /proc --tmpfs /tmp \
-      --share-net --die-with-parent \
-      -- <venv_path>/bin/python3 scripts/test_bwrap_isolation.py <backend_path>
+Exit codes:
+    0 = all isolation checks PASSED (backend cannot escape)
+    1 = one or more checks FAILED (secrets visible)
 """
 import os
+import socket
+import subprocess
 import sys
 
-results = {}
+results = []  # list of (status, target, detail)
 
-targets = {
-    "/root/clawd-backend/.env.postgres": "Platform DB credentials",
-    "/root/clawd-backend/app.py": "Platform source code",
-    "/root/.claude/settings.json": "Claude settings",
-    "/etc/nginx/nginx.conf": "Nginx config",
-    "/var/run/docker.sock": "Docker socket",
-    "/workspaces": "Other users workspaces",
-}
 
-for path, label in targets.items():
+def check_blocked(label, path, *, kind="file"):
+    """Verify a path is NOT visible from inside the sandbox."""
+    try:
+        if kind == "dir":
+            entries = os.listdir(path)
+            results.append(("FAIL", path, f"directory LISTABLE — {len(entries)} entries visible"))
+            return
+        if not os.path.exists(path):
+            results.append(("PASS", path, "not present in sandbox"))
+            return
+        with open(path, "r") as fh:
+            preview = fh.read(80).replace("\n", " ")
+        results.append(("FAIL", path, f"READABLE — preview: {preview!r}"))
+    except FileNotFoundError:
+        results.append(("PASS", path, "not present in sandbox"))
+    except PermissionError:
+        results.append(("PASS", path, "permission denied"))
+    except IsADirectoryError:
+        try:
+            entries = os.listdir(path)
+            results.append(("FAIL", path, f"directory LISTABLE — {len(entries)} entries"))
+        except Exception as e:
+            results.append(("PASS", path, f"blocked ({type(e).__name__})"))
+    except Exception as e:
+        # Any error trying to read = blocked = pass
+        results.append(("PASS", path, f"blocked ({type(e).__name__})"))
+
+
+def check_visible(label, path):
+    """Verify a path IS visible from inside the sandbox (sanity check)."""
     try:
         if os.path.exists(path):
-            with open(path, "r") as f:
-                content = f.read(100)
-            results[path] = f"!!! READABLE ({label}) !!!: {content[:30]}..."
+            results.append(("PASS", path, "visible (expected)"))
         else:
-            results[path] = "NOT FOUND (good)"
-    except PermissionError:
-        results[path] = "BLOCKED (good)"
-    except FileNotFoundError:
-        results[path] = "NOT FOUND (good)"
+            results.append(("FAIL", path, "should be visible but is missing"))
     except Exception as e:
-        results[path] = f"BLOCKED ({type(e).__name__}) (good)"
+        results.append(("FAIL", path, f"unexpected error: {type(e).__name__}: {e}"))
 
-# Can we list other users?
+
+# ----------------------------------------------------------------------------
+# 1. CRITICAL: Platform secrets must NOT be visible
+# ----------------------------------------------------------------------------
+check_blocked("Platform DB credentials", "/root/clawd-backend/.env.postgres")
+check_blocked("Platform source code", "/root/clawd-backend/app.py")
+check_blocked("Platform source dir", "/root/clawd-backend", kind="dir")
+check_blocked("Claude settings dir", "/root/.claude", kind="dir")
+check_blocked("Claude settings.json", "/root/.claude.json")
+check_blocked("SSH private keys", "/root/.ssh", kind="dir")
+check_blocked("Root home dir", "/root", kind="dir")
+check_blocked("Worker source (project_creation_runs)", "/root/clawd-backend/services/project_creation_runs.py")
+check_blocked("Container manager source", "/root/clawd-backend/services/container_manager.py")
+
+# ----------------------------------------------------------------------------
+# 2. CRITICAL: Host compromise vectors must NOT be visible
+# ----------------------------------------------------------------------------
+check_blocked("Docker socket", "/var/run/docker.sock")
+check_blocked("Systemd unit dir", "/etc/systemd", kind="dir")
+check_blocked("Nginx config", "/etc/nginx/nginx.conf")
+check_blocked("Nginx config dir", "/etc/nginx", kind="dir")
+check_blocked("Postgres config", "/etc/postgresql", kind="dir")
+check_blocked("Cron jobs", "/etc/crontab")
+check_blocked("PAM config", "/etc/pam.d", kind="dir")
+check_blocked("Shadow password file", "/etc/shadow")
+
+# ----------------------------------------------------------------------------
+# 3. CRITICAL: Other users' files must NOT be visible
+# ----------------------------------------------------------------------------
+check_blocked("Other users root", "/workspaces", kind="dir")
+check_blocked("Other users parent", "/workspaces/user_1", kind="dir")
+check_blocked("DreamPilot parent (other projects)", "/root/dreampilot", kind="dir")
+
+# ----------------------------------------------------------------------------
+# 4. Network: should NOT be able to bind privileged ports or reach metadata
+# ----------------------------------------------------------------------------
+# Try to connect to AWS/GCP metadata endpoint (if cloud-hosted, this leaks IAM creds)
 try:
-    other = os.listdir("/workspaces")
-    results["/workspaces"] = f"!!! LISTED: {other} !!!"
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(1)
+    s.connect(("169.254.169.254", 80))
+    s.close()
+    results.append(("WARN", "metadata:169.254.169.254", "reachable — cloud IAM may be exposed"))
 except Exception as e:
-    results["/workspaces"] = f"BLOCKED ({type(e).__name__}) (good)"
+    results.append(("PASS", "metadata:169.254.169.254", f"blocked ({type(e).__name__})"))
 
-# Can we read our own backend dir?
+# Try to bind a privileged port (<1024 requires CAP_NET_BIND_SERVICE which we don't have)
 try:
-    own = os.listdir(".")
-    results["own_dir"] = f"OK: {len(own)} files (good - should work)"
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 80))
+    s.close()
+    results.append(("FAIL", "bind:127.0.0.1:80", "privileged port bind succeeded — has CAP_NET_BIND_SERVICE"))
+except PermissionError:
+    results.append(("PASS", "bind:127.0.0.1:80", "permission denied (no CAP_NET_BIND_SERVICE)"))
 except Exception as e:
-    results["own_dir"] = f"FAILED: {e} (BAD - should work)"
+    results.append(("PASS", "bind:127.0.0.1:80", f"blocked ({type(e).__name__})"))
 
-# Try to execute commands
+# ----------------------------------------------------------------------------
+# 5. Process namespace: should NOT see host processes
+# ----------------------------------------------------------------------------
 try:
-    import subprocess
-    r = subprocess.run(["ls", "/root/clawd-backend/"], capture_output=True, text=True, timeout=5)
-    if r.returncode == 0 and r.stdout.strip():
-        results["ls /root/clawd-backend"] = f"!!! ACCESSIBLE: {r.stdout[:50]} !!!"
+    proc_entries = os.listdir("/proc")
+    pids = [e for e in proc_entries if e.isdigit()]
+    # Sandbox should have very few PIDs visible (init + self + a few helpers)
+    if len(pids) > 20:
+        results.append(("WARN", "/proc", f"{len(pids)} PIDs visible — may share PID namespace with host"))
     else:
-        results["ls /root/clawd-backend"] = "empty or blocked (good)"
+        results.append(("PASS", "/proc", f"{len(pids)} PIDs visible (likely sandboxed PID namespace)"))
 except Exception as e:
-    results["ls /root/clawd-backend"] = f"BLOCKED ({type(e).__name__}) (good)"
+    results.append(("PASS", "/proc", f"blocked ({type(e).__name__})"))
 
-print("=" * 50)
-print("BWRAP SANDBOX ISOLATION TEST")
-print("=" * 50)
-for path, result in results.items():
-    status = "PASS" if "(good)" in result else "FAIL"
-    print(f"[{status}] {path}: {result}")
-print("=" * 50)
-fails = sum(1 for r in results.values() if "(good)" not in r and "OK" not in r)
+# ----------------------------------------------------------------------------
+# 6. Sanity: things the backend SHOULD be able to see
+# ----------------------------------------------------------------------------
+own_backend = sys.argv[1] if len(sys.argv) > 1 else "."
+check_visible("Own backend dir", own_backend)
+check_visible("Shared venv", "/root/dreampilot/dreampilotvenv")
+check_visible("System libs", "/usr/lib")
+check_visible("DNS resolver", "/etc/resolv.conf")
+
+# ----------------------------------------------------------------------------
+# Report
+# ----------------------------------------------------------------------------
+print("=" * 70)
+print(" BWRAP SANDBOX ISOLATION REPORT")
+print("=" * 70)
+
+fails = warns = 0
+for status, target, detail in results:
+    icon = {"PASS": "✓", "FAIL": "✗", "WARN": "⚠"}[status]
+    print(f" [{icon} {status:4}] {target}")
+    print(f"            {detail}")
+    if status == "FAIL":
+        fails += 1
+    elif status == "WARN":
+        warns += 1
+
+print("=" * 70)
 if fails:
-    print(f"RESULT: {fails} SECURITY FAILURES DETECTED")
+    print(f" RESULT: ❌ FAIL — {fails} isolation failure(s), {warns} warning(s)")
+    print(" The deployed backend CAN read paths it should not be able to.")
+    print(" DO NOT launch publicly until these are fixed.")
     sys.exit(1)
+elif warns:
+    print(f" RESULT: ⚠ PASS with {warns} warning(s) — review above")
+    sys.exit(0)
 else:
-    print("RESULT: ALL CHECKS PASSED - sandbox is secure")
+    print(" RESULT: ✅ PASS — backend is fully isolated from host secrets")
     sys.exit(0)
