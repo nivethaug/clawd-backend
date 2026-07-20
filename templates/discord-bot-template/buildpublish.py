@@ -69,19 +69,35 @@ def publish(project_path: str, project_id: str) -> bool:
     """
     process_name = f"dc-bot-{project_id}"
 
-    # Stop existing process if running
-    subprocess.run(
-        ["pm2", "stop", process_name],
-        capture_output=True
-    )
-    subprocess.run(
-        ["pm2", "delete", process_name],
-        capture_output=True
-    )
+    # Strategy 1: worker-api internal endpoint (container/sandbox path).
+    # The container/sandbox can't access PM2 directly — call the worker-api
+    # which runs on the same host as PM2.
+    worker_api_url = os.environ.get("DREAMPILOT_WORKER_API_URL")
+    if worker_api_url:
+        import json as _json
+        import urllib.request as _urlreq
+        endpoint = f"{worker_api_url}/internal/pm2-restart"
+        payload = _json.dumps({"pm2_app_name": process_name}).encode()
+        print(f"→ Calling worker-api: POST {endpoint}")
+        try:
+            req = _urlreq.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+            with _urlreq.urlopen(req, timeout=60) as resp:
+                result = _json.loads(resp.read().decode())
+            if result.get("success"):
+                print(f"✓ Worker-api restarted PM2 app '{process_name}'")
+                print(f"Bot published as PM2 process: {process_name}")
+                return True
+            else:
+                print(f"✗ Worker-api restart failed: {result.get('error', 'unknown')}")
+        except Exception as e:
+            print(f"⚠ Worker-api call failed: {e} — falling back to direct pm2")
 
-    # Start with PM2
+    # Strategy 2: direct pm2 stop + start (host path, no sudo)
+    subprocess.run(["pm2", "stop", process_name], capture_output=True)
+    subprocess.run(["pm2", "delete", process_name], capture_output=True)
+
     result = subprocess.run(
-        ["sudo pm2", "start", "main.py",
+        ["pm2", "start", "main.py",
          "--name", process_name,
          "--interpreter", sys.executable],
         cwd=project_path,
@@ -89,6 +105,16 @@ def publish(project_path: str, project_id: str) -> bool:
         text=True
     )
 
+    if result.returncode == 0:
+        print(f"Bot published as PM2 process: {process_name}")
+        return True
+
+    # Strategy 3: sudo pm2 start (last resort — fails in sandbox/container)
+    print("⚠ bare pm2 start failed, trying with sudo")
+    result = subprocess.run(
+        f"sudo pm2 start main.py --name {process_name} --interpreter {sys.executable}",
+        shell=True, cwd=project_path, capture_output=True, text=True
+    )
     if result.returncode != 0:
         print(f"PM2 start failed: {result.stderr}")
         return False

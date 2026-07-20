@@ -107,27 +107,31 @@ def clear_python_cache():
 
 
 def restart_pm2():
-    """Restart PM2 process for this bot with HARD restart
-    
-    PM2 app name is read from .env file (BOT_NAME variable)
-    Format: tg-bot-{project_id} (set by pm2_manager.py)
-    
-    Uses stop + start instead of restart to ensure fresh code load
+    """Restart PM2 process for this bot with HARD restart.
+
+    PM2 app name is read from .env file.
+    Format: {domain}-bot or tg-bot-{project_id} (set by pm2_manager.py)
+
+    Tries three strategies in order (same as backend/frontend buildpublish):
+      1. Call worker-api's internal /internal/pm2-restart endpoint
+         (works inside containers/sandbox where PM2 isn't directly accessible)
+      2. Direct pm2 stop+start (host path, no sudo)
+      3. sudo pm2 restart (last resort — fails in sandbox/container)
     """
     print("\n" + "="*50)
     print("PM2 HARD RESTART")
     print("="*50)
-    
+
     # Read bot name from .env
     env_path = Path(".env")
     if not env_path.exists():
         print("✗ .env file not found")
         return False
-    
+
     project_id = None
     bot_token = None
     domain = None
-    
+
     with open(env_path, 'r') as f:
         for line in f:
             if line.startswith("PROJECT_ID="):
@@ -135,61 +139,87 @@ def restart_pm2():
             elif line.startswith("BOT_TOKEN="):
                 bot_token = line.split("=", 1)[1].strip()
             elif line.startswith("WEBHOOK_DOMAIN="):
-                # Primary: use WEBHOOK_DOMAIN directly from .env
                 domain = line.split("=", 1)[1].strip()
             elif line.startswith("WEBHOOK_URL=") and not domain:
-                # Fallback: extract domain from WEBHOOK_URL if WEBHOOK_DOMAIN not set
                 webhook_url = line.split("=", 1)[1].strip()
                 if "://" in webhook_url:
                     domain = webhook_url.split("://")[1].split("/")[0]
                 else:
                     domain = webhook_url.split("/")[0]
-    
+
     if not project_id:
         print("✗ PROJECT_ID not found in .env")
         return False
-    
+
     # PM2 process name format: {domain}-bot or tg-bot-{project_id}
-    # Domain from WEBHOOK_URL already contains the subdomain (e.g., crypto-bot-x123)
     pm2_process_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
     print(f"📦 PM2 process name: {pm2_process_name}")
-    
+
+    # Strategy 1: worker-api internal endpoint (container/sandbox path).
+    worker_api_url = os.environ.get("DREAMPILOT_WORKER_API_URL")
+    if worker_api_url:
+        import json as _json
+        import urllib.request as _urlreq
+        endpoint = f"{worker_api_url}/internal/pm2-restart"
+        payload = _json.dumps({"pm2_app_name": pm2_process_name}).encode()
+        print(f"→ Calling worker-api: POST {endpoint}")
+        try:
+            req = _urlreq.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+            with _urlreq.urlopen(req, timeout=60) as resp:
+                result = _json.loads(resp.read().decode())
+            if result.get("success"):
+                print(f"✓ Worker-api restarted PM2 app '{pm2_process_name}'")
+                _post_restart_webhook(bot_token, domain, project_id, pm2_process_name)
+                return True
+            else:
+                print(f"✗ Worker-api restart failed: {result.get('error', 'unknown')}")
+        except Exception as e:
+            print(f"⚠ Worker-api call failed: {e} — falling back to direct pm2")
+    else:
+        print("ℹ DREAMPILOT_WORKER_API_URL not set — skipping worker-api path")
+
+    # Strategy 2: direct pm2 stop + start (host path, no sudo)
     print(f"📦 Stopping PM2 app: {pm2_process_name}")
     run(f"pm2 stop {pm2_process_name}")
-    
-    # Wait for process to fully stop
     import time
     time.sleep(2)
-    
     print(f"📦 Starting PM2 app: {pm2_process_name}")
-    if not run(f"pm2 start {pm2_process_name}"):
-        print("⚠️ PM2 start failed, trying restart...")
-        if not run(f"sudo pm2 restart {pm2_process_name}"):
-            return False
-    
-    # Verify process is running
+    if run(f"pm2 start {pm2_process_name}"):
+        _post_restart_webhook(bot_token, domain, project_id, pm2_process_name)
+        return True
+
+    # Strategy 3: sudo pm2 restart (last resort)
+    print("⚠ bare pm2 failed, trying with sudo (may fail in sandbox/container)")
+    if not run(f"sudo pm2 restart {pm2_process_name}"):
+        return False
+
+    _post_restart_webhook(bot_token, domain, project_id, pm2_process_name)
+    return True
+
+
+def _post_restart_webhook(bot_token, domain, project_id, pm2_process_name):
+    """Re-register webhook + verify PM2 status after restart (any strategy)."""
+    import time
     time.sleep(2)
+
+    # Verify process is running (best-effort — may not work inside sandbox)
     result = subprocess.run(
-        f"pm2 describe {pm2_process_name}",
+        f"pm2 describe {pm2_process_name} 2>/dev/null",
         shell=True,
         capture_output=True,
         text=True
     )
-    
     if "online" in result.stdout.lower():
         print(f"✅ PM2 process is online: {pm2_process_name}")
     else:
-        print(f"⚠️ PM2 process may not be running properly")
-        print(f"Status output:\n{result.stdout[:500]}")
-    
+        print(f"⚠️ PM2 process status unknown (may be in sandbox)")
+
     # Re-register webhook if token and domain available
     if bot_token and domain:
         print("\n" + "="*50)
         print("WEBHOOK RE-REGISTRATION")
         print("="*50)
         re_register_webhook(bot_token, domain, project_id)
-    
-    return True
 
 
 def re_register_webhook(bot_token: str, domain: str, project_id: str):
