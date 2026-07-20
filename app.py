@@ -2741,7 +2741,9 @@ async def clone_project(
 
     # Create project folder
     project_manager = ProjectFileManager()
-    clone_folder_path, folder_success = project_manager.create_project_with_git(clone_project_id, request.name, source_type_id)
+    clone_folder_path, folder_success = project_manager.create_project_with_git(
+        clone_project_id, request.name, source_type_id, user_id=user_id
+    )
 
     if not folder_success:
         with get_db() as conn:
