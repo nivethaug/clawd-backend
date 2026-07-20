@@ -2053,12 +2053,23 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
 # Clone Project Endpoint
 # ---------------------------------------------------------------------------
 
+import re as _re_chat_filter
+
+# Matches a single TOOL:<name> token (used to filter space-separated runs
+# embedded inside otherwise-real text chunks, e.g.:
+#   "TOOL:Read TOOL:Read Now let me read the full Navbar..."
+# becomes:
+#   "Now let me read the full Navbar..."
+_CHAT_TOOL_TOKEN_RE = _re_chat_filter.compile(r"(?:^|\s)TOOL:[A-Za-z0-9_\-]+(?=\s|$)")
+
+
 def _clean_chat_chunks(chunks):
     """Filter chat chunks before saving to DB or returning to the UI.
 
     Strips the noise that the streaming pipeline emits:
       - PROGRESS: ...      → friendly progress messages (not real content)
-      - TOOL: ...          → tool-call name telemetry (e.g. TOOL:Read)
+      - TOOL: <name>       → tool-call telemetry (drops token, keeps any
+                             real text that shares the chunk)
       - TEXT: ...          → strip the prefix, keep the real text
       - pure JSON/empty    → stream-json envelope noise (null, {}, [], ---)
       - z.ai built-in tool → built-in MCP tool dump
@@ -2075,10 +2086,36 @@ def _clean_chat_chunks(chunks):
         text = str(raw or "").strip()
         if not text or text in ("null", "{}", "[]", "---"):
             continue
-        if text.startswith("PROGRESS:") or text.startswith("TOOL:"):
+        # Drop pure PROGRESS: lines entirely.
+        if text.startswith("PROGRESS:"):
             continue
+        # Strip a leading TEXT: prefix (keep the rest).
         if text.startswith("TEXT:"):
             text = text[5:].strip()
+            if not text:
+                continue
+        # Strip TOOL: tokens. Three cases:
+        #   1. chunk is exactly "TOOL:Read"      → drop entirely
+        #   2. chunk starts with "TOOL:" + more  → strip TOOL: prefix, keep rest
+        #   3. chunk has TOOL: tokens mid-text   → drop just the tokens, keep text
+        if text.startswith("TOOL:"):
+            # Could be a single token OR a token plus real text on the same chunk.
+            tokens = text.split()
+            if all(t.startswith("TOOL:") for t in tokens):
+                # Pure tool-name chunk — drop entirely.
+                continue
+            # Mixed: drop TOOL: tokens, keep the rest.
+            text = " ".join(t for t in tokens if not t.startswith("TOOL:")).strip()
+            if not text:
+                continue
+        else:
+            # Intra-line TOOL: tokens (mid-chunk). Strip them in place.
+            new_text = _CHAT_TOOL_TOKEN_RE.sub(" ", text).strip()
+            # Collapse multiple spaces left by the substitutions.
+            while "  " in new_text:
+                new_text = new_text.replace("  ", " ")
+            if new_text != text:
+                text = new_text
             if not text:
                 continue
         if text.startswith("{") or text.startswith("["):
