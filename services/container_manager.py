@@ -14,7 +14,7 @@ Container model (see docs/container_isolation.md §5)
 - Flags (applied on every `docker run`):
     --cap-drop=ALL --security-opt=no-new-privileges
     --read-only --tmpfs /tmp
-    --memory=2g --cpus=2 --pids-limit=256
+    --memory=2g --cpus=2 --pids-limit=1024
     --network=dreamagent-net --restart unless-stopped
 - NEVER mounts: Docker socket, backend source, other users' workspaces, /root
 
@@ -65,7 +65,14 @@ SHARED_CACHE_TARGET: str = os.getenv("SHARED_CACHE_TARGET", "/cache")
 # Resource limits — non-optional. Documented in docs/container_isolation.md §13.
 CONTAINER_MEMORY: str = os.getenv("CONTAINER_MEMORY", "2g")
 CONTAINER_CPUS: str = os.getenv("CONTAINER_CPUS", "2")
-CONTAINER_PIDS_LIMIT: int = int(os.getenv("CONTAINER_PIDS_LIMIT", "512"))
+# PID limit. 512 was the original single-operation limit, but when a chat
+# and a project creation run in parallel inside the same container they
+# legitimately need ~600-800 PIDs (two Claude instances, npm install,
+# vite/esbuild workers, chrome-devtools-mcp). Hitting the limit makes the
+# kernel SIGKILL processes — usually the biggest one (Claude) dies first
+# with exit code 137. 1024 gives headroom for parallel work without
+# unbounded growth. Override via env var if needed.
+CONTAINER_PIDS_LIMIT: int = int(os.getenv("CONTAINER_PIDS_LIMIT", "1024"))
 
 # User mapping inside the container.
 CONTAINER_USER_UID: int = int(os.getenv("CONTAINER_USER_UID", "1001"))
@@ -478,6 +485,26 @@ class ContainerManager:
         ])
         return r.returncode == 0 and self.container_name in r.stdout.strip().splitlines()
 
+    def has_active_claude(self) -> bool:
+        """True if a Claude CLI process is currently running inside this container.
+
+        Used by project-creation to detect when a parallel chat is in flight
+        so it can skip the pre-run cleanup_processes() (which would SIGKILL
+        the chat's Claude).
+        """
+        if not self._container_exists():
+            return False
+        r = _run_docker([
+            "exec", self.container_name,
+            "sh", "-c",
+            # pgrep returns 0 if any match, 1 if none. -f matches full cmdline.
+            # Match either the binary name 'claude' or the npm package path.
+            "pgrep -f 'claude' >/dev/null 2>&1 && echo yes || echo no",
+        ], timeout=5)
+        if r.returncode != 0:
+            return False
+        return r.stdout.strip() == "yes"
+
     def cleanup_processes(self, spare_patterns: Optional[List[str]] = None) -> int:
         """Kill processes inside the container except PID 1 and any matching spare_patterns.
 
@@ -529,15 +556,18 @@ class ContainerManager:
 
             if spare_patterns and any(pat in cmdline for pat in spare_patterns):
                 spared += 1
-                logger.debug(
-                    "[CONTAINER] sparing pid=%s in %s (cmdline matches keepalive pattern): %s",
-                    pid, self.container_name, cmdline[:120],
+                logger.info(
+                    "[CONTAINER] sparing pid=%s in %s (cmdline matches keepalive pattern %r): %s",
+                    pid, self.container_name,
+                    next(p for p in spare_patterns if p in cmdline),
+                    cmdline[:120],
                 )
                 continue
 
             kr = _run_docker(["exec", self.container_name, "kill", "-9", pid], timeout=5)
             if kr.returncode == 0:
                 killed += 1
+                logger.debug("[CONTAINER] killed pid=%s in %s: %s", pid, self.container_name, cmdline[:80])
 
         if killed or spared:
             logger.info(

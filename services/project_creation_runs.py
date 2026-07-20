@@ -827,14 +827,29 @@ def execute_run(run_id: int) -> Dict[str, Any]:
         # a new project creation. Previous ACPX/build/MCP processes accumulate
         # (orphaned npm, esbuild, node, chrome-devtools). This prevents PID
         # exhaustion that causes build failures and rollbacks.
+        #
+        # CRITICAL: if a chat is currently running in the same container, skip
+        # the cleanup entirely. The container hosts BOTH the chat's Claude and
+        # this project's ACPX Claude. cleanup_processes() would SIGKILL the
+        # chat's Claude (exit code 137) and lose the user's in-flight chat.
+        # Even with spare_patterns=['claude'], running cleanup adds docker
+        # exec overhead and risks edge cases — better to skip when we know
+        # there's parallel work.
         try:
             if os.getenv("EXECUTION_MODE", "local").lower() == "container":
                 from services.container_manager import ContainerManager
                 cm = ContainerManager(user_id)
                 if cm._container_exists():
-                    killed = cm.cleanup_processes()
-                    if killed:
-                        logger.info("[PROJECT-RUN] pre-run cleanup: killed %d orphaned processes", killed)
+                    if cm.has_active_claude():
+                        logger.warning(
+                            "[PROJECT-RUN] active Claude chat detected in %s — "
+                            "SKIPPING pre-run cleanup to avoid killing it",
+                            cm.container_name,
+                        )
+                    else:
+                        killed = cm.cleanup_processes()
+                        if killed:
+                            logger.info("[PROJECT-RUN] pre-run cleanup: killed %d orphaned processes", killed)
         except Exception as exc:
             logger.debug("[PROJECT-RUN] container pre-cleanup skipped: %s", exc)
 
