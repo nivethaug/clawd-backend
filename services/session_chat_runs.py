@@ -439,15 +439,11 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
         if final_response:
             assistant_content = str(final_response).strip()
         else:
-            real_chunks = []
-            for chunk in chunks_for_response:
-                text = str(chunk).strip()
-                if not text or text.startswith("PROGRESS:"):
-                    continue
-                if text.startswith("TEXT:"):
-                    text = text[5:].strip()
-                if text:
-                    real_chunks.append(text)
+            # Use the shared chunk filter from app.py so TOOL: / PROGRESS: /
+            # JSON noise doesn't leak into the saved assistant message.
+            # Local import to avoid a circular import at module load time.
+            from app import _clean_chat_chunks
+            real_chunks = _clean_chat_chunks(chunks_for_response)
             assistant_content = "\n".join(real_chunks).strip()
 
         if not assistant_content:

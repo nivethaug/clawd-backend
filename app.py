@@ -2053,6 +2053,50 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
 # Clone Project Endpoint
 # ---------------------------------------------------------------------------
 
+def _clean_chat_chunks(chunks):
+    """Filter chat chunks before saving to DB or returning to the UI.
+
+    Strips the noise that the streaming pipeline emits:
+      - PROGRESS: ...      → friendly progress messages (not real content)
+      - TOOL: ...          → tool-call name telemetry (e.g. TOOL:Read)
+      - TEXT: ...          → strip the prefix, keep the real text
+      - pure JSON/empty    → stream-json envelope noise (null, {}, [], ---)
+      - z.ai built-in tool → built-in MCP tool dump
+      - analyze_image dump → vision tool telemetry
+      - code fence openings → stray ``` and ```json with no closing fence
+
+    Returns a list of clean content strings ready to join with newlines.
+    Used by the streaming endpoint, background save paths, and the durable
+    session-chat worker so the saved assistant message is human-readable
+    instead of cluttered with telemetry.
+    """
+    cleaned = []
+    for raw in chunks or []:
+        text = str(raw or "").strip()
+        if not text or text in ("null", "{}", "[]", "---"):
+            continue
+        if text.startswith("PROGRESS:") or text.startswith("TOOL:"):
+            continue
+        if text.startswith("TEXT:"):
+            text = text[5:].strip()
+            if not text:
+                continue
+        if text.startswith("{") or text.startswith("["):
+            continue
+        low = text.lower()
+        if "z.ai built-in tool" in low or "analyze_image" in low:
+            continue
+        if text in ("**Input:**", "**Output:**"):
+            continue
+        if text.startswith("```"):
+            # stray code-fence opener with no real content on the same line
+            fence_body = text.lstrip("`").strip()
+            if not fence_body:
+                continue
+        cleaned.append(text)
+    return cleaned
+
+
 def _copy_project_files(src_path: str, dst_path: str, skip_dirs: set = None):
     """Recursively copy project files, skipping build artifacts and VCS dirs."""
     if skip_dirs is None:
@@ -6352,8 +6396,9 @@ async def chat_stream_endpoint(
                     # Fallback to chunks
                     if hasattr(handler, '_last_query_chunks'):
                         chunks = handler._last_query_chunks
-                        real_chunks = [c for c in chunks if not c.startswith('PROGRESS:')]
-                        real_chunks = [c[5:] if c.startswith('TEXT:') else c for c in real_chunks]
+                        # Use the shared chunk filter so TOOL: / PROGRESS: / JSON
+                        # noise doesn't leak into the saved assistant message.
+                        real_chunks = _clean_chat_chunks(chunks)
                         if real_chunks:
                             content = '\n'.join(real_chunks).strip()
                             if content:
@@ -6371,12 +6416,11 @@ async def chat_stream_endpoint(
                         full_response.append(chunk)
                         event_data = json.dumps({'choices': [{'delta': {'content': chunk + "\n"}}]})
                         yield f"data: {event_data}\n\n"
-                    
-                    # Filter out PROGRESS: messages, keep TEXT: and unprefixed
-                    real_chunks = [c for c in full_response if not c.startswith('PROGRESS:')]
-                    # Strip TEXT: prefix from actual content
-                    real_chunks = [c[5:] if c.startswith('TEXT:') else c for c in real_chunks]
-                    
+
+                    # Filter noise (PROGRESS:, TOOL:, JSON envelopes, code-fence
+                    # openings) and strip TEXT: prefix before saving to DB.
+                    real_chunks = _clean_chat_chunks(full_response)
+
                     # Save complete response to database (with newlines between chunks)
                     assistant_content = '\n'.join(real_chunks).strip()
                     
@@ -6391,11 +6435,11 @@ async def chat_stream_endpoint(
                 except asyncio.CancelledError:
                     # Client disconnected - spawn background task to save when complete
                     logger.warning(f"[ACP-STREAM] Client disconnected, spawning background save task...")
-                    
-                    # Filter out PROGRESS: messages from what we have so far
-                    real_chunks = [c for c in full_response if not c.startswith('PROGRESS:')]
-                    # Strip TEXT: prefix from actual content
-                    real_chunks = [c[5:] if c.startswith('TEXT:') else c for c in real_chunks]
+
+                    # Filter noise (PROGRESS:, TOOL:, JSON envelopes, code-fence
+                    # openings) and strip TEXT: prefix so the saved assistant
+                    # message is human-readable.
+                    real_chunks = _clean_chat_chunks(full_response)
                     
                     # Spawn background task that will poll until query completes
                     async def wait_and_save():
@@ -6755,15 +6799,8 @@ async def chat_chunks(
             if not run:
                 return {"chunks": [], "total": 0, "active": False}
             durable = get_run_chunks(int(run["id"]), after)
-            filtered = []
-            for chunk in durable.get("chunks", []):
-                content = str(chunk.get("content") or "")
-                if content.startswith('PROGRESS:') or content.startswith('TOOL:'):
-                    continue
-                if content.startswith('TEXT:'):
-                    filtered.append(content[5:])
-                elif content.strip() and content not in ['null', '{}', '[]', '---']:
-                    filtered.append(content)
+            raw_chunks = [str(c.get("content") or "") for c in durable.get("chunks", [])]
+            filtered = _clean_chat_chunks(raw_chunks)
             return {
                 "chunks": filtered,
                 "total": durable.get("total", 0),
@@ -6778,15 +6815,8 @@ async def chat_chunks(
     all_chunks = getattr(handler, '_last_query_chunks', []) or []
     new_chunks = all_chunks[after:] if after < len(all_chunks) else []
 
-    # Filter out PROGRESS: and TOOL: chunks, strip TEXT: prefix
-    filtered = []
-    for chunk in new_chunks:
-        if chunk.startswith('PROGRESS:') or chunk.startswith('TOOL:'):
-            continue
-        if chunk.startswith('TEXT:'):
-            filtered.append(chunk[5:])
-        elif chunk.strip() and chunk not in ['null', '{}', '[]', '---']:
-            filtered.append(chunk)
+    # Use the shared chunk filter so live polling sees clean content too.
+    filtered = _clean_chat_chunks(new_chunks)
 
     return {
         "chunks": filtered,
