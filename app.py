@@ -134,14 +134,17 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
         logger.error(f"[ACP-CHAT] Failed to create handler: {e}")
         return f"Error: Failed to initialize ACP mode: {str(e)}"
     
-    # Build session context from recent messages (last 4 messages = 2 exchanges)
+    # Build session context from recent messages (last 10 messages = ~5 exchanges).
+    # Without --resume, this is Claude's only view of prior turns, so we keep
+    # more history than the old limit of 4 (which only worked because --resume
+    # carried the rest natively).
     context_lines = []
     with get_db() as conn:
         recent_messages = conn.execute(
-            """SELECT role, content FROM messages 
-               WHERE session_id = ? 
-               ORDER BY created_at DESC 
-               LIMIT 4""",
+            """SELECT role, content FROM messages
+               WHERE session_id = ?
+               ORDER BY created_at DESC
+               LIMIT 10""",
             (session_id,)
         ).fetchall()
         
@@ -6083,9 +6086,9 @@ async def chat_stream_endpoint(
             try:
                 with get_db() as conn:
                     rows = conn.execute(
-                        """SELECT role, content, image FROM messages 
-                           WHERE session_id = ? 
-                           ORDER BY created_at DESC LIMIT 4""",
+                        """SELECT role, content, image FROM messages
+                           WHERE session_id = ?
+                           ORDER BY created_at DESC LIMIT 10""",
                         (session_id,)
                     ).fetchall()
                     if rows:
