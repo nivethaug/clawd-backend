@@ -323,17 +323,41 @@ def _docker() -> Dict[str, Any]:
             entry["user_id"] = uc["user_id"]
             entry["workspace_path"] = uc["workspace_path"]
             entry["last_used_at"] = uc["last_used_at"]
-            # Get PID count for running user containers
+            # Get PID count + per-name breakdown for running user containers.
+            # We read /proc/<pid>/comm for each process and group by name so
+            # the Docker Fleet card can show:
+            #   PIDs: 87 total
+            #     python3: 42, node: 18, npm: 8, ...
             if entry["running"]:
-                pid_count_raw = _run([
+                pid_detail_raw = _run([
                     "docker", "exec", name,
-                    "sh", "-c", "ls /proc/[0-9]*/comm 2>/dev/null | wc -l"
-                ])
-                if pid_count_raw:
+                    "sh", "-c",
+                    # Print: total_count\nname1\ncount1\nname2\ncount2\n...
+                    "echo $(ls /proc/[0-9]*/comm 2>/dev/null | wc -l); "
+                    "for f in /proc/[0-9]*/comm; do cat \"$f\" 2>/dev/null; done | sort | uniq -c | sort -rn | awk '{print $2\" \"$1}'"
+                ], timeout=10)
+                if pid_detail_raw:
+                    lines = pid_detail_raw.strip().splitlines()
                     try:
-                        entry["pid_count"] = int(pid_count_raw.strip())
-                    except ValueError:
+                        entry["pid_count"] = int(lines[0].split()[0]) if lines else 0
+                    except (ValueError, IndexError):
                         entry["pid_count"] = None
+                    # Parse "name count" pairs into a dict
+                    pid_by_name: Dict[str, int] = {}
+                    for line in lines[1:]:
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            try:
+                                pname = parts[0]
+                                pcount = int(parts[1])
+                                pid_by_name[pname] = pcount
+                            except (ValueError, IndexError):
+                                continue
+                    # Keep top 8 by count, sorted descending
+                    sorted_pids = sorted(pid_by_name.items(), key=lambda x: x[1], reverse=True)
+                    entry["pid_breakdown"] = dict(sorted_pids[:8])
+                else:
+                    entry["pid_count"] = None
         containers.append(entry)
 
     # Per-container CPU/RAM via `docker stats --no-stream`
