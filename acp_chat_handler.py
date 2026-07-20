@@ -3128,6 +3128,10 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         
         # Snapshot chrome PIDs before session starts
         before_pids = self._get_chrome_devtools_pids()
+        # Stash so the background-save task in app.py can compute the orphan
+        # diff AFTER the query truly completes (we skip cleanup on client
+        # disconnect to avoid SIGKILLing Claude mid-tool-use).
+        self._chrome_pids_before_session = before_pids
         logger.info(f"[ACP-CHAT] Chrome PIDs before session: {before_pids}")
         
         # Reset progress mapper for new session
@@ -3310,14 +3314,26 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             self._last_query_chunks = all_chunks
             raise
         finally:
-            # Kill only chrome processes spawned by THIS session
-            after_pids = self._get_chrome_devtools_pids()
-            new_pids = after_pids - before_pids
-            if new_pids:
-                logger.info(f"[ACP-CHAT] Killing {len(new_pids)} orphan chrome PIDs from this session: {new_pids}")
-                self._kill_chrome_pids(new_pids)
+            # Kill chrome processes spawned by THIS session — but ONLY if the
+            # query has actually finished. If the client disconnected mid-chat
+            # and the query is still running in the background (CancelledError
+            # path above), Claude may still be actively using chrome-devtools-mcp.
+            # Killing those PIDs here would SIGKILL Claude (exit code 137) and
+            # lose the entire chat. The background-save task in app.py will
+            # clean up chrome PIDs AFTER the query truly completes.
+            if query_complete.is_set():
+                after_pids = self._get_chrome_devtools_pids()
+                new_pids = after_pids - before_pids
+                if new_pids:
+                    logger.info(f"[ACP-CHAT] Killing {len(new_pids)} orphan chrome PIDs from this session: {new_pids}")
+                    self._kill_chrome_pids(new_pids)
+                else:
+                    logger.info(f"[ACP-CHAT] No new chrome PIDs to clean up")
             else:
-                logger.info(f"[ACP-CHAT] No new chrome PIDs to clean up")
+                logger.info(
+                    "[ACP-CHAT] Query still running — skipping chrome cleanup "
+                    "(background task will handle it after query completes)"
+                )
             
             # Only cancel if query is truly abandoned
             if not query_complete.is_set() and query_task.done() and not query_task.cancelled():

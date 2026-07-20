@@ -6463,11 +6463,12 @@ async def chat_stream_endpoint(
                                     await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                                     return
 
-                            # Fallback to chunks if _last_query_response not set
+                            # Fallback to chunks if _last_query_response not set.
+                            # Use the shared filter so TOOL:/PROGRESS:/JSON noise
+                            # doesn't leak into the saved message.
                             if hasattr(handler, '_last_query_chunks'):
                                 chunks = handler._last_query_chunks
-                                real = [c for c in chunks if not c.startswith('PROGRESS:')]
-                                real = [c[5:] if c.startswith('TEXT:') else c for c in real]
+                                real = _clean_chat_chunks(chunks)
                                 if real:
                                     content = '\n'.join(real).strip()
                                     if content and len(content) > 50:
@@ -6475,7 +6476,7 @@ async def chat_stream_endpoint(
                                         await save_response_to_db(content)
                                         await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                                         return
-                            
+
                             # Fall back to what we collected before disconnect
                             if real_chunks:
                                 content = '\n'.join(real_chunks).strip()
@@ -6488,6 +6489,25 @@ async def chat_stream_endpoint(
                             logger.error(f"[ACP-STREAM] Background save error: {e}")
                         finally:
                             cleanup_chat_image_attachment(image_attachment, "[ACP-STREAM]")
+                            # NOW that the query is truly complete, clean up any
+                            # chrome-devtools-mcp processes spawned by this chat.
+                            # We can't do this in the stream's finally block because
+                            # that fires the moment the client disconnects (which is
+                            # before the query finishes — killing chrome then would
+                            # SIGKILL Claude mid-tool-use).
+                            try:
+                                if hasattr(handler, '_kill_chrome_pids'):
+                                    # Compute orphan PIDs from the handler's perspective.
+                                    # The handler tracks before_pids itself; just trigger
+                                    # the cleanup of anything new that's still alive.
+                                    before = getattr(handler, '_chrome_pids_before_session', set())
+                                    after = handler._get_chrome_devtools_pids()
+                                    new_pids = after - before
+                                    if new_pids:
+                                        logger.info(f"[ACP-STREAM] Cleaning up {len(new_pids)} chrome PIDs after background save: {new_pids}")
+                                        handler._kill_chrome_pids(new_pids)
+                            except Exception as chrome_cleanup_err:
+                                logger.warning(f"[ACP-STREAM] Chrome cleanup after background save failed (non-fatal): {chrome_cleanup_err}")
                             SessionLockService.release_processing(session_id)
                             # Remove handler from registry after background save completes
                             active_handlers.pop(request.session_key, None)
