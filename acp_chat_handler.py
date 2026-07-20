@@ -3105,6 +3105,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         async def run_query():
             """Run the query in a separate task."""
             logger.info(f"[ACP-CHAT] run_query task starting...")
+            agent = None  # defined here so the except block can inspect it
             try:
                 # Use project_path (e.g., /root/dreampilot/projects/website/PROJECT_NAME)
                 # instead of frontend_src_path because MCP servers are configured
@@ -3204,6 +3205,30 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 logger.error(f"[ACP-CHAT] Traceback: {traceback.format_exc()}")
                 await chunk_queue.put(f"Error: {str(e)}")
                 self._last_query_response = None
+
+                # If Claude flagged the resume as stale (exited with 0 tokens
+                # after --resume), delete the dead session id from both the
+                # in-memory cache and the durable DB row so the NEXT message
+                # starts a fresh session instead of looping on the same dead id.
+                if agent is not None and getattr(agent, "_resume_failed", False):
+                    logger.info(
+                        "[ACP-CHAT] clearing stale resume id for %s (Claude flagged dead session)",
+                        resume_key,
+                    )
+                    _claude_session_ids.pop(resume_key, None)
+                    try:
+                        from database_postgres import get_db
+
+                        with get_db() as resume_conn:
+                            resume_conn.execute(
+                                "DELETE FROM claude_session_resumes WHERE resume_key = %s",
+                                (resume_key,),
+                            )
+                            resume_conn.commit()
+                    except Exception as cleanup_err:
+                        logger.warning(
+                            "[ACP-CHAT] Failed to clear stale resume row: %s", cleanup_err
+                        )
             finally:
                 logger.info(f"[ACP-CHAT] run_query task done, setting complete flag")
                 self._active_agent = None  # Clear active agent reference

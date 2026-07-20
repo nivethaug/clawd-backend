@@ -157,6 +157,11 @@ class ClaudeCodeAgent:
         self._progress_dots_offset = 0  # For dot animation (1-2-3 cycling)
         self._last_token_usage = None  # Token usage from last query result
         self._last_session_id: Optional[str] = resume_session_id
+        # Track which session id we tried to resume on this run (for stale-detection).
+        self._resumed_session_id: Optional[str] = None
+        # Set when a resume failed with 0 tokens — caller can check this to
+        # delete the bad row from claude_session_resumes.
+        self._resume_failed: bool = False
 
         # Load Claude Code settings
         self._settings = self._load_settings()
@@ -830,6 +835,12 @@ class ClaudeCodeAgent:
         if self._last_session_id:
             command.extend(["--resume", self._last_session_id])
             logger.info(f"[CLAUDE-AGENT] Resuming session: {self._last_session_id}")
+            # Record which id we're resuming so the error path can detect
+            # stale-resume (Claude exits with 0 tokens after a --resume attempt).
+            self._resumed_session_id = self._last_session_id
+            self._resume_failed = False
+        else:
+            self._resumed_session_id = None
 
         # Add prompt flag first
         command.extend(["-p", prompt])
@@ -1078,6 +1089,25 @@ class ClaudeCodeAgent:
                 elif all_chunks:
                     error_msg += f": {' '.join(all_chunks[-3:])}"
                 logger.error(f"Query failed: {error_msg}")
+
+                # If we attempted to resume a session and Claude exited with an
+                # error + zero tokens, the resume target is dead (container
+                # restart wiped tmpfs, session expired, etc.). Clear the cached
+                # session ID so the NEXT call starts a fresh session instead of
+                # looping forever on the same dead ID.
+                resumed_this_run = bool(self._resumed_session_id)
+                tokens_used = (
+                    (self._last_token_usage or {}).get("total_tokens", 0) > 0
+                )
+                if resumed_this_run and not tokens_used:
+                    logger.warning(
+                        "[CLAUDE-AGENT] resume failed with 0 tokens — clearing stale "
+                        "session id %s so next call starts fresh",
+                        self._resumed_session_id,
+                    )
+                    self._last_session_id = None
+                    self._resumed_session_id = None
+                    self._resume_failed = True  # signal caller to clear DB row
                 raise RuntimeError(error_msg)
 
             # No output received
