@@ -18,12 +18,31 @@ import sys
 results = []  # list of (status, target, detail)
 
 
-def check_blocked(label, path, *, kind="file"):
-    """Verify a path is NOT visible from inside the sandbox."""
+def check_blocked(label, path, *, kind="file", allow_entries=None):
+    """Verify a path is NOT visible from inside the sandbox.
+
+    `allow_entries` lets us whitelist specific directory contents. bwrap
+    creates parent directories of bind-mounted paths as empty tmpfs dirs
+    so they show up as LISTABLE — but they only contain the mount chain,
+    not other users' data. If `allow_entries` is set and the dir contains
+    EXACTLY those entries (no more), we treat it as PASS.
+    """
     try:
         if kind == "dir":
-            entries = os.listdir(path)
-            results.append(("FAIL", path, f"directory LISTABLE — {len(entries)} entries visible"))
+            try:
+                entries = sorted(os.listdir(path))
+            except FileNotFoundError:
+                results.append(("PASS", path, "not present in sandbox"))
+                return
+            except Exception as e:
+                results.append(("PASS", path, f"blocked ({type(e).__name__})"))
+                return
+            if allow_entries and sorted(allow_entries) == entries:
+                results.append(("PASS", path,
+                    f"only mount-chain visible — entries: {entries} (expected)"))
+            else:
+                results.append(("FAIL", path,
+                    f"directory LISTABLE — {len(entries)} entries: {entries[:10]}"))
             return
         if not os.path.exists(path):
             results.append(("PASS", path, "not present in sandbox"))
@@ -37,8 +56,13 @@ def check_blocked(label, path, *, kind="file"):
         results.append(("PASS", path, "permission denied"))
     except IsADirectoryError:
         try:
-            entries = os.listdir(path)
-            results.append(("FAIL", path, f"directory LISTABLE — {len(entries)} entries"))
+            entries = sorted(os.listdir(path))
+            if allow_entries and sorted(allow_entries) == entries:
+                results.append(("PASS", path,
+                    f"only mount-chain visible — entries: {entries} (expected)"))
+            else:
+                results.append(("FAIL", path,
+                    f"directory LISTABLE — {len(entries)} entries: {entries[:10]}"))
         except Exception as e:
             results.append(("PASS", path, f"blocked ({type(e).__name__})"))
     except Exception as e:
@@ -66,7 +90,9 @@ check_blocked("Platform source dir", "/root/clawd-backend", kind="dir")
 check_blocked("Claude settings dir", "/root/.claude", kind="dir")
 check_blocked("Claude settings.json", "/root/.claude.json")
 check_blocked("SSH private keys", "/root/.ssh", kind="dir")
-check_blocked("Root home dir", "/root", kind="dir")
+# /root — bwrap creates /root as empty tmpfs dir to host the venv mount chain
+# (/root/dreampilot/dreampilotvenv). It should contain ONLY "dreampilot".
+check_blocked("Root home dir", "/root", kind="dir", allow_entries=["dreampilot"])
 check_blocked("Worker source (project_creation_runs)", "/root/clawd-backend/services/project_creation_runs.py")
 check_blocked("Container manager source", "/root/clawd-backend/services/container_manager.py")
 
@@ -85,9 +111,15 @@ check_blocked("Shadow password file", "/etc/shadow")
 # ----------------------------------------------------------------------------
 # 3. CRITICAL: Other users' files must NOT be visible
 # ----------------------------------------------------------------------------
-check_blocked("Other users root", "/workspaces", kind="dir")
+# /workspaces — bwrap creates /workspaces as empty tmpfs dir to host this
+# user's project mount chain. It should contain ONLY "user_24" (this user).
+# If it contains user_1, user_2, etc. — that's a real isolation failure.
+check_blocked("Other users root", "/workspaces", kind="dir", allow_entries=["user_24"])
 check_blocked("Other users parent", "/workspaces/user_1", kind="dir")
-check_blocked("DreamPilot parent (other projects)", "/root/dreampilot", kind="dir")
+# /root/dreampilot — bwrap creates this to host the venv mount. Should
+# contain ONLY "dreampilotvenv", NOT other deployed projects.
+check_blocked("DreamPilot parent (other projects)", "/root/dreampilot",
+              kind="dir", allow_entries=["dreampilotvenv"])
 
 # ----------------------------------------------------------------------------
 # 4. Network: should NOT be able to bind privileged ports or reach metadata
@@ -119,11 +151,17 @@ except Exception as e:
 try:
     proc_entries = os.listdir("/proc")
     pids = [e for e in proc_entries if e.isdigit()]
-    # Sandbox should have very few PIDs visible (init + self + a few helpers)
-    if len(pids) > 20:
-        results.append(("WARN", "/proc", f"{len(pids)} PIDs visible — may share PID namespace with host"))
+    # With --unshare-pid the sandbox has its own PID namespace. bwrap's init
+    # is PID 1, the probe is PID 2, maybe a couple helpers. Anything > 10
+    # means we are leaking the host's PID namespace (severe — host processes
+    # reveal cmdline args, env, etc. via /proc/<pid>/).
+    if len(pids) > 10:
+        results.append(("FAIL", "/proc",
+            f"{len(pids)} PIDs visible — shares PID namespace with host "
+            "(needs --unshare-pid in backend-sandbox.sh)"))
     else:
-        results.append(("PASS", "/proc", f"{len(pids)} PIDs visible (likely sandboxed PID namespace)"))
+        results.append(("PASS", "/proc",
+            f"{len(pids)} PIDs visible (own PID namespace — host hidden)"))
 except Exception as e:
     results.append(("PASS", "/proc", f"blocked ({type(e).__name__})"))
 

@@ -58,6 +58,7 @@ trap 'rm -f "$BACKEND_PATH/$PROBE_NAME"' EXIT
 # Mirror the EXACT bwrap layout from backend-sandbox.sh so this test
 # reflects what a deployed backend actually sees.
 BWRAP_ARGS=(
+  --unshare-pid
   --share-net
   --dev /dev
   --proc /proc

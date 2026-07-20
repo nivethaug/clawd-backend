@@ -27,7 +27,9 @@ cd "$BOT_DIR"
 
 # On Debian 13, /lib /bin /sbin /lib64 are symlinks into /usr.
 # NOTE: No --die-with-parent — PM2 owns lifecycle (see backend-sandbox.sh).
+# --unshare-pid hides host processes from the bot (see backend-sandbox.sh).
 BWRAP_ARGS=(
+  --unshare-pid
   --share-net
   --dev /dev
   --proc /proc

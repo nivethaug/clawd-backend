@@ -72,7 +72,17 @@ fi
 # script, PM2's launcher thread exits after fork/exec, which would trigger
 # parent-death signal and kill the sandbox before uvicorn binds the port.
 # PM2 itself owns the lifecycle (it restarts on crash, stops on delete).
+#
+# --unshare-pid gives the sandbox its own PID namespace so the backend
+# cannot enumerate host processes via /proc. Without it, the backend can
+# read /proc/<pid>/cmdline for every process on the worker VPS (Claude,
+# PM2 workers, other users' containers) — a real leak vector. bwrap
+# auto-launches an init process inside the new PID namespace (PID 1) that
+# reaps zombies. The venv python + uvicorn workers all run as PIDs 2..N
+# inside the namespace; host sees them via translated PIDs but backend
+# sees ONLY its own processes.
 BWRAP_ARGS=(
+  --unshare-pid
   --share-net
   --dev /dev
   --proc /proc
