@@ -774,6 +774,10 @@ PROJECT_CREATION_IN_PROGRESS_STATUSES = (
     "provisioning",
     "infrastructure_provisioning",
     "ai_provisioning",
+    # Clone-flow statuses (mirror the create-flow phases so the UI's existing
+    # status-polling picks up clone progress too).
+    "cloning",
+    "copying_files",
 )
 
 
@@ -2275,6 +2279,25 @@ def _replace_scheduler_credentials_in_code(clone_path: str, source_project_id: i
         logger.info(f"[CLONE] Credential replacement: {replaced_count} files updated")
 
 
+def _set_clone_status(project_id: int, status: str, message: str = "") -> None:
+    """Update the project's status during cloning so the UI's status polling
+    shows progressive phases (cloning -> copying_files -> building -> deploying -> ready),
+    mirroring how the create flow surfaces progress via the same `status` column
+    the UI already polls.
+    """
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE projects SET status = ? WHERE id = ?",
+                (status, project_id),
+            )
+            conn.commit()
+        if message:
+            logger.info(f"[CLONE] project={project_id} status={status} — {message}")
+    except Exception as exc:
+        logger.warning(f"[CLONE] failed to set status={status} for project={project_id}: {exc}")
+
+
 def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
                   source_path: str, clone_path: str, template_id: Optional[str],
                   description: Optional[str], source_domain: str = "",
@@ -2289,6 +2312,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
 
     try:
         # --- Copy files from source project ---
+        _set_clone_status(project_id, "copying_files", f"Copying files from source project")
         logger.info(f"[CLONE] Copying files from {source_path} -> {clone_path}")
         _copy_project_files(source_path, clone_path)
         logger.info(f"[CLONE] File copy complete for project {project_id}")
@@ -2362,6 +2386,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         # --- Type-specific deployment ---
         if source_type_id == 1:
             # Website clone -- full infrastructure provisioning
+            _set_clone_status(project_id, "building", f"Installing frontend dependencies")
             logger.info(f"[CLONE] Provisioning website infrastructure for project {project_id}")
 
             # Run npm install in frontend dir (node_modules was excluded during copy)
@@ -2390,6 +2415,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 project_id=project_id,
                 is_clone=True,
             )
+            _set_clone_status(project_id, "deploying", f"Provisioning database, backend, nginx, DNS")
             success = infra.provision_all()
 
             # Clean up build artifacts after provisioning (same as create flow)
@@ -2404,6 +2430,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         elif source_type_id in (2, 3):
             # Telegram (2) / Discord (3) clone
             bot_type_label = "telegram" if source_type_id == 2 else "discord"
+            _set_clone_status(project_id, "deploying", f"Provisioning {bot_type_label} bot")
             logger.info(f"[CLONE] Provisioning {bot_type_label} bot for project {project_id}")
 
             # Copy bot-specific subdirectory from source if it exists
@@ -2468,6 +2495,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
 
         elif source_type_id == 5:
             # Scheduler clone
+            _set_clone_status(project_id, "deploying", f"Provisioning scheduler")
             logger.info(f"[CLONE] Provisioning scheduler for project {project_id}")
 
             # Copy scheduler-specific subdirectory from source if it exists
