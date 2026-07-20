@@ -10304,6 +10304,63 @@ async def editor_build_publish(
         )
 
 
+def _broadcast_rollback_to_sessions(
+    project_id: int,
+    origin_session_id: Optional[int],
+    commit_hash: str,
+    commit_message: str,
+) -> int:
+    """Insert a rollback notification message into EVERY chat session of a project.
+
+    When a user clicks 'Restore' on a commit, that rollback is a project-wide
+    event — it affects the live site and the codebase. Other chat sessions for
+    the same project would otherwise have no idea it happened. This inserts one
+    assistant message into each session (including the origin session) so the
+    rollback shows up in every chat's history.
+
+    Args:
+        project_id: Project the rollback happened on.
+        origin_session_id: Session where the rollback was triggered (also gets a row).
+        commit_hash: Hash the project was restored to.
+        commit_message: Human-readable message (e.g. "Restored to abc12345").
+
+    Returns:
+        Number of sessions that received the notification.
+    """
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id FROM sessions WHERE project_id = ? AND archived = 0",
+                (project_id,),
+            ).fetchall()
+            session_ids = [r["id"] if isinstance(r, dict) else r[0] for r in rows]
+
+            inserted = 0
+            for sid in session_ids:
+                try:
+                    conn.execute(
+                        """INSERT INTO messages
+                           (session_id, role, content, commit_hash, commit_status, mode)
+                           VALUES (?, 'assistant', ?, ?, 'pushed', 'system')""",
+                        (sid, commit_message, commit_hash),
+                    )
+                    inserted += 1
+                except Exception as msg_err:
+                    logger.warning(
+                        "[ROLLBACK] failed to insert notification into session %s: %s",
+                        sid, msg_err,
+                    )
+            conn.commit()
+        logger.info(
+            "[ROLLBACK] broadcast restore notice to %d/%d sessions for project %d (origin=%s)",
+            inserted, len(session_ids), project_id, origin_session_id,
+        )
+        return inserted
+    except Exception as exc:
+        logger.warning("[ROLLBACK] broadcast failed (non-fatal): %s", exc)
+        return 0
+
+
 @app.post("/projects/{project_id}/commits/{message_id}/rollback")
 async def rollback_commit(
     project_id: int,
@@ -10419,6 +10476,20 @@ async def rollback_commit(
             conn.commit()
 
         logger.info(f"✓ Restored project {project_id} to commit {original_hash[:8]} via reset --hard, log_id={revert_log_id}")
+
+        # Broadcast the rollback into every chat session for this project so
+        # users in other sessions see what happened (the rollback affects the
+        # live site + codebase, not just the origin session).
+        restore_notice = (
+            f"🔄 Restored project to commit {original_hash[:8]} via version history. "
+            f"The live site has been rebuilt to match this version."
+        )
+        _broadcast_rollback_to_sessions(
+            project_id=project_id,
+            origin_session_id=session_id,
+            commit_hash=revert_hash,
+            commit_message=restore_notice,
+        )
 
         # Rebuild and redeploy after rollback so the live site reflects the restored code
         rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
@@ -10574,6 +10645,20 @@ async def rollback_commit_by_log_id(
             conn.commit()
 
         logger.info(f"✓ Restored project {project_id} to commit {original_hash[:8]} via log_id={log_id} (reset --hard)")
+
+        # Broadcast the rollback into every chat session for this project so
+        # users in other sessions see what happened (the rollback affects the
+        # live site + codebase, not just the origin session).
+        restore_notice = (
+            f"🔄 Restored project to commit {original_hash[:8]} via version history. "
+            f"The live site has been rebuilt to match this version."
+        )
+        _broadcast_rollback_to_sessions(
+            project_id=project_id,
+            origin_session_id=session_id,
+            commit_hash=revert_hash,
+            commit_message=restore_notice,
+        )
 
         # Rebuild and redeploy after rollback so the live site reflects the restored code
         rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
