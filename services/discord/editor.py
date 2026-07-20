@@ -522,7 +522,13 @@ OPTIONAL:
             import asyncio
 
             async def run_claude():
-                async with ClaudeCodeAgent(repo_path=str(self.project_path)) as agent:
+                # Phase 4: resolve user_id for container targeting (no-op in local mode).
+                from claude_code_agent import resolve_user_id_for_project
+                _user_id = resolve_user_id_for_project(self.project_id)
+                async with ClaudeCodeAgent(
+                    repo_path=str(self.project_path),
+                    user_id=_user_id,
+                ) as agent:
                     result = await agent.query(
                         prompt=prompt,
                         timeout=900

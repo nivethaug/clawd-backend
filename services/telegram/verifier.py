@@ -40,7 +40,7 @@ class WebhookVerificationError(Exception):
     pass
 
 
-async def verify_telegram_bot_webhook(domain: str, project_path: str = None, timeout: int = 120, max_retries: int = 2) -> Tuple[bool, Dict[str, Any]]:
+async def verify_telegram_bot_webhook(domain: str, project_path: str = None, timeout: int = 120, max_retries: int = 2, project_id: int = None) -> Tuple[bool, Dict[str, Any]]:
     """
     Verify Telegram bot webhook endpoints using Claude Code Agent with Chrome DevTools MCP.
     
@@ -220,10 +220,20 @@ Previous verification failed for {domain}. Issues detected:
                 agent_response_text.append(text)
                 logger.debug(f"[Claude Agent]: {text[:100]}...")
             
+            # Phase 4: resolve user_id for container targeting (no-op in local mode).
+            _user_id = None
+            if project_id:
+                try:
+                    from claude_code_agent import resolve_user_id_for_project
+                    _user_id = resolve_user_id_for_project(project_id)
+                except Exception:
+                    pass
+
             async with ClaudeCodeAgent(
                 repo_path=repo_path,
                 on_text=on_text_callback,
-                progress_interval=30.0
+                progress_interval=30.0,
+                user_id=_user_id,
             ) as agent:
                 response = await agent.query(verification_prompt, timeout=timeout)
                 
@@ -424,15 +434,16 @@ async def _fallback_http_verification(domain: str, verification_info: Dict[str, 
         return (False, verification_info)
 
 
-def verify_telegram_bot_webhook_sync(domain: str, timeout: int = 120, max_retries: int = 2) -> Tuple[bool, Dict[str, Any]]:
+def verify_telegram_bot_webhook_sync(domain: str, timeout: int = 120, max_retries: int = 2, project_id: int = None) -> Tuple[bool, Dict[str, Any]]:
     """
     Synchronous wrapper for verify_telegram_bot_webhook.
-    
+
     Args:
         domain: Full domain (e.g., "mybot-api.dreamagent.cloud")
         timeout: Timeout in seconds for verification (default: 120)
         max_retries: Maximum number of retry attempts (default: 2)
-    
+        project_id: Project ID (for container user_id resolution in EXECUTION_MODE=container)
+
     Returns:
         Tuple of (success, verification_info)
     """
@@ -441,9 +452,9 @@ def verify_telegram_bot_webhook_sync(domain: str, timeout: int = 120, max_retrie
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    
+
     return loop.run_until_complete(
-        verify_telegram_bot_webhook(domain, timeout=timeout, max_retries=max_retries)
+        verify_telegram_bot_webhook(domain, timeout=timeout, max_retries=max_retries, project_id=project_id)
     )
 
 

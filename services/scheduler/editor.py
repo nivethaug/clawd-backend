@@ -317,7 +317,13 @@ CRITICAL RULES
 
     async def _async_run_claude(self, prompt: str) -> dict:
         """Async wrapper for ClaudeCodeAgent."""
-        async with ClaudeCodeAgent(str(self.project_path)) as agent:
+        # Phase 4: resolve user_id for container targeting (no-op in local mode).
+        from claude_code_agent import resolve_user_id_for_project
+        _user_id = resolve_user_id_for_project(self.project_id)
+        async with ClaudeCodeAgent(
+            str(self.project_path),
+            user_id=_user_id,
+        ) as agent:
             result = await agent.query(prompt, timeout=600)
             # Capture token usage
             self._last_token_usage = agent.last_token_usage
