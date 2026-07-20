@@ -1465,7 +1465,9 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
     # Step 2: Create project folder with Git initialization
     project_manager = ProjectFileManager()
     try:
-        project_folder_path, folder_success = project_manager.create_project_with_git(project_id, request.name, type_id)
+        project_folder_path, folder_success = project_manager.create_project_with_git(
+            project_id, request.name, type_id, user_id=user_id
+        )
     except Exception as folder_err:
         if project_creation_charge:
             try:
