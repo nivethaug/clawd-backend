@@ -4642,6 +4642,86 @@ async def publish_backend(
 
 
 # ---------------------------------------------------------------------------
+# Internal PM2 restart endpoint (called by buildpublish.py from inside the
+# user container). The container/sandbox can't access PM2 directly (not
+# mounted, PID namespace isolated, no sudo). buildpublish.py calls this
+# endpoint on the worker-api (same host as PM2, port 8003) to trigger a
+# restart of the project's PM2 app. After restart, buildpublish.py can
+# health-check the backend and Claude can verify its changes live.
+#
+# Security: only accepts requests from localhost / Docker bridge gateway
+# (172.x.x.x). Not exposed publicly — nginx only proxies the main API,
+# not this internal endpoint.
+# ---------------------------------------------------------------------------
+
+class InternalRestartRequest(BaseModel):
+    pm2_app_name: str
+    expect_port: Optional[int] = None  # if set, health-check this port after restart
+
+
+@app.post("/internal/pm2-restart")
+async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Request):
+    """Restart a PM2 app by name. Internal endpoint — not public-facing.
+
+    Called by buildpublish.py running inside user containers to restart
+    their own backend/frontend PM2 process. The worker-api runs on the
+    same host as PM2 and has direct access.
+    """
+    # Basic security: only allow requests from localhost or Docker bridge.
+    client_host = request_obj.client.host if request_obj.client else ""
+    if not (client_host.startswith("127.") or client_host.startswith("172.")
+            or client_host.startswith("10.") or client_host == "::1"):
+        raise HTTPException(status_code=403, detail="Internal endpoint — not accessible from public network")
+
+    app_name = request.pm2_app_name.strip()
+    if not app_name or not app_name.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid pm2_app_name")
+
+    logger.info(f"[INTERNAL-RESTART] restarting PM2 app '{app_name}' (from {client_host})")
+
+    try:
+        restart_result = subprocess.run(
+            ["pm2", "restart", app_name, "--update-env"],
+            capture_output=True, text=True, timeout=30
+        )
+        if restart_result.returncode != 0:
+            logger.error(f"[INTERNAL-RESTART] PM2 restart failed: {restart_result.stderr[:500]}")
+            return {"success": False, "error": restart_result.stderr[:500]}
+
+        logger.info(f"[INTERNAL-RESTART] ✓ PM2 app '{app_name}' restarted")
+
+        # If caller specified a port, health-check it (wait for backend to come up)
+        if request.expect_port:
+            import time as _time
+            healthy = False
+            for attempt in range(12):  # 12 x 2.5s = 30s max
+                _time.sleep(2.5)
+                try:
+                    hc = subprocess.run(
+                        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                         f"http://localhost:{request.expect_port}/health"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    code = hc.stdout.strip()
+                    if code in ("200", "404"):  # 404 means route doesn't exist but server is up
+                        healthy = True
+                        logger.info(f"[INTERNAL-RESTART] health check passed on port {request.expect_port} (HTTP {code})")
+                        break
+                except Exception:
+                    pass
+            if not healthy:
+                logger.warning(f"[INTERNAL-RESTART] health check failed on port {request.expect_port} after 30s")
+
+        return {"success": True, "pm2_app_name": app_name, "restarted": True}
+
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "PM2 restart timed out"}
+    except Exception as e:
+        logger.error(f"[INTERNAL-RESTART] error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Environment Variables endpoints
 # ---------------------------------------------------------------------------
 

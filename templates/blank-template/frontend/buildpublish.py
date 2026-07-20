@@ -247,20 +247,57 @@ def cleanup_node_modules():
 
 
 def restart_pm2(project_name: str = None):
-    """Restart PM2 process
-    
+    """Restart the PM2 frontend process.
+
+    Tries three strategies in order:
+      1. Call worker-api's internal /internal/pm2-restart endpoint
+         (works inside containers/sandbox where PM2 isn't directly accessible)
+      2. Direct `pm2 restart` (host path, no sudo)
+      3. `sudo pm2 restart` (last resort — fails in sandbox/container)
+
     Args:
-        project_name: Project name (uses {project_name} placeholder by default)
+        project_name: Domain (PM2 app name is {domain}-frontend)
     """
     print("\n" + "="*50)
     print("PM2 RESTART")
     print("="*50)
-    
+
     # Use placeholder if not provided (will be replaced by infra manager)
     if not project_name:
         project_name = "{project_name}"
-    
-    return run(f"sudo pm2 restart {project_name}-frontend")
+
+    app_name = f"{project_name}-frontend"
+    print(f"📦 Restarting PM2 app: {app_name}")
+
+    # Strategy 1: worker-api internal endpoint (container/sandbox path).
+    worker_api_url = os.environ.get("DREAMPILOT_WORKER_API_URL")
+    if worker_api_url:
+        import json as _json
+        import urllib.request as _urlreq
+        endpoint = f"{worker_api_url}/internal/pm2-restart"
+        payload = _json.dumps({"pm2_app_name": app_name}).encode()
+        print(f"→ Calling worker-api: POST {endpoint}")
+        try:
+            req = _urlreq.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+            with _urlreq.urlopen(req, timeout=60) as resp:
+                result = _json.loads(resp.read().decode())
+            if result.get("success"):
+                print(f"✓ Worker-api restarted PM2 app '{app_name}'")
+                return True
+            else:
+                print(f"✗ Worker-api restart failed: {result.get('error', 'unknown')}")
+        except Exception as e:
+            print(f"⚠ Worker-api call failed: {e} — falling back to direct pm2")
+    else:
+        print("ℹ DREAMPILOT_WORKER_API_URL not set — skipping worker-api path")
+
+    # Strategy 2: direct pm2 restart (host path, no sudo)
+    if run(f"pm2 restart {app_name} --update-env"):
+        return True
+
+    # Strategy 3: sudo pm2 restart (last resort)
+    print("⚠ bare pm2 restart failed, trying with sudo (may fail in sandbox/container)")
+    return run(f"sudo pm2 restart {app_name}")
 
 
 def reload_nginx():
@@ -268,7 +305,9 @@ def reload_nginx():
     print("\n" + "="*50)
     print("NGINX RELOAD")
     print("="*50)
-    return run("sudo nginx -s reload") or run("nginx -s reload")
+    if run("nginx -s reload"):
+        return True
+    return run("sudo nginx -s reload")
 
 def remove_old_dist():
     """Remove existing dist directory before a fresh build.

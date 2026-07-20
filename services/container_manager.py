@@ -690,6 +690,16 @@ class ContainerManager:
             args += ["-e", f"CONTAINER_IP={container_ip}"]
             args += ["-e", f"CHROME_VERIFY_URL=http://{container_ip}"]
 
+        # Inject PROJECT_ID and host API URL so buildpublish.py inside the
+        # container can call back to the worker-api to restart PM2 (the
+        # sandbox/container can't access PM2 directly). The worker-api runs
+        # on the SAME host as PM2 (the worker VPS), reachable via
+        # host.docker.internal (set via --add-host above) on port 8003.
+        # Note: 8002 is the MAIN VPS API — not reachable from the container.
+        # 8003 is the worker-api which has direct PM2 access.
+        args += ["-e", f"DREAMPILOT_PROJECT_ID={self.user_id}"]
+        args += ["-e", "DREAMPILOT_WORKER_API_URL=http://host.docker.internal:8003"]
+
         if env:
             for k, v in env.items():
                 # Skip empty/None values to avoid docker CLI quirks.
