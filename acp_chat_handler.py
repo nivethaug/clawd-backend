@@ -659,6 +659,18 @@ curl -s -X POST {jobs_base} \\
 python -c "import py_compile; py_compile.compile('{self.project_path}/scheduler/executor.py', doraise=True)"
 ```
 
+### Step 6: Publish changes (restart the scheduler)
+
+The centralized `clawd-scheduler` caches executor modules in memory (importlib).
+After editing executor.py, you MUST restart it so the new code takes effect:
+
+```bash
+cd {self.project_path} && python3 buildpublish.py --skip-deps
+```
+
+This restarts the scheduler via the worker-api. After it completes, test the job
+immediately (Step "Run a job immediately") to verify the new code is live.
+
 ---
 
 ## JOB MANAGEMENT REST API
@@ -866,6 +878,7 @@ FIRST list jobs to find the job ID, THEN perform the action. Always show the res
 8. EXECUTE curl commands for ALL job management — never just print them
 9. AFTER editing any .py file, run: `python -c "import py_compile; py_compile.compile('FILE', doraise=True)"`
 10. When editing existing jobs, ALWAYS list jobs first to get the correct job ID
+11. AFTER editing executor.py, run `cd {self.project_path} && python3 buildpublish.py --skip-deps` to restart the scheduler so new code takes effect immediately
 
 ---
 
@@ -874,6 +887,7 @@ FIRST list jobs to find the job ID, THEN perform the action. Always show the res
 - [ ] Did I read agent/ai_index files before making changes?
 - [ ] Did I modify only executor.py and/or api_client.py?
 - [ ] Did I run py_compile on all edited files?
+- [ ] Did I publish changes with `python3 buildpublish.py --skip-deps`? (restarts scheduler)
 - [ ] Did I create/update the job via REST API?
 - [ ] Did I test the job (run now) if possible?
 - [ ] Did I update ai_index files after changes?
