@@ -9862,9 +9862,18 @@ async def get_commit_history(
     project_id: int,
     limit: int = 20,
     offset: int = 0,
+    include_deleted: bool = False,
     authorization: Optional[str] = Header(None),
 ):
-    """Get commit history for a project from commit_log (survives session/message deletion)."""
+    """Get commit history for a project from commit_log (survives session/message deletion).
+
+    By default hides 'reverted' commits — those are commits that were DISCARDED
+    by a later rollback (git reset --hard to an earlier commit). They remain in
+    the DB for audit trail but should not clutter the version history UI since
+    they're no longer part of the project's lineage.
+
+    Pass include_deleted=true to see them (admin/debug view).
+    """
     _require_project_owner(project_id, authorization)
     with get_db() as conn:
         # Get repo_url for building commit links
@@ -9873,18 +9882,28 @@ async def get_commit_history(
         ).fetchone()
         repo_url = dict(project).get("repo_url", "") if project else ""
 
+        # Filter out reverted commits by default. 'reverted' = discarded by a
+        # later rollback; 'pushed'/'committed' = active in the project's lineage.
+        if include_deleted:
+            status_filter = ""
+            query_args = (project_id, limit, offset)
+        else:
+            status_filter = "AND status != 'reverted'"
+            query_args = (project_id, limit, offset)
+
         rows = conn.execute(
-            """SELECT id, project_id, session_id, message_id, commit_hash, commit_message, 
+            f"""SELECT id, project_id, session_id, message_id, commit_hash, commit_message,
                       status, reverted_by, created_at
-               FROM commit_log 
-               WHERE project_id = ? 
-               ORDER BY created_at DESC 
+               FROM commit_log
+               WHERE project_id = ? {status_filter}
+               ORDER BY created_at DESC
                LIMIT ? OFFSET ?""",
-            (project_id, limit, offset)
+            query_args
         ).fetchall()
 
+        # Count matches the same filter so pagination is consistent.
         total = conn.execute(
-            "SELECT COUNT(*) as cnt FROM commit_log WHERE project_id = ?",
+            f"SELECT COUNT(*) as cnt FROM commit_log WHERE project_id = ? {status_filter}",
             (project_id,)
         ).fetchone()["cnt"]
 
@@ -10463,6 +10482,28 @@ async def rollback_commit(
                 "UPDATE messages SET commit_status = 'pushed' WHERE id = ?",
                 (message_id,)
             )
+
+            # Find the target's commit_log row (if it has one) so we can mark
+            # all LATER commit_log rows as 'reverted'. Without this, the GET
+            # /commits endpoint (which reads commit_log) would still show the
+            # discarded commits in the version history UI.
+            target_log = conn.execute(
+                "SELECT id FROM commit_log WHERE commit_hash = ? AND project_id = ?",
+                (original_hash, project_id)
+            ).fetchone()
+            if target_log:
+                target_log_id = target_log["id"] if isinstance(target_log, dict) else target_log[0]
+                conn.execute(
+                    "UPDATE commit_log SET status = 'reverted' "
+                    "WHERE project_id = ? AND id > ? "
+                    "AND status IN ('pushed', 'committed')",
+                    (project_id, target_log_id)
+                )
+                # Re-mark the target as the current active commit
+                conn.execute(
+                    "UPDATE commit_log SET status = 'pushed' WHERE id = ?",
+                    (target_log_id,)
+                )
 
             # Log the rollback in commit_log so history shows what happened.
             # Use a descriptive commit_message so the audit trail is clear.
