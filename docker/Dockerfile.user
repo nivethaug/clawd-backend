@@ -32,6 +32,10 @@ ARG NODE_MAJOR=22
 # - procps: provides ps/top/pgrep so operators can inspect container PIDs
 #   from inside (docker exec user-N ps -eo comm). Without it, runaway
 #   processes are hard to spot until the pids-limit kills Claude.
+# - tini: minimal PID 1 init. CRITICAL: without tini, 'sleep infinity' is
+#   PID 1 and never calls waitpid(), so when Claude's chrome-devtools-mcp
+#   and node workers exit they become <defunct> zombies that accumulate
+#   forever (counting against --pids-limit=512). tini reaps them properly.
 # Kept minimal — every extra package is attack surface.
 # ─────────────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -43,6 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
         procps \
+        tini \
     && rm -rf /var/lib/apt/lists/*
 
 # python:3.12-slim already provides python3, python, pip — no build-from-source needed.
@@ -115,7 +120,10 @@ WORKDIR /workspace
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
     CMD claude --version || exit 1
 
-# Entrypoint runs as root (to chown the tmpfs), then drops to dreampilot via gosu.
-# The default CMD keeps the container alive between docker exec invocations.
-ENTRYPOINT ["/opt/entrypoint.sh"]
+# tini as PID 1 reaps zombie processes left behind by Claude's child workers
+# (chrome-devtools-mcp, node esbuild workers, etc). Without it, 'sleep infinity'
+# becomes PID 1 and never calls waitpid() — zombies accumulate until the
+# --pids-limit kills Claude mid-edit. tini execs our entrypoint after installing
+# its own signal handlers + reaper loop.
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/entrypoint.sh"]
 CMD ["sleep", "infinity"]

@@ -341,11 +341,37 @@ class ACPChatHandler:
     def _get_chrome_devtools_pids(self) -> set:
         """
         Get current chrome-devtools-mcp PIDs.
-        
+
+        In EXECUTION_MODE=container these processes live INSIDE the user's
+        container, not on the host — so we must `docker exec` into the
+        container to find them. Running pgrep on the host finds nothing,
+        which is why chrome-devtools accumulated as zombies/orphans.
+
         Returns:
             Set of PIDs (integers) for all chrome-devtools-mcp processes
         """
         import subprocess
+
+        # Resolve container name if we're in container mode.
+        container_name = self._resolve_container_name()
+        if container_name:
+            # Container mode — query inside the container.
+            try:
+                result = subprocess.run(
+                    ["docker", "exec", container_name, "pgrep", "-f", "chrome-devtools-mcp"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    pids = set(int(p) for p in result.stdout.split() if p.isdigit())
+                    if pids:
+                        logger.info(f"[ACP-CHAT] Found chrome-devtools-mcp PIDs in {container_name}: {pids}")
+                    return pids
+                return set()
+            except Exception as e:
+                logger.warning(f"[ACP-CHAT] Error getting chrome-devtools-mcp PIDs from {container_name}: {e}")
+                return set()
+
+        # Local mode — query on the host.
         try:
             result = subprocess.check_output(
                 ["pgrep", "-f", "chrome-devtools-mcp"],
@@ -361,51 +387,98 @@ class ACPChatHandler:
         except Exception as e:
             logger.warning(f"[ACP-CHAT] Error getting chrome-devtools-mcp PIDs: {e}")
             return set()
-    
+
+    def _resolve_container_name(self) -> Optional[str]:
+        """Return the user's container name if in EXECUTION_MODE=container.
+
+        Container naming convention (matches ContainerManager.__init__):
+            dreamagent-user-<user_id>
+        """
+        try:
+            if os.getenv("EXECUTION_MODE", "local").lower() != "container":
+                return None
+            if not self.project_id:
+                return None
+            from claude_code_agent import resolve_user_id_for_project
+            user_id = resolve_user_id_for_project(self.project_id)
+            if not user_id:
+                return None
+            return f"dreamagent-user-{user_id}"
+        except Exception:
+            return None
+
     def _kill_chrome_pids(self, pids: set):
         """
         Kill chrome-devtools-mcp processes by PID.
-        
-        Sends SIGTERM first, then SIGKILL after 3s if still alive.
-        
+
+        Sends SIGTERM first, then SIGKILL after 3s if still alive. In
+        EXECUTION_MODE=container the PIDs are INSIDE the user's container
+        (namespace-isolated), so we `docker exec` the kill. Killing on the
+        host would silently no-op because those PIDs don't exist on the host.
+
         Args:
-            pids: Set of PIDs to kill
+            pids: Set of PIDs to kill (in container namespace if container mode)
         """
         import signal as sig
         import time
-        
+
         if not pids:
             logger.info(f"[ACP-CHAT] No chrome-devtools-mcp PIDs to kill")
             return
-        
-        logger.info(f"[ACP-CHAT] Killing chrome-devtools-mcp PIDs: {pids}")
-        
+
+        container_name = self._resolve_container_name()
+        scope = f"inside {container_name}" if container_name else "on host"
+        logger.info(f"[ACP-CHAT] Killing chrome-devtools-mcp PIDs {pids} {scope}")
+
+        def _send_signal(pid: int, signal_name: str, signal_const: int) -> bool:
+            """Send signal to PID. Returns True if process still alive after."""
+            if container_name:
+                # Inside the container — use docker exec kill.
+                # `kill -0` is a no-op probe; non-zero return means process gone.
+                try:
+                    probe = subprocess.run(
+                        ["docker", "exec", container_name, "kill", f"-{signal_name}", str(pid)],
+                        capture_output=True, timeout=5,
+                    )
+                    return probe.returncode == 0
+                except Exception as e:
+                    logger.warning(f"[ACP-CHAT] docker exec kill failed for PID {pid}: {e}")
+                    return False
+            else:
+                # Local mode — direct os.kill on host.
+                try:
+                    os.kill(pid, signal_const)
+                    return True
+                except ProcessLookupError:
+                    return False
+                except Exception as e:
+                    logger.warning(f"[ACP-CHAT] os.kill failed for PID {pid}: {e}")
+                    return False
+
         # First pass: SIGTERM (graceful)
         for pid in pids:
-            try:
-                os.kill(pid, sig.SIGTERM)
+            alive = _send_signal(pid, "TERM", sig.SIGTERM)
+            if alive:
                 logger.info(f"[ACP-CHAT] Sent SIGTERM to chrome-devtools-mcp PID: {pid}")
-            except ProcessLookupError:
+            else:
                 logger.info(f"[ACP-CHAT] PID {pid} already terminated")
-            except Exception as e:
-                logger.warning(f"[ACP-CHAT] Failed to SIGTERM PID {pid}: {e}")
-        
+
         # Wait 3 seconds for graceful shutdown
         time.sleep(3)
-        
-        # Second pass: SIGKILL (force) for any still alive
+
+        # Second pass: SIGKILL (force) for any still alive (probe with kill -0)
         for pid in pids:
-            try:
-                # Check if process still exists
-                os.kill(pid, 0)  # Signal 0 = check if exists
-                # Process still alive, force kill
-                os.kill(pid, sig.SIGKILL)
+            if container_name:
+                still_alive = _send_signal(pid, "0", 0)  # probe only
+            else:
+                try:
+                    os.kill(pid, 0)
+                    still_alive = True
+                except (ProcessLookupError, OSError):
+                    still_alive = False
+            if still_alive:
+                _send_signal(pid, "KILL", sig.SIGKILL)
                 logger.info(f"[ACP-CHAT] Sent SIGKILL to chrome-devtools-mcp PID: {pid}")
-            except ProcessLookupError:
-                # Already dead, good
-                pass
-            except Exception as e:
-                logger.warning(f"[ACP-CHAT] Failed to SIGKILL PID {pid}: {e}")
 
     def _build_chat_prompt_scheduler(self, user_message: str, session_context: str = "") -> str:
         """
