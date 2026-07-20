@@ -10311,9 +10311,17 @@ async def rollback_commit(
     authorization: Optional[str] = Header(None),
 ):
     """
-    Rollback a commit by reverting it via git (legacy — by message_id).
-    Creates a new message row for the revert with reverted_message_id pointing to the original.
-    Also writes to commit_log for persistent history.
+    Restore the project to the state of a specific commit (legacy — by message_id).
+
+    Uses `git reset --hard <target_hash>` so the working tree + HEAD move
+    back to EXACTLY the target commit. This discards any commits made AFTER
+    the target — the project will look exactly like it did at the target.
+
+    This is different from `git revert`, which creates a NEW commit that
+    inverse only one commit's diff while keeping later commits intact.
+
+    Force-pushes to origin to update the remote (history rewrite).
+    Updates messages + commit_log so the UI shows rolled-back state correctly.
     """
     import traceback
     _require_project_owner(project_id, authorization)
@@ -10346,22 +10354,26 @@ async def rollback_commit(
             capture_output=True, text=True, timeout=10
         )
 
-        revert_result = subprocess.run(
-            ["git", "-C", project_path, "revert", original_hash, "--no-edit"],
+        # Restore the project to the TARGET commit's state.
+        # NOT git revert — that creates a NEW commit inverse only the target's
+        # diff, leaving later commits intact. We want git reset --hard, which
+        # moves HEAD + working tree back to exactly the target commit and
+        # discards everything after it. This matches user expectation: "restore
+        # to this commit" = "make the code look exactly like it did at this commit".
+        reset_result = subprocess.run(
+            ["git", "-C", project_path, "reset", "--hard", original_hash],
             capture_output=True, text=True, timeout=60
         )
 
-        if revert_result.returncode != 0:
-            logger.error(f"Git revert failed: {revert_result.stderr}")
-            return {"success": False, "error": revert_result.stderr, "status": "failed"}
+        if reset_result.returncode != 0:
+            logger.error(f"Git reset --hard failed: {reset_result.stderr}")
+            return {"success": False, "error": reset_result.stderr, "status": "failed"}
 
-        hash_result = subprocess.run(
-            ["git", "-C", project_path, "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=10
-        )
-        revert_hash = hash_result.stdout.strip()
+        # HEAD now == original_hash
+        revert_hash = original_hash
 
-        # Only push if 'origin' remote exists
+        # Only push if 'origin' remote exists. Force-push because reset rewrites
+        # history (later commits are being discarded on the remote too).
         remote_result = subprocess.run(
             ["git", "-C", project_path, "remote"],
             capture_output=True, text=True, timeout=10
@@ -10370,59 +10382,52 @@ async def rollback_commit(
 
         if has_origin:
             push_result = subprocess.run(
-                ["git", "-C", project_path, "push", "origin", "main"],
+                ["git", "-C", project_path, "push", "origin", "main", "--force"],
                 capture_output=True, text=True, timeout=60
             )
             if push_result.returncode != 0:
-                logger.error(f"Git push revert failed: {push_result.stderr}")
-                return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
+                logger.error(f"Git push (force) failed: {push_result.stderr}")
+                return {"success": False, "error": "Reset applied locally but force-push failed", "status": "committed"}
         else:
-            logger.info(f"No 'origin' remote for project {project_id}, revert stays local")
+            logger.info(f"No 'origin' remote for project {project_id}, reset stays local")
 
         with get_db() as conn:
+            # Mark all messages with commit_hash LATER than original_hash as reverted,
+            # so the UI shows the rolled-back history correctly.
             conn.execute(
-                "UPDATE messages SET commit_status = 'reverted' WHERE id = ?",
+                "UPDATE messages SET commit_status = 'reverted' "
+                "WHERE session_id = ? AND commit_hash IS NOT NULL "
+                "AND commit_status IN ('pushed', 'committed') "
+                "AND id > ?",
+                (session_id, message_id)
+            )
+            # Also mark the target commit itself as the current 'pushed' state
+            conn.execute(
+                "UPDATE messages SET commit_status = 'pushed' WHERE id = ?",
                 (message_id,)
             )
 
+            # Log the rollback in commit_log so history shows what happened.
+            # Use a descriptive commit_message so the audit trail is clear.
             cursor = conn.execute(
-                """INSERT INTO messages (session_id, role, content, commit_hash, commit_status, reverted_message_id)
-                   VALUES (?, 'assistant', ?, ?, 'pushed', ?)
-                   RETURNING id""",
-                (session_id, f"Reverted commit {original_hash[:8]}", revert_hash, message_id)
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) "
+                "VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
+                (project_id, session_id, message_id, revert_hash, f"Restored to {original_hash[:8]}")
             )
-            revert_message_id = cursor.fetchone()["id"]
-
-            # Dual-write: also persist in commit_log
-            original_log = conn.execute(
-                "SELECT id FROM commit_log WHERE commit_hash = ? AND project_id = ?",
-                (original_hash, project_id)
-            ).fetchone()
-
-            cursor3 = conn.execute(
-                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
-                (project_id, session_id, revert_message_id, revert_hash, f"Revert {original_hash[:8]}")
-            )
-            revert_log_id = cursor3.fetchone()["id"]
-
-            if original_log:
-                conn.execute(
-                    "UPDATE commit_log SET status = 'reverted', reverted_by = ? WHERE id = ?",
-                    (revert_log_id, original_log["id"])
-                )
+            revert_log_id = cursor.fetchone()["id"]
 
             conn.commit()
 
-        logger.info(f"✓ Reverted commit {original_hash[:8]}, message_id={revert_message_id}, log_id={revert_log_id}")
+        logger.info(f"✓ Restored project {project_id} to commit {original_hash[:8]} via reset --hard, log_id={revert_log_id}")
 
-        # Rebuild and redeploy after rollback so the live site reflects the reverted code
+        # Rebuild and redeploy after rollback so the live site reflects the restored code
         rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
 
         return {
             "success": True,
             "commit_hash": revert_hash,
-            "message_id": revert_message_id,
-            "reverted_message_id": message_id,
+            "message_id": message_id,
+            "restored_to_message_id": message_id,
             "status": "pushed",
             "rebuild": rebuild_status,
         }
@@ -10442,8 +10447,20 @@ async def rollback_commit_by_log_id(
     authorization: Optional[str] = Header(None),
 ):
     """
-    Rollback a commit by commit_log id (works even after session/message deletion).
-    Uses commit_log as the source of truth for commit hash.
+    Restore the project to the state of a specific commit (by commit_log id).
+
+    Uses `git reset --hard <target_hash>` so the working tree + HEAD move
+    back to EXACTLY the target commit. This discards any commits made AFTER
+    the target — the project will look exactly like it did at the target.
+
+    Different from `git revert` (which only inverse one commit's diff while
+    keeping later commits). This is a true "restore to this point in time".
+
+    Works even after session/message deletion because commit_log is the
+    source of truth for commit hashes.
+
+    Force-pushes to origin (history rewrite). Updates commit_log so later
+    commits are marked 'reverted' and the target is re-marked 'pushed'.
     """
     import traceback
     _require_project_owner(project_id, authorization)
@@ -10477,22 +10494,26 @@ async def rollback_commit_by_log_id(
             capture_output=True, text=True, timeout=10
         )
 
-        revert_result = subprocess.run(
-            ["git", "-C", project_path, "revert", original_hash, "--no-edit"],
+        # Restore the project to the TARGET commit's state.
+        # NOT git revert — that creates a NEW commit inverse only the target's
+        # diff, leaving later commits intact. We want git reset --hard, which
+        # moves HEAD + working tree back to exactly the target commit and
+        # discards everything after it. This matches user expectation: "restore
+        # to this commit" = "make the code look exactly like it did at this commit".
+        reset_result = subprocess.run(
+            ["git", "-C", project_path, "reset", "--hard", original_hash],
             capture_output=True, text=True, timeout=60
         )
 
-        if revert_result.returncode != 0:
-            logger.error(f"Git revert failed: {revert_result.stderr}")
-            return {"success": False, "error": revert_result.stderr, "status": "failed"}
+        if reset_result.returncode != 0:
+            logger.error(f"Git reset --hard failed: {reset_result.stderr}")
+            return {"success": False, "error": reset_result.stderr, "status": "failed"}
 
-        hash_result = subprocess.run(
-            ["git", "-C", project_path, "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=10
-        )
-        revert_hash = hash_result.stdout.strip()
+        # HEAD now == original_hash
+        revert_hash = original_hash
 
-        # Only push if 'origin' remote exists
+        # Only push if 'origin' remote exists. Force-push because reset rewrites
+        # history (later commits are being discarded on the remote too).
         remote_result = subprocess.run(
             ["git", "-C", project_path, "remote"],
             capture_output=True, text=True, timeout=10
@@ -10501,58 +10522,67 @@ async def rollback_commit_by_log_id(
 
         if has_origin:
             push_result = subprocess.run(
-                ["git", "-C", project_path, "push", "origin", "main"],
+                ["git", "-C", project_path, "push", "origin", "main", "--force"],
                 capture_output=True, text=True, timeout=60
             )
             if push_result.returncode != 0:
-                logger.error(f"Git push revert failed: {push_result.stderr}")
-                return {"success": False, "error": "Revert committed but push failed", "status": "committed"}
+                logger.error(f"Git push (force) failed: {push_result.stderr}")
+                return {"success": False, "error": "Reset applied locally but force-push failed", "status": "committed"}
         else:
-            logger.info(f"No 'origin' remote for project {project_id}, revert stays local")
+            logger.info(f"No 'origin' remote for project {project_id}, reset stays local")
 
         with get_db() as conn:
-            # Update original commit_log entry
+            # Mark all commit_log rows LATER than the target as reverted.
+            # We identify "later" by id — commit_log rows are inserted in
+            # chronological order, so id > log_id means "committed after target".
             conn.execute(
-                "UPDATE commit_log SET status = 'reverted' WHERE id = ?",
+                "UPDATE commit_log SET status = 'reverted' "
+                "WHERE project_id = ? AND id > ? "
+                "AND status IN ('pushed', 'committed')",
+                (project_id, log_id)
+            )
+
+            # Re-mark the target as the current 'pushed' commit.
+            conn.execute(
+                "UPDATE commit_log SET status = 'pushed' WHERE id = ?",
                 (log_id,)
             )
 
-            # Insert revert entry into commit_log (RETURNING id for PostgreSQL compatibility)
+            # Log the rollback action itself so the audit trail is clear.
             cursor = conn.execute(
-                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
-                (project_id, session_id, original_message_id, revert_hash, f"Revert {original_hash[:8]}")
+                "INSERT INTO commit_log (project_id, session_id, message_id, commit_hash, commit_message, status) "
+                "VALUES (?, ?, ?, ?, ?, 'pushed') RETURNING id",
+                (project_id, session_id, original_message_id, revert_hash, f"Restored to {original_hash[:8]}")
             )
-            revert_log_id = cursor.fetchone()["id"]
+            restore_log_id = cursor.fetchone()["id"]
 
-            # Set reverted_by on original
-            conn.execute(
-                "UPDATE commit_log SET reverted_by = ? WHERE id = ?",
-                (revert_log_id, log_id)
-            )
-
-            # Also update messages table if message still exists
+            # Also update messages table: any pushed message LATER than the
+            # target's message is now reverted.
             if original_message_id:
-                msg_exists = conn.execute(
-                    "SELECT id FROM messages WHERE id = ?", (original_message_id,)
-                ).fetchone()
-                if msg_exists:
-                    conn.execute(
-                        "UPDATE messages SET commit_status = 'reverted' WHERE id = ?",
-                        (original_message_id,)
-                    )
+                conn.execute(
+                    "UPDATE messages SET commit_status = 'reverted' "
+                    "WHERE session_id = ? AND commit_hash IS NOT NULL "
+                    "AND commit_status IN ('pushed', 'committed') "
+                    "AND id > ?",
+                    (session_id, original_message_id)
+                )
+                conn.execute(
+                    "UPDATE messages SET commit_status = 'pushed' WHERE id = ?",
+                    (original_message_id,)
+                )
 
             conn.commit()
 
-        logger.info(f"✓ Reverted commit {original_hash[:8]} via log_id={log_id}, revert_log_id={revert_log_id}")
+        logger.info(f"✓ Restored project {project_id} to commit {original_hash[:8]} via log_id={log_id} (reset --hard)")
 
-        # Rebuild and redeploy after rollback so the live site reflects the reverted code
+        # Rebuild and redeploy after rollback so the live site reflects the restored code
         rebuild_status = _rebuild_after_rollback(project_id, project_path, project_name)
 
         return {
             "success": True,
             "commit_hash": revert_hash,
-            "log_id": revert_log_id,
-            "reverted_log_id": log_id,
+            "log_id": restore_log_id,
+            "restored_to_log_id": log_id,
             "status": "pushed",
             "rebuild": rebuild_status,
         }
