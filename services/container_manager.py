@@ -478,15 +478,32 @@ class ContainerManager:
         ])
         return r.returncode == 0 and self.container_name in r.stdout.strip().splitlines()
 
-    def cleanup_processes(self) -> int:
-        """Kill ALL processes inside the container except PID 1.
+    def cleanup_processes(self, spare_patterns: Optional[List[str]] = None) -> int:
+        """Kill processes inside the container except PID 1 and any matching spare_patterns.
 
         Previous ACPX/build/MCP processes accumulate inside the container
         (orphaned npm, esbuild, node, chrome-devtools processes). This
         cleans them up before starting a new exec session.
 
+        CRITICAL: by default this SPARES active Claude CLI processes and
+        chrome-devtools-mcp servers, because the same user container may be
+        running an active chat in parallel with project creation. Killing
+        those would SIGKILL the chat (exit code 137) and lose the user's
+        in-flight conversation.
+
+        Args:
+            spare_patterns: substrings matched against each process's
+                /proc/<pid>/cmdline. If a process matches ANY pattern, it is
+                NOT killed. Defaults to claude + chrome-devtools-mcp so
+                active chats survive parallel project creation.
+
         Returns the number of processes killed.
         """
+        if spare_patterns is None:
+            # By default, spare anything that looks like an active Claude
+            # chat session or its chrome-devtools MCP server.
+            spare_patterns = ["claude", "chrome-devtools-mcp"]
+
         # List all PIDs except PID 1
         r = _run_docker([
             "exec", self.container_name,
@@ -498,13 +515,35 @@ class ContainerManager:
 
         pids = [p.strip() for p in r.stdout.strip().splitlines() if p.strip().isdigit()]
         killed = 0
+        spared = 0
         for pid in pids:
+            # Read the process's cmdline to decide if it should be spared.
+            cmdline = ""
+            if spare_patterns:
+                cmd_r = _run_docker([
+                    "exec", self.container_name,
+                    "sh", "-c", f"tr '\\0' ' ' < /proc/{pid}/cmdline 2>/dev/null",
+                ], timeout=3)
+                if cmd_r.returncode == 0:
+                    cmdline = cmd_r.stdout
+
+            if spare_patterns and any(pat in cmdline for pat in spare_patterns):
+                spared += 1
+                logger.debug(
+                    "[CONTAINER] sparing pid=%s in %s (cmdline matches keepalive pattern): %s",
+                    pid, self.container_name, cmdline[:120],
+                )
+                continue
+
             kr = _run_docker(["exec", self.container_name, "kill", "-9", pid], timeout=5)
             if kr.returncode == 0:
                 killed += 1
 
-        if killed:
-            logger.info("[CONTAINER] cleaned up %d orphaned processes in %s", killed, self.container_name)
+        if killed or spared:
+            logger.info(
+                "[CONTAINER] cleanup in %s: killed %d, spared %d (keepalive: %s)",
+                self.container_name, killed, spared, spare_patterns,
+            )
         return killed
 
     def health(self) -> Dict[str, Any]:
