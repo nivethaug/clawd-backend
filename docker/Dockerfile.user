@@ -29,6 +29,9 @@ ARG NODE_MAJOR=22
 
 # ─────────────────────────────────────────────────────────────────────
 # Base packages: required for Claude CLI, npm, pip, git, build toolchain.
+# - procps: provides ps/top/pgrep so operators can inspect container PIDs
+#   from inside (docker exec user-N ps -eo comm). Without it, runaway
+#   processes are hard to spot until the pids-limit kills Claude.
 # Kept minimal — every extra package is attack surface.
 # ─────────────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -39,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         build-essential \
         libpq-dev \
+        procps \
     && rm -rf /var/lib/apt/lists/*
 
 # python:3.12-slim already provides python3, python, pip — no build-from-source needed.
