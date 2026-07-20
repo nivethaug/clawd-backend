@@ -406,6 +406,16 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
 
         chunks_for_response: List[str] = []
 
+        # Heartbeat the run periodically so recover_stale_runs (20-min default)
+        # doesn't mark it 'interrupted' while Claude is still working. Long
+        # tool-use phases (file edits, build runs, MCP calls) can go many
+        # minutes without emitting a chunk, which would otherwise let the
+        # heartbeat age out and trigger a false recovery on the next worker
+        # startup. We bump on every chunk AND on a time-based floor.
+        import time as _time
+        _last_heartbeat = 0.0
+        _HEARTBEAT_INTERVAL = 15.0  # seconds
+
         async for chunk in handler.run_chat_streaming_unified(run.get("user_message") or "", run.get("session_context") or ""):
             if is_cancel_requested(run_id):
                 raise asyncio.CancelledError()
@@ -415,6 +425,15 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
             chunk_type = "progress" if text.startswith("PROGRESS:") else "text"
             append_chunk(run_id, chunk_type, text)
             chunks_for_response.append(text)
+
+            # Bump heartbeat on chunk + on time floor (covers long no-chunk gaps).
+            now = _time.monotonic()
+            if now - _last_heartbeat >= _HEARTBEAT_INTERVAL:
+                try:
+                    update_heartbeat(run_id)
+                    _last_heartbeat = now
+                except Exception as hb_err:
+                    logger.warning("[SESSION-RUN] heartbeat update failed (non-fatal): %s", hb_err)
 
         final_response = getattr(handler, "_last_query_response", None)
         if final_response:
