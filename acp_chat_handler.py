@@ -178,6 +178,11 @@ class ACPChatHandler:
 
         # Query completion tracking for background save
         self._query_complete = asyncio.Event()
+        # Set True the moment we register intent to run a query (before the
+        # run_query task actually sets _active_agent). Lets is_query_running()
+        # return True during the startup window so /chat/chunks and /chat/status
+        # don't briefly report active=False while the query is about to start.
+        self._query_started = False
 
         # Token usage from last query
         self._last_token_usage = None
@@ -325,8 +330,16 @@ class ACPChatHandler:
         return True
 
     def is_query_running(self) -> bool:
-        """Check if a query is currently running."""
-        return self._active_agent is not None and not self._query_complete.is_set()
+        """Check if a query is currently running.
+
+        True when EITHER:
+          - _query_started is True and the run hasn't completed yet
+            (covers the startup race window before _active_agent is set)
+          - _active_agent is set and the completion event hasn't fired
+        """
+        if self._query_complete.is_set():
+            return False
+        return self._query_started or self._active_agent is not None
 
     def get_last_token_usage(self) -> Optional[Dict[str, Any]]:
         """
@@ -3120,6 +3133,10 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         # Reset progress mapper for new session
         self.progress_mapper.reset()
         self._query_complete.clear()  # Reset completion event
+        # Mark query as started NOW so is_query_running() returns True before
+        # _active_agent is set (covers the startup race window during which
+        # /chat/chunks and /chat/status could otherwise return active=False).
+        self._query_started = True
         self._last_token_usage = None  # Reset token usage for new query
         query_start_time = datetime.now()
 
@@ -3254,6 +3271,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 self._active_agent = None  # Clear active agent reference
                 query_complete.set()
                 self._query_complete.set()  # Signal app.py background save
+                # Query is done — clear _query_started so is_query_running()
+                # returns False for subsequent polls.
+                self._query_started = False
         
         # Start query task (shielded from cancellation)
         logger.info(f"[ACP-CHAT] Creating query task...")

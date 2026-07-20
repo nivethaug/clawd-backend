@@ -11,7 +11,7 @@ import base64
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncGenerator, Any, Optional, Dict, List
+from typing import AsyncGenerator, Any, Optional, Dict, List, Tuple
 from contextlib import contextmanager
 from dotenv import load_dotenv
 from urllib.parse import quote
@@ -6791,7 +6791,25 @@ async def chat_chunks(
     """
     _require_session_key_owner(session_key, authorization)
     handler = active_handlers.get(session_key)
+
+    # Resolve "active" from BOTH the in-memory handler AND the durable run.
+    # There's a startup race: handler is registered in active_handlers BEFORE
+    # _active_agent is set (which happens inside the run_query task). If the UI
+    # polls during that window, is_query_running() returns False even though
+    # the query is about to start. Falling back to the durable run catches
+    # that case — the run row exists with status='queued' or 'running'.
+    def _durable_active() -> Tuple[bool, Optional[dict]]:
+        try:
+            from services.session_chat_runs import get_active_run_for_session
+            run = get_active_run_for_session(session_key)
+            if run:
+                return (True, run)
+        except Exception as exc:
+            logger.debug(f"[CHUNKS] durable active lookup failed: {exc}")
+        return (False, None)
+
     if not handler:
+        # No in-memory handler — read entirely from the durable store.
         try:
             from services.session_chat_runs import get_active_run_for_session, get_latest_run_for_session, get_chunks as get_run_chunks
 
@@ -6812,6 +6830,15 @@ async def chat_chunks(
             logger.warning(f"[CHUNKS] Could not read durable chunks: {durable_chunks_err}")
             return {"chunks": [], "total": 0, "active": False}
 
+    # Handler exists in memory. Compute active from handler state, but also
+    # consult the durable run as a fallback so the UI doesn't prematurely flip
+    # to "not thinking" during the startup race window.
+    handler_active = handler.is_query_running()
+    if not handler_active:
+        durable_active, _ = _durable_active()
+        if durable_active:
+            handler_active = True
+
     all_chunks = getattr(handler, '_last_query_chunks', []) or []
     new_chunks = all_chunks[after:] if after < len(all_chunks) else []
 
@@ -6821,7 +6848,7 @@ async def chat_chunks(
     return {
         "chunks": filtered,
         "total": len(all_chunks),
-        "active": handler.is_query_running()
+        "active": handler_active,
     }
 
 
