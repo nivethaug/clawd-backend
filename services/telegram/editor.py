@@ -472,7 +472,7 @@ OPTIONAL:
                 ) as agent:
                     result = await agent.query(
                         prompt=prompt,
-                        timeout=1200  # 20 minutes
+                        timeout=1800  # 30 minutes (bot/scheduler)
                     )
                     # Capture token usage
                     self._last_token_usage = agent.last_token_usage
@@ -490,12 +490,12 @@ OPTIONAL:
                 else:
                     # Use existing loop with timeout
                     result = loop.run_until_complete(
-                        asyncio.wait_for(run_claude(), timeout=1200)
+                        asyncio.wait_for(run_claude(), timeout=1800)
                     )
             except RuntimeError:
                 # No event loop, create new one
                 result = asyncio.run(
-                    asyncio.wait_for(run_claude(), timeout=1200)
+                    asyncio.wait_for(run_claude(), timeout=1800)
                 )
             
             # Handle result - can be string (success) or dict
@@ -512,7 +512,7 @@ OPTIONAL:
                 return {"success": False, "error": "Empty or invalid response"}
         
         except asyncio.TimeoutError:
-            logger.error("❌ Claude modification timeout after 600s")
+            logger.error("❌ Claude modification timeout after 1800s (30 min)")
             return {
                 "success": False,
                 "error": "Modification timeout"

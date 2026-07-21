@@ -324,7 +324,7 @@ CRITICAL RULES
             str(self.project_path),
             user_id=_user_id,
         ) as agent:
-            result = await agent.query(prompt, timeout=600)
+            result = await agent.query(prompt, timeout=1800)
             # Capture token usage
             self._last_token_usage = agent.last_token_usage
             if self._last_token_usage:

@@ -531,7 +531,7 @@ OPTIONAL:
                 ) as agent:
                     result = await agent.query(
                         prompt=prompt,
-                        timeout=900
+                        timeout=1800
                     )
                     # Capture token usage
                     self._last_token_usage = agent.last_token_usage
@@ -545,11 +545,11 @@ OPTIONAL:
                     result = asyncio.run(run_claude())
                 else:
                     result = loop.run_until_complete(
-                        asyncio.wait_for(run_claude(), timeout=900)
+                        asyncio.wait_for(run_claude(), timeout=1800)
                     )
             except RuntimeError:
                 result = asyncio.run(
-                    asyncio.wait_for(run_claude(), timeout=900)
+                    asyncio.wait_for(run_claude(), timeout=1800)
                 )
 
             if isinstance(result, dict):
@@ -564,7 +564,7 @@ OPTIONAL:
                 return {"success": False, "error": "Empty or invalid response"}
 
         except asyncio.TimeoutError:
-            logger.error("Claude modification timeout after 900s")
+            logger.error("Claude modification timeout after 1800s (30 min)")
             return {"success": False, "error": "Modification timeout"}
         except Exception as e:
             logger.error(f"Claude modification error: {e}")
