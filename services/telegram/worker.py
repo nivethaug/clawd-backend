@@ -577,11 +577,11 @@ def run_telegram_bot_pipeline(
         # ========================================================================
         
         logger.info(f"🎉 Telegram bot pipeline completed!")
-        logger.info(f"Bot running at: https://{full_domain}")
-        logger.info(f"Webhook URL: https://{full_domain}/webhook")
-        
-        result_info["webhook_url"] = f"https://{full_domain}/webhook"
-        result_info["bot_url"] = f"https://{full_domain}"
+        logger.info(f"Bot running at: https://{domain}-api.{BASE_DOMAIN}")
+        logger.info(f"Webhook URL: {_webhook_url(domain)}")
+
+        result_info["webhook_url"] = _webhook_url(domain)
+        result_info["bot_url"] = f"https://{domain}-api.{BASE_DOMAIN}"
         
         return True, result_info
     
