@@ -9731,6 +9731,99 @@ async def execute_app_action(
 # Commit Tracking Endpoints
 # ============================================================================
 
+def _restart_and_rewebhook(project_id: int, project_path: str, domain: str, type_id: int) -> None:
+    """Restart the project's PM2 process after code changes and re-register
+    webhook for telegram bots.
+
+    Called by _auto_commit_and_push after git commit+push. Ensures the live
+    deployment reflects Claude's edits, and that telegram webhooks survive
+    the PM2 restart (old templates delete webhook on shutdown).
+    """
+    try:
+        if type_id == 1:
+            # Website — restart both frontend and backend via worker-api
+            if domain:
+                _restart_pm2_via_worker_api(f"{domain}-frontend")
+                _restart_pm2_via_worker_api(f"{domain}-backend")
+        elif type_id == 2:
+            # Telegram bot — restart PM2 + re-register webhook
+            pm2_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
+            _restart_pm2_via_worker_api(pm2_name)
+            _re_register_telegram_webhook(project_id, project_path, domain)
+        elif type_id == 3:
+            # Discord bot — just restart PM2
+            pm2_name = f"{domain}-bot" if domain else f"dc-bot-{project_id}"
+            _restart_pm2_via_worker_api(pm2_name)
+        elif type_id == 5:
+            # Scheduler — restart centralized scheduler
+            _restart_pm2_via_worker_api("clawd-scheduler")
+    except Exception as exc:
+        logger.warning("[AUTO-COMMIT] restart/rewebhook failed (non-fatal): %s", exc)
+
+
+def _restart_pm2_via_worker_api(pm2_app_name: str) -> bool:
+    """Restart a PM2 app via the worker-api internal endpoint."""
+    try:
+        import json as _json
+        import urllib.request as _urlreq
+        endpoint = "http://localhost:8003/internal/pm2-restart"
+        payload = _json.dumps({"pm2_app_name": pm2_app_name}).encode()
+        req = _urlreq.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        with _urlreq.urlopen(req, timeout=60) as resp:
+            result = _json.loads(resp.read().decode())
+        if result.get("success"):
+            logger.info("[AUTO-COMMIT] ✓ PM2 restarted: %s", pm2_app_name)
+            return True
+        else:
+            logger.warning("[AUTO-COMMIT] PM2 restart failed for %s: %s", pm2_app_name, result.get("error"))
+            return False
+    except Exception as exc:
+        logger.warning("[AUTO-COMMIT] PM2 restart error for %s: %s", pm2_app_name, exc)
+        return False
+
+
+def _re_register_telegram_webhook(project_id: int, project_path: str, domain: str) -> None:
+    """Re-register the Telegram webhook after PM2 restart.
+
+    The bot's shutdown handler (old template) calls delete_webhook() which
+    removes the working webhook. We re-register it here from the host
+    (where DNS works) to guarantee the bot keeps receiving messages.
+    """
+    try:
+        # Read bot token from .env
+        bot_token = None
+        env_path = os.path.join(project_path, "telegram", ".env")
+        if not os.path.exists(env_path):
+            env_path = os.path.join(project_path, ".env")
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    if line.strip().startswith("BOT_TOKEN="):
+                        bot_token = line.split("=", 1)[1].strip()
+                        break
+
+        if not bot_token:
+            logger.warning("[AUTO-COMMIT] No BOT_TOKEN found for webhook re-registration")
+            return
+
+        # Build webhook URL (uses -api subdomain)
+        from domain_config import webhook_url as _webhook_url
+        webhook = _webhook_url(domain)
+
+        import requests as _req
+        resp = _req.post(
+            f"https://api.telegram.org/bot{bot_token}/setWebhook",
+            json={"url": webhook, "allowed_updates": ["message", "edited_message", "callback_query"]},
+            timeout=15,
+        )
+        if resp.status_code == 200 and resp.json().get("ok"):
+            logger.info("[AUTO-COMMIT] ✓ Webhook re-registered: %s", webhook)
+        else:
+            logger.warning("[AUTO-COMMIT] Webhook re-registration failed: %s", resp.text[:200])
+    except Exception as exc:
+        logger.warning("[AUTO-COMMIT] Webhook re-registration error: %s", exc)
+
+
 async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode: str) -> None:
     """Auto-commit and push after a query completes, if files were modified.
 
@@ -9768,10 +9861,10 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
 
         logger.info(f"[AUTO-COMMIT] Writes detected — committing project {project_id}, session {session_id}")
 
-        # Get project path, repo_url, and domain from DB
+        # Get project path, repo_url, domain, type_id from DB
         with get_db() as conn:
             project = conn.execute(
-                "SELECT project_path, repo_url, domain FROM projects WHERE id = ?",
+                "SELECT project_path, repo_url, domain, type_id FROM projects WHERE id = ?",
                 (project_id,)
             ).fetchone()
             if not project:
@@ -9780,6 +9873,7 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
             project_path = project["project_path"]
             repo_url = project.get("repo_url")
             domain = project.get("domain", "")
+            type_id = project.get("type_id", 1)
 
         # If repo_url is missing, try to reconstruct from domain via GitHubService
         if not repo_url and domain:
@@ -9916,6 +10010,11 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
             conn.commit()
 
         logger.info(f"[AUTO-COMMIT] ✓ {commit_status} hash={commit_hash[:8]} msg='{commit_msg}'")
+
+        # After committing + pushing, restart the project's PM2 process so the
+        # live deployment picks up the changes. Also re-register webhook for
+        # telegram bots (the PM2 restart's shutdown handler may have deleted it).
+        _restart_and_rewebhook(project_id, project_path, domain, type_id)
 
     except Exception as e:
         logger.error(f"[AUTO-COMMIT] Error: {e}", exc_info=True)
