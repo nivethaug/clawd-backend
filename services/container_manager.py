@@ -839,6 +839,21 @@ class ContainerManager:
                 "--filter", "status=running", "--format", "{{.Names}}",
             ])
             if r.returncode == 0 and container_name in r.stdout.strip().splitlines():
+                # CRITICAL: don't stop if the container has active Claude processes.
+                # Long-running operations (telegram editor, scheduler editor,
+                # project creation) run Claude inside the container for up to
+                # 20 minutes WITHOUT bumping last_used_at (they're not going
+                # through ensure_container on every loop). The reaper would
+                # kill the container mid-edit → exit code 137 → rollback.
+                # Check for claude processes before stopping.
+                cm = cls(user_id)
+                if cm.has_active_claude():
+                    logger.info(
+                        "[REAPER] skipping %s — Claude is actively running (user_id=%s)",
+                        container_name, user_id,
+                    )
+                    continue
+
                 logger.info("[REAPER] stopping idle container: %s (user_id=%s)", container_name, user_id)
                 stop_r = _run_docker(["stop", container_name], timeout=30)
                 if stop_r.returncode == 0:
