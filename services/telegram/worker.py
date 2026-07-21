@@ -526,6 +526,30 @@ def run_telegram_bot_pipeline(
                 logger.info(f"⏳ Waiting 3s for bot to restart...")
                 time.sleep(3)
 
+                # Re-register the webhook AFTER the PM2 restart.
+                # buildpublish.py does a HARD restart (pm2 stop + start).
+                # The bot's shutdown handler calls delete_webhook() (old template)
+                # which removes the webhook. The startup handler tries to
+                # re-register but may fail (DNS in sandbox). We re-register
+                # HERE from the worker (host has working DNS) to guarantee
+                # the webhook survives the restart.
+                if bot_token:
+                    import requests as _req
+                    webhook_full_url = _webhook_url(domain)
+                    logger.info(f"🔄 Re-registering webhook after PM2 restart: {webhook_full_url}")
+                    try:
+                        tg_resp = _req.post(
+                            f"https://api.telegram.org/bot{bot_token}/setWebhook",
+                            json={"url": webhook_full_url, "allowed_updates": ["message", "edited_message", "callback_query"]},
+                            timeout=15,
+                        )
+                        if tg_resp.status_code == 200 and tg_resp.json().get("ok"):
+                            logger.info(f"✅ Webhook re-registered successfully: {webhook_full_url}")
+                        else:
+                            logger.warning(f"⚠️ Webhook re-registration failed: {tg_resp.text[:200]}")
+                    except Exception as webhook_err:
+                        logger.warning(f"⚠️ Webhook re-registration error: {webhook_err}")
+
         # Step 13: HTTP verify (enhanced version works)
         logger.info("📋 Step 12/12: Final HTTP verification (enhanced bot)...")
         try:
