@@ -6498,10 +6498,10 @@ async def chat_stream_endpoint(
                     query_event = getattr(handler, '_query_complete', None)
                     if query_event:
                         try:
-                            await asyncio.wait_for(query_event.wait(), timeout=600)
+                            await asyncio.wait_for(query_event.wait(), timeout=1200)
                             logger.info(f"[ACP-STREAM] Query completed, saving full response")
                         except asyncio.TimeoutError:
-                            logger.warning(f"[ACP-STREAM] Query completion timed out after 600s")
+                            logger.warning(f"[ACP-STREAM] Query completion timed out after 1200s (20 min)")
 
                     # Prefer _last_query_response (full final response from Claude Agent)
                     if hasattr(handler, '_last_query_response') and handler._last_query_response:
@@ -6566,10 +6566,10 @@ async def chat_stream_endpoint(
                             query_event = getattr(handler, '_query_complete', None)
                             if query_event:
                                 try:
-                                    await asyncio.wait_for(query_event.wait(), timeout=600)
+                                    await asyncio.wait_for(query_event.wait(), timeout=1200)
                                     logger.info(f"[ACP-STREAM] Query completed, saving full response")
                                 except asyncio.TimeoutError:
-                                    logger.warning(f"[ACP-STREAM] Query completion timed out after 600s")
+                                    logger.warning(f"[ACP-STREAM] Query completion timed out after 1200s (20 min)")
 
                             # Prefer _last_query_response (full final response from Claude Agent)
                             if hasattr(handler, '_last_query_response') and handler._last_query_response:
