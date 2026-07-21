@@ -1875,7 +1875,7 @@ Bot Directory: `{self.project_path}`
 1. READ agent README
 2. MAKE code changes
 3. UPDATE agent folder
-4. RESTART PM2 to apply changes
+4. PUBLISH with buildpublish.py to apply changes
 5. TEST bot via Telegram
 
 ---
@@ -1908,7 +1908,7 @@ Bot Directory: `{self.project_path}`
 4. CONFIRM API REQUIREMENT (ASK USER FIRST)
 5. MAKE your modifications
 6. UPDATE agent/ai_index/*.json files (MANDATORY)
-7. RESTART PM2 to apply changes
+7. PUBLISH with buildpublish.py to apply changes
 8. RUN UNIT TESTS to verify changes
 
 ---
@@ -2044,15 +2044,15 @@ If the user request needs website data:
 
 ## TESTING YOUR CHANGES
 
-### PM2 Restart (After changes)
+### Publish Changes (After changes)
 ```bash
 cd {self.project_path}
-pm2 restart tg-bot-{self.project_id}
+python3 buildpublish.py
 ```
 
 ### Check Bot Status
 ```bash
-pm2 status | grep tg-bot-{self.project_id}
+curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
 ```
 
 ### Run Unit Tests (MANDATORY)
@@ -2147,7 +2147,7 @@ After making ANY changes, update these files:
 ### Bot Not Responding
 - Check PM2 status: `pm2 status`
 - Check logs: `pm2 logs tg-bot-{self.project_id}`
-- Restart PM2: `pm2 restart tg-bot-{self.project_id}`
+- Publish: `cd {self.project_path} && python3 buildpublish.py`
 
 ### Webhook Issues
 - Verify domain resolves: `nslookup {self.domain}`
@@ -2290,7 +2290,7 @@ Bot Directory: `{self.project_path}`
 1. READ agent README
 2. MAKE code changes
 3. UPDATE agent folder
-4. RESTART PM2 to apply changes
+4. PUBLISH with buildpublish.py to apply changes
 5. TEST bot via Discord
 
 ---
@@ -2359,7 +2359,7 @@ Bot Directory: `{self.project_path}`
 3. UNDERSTAND the existing code structure
 4. MAKE your modifications
 5. UPDATE agent/ai_index/*.json files (MANDATORY)
-6. RESTART PM2 to apply changes
+6. PUBLISH with buildpublish.py to apply changes
 7. RUN UNIT TESTS to verify changes
 
 ---
@@ -2508,32 +2508,34 @@ If the user request requires website data:
 
 ---
 
-## PM2 MANAGEMENT
+## PUBLISHING CHANGES
 
-**Process name:** `dc-bot-{self.project_id}`
+**After making changes, use buildpublish.py (NOT direct pm2 commands):**
 
 ```bash
-# Restart bot after changes
-pm2 restart dc-bot-{self.project_id}
+# Publish changes (handles PM2 restart via worker-api)
+cd {self.project_path}
+python3 buildpublish.py
 
 # Check if running
-pm2 status | grep dc-bot-{self.project_id}
-
-# View logs
-pm2 logs dc-bot-{self.project_id} --lines 50
+curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
 
 # Test changes
-pm2 restart dc-bot-{self.project_id} && sleep 3 && pm2 logs dc-bot-{self.project_id} --lines 20
+python3 buildpublish.py && sleep 3 && curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
 ```
+
+⛔ NEVER run `pm2 restart`, `pm2 stop`, or `sudo pm2` directly.
+These fail inside the container/sandbox. ALWAYS use `buildpublish.py`
+which handles PM2 restart via the worker-api.
 
 ---
 
 ## COMMON ISSUES
 
 ### Bot Not Responding
-- Check PM2 status: `pm2 status`
+- Check health: `curl -s https://{self.domain}-api.{BASE_DOMAIN}/health`
 - Check logs: `pm2 logs dc-bot-{self.project_id}`
-- Restart PM2: `pm2 restart dc-bot-{self.project_id}`
+- Publish: `cd {self.project_path} && python3 buildpublish.py`
 - Check bot token in `.env`
 
 ### Database Issues
