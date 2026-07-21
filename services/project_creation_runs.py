@@ -612,11 +612,31 @@ def _create_github_repo(run_id: int, project_id: int, project_path: str, domain:
         if not repo_url:
             append_chunk(run_id, "log", "GitHub repository was not created; continuing without remote")
             return
-        if github.add_remote(project_path, repo_url):
-            with get_db() as conn:
-                conn.execute("UPDATE projects SET repo_url = %s WHERE id = %s", (repo_url, project_id))
-                conn.commit()
-            append_chunk(run_id, "log", f"GitHub remote attached: {repo_url}")
+
+        logger.info("[PROJECT-RUN] GitHub repo created: %s", repo_url)
+
+        # Save repo_url to DB FIRST — even if add_remote fails (git ownership),
+        # _push_to_github can recover by reading repo_url from DB.
+        with get_db() as conn:
+            conn.execute("UPDATE projects SET repo_url = %s WHERE id = %s", (repo_url, project_id))
+            conn.commit()
+        logger.info("[PROJECT-RUN] Saved repo_url to DB for project %s", project_id)
+
+        # Fix dubious ownership before git commands
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", project_path],
+            capture_output=True, text=True, timeout=10,
+        )
+
+        # Try to add remote — may fail if git ownership is wrong, but DB has the URL
+        try:
+            if github.add_remote(project_path, repo_url):
+                append_chunk(run_id, "log", f"GitHub remote attached: {repo_url}")
+            else:
+                logger.warning("[PROJECT-RUN] add_remote returned False for %s", repo_url)
+        except Exception as remote_err:
+            logger.warning("[PROJECT-RUN] add_remote failed (non-fatal, DB has URL): %s", remote_err)
+
     except Exception as exc:
         logger.warning("[PROJECT-RUN] GitHub integration failed for project %s: %s", project_id, exc)
         append_chunk(run_id, "log", f"GitHub setup skipped: {exc}")
