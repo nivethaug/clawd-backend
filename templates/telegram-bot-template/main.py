@@ -100,22 +100,41 @@ def init_bot():
 async def startup():
     """Startup event - initialize bot and set webhook (v20 lifecycle)."""
     global bot_app
-    
+
     # Build the bot application
     init_bot()
-    
+
     # v20 requires explicit initialize() and start()
     await bot_app.initialize()
     await bot_app.start()
-    
-    # Set webhook on Telegram servers
+
+    # Check if webhook is already registered before overwriting it.
+    # The platform registers the webhook during project creation with retries.
+    # On PM2 restart (buildpublish), the bot runs inside a bwrap sandbox
+    # where DNS may not resolve the webhook domain → set_webhook would fail
+    # and clear the existing webhook. Only set if it's missing.
     if WEBHOOK_URL:
         try:
-            await bot_app.bot.set_webhook(url=WEBHOOK_URL)
-            logger.info(f"✅ Webhook set: {WEBHOOK_URL}")
+            # Check current webhook status first
+            current = await bot_app.bot.get_webhook_info()
+            current_url = getattr(current, "url", "") or ""
+
+            if current_url == WEBHOOK_URL:
+                logger.info(f"✅ Webhook already registered: {WEBHOOK_URL}")
+            elif current_url:
+                # Different webhook URL registered — update it
+                logger.info(f"🔄 Updating webhook: {current_url} → {WEBHOOK_URL}")
+                await bot_app.bot.set_webhook(url=WEBHOOK_URL)
+                logger.info(f"✅ Webhook updated: {WEBHOOK_URL}")
+            else:
+                # No webhook registered — register now
+                logger.info(f"🔗 Registering webhook: {WEBHOOK_URL}")
+                await bot_app.bot.set_webhook(url=WEBHOOK_URL)
+                logger.info(f"✅ Webhook set: {WEBHOOK_URL}")
         except Exception as e:
-            logger.error(f"❌ Failed to set webhook: {e}")
-            logger.error(f"   Check that WEBHOOK_URL is reachable: {WEBHOOK_URL}")
+            logger.warning(f"⚠️ Webhook check/set failed (non-fatal — webhook may already be registered): {e}")
+            logger.info(f"   If the bot doesn't respond, register manually:")
+            logger.info(f"   curl -X POST 'https://api.telegram.org/bot$BOT_TOKEN/setWebhook?url={WEBHOOK_URL}'")
     else:
         logger.warning("⚠️ No WEBHOOK_URL configured - bot running in webhook mode without registration")
         logger.info("ℹ️ Set WEBHOOK_URL or WEBHOOK_DOMAIN environment variable to enable webhook")
@@ -145,13 +164,19 @@ async def get_openapi_json():
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Shutdown event - cleanup (v20 lifecycle)."""
+    """Shutdown event - cleanup (v20 lifecycle).
+
+    NOTE: We do NOT delete the webhook on shutdown. PM2 restarts (buildpublish)
+    trigger shutdown → startup cycles. Deleting the webhook here would clear
+    the registration, and the startup re-registration might fail (DNS in
+    sandbox), leaving the bot without a webhook. The platform manages webhook
+    lifecycle — leave it registered across restarts.
+    """
     if bot_app:
         try:
             await bot_app.stop()
             await bot_app.shutdown()
-            await bot_app.bot.delete_webhook()
-            logger.info("✅ Bot stopped and webhook removed")
+            logger.info("✅ Bot stopped (webhook left registered)")
         except Exception as e:
             logger.error(f"❌ Shutdown error: {e}")
 
