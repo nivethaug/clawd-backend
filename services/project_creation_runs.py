@@ -630,23 +630,38 @@ def _push_to_github(run_id: int, project_id: int, project_path: str) -> None:
     init from _create_project_folder.
     """
     try:
-        # Stage all files (ACPX/build may have created new files since init)
+        logger.info("[PROJECT-RUN] _push_to_github: project_id=%s path=%s", project_id, project_path)
+
+        # Fix dubious ownership: register project as safe directory for root
         subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", project_path],
+            capture_output=True, text=True, timeout=10,
+        )
+
+        # Stage all files (ACPX/build may have created new files since init)
+        add_result = subprocess.run(
             ["git", "add", "-A"],
             cwd=project_path, capture_output=True, text=True, timeout=30,
         )
+        if add_result.returncode != 0:
+            logger.warning("[PROJECT-RUN] git add failed: %s", add_result.stderr[:300])
+
         # Commit any uncommitted changes
         commit_result = subprocess.run(
             ["git", "commit", "-m", "Initial project creation",
              "--allow-empty"],
             cwd=project_path, capture_output=True, text=True, timeout=30,
         )
+        logger.info("[PROJECT-RUN] git commit: rc=%s out=%s", commit_result.returncode, commit_result.stdout[:200])
+
         # Check if 'origin' remote exists
         remote_result = subprocess.run(
-            ["git", "remote"],
+            ["git", "remote", "-v"],
             cwd=project_path, capture_output=True, text=True, timeout=10,
         )
-        has_origin = "origin" in remote_result.stdout.split()
+        has_origin = "origin" in remote_result.stdout
+        logger.info("[PROJECT-RUN] git remote -v: %s", remote_result.stdout[:200])
+
         if not has_origin:
             # Try to get repo_url from DB and add it
             with get_db() as conn:
@@ -655,6 +670,7 @@ def _push_to_github(run_id: int, project_id: int, project_path: str) -> None:
                     (project_id,),
                 ).fetchone()
             repo_url = row["repo_url"] if row else None
+            logger.info("[PROJECT-RUN] repo_url from DB: %s", repo_url)
             if repo_url:
                 subprocess.run(
                     ["git", "remote", "add", "origin", repo_url],
@@ -664,12 +680,17 @@ def _push_to_github(run_id: int, project_id: int, project_path: str) -> None:
 
         if not has_origin:
             append_chunk(run_id, "log", "GitHub push skipped — no remote configured")
+            logger.warning("[PROJECT-RUN] GitHub push skipped — no remote configured")
             return
 
         # Push to origin main
         push_result = subprocess.run(
             ["git", "push", "--set-upstream", "origin", "main"],
             cwd=project_path, capture_output=True, text=True, timeout=60,
+        )
+        logger.info(
+            "[PROJECT-RUN] git push: rc=%s out=%s err=%s",
+            push_result.returncode, push_result.stdout[:200], push_result.stderr[:200],
         )
         if push_result.returncode == 0:
             logger.info("[PROJECT-RUN] Pushed project %s to GitHub", project_id)
