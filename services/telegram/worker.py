@@ -455,12 +455,15 @@ def run_telegram_bot_pipeline(
         # Step 12: Call buildpublish.py (restarts PM2 with enhanced code)
         if result_info.get("ai_enhancement") and "failed" not in result_info.get("ai_enhancement", ""):
             logger.info("📋 Step 11/12: Running buildpublish.py (restart PM2)...")
+
+            # First try: run buildpublish.py from the project directory.
+            # On the host this has direct PM2 access.
+            buildpublish_ok = False
             try:
                 import subprocess
-                
-                # Run buildpublish.py from telegram directory
+
                 buildpublish_path = Path(telegram_path) / "buildpublish.py"
-                
+
                 if buildpublish_path.exists():
                     result = subprocess.run(
                         ["python3", str(buildpublish_path)],
@@ -469,28 +472,60 @@ def run_telegram_bot_pipeline(
                         text=True,
                         timeout=60
                     )
-                    
+
                     if result.returncode == 0:
                         logger.info(f"✅ buildpublish.py completed successfully")
-                        logger.debug(f"Output: {result.stdout}")
+                        buildpublish_ok = True
                         result_info["steps_completed"].append("buildpublish")
-                        
-                        # Wait for bot to restart
-                        logger.info("⏳ Waiting 3s for bot to restart...")
-                        time.sleep(3)
                     else:
-                        logger.warning(f"⚠️ buildpublish.py failed: {result.stderr}")
-                        result_info["errors"].append(f"buildpublish_failed: {result.stderr}")
+                        logger.warning(f"⚠️ buildpublish.py failed: {result.stderr[:300]}")
                 else:
                     logger.warning(f"⚠️ buildpublish.py not found at {buildpublish_path}")
-            
             except subprocess.TimeoutExpired:
                 logger.warning(f"⚠️ buildpublish.py timeout - continuing")
                 result_info["errors"].append("buildpublish_timeout")
             except Exception as e:
                 logger.warning(f"⚠️ buildpublish.py error: {e} - continuing")
                 result_info["errors"].append(f"buildpublish_error: {e}")
-        
+
+            # Fallback: if buildpublish failed or wasn't found, restart PM2 directly.
+            # The worker runs on the host with full PM2 access — no need for the
+            # worker-api detour.
+            if not buildpublish_ok:
+                pm2_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
+                logger.info(f"🔄 Direct PM2 restart fallback: {pm2_name}")
+                try:
+                    restart_result = subprocess.run(
+                        ["pm2", "restart", pm2_name, "--update-env"],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    if restart_result.returncode == 0:
+                        logger.info(f"✅ PM2 restarted directly: {pm2_name}")
+                        buildpublish_ok = True
+                        result_info["steps_completed"].append("pm2_restart_fallback")
+                    else:
+                        # Try old naming convention
+                        fallback_name = f"tg-bot-{project_id}"
+                        logger.info(f"🔄 Trying fallback PM2 name: {fallback_name}")
+                        restart2 = subprocess.run(
+                            ["pm2", "restart", fallback_name, "--update-env"],
+                            capture_output=True, text=True, timeout=30,
+                        )
+                        if restart2.returncode == 0:
+                            logger.info(f"✅ PM2 restarted: {fallback_name}")
+                            buildpublish_ok = True
+                        else:
+                            logger.error(f"❌ PM2 restart failed: {restart_result.stderr[:300]}")
+                            result_info["errors"].append("pm2_restart_failed")
+                except Exception as pm2_err:
+                    logger.error(f"❌ PM2 restart error: {pm2_err}")
+                    result_info["errors"].append(f"pm2_restart_error: {pm2_err}")
+
+            # Wait for bot to restart either way
+            if buildpublish_ok:
+                logger.info(f"⏳ Waiting 3s for bot to restart...")
+                time.sleep(3)
+
         # Step 13: HTTP verify (enhanced version works)
         logger.info("📋 Step 12/12: Final HTTP verification (enhanced bot)...")
         try:
