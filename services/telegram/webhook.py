@@ -10,6 +10,7 @@ import requests
 from typing import Tuple
 import logging
 from utils.logger import logger  # noqa: F811 — reassign below
+from domain_config import webhook_url as _webhook_url
 logger = logging.getLogger("services.telegram.webhook")
 
 
@@ -48,8 +49,9 @@ def register_telegram_webhook(
             logger.warning("⚠️ No domain provided - skipping webhook registration")
             return True, "Skipped (no domain)"
         
-        # Build webhook URL (matches nginx /webhook location)
-        webhook_url = f"https://{domain}/webhook"
+        # Build webhook URL — uses the -api subdomain (not frontend domain).
+        # domain_config.webhook_url() generates https://{domain}-api.{BASE_DOMAIN}/webhook
+        webhook_url = _webhook_url(domain)
         
         logger.info(f"🔗 Registering Telegram webhook: {webhook_url}")
         
@@ -291,7 +293,7 @@ def register_webhook_async(
                 logger.info(f"✅ Async webhook registration completed: {message}")
             else:
                 logger.warning(f"⚠️ Async webhook registration failed: {message}")
-                logger.info(f"ℹ️ To register manually: curl -X POST 'https://api.telegram.org/bot{bot_token}/setWebhook?url=https://{domain}/webhook'")
+                logger.info(f"ℹ️ To register manually: curl -X POST 'https://api.telegram.org/bot{bot_token}/setWebhook?url={_webhook_url(domain)}'")
         
         except Exception as e:
             logger.error(f"❌ Async webhook registration error: {e}")
