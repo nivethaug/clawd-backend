@@ -25,7 +25,7 @@ logging.basicConfig(
 from services.scheduler.jobs import get_due_jobs, update_job_run
 from services.scheduler.parser import calculate_next_run
 from services.scheduler.logger import log_job
-from services.scheduler.execution_engine import execute_job
+from services.scheduler.execution_engine import execute_job, JOB_TIMEOUT_SECONDS
 
 logger = logging.getLogger('scheduler.worker')
 
@@ -33,6 +33,12 @@ logger = logging.getLogger('scheduler.worker')
 SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
 SCHEDULER_INTERVAL = int(os.getenv("SCHEDULER_INTERVAL", "10"))
 MAX_WORKERS = int(os.getenv("SCHEDULER_MAX_WORKERS", "10"))
+
+# Per-job wait timeout on the future. In sandbox mode the subprocess itself
+# enforces JOB_TIMEOUT_SECONDS (it SIGKILLs bwrap on timeout). We add a 30s
+# buffer here so future.result() doesn't fire before subprocess.run() has
+# had time to clean up the bwrap process + emit its result line.
+FUTURE_WAIT_TIMEOUT = JOB_TIMEOUT_SECONDS + 30
 
 
 def _execute_single_job(job: dict):
@@ -111,10 +117,13 @@ def run_scheduler():
                     future = executor.submit(_execute_single_job, job)
                     futures.append(future)
 
-                # Wait for all to complete (with timeout safety)
+                # Wait for all to complete (with timeout safety).
+                # In sandbox mode the subprocess.run(timeout=JOB_TIMEOUT_SECONDS)
+                # is the real kill switch — this future timeout is just a safety
+                # net for the rare case where subprocess cleanup itself hangs.
                 for future in futures:
                     try:
-                        future.result(timeout=120)  # 2 min max per job
+                        future.result(timeout=FUTURE_WAIT_TIMEOUT)
                     except Exception as e:
                         logger.error(f"Job thread error: {e}")
 

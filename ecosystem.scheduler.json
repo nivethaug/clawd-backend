@@ -13,6 +13,8 @@
     "USE_POSTGRES": "true",
     "SCHEDULER_ENABLED": "true",
     "SCHEDULER_INTERVAL": "10",
-    "SCHEDULER_MAX_WORKERS": "10"
+    "SCHEDULER_MAX_WORKERS": "10",
+    "EXECUTION_MODE": "container",
+    "SHARED_VENV_PATH": "/root/dreampilot/dreampilotvenv"
   }
 }
