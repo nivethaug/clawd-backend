@@ -10293,10 +10293,23 @@ def _rebuild_after_rollback(project_id: int, project_path: str, project_name: st
     # Bot/Scheduler projects (type_id 2, 3, 5) — just restart PM2 process
     # ========================================================================
     if project_type_id in (2, 3, 5):
+        # Resolve the PM2 process name. Bots are created with domain-based
+        # names ({domain}-bot) by pm2_manager.py, NOT tg-bot-{project_id}.
+        # The old naming convention (tg-bot-{project_id}) is kept as a
+        # fallback for projects created before the domain-based naming.
+        with get_db() as conn:
+            proj = conn.execute(
+                "SELECT domain FROM projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+        domain = dict(proj).get("domain", "") if proj else ""
+
         if project_type_id == 2:
-            pm2_name = f"tg-bot-{project_id}"
+            # Telegram: try domain-based name first, fall back to project_id
+            pm2_name = f"{domain}-bot" if domain else f"tg-bot-{project_id}"
         elif project_type_id == 3:
-            pm2_name = f"dc-bot-{project_id}"
+            # Discord: try domain-based name first, fall back to project_id
+            pm2_name = f"{domain}-bot" if domain else f"dc-bot-{project_id}"
         else:
             # Scheduler — no dedicated PM2 process per project, jobs run in main scheduler
             logger.info(f"🔄 [ROLLBACK] Scheduler project {project_id} — no PM2 restart needed (jobs managed via DB)")
@@ -10313,6 +10326,19 @@ def _rebuild_after_rollback(project_id: int, project_path: str, project_name: st
                 capture_output=True, text=True, timeout=30,
             )
             success = result.returncode == 0
+            if not success:
+                # Try fallback name (old convention) if domain-based name failed
+                fallback = f"tg-bot-{project_id}" if project_type_id == 2 else f"dc-bot-{project_id}"
+                if fallback != pm2_name:
+                    logger.info(f"🔄 [ROLLBACK] Trying fallback PM2 name: {fallback}")
+                    result2 = subprocess.run(
+                        ["pm2", "restart", fallback],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    success = result2.returncode == 0
+                    if success:
+                        pm2_name = fallback
+                        result = result2
             return {
                 "type": "bot" if project_type_id in (2, 3) else "scheduler",
                 "pm2_process": pm2_name,
