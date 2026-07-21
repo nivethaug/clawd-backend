@@ -1,10 +1,28 @@
+"""
+AI Logic Layer — DreamAgent Telegram Bot Template.
+
+This is the BASE template that runs before AI enhancement.
+The AI enhancement step (Claude) rewrites this file to add project-specific
+commands and integrations based on the user's description.
+
+Until AI enhancement runs, the bot responds with generic placeholder messages
+so the user can verify the bot is alive after webhook registration.
+"""
 from typing import Optional
-from services.api_client import get_crypto_price
 from utils.logger import logger
 from models.user import User
 
 
 def process_user_input(text: str, user: Optional[User] = None) -> str:
+    """Main entry point — routes user input to handlers.
+
+    Args:
+        text: The message text from Telegram (command or natural language).
+        user: The Telegram user object (may be None in some flows).
+
+    Returns:
+        Response string to send back to the user.
+    """
     text_lower = text.lower().strip()
     logger.info(f"Processing: {text_lower[:50]}")
 
@@ -23,44 +41,6 @@ def process_user_input(text: str, user: Optional[User] = None) -> str:
 
     if text_lower.startswith("/status") or text_lower == "status":
         return _handle_status(user)
-
-    # ✅ FIXED /ask
-    if text_lower.startswith("/ask"):
-        parts = text.split(maxsplit=1)
-
-        if len(parts) < 2:
-            return (
-                "💡 Usage: /ask <your question>\n\n"
-                "Examples:\n"
-                "• /ask what is bitcoin?\n"
-                "• /ask how does blockchain work?"
-            )
-
-        return _handle_ask(parts[1])
-
-    # =========================
-    # CRYPTO COMMANDS
-    # =========================
-
-    # ✅ FIXED /price
-    if text_lower.startswith("/price"):
-        parts = text_lower.split()
-
-        if len(parts) < 2:
-            return "💡 Usage: /price <coin>\nExample: /price btc"
-
-        coin = parts[1]
-        return _handle_crypto_query(coin)
-
-    # =========================
-    # NATURAL CRYPTO QUERIES
-    # =========================
-
-    if any(k in text_lower for k in ["btc", "bitcoin"]):
-        return _handle_crypto_query("bitcoin")
-
-    if any(k in text_lower for k in ["eth", "ethereum"]):
-        return _handle_crypto_query("ethereum")
 
     # =========================
     # GENERAL INTERACTIONS
@@ -88,39 +68,30 @@ def process_user_input(text: str, user: Optional[User] = None) -> str:
 # =========================
 
 def _handle_start(user: Optional[User]) -> str:
-    if user and user.telegram_username:
-        return (
-            f"👋 Welcome @{user.telegram_username}!\n\n"
-            "🪙 Crypto Bot Ready!\n\n"
-            "Commands:\n"
-            "• /price btc\n"
-            "• /ask anything\n"
-            "• /help\n"
-        )
+    """Welcome message — generic, no project-specific commands yet."""
+    name = f" @{user.telegram_username}" if user and user.telegram_username else ""
     return (
-        "👋 Welcome!\n\n"
-        "🪙 Crypto Bot Ready!\n\n"
+        f"👋 Welcome{name}!\n\n"
+        "🤖 Your bot is online and ready.\n\n"
         "Commands:\n"
-        "• /price btc\n"
-        "• /ask anything\n"
-        "• /help\n"
+        "• /help — Show available commands\n"
+        "• /status — Check bot status\n"
     )
 
 
 def _handle_help() -> str:
+    """Help menu — generic until AI enhancement adds real commands."""
     return (
         "📚 Commands:\n\n"
-        "• /price <coin>\n"
-        "• /ask <question>\n"
-        "• /status\n"
-        "• /start\n\n"
-        "Try:\n"
-        "• BTC price\n"
-        "• ETH price"
+        "• /start — Welcome message\n"
+        "• /help — Show this help\n"
+        "• /status — Bot status\n\n"
+        "More commands will be available after AI setup completes."
     )
 
 
 def _handle_status(user: Optional[User]) -> str:
+    """Status check — confirms bot is alive after webhook registration."""
     import datetime
     return (
         "✅ Bot Online\n"
@@ -128,28 +99,9 @@ def _handle_status(user: Optional[User]) -> str:
     )
 
 
-def _handle_ask(question: str) -> str:
-    return (
-        f"🤔 {question}\n\n"
-        "⚠️ AI not enabled yet.\n"
-        "Try crypto commands like /price btc"
-    )
-
-
-def _handle_crypto_query(coin: str) -> str:
-    result = get_crypto_price(coin_id=coin)
-
-    if result["success"]:
-        return f"💰 {coin.capitalize()}: ${result['price']:,.2f}"
-    else:
-        return f"💰 {coin.capitalize()}: $1000 (mock)"
-
-
 def _get_default_response() -> str:
+    """Fallback for unrecognized input."""
     return (
-        "🤖 I didn't understand.\n\n"
-        "Try:\n"
-        "• /price btc\n"
-        "• BTC price\n"
-        "• /ask something"
+        "🤖 I didn't understand that.\n\n"
+        "Type /help to see available commands."
     )
