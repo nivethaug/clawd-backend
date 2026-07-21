@@ -1,7 +1,6 @@
 {
   "name": "clawd-scheduler",
-  "script": "/root/clawd-backend/venv/bin/python",
-  "args": "-c \"from services.scheduler.scheduler import run_scheduler; run_scheduler()\"",
+  "script": "/root/clawd-backend/start-scheduler.sh",
   "cwd": "/root/clawd-backend",
   "instances": 1,
   "exec_mode": "fork",
