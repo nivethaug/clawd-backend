@@ -309,24 +309,16 @@ def run_telegram_bot_pipeline(
 
             # Check if DNS skill is available
             if dns.dns_skill_available:
-                # Create A record for the frontend domain ({domain}.dreamagent.cloud)
-                dns_result = dns.create_a_record(domain, BASE_DOMAIN, SERVER_IP)
-
-                if dns_result:
-                    logger.info(f"✅ DNS A record created for {full_domain}")
-                    result_info["steps_completed"].append("dns_provisioning")
-                else:
-                    logger.warning(f"⚠️ DNS provisioning failed for frontend, but wildcard DNS may work")
-
-                # Create A record for the webhook/API domain ({domain}-api.dreamagent.cloud)
-                # Without this, Telegram can't reach the webhook URL and the bot
-                # appears dead even though it's running.
+                # Telegram bots only have a backend/API domain (no frontend).
+                # The webhook URL is https://{domain}-api.dreamagent.cloud/webhook
+                # so we only need ONE DNS record for the -api subdomain.
                 api_domain = f"{domain}-api"
                 api_dns_result = dns.create_a_record(api_domain, BASE_DOMAIN, SERVER_IP)
                 if api_dns_result:
                     logger.info(f"✅ DNS A record created for webhook: {api_domain}.{BASE_DOMAIN}")
+                    result_info["steps_completed"].append("dns_provisioning")
                 else:
-                    logger.warning(f"⚠️ DNS provisioning failed for {api_domain} (webhook may not work)")
+                    logger.warning(f"⚠️ DNS provisioning failed for {api_domain} — webhook may not work")
             else:
                 logger.info(f"ℹ️ DNS provisioning skipped (using wildcard DNS)")
                 logger.info(f"  Webhook will be available at: https://{full_domain}/webhook")
