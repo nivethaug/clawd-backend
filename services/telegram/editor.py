@@ -154,6 +154,7 @@ class TelegramBotEditor:
     
     def _build_enhancement_prompt(self, description: str, bot_name: str) -> str:
         """Build concise AI prompt for bot enhancement with dynamic command generation."""
+        from services.container_storage import to_container_path
         meta_block = build_workflow_meta_block(
             project_type_id=2,
             project_type="telegram",
@@ -161,8 +162,8 @@ class TelegramBotEditor:
             workflow="telegram_create",
             project_name=bot_name,
             project_id=self.project_id,
-            project_path=self.project_path,
-            service_path=self.project_path,
+            project_path=to_container_path(str(self.project_path)),
+            service_path=to_container_path(str(self.project_path)),
             prompt_kind="telegram_ai_enhancement",
         )
         return f"""{meta_block}

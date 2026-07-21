@@ -11,6 +11,7 @@ import logging
 from utils.logger import logger  # noqa: F811 — reassign below
 logger = logging.getLogger("services.discord.editor")
 from workflow_prompt_meta import build_workflow_meta_block
+from services.container_storage import to_container_path
 
 # Try to import Claude Code Agent
 try:
@@ -161,8 +162,8 @@ class DiscordBotEditor:
             workflow="discord_create",
             project_name=bot_name,
             project_id=self.project_id,
-            project_path=self.project_path,
-            service_path=self.project_path,
+            project_path=to_container_path(str(self.project_path)),
+            service_path=to_container_path(str(self.project_path)),
             prompt_kind="discord_ai_enhancement",
         )
         return f"""{meta_block}

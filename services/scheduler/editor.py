@@ -15,6 +15,7 @@ import logging
 from utils.logger import logger  # noqa: F811 — reassign below
 logger = logging.getLogger("services.scheduler.editor")
 from workflow_prompt_meta import build_workflow_meta_block
+from services.container_storage import to_container_path
 
 try:
     from claude_code_agent import ClaudeCodeAgent
@@ -109,8 +110,8 @@ class SchedulerEditor:
             workflow="scheduler_create",
             project_name=project_name,
             project_id=self.project_id,
-            project_path=self.project_path,
-            service_path=self.project_path / "scheduler",
+            project_path=to_container_path(str(self.project_path)),
+            service_path=to_container_path(str(self.project_path / "scheduler")),
             prompt_kind="scheduler_ai_enhancement",
         )
 
