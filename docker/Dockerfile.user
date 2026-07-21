@@ -53,6 +53,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # python:3.12-slim already provides python3, python, pip — no build-from-source needed.
 RUN python3 --version && pip3 --version
 
+# Pre-install common Python dependencies that bots/projects need.
+# These are used by telegram/discord bot templates (requests, chardet)
+# and website backends (sqlalchemy, psycopg2, pydantic, fastapi, uvicorn).
+# Installing them in the image avoids pip install failures inside the
+# read-only container (tmpfs /tmp is too small for compilation).
+RUN pip3 install --no-cache-dir --break-system-packages \
+        requests chardet charset-normalizer \
+        sqlalchemy psycopg2-binary pydantic \
+        fastapi uvicorn python-dotenv python-telegram-bot discord.py
+
 # ─────────────────────────────────────────────────────────────────────
 # Node.js (via NodeSource — matches docs/worker_vps_setup.md §1.3).
 # Required for Claude CLI (it's a Node package) and for user npm installs.
