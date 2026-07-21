@@ -697,6 +697,15 @@ class ClaudeCodeAgent:
             # so we fetch real usage directly from the wrapper's usage buffer.
             await self._fetch_usage_session(_session_id)
 
+            # Filesystem fallback: if the wrapper reports has_writes=False but
+            # git shows actual file changes, override to True. This catches
+            # the timeout case where the wrapper's usage session gets corrupted
+            # but Claude DID edit files before the timeout.
+            if self._last_token_usage and not self._last_token_usage.get("has_writes"):
+                if self._check_git_has_changes():
+                    logger.info("[CLAUDE-AGENT] git has changes but wrapper reports no writes — overriding has_writes=True")
+                    self._last_token_usage["has_writes"] = True
+
             return result
         except asyncio.TimeoutError:
             elapsed = (datetime.now() - start_time).total_seconds()
@@ -704,7 +713,36 @@ class ClaudeCodeAgent:
             # Fetch partial usage so tokens consumed before timeout aren't lost.
             # Without this, timed-out queries record zero tokens and zero cost.
             await self._fetch_usage_session(_session_id)
+
+            # Filesystem fallback for timeout: git changes prove Claude edited
+            # files before the timeout killed it.
+            if self._last_token_usage and not self._last_token_usage.get("has_writes"):
+                if self._check_git_has_changes():
+                    logger.info("[CLAUDE-AGENT] git has changes after timeout — overriding has_writes=True")
+                    self._last_token_usage["has_writes"] = True
+
             raise
+
+    def _check_git_has_changes(self) -> bool:
+        """Check if git reports any uncommitted changes in the repo.
+
+        Used as a filesystem fallback for has_writes when the wrapper's
+        usage tracking is unreliable (e.g., after a timeout kills Claude
+        mid-stream, the usage session gets corrupted and has_writes=False
+        even though Claude did edit files before being killed).
+        """
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(self.repo_path),
+                capture_output=True, text=True, timeout=5,
+            )
+            has_changes = bool(result.stdout.strip())
+            if has_changes:
+                logger.debug(f"[CLAUDE-AGENT] git status shows changes: {result.stdout.strip()[:200]}")
+            return has_changes
+        except Exception:
+            return False
 
     @staticmethod
     def _inject_usage_session(prompt: str, session_id: str) -> str:
