@@ -622,6 +622,69 @@ def _create_github_repo(run_id: int, project_id: int, project_path: str, domain:
         append_chunk(run_id, "log", f"GitHub setup skipped: {exc}")
 
 
+def _push_to_github(run_id: int, project_id: int, project_path: str) -> None:
+    """Push the project code to GitHub after all edits + builds complete.
+
+    Called after the pipeline finishes (ACPX, build, deploy) so the GitHub
+    repo reflects the final state of the project — not just the empty git
+    init from _create_project_folder.
+    """
+    try:
+        # Stage all files (ACPX/build may have created new files since init)
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=project_path, capture_output=True, text=True, timeout=30,
+        )
+        # Commit any uncommitted changes
+        commit_result = subprocess.run(
+            ["git", "commit", "-m", "Initial project creation",
+             "--allow-empty"],
+            cwd=project_path, capture_output=True, text=True, timeout=30,
+        )
+        # Check if 'origin' remote exists
+        remote_result = subprocess.run(
+            ["git", "remote"],
+            cwd=project_path, capture_output=True, text=True, timeout=10,
+        )
+        has_origin = "origin" in remote_result.stdout.split()
+        if not has_origin:
+            # Try to get repo_url from DB and add it
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT repo_url FROM projects WHERE id = %s",
+                    (project_id,),
+                ).fetchone()
+            repo_url = row["repo_url"] if row else None
+            if repo_url:
+                subprocess.run(
+                    ["git", "remote", "add", "origin", repo_url],
+                    cwd=project_path, capture_output=True, text=True, timeout=10,
+                )
+                has_origin = True
+
+        if not has_origin:
+            append_chunk(run_id, "log", "GitHub push skipped — no remote configured")
+            return
+
+        # Push to origin main
+        push_result = subprocess.run(
+            ["git", "push", "--set-upstream", "origin", "main"],
+            cwd=project_path, capture_output=True, text=True, timeout=60,
+        )
+        if push_result.returncode == 0:
+            logger.info("[PROJECT-RUN] Pushed project %s to GitHub", project_id)
+            append_chunk(run_id, "log", "Project code pushed to GitHub")
+        else:
+            logger.warning(
+                "[PROJECT-RUN] Git push failed for project %s: %s",
+                project_id, push_result.stderr[:300],
+            )
+            append_chunk(run_id, "log", f"GitHub push failed: {push_result.stderr[:200]}")
+    except Exception as exc:
+        logger.warning("[PROJECT-RUN] GitHub push failed for project %s: %s", project_id, exc)
+        append_chunk(run_id, "log", f"GitHub push error: {exc}")
+
+
 def _select_template(run_id: int, project_id: int, name: str, description: str, type_id: int, template_id: Optional[str]) -> Optional[str]:
     selected_template_id = template_id
     if os.getenv("EMPTY_TEMPLATE_MODE", "false").lower() == "true":
@@ -906,6 +969,12 @@ def execute_run(run_id: int) -> Dict[str, Any]:
             else:
                 errors = result.get("errors") if isinstance(result, dict) else None
                 raise RuntimeError("; ".join(errors or ["Project pipeline failed"]))
+
+        # Push the final project code to GitHub (after all edits/builds/deploy).
+        # The repo was created earlier in _create_github_repo but only the
+        # remote was attached — no push happened. This pushes the complete
+        # project state including ACPX-generated code, builds, and configs.
+        _push_to_github(run_id, project_id, project_path)
 
         record_usage(
             user_id=user_id,
