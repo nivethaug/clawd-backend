@@ -60,7 +60,7 @@ def _save_project_metadata(
             "bot_username": bot_username,
             # Note: bot_token is NOT included for security
             "domain": domain,
-            "full_domain": _frontend_domain(domain),
+            "full_domain": f"{domain}-api.{BASE_DOMAIN}",
             "port": port,
             "pm2_process": pm2_process,
             "telegram_path": telegram_path,
@@ -275,18 +275,20 @@ def run_telegram_bot_pipeline(
         logger.info("📋 Step 6/12: Configuring nginx for webhook...")
         try:
             from infrastructure_manager import NginxConfigurator
-            
+
             nginx = NginxConfigurator()
-            full_domain = _frontend_domain(domain)
-            
-            # Generate telegram bot nginx config
-            config_domain, config = nginx.generate_telegram_bot_config(domain, port)
-            
-            # Install config
-            if nginx.install_config(domain, config):
-                logger.info(f"✅ Nginx config installed for {full_domain}")
+            # Telegram bots use the -api subdomain for webhook (NOT frontend domain).
+            # The webhook URL is https://{domain}-api.dreamagent.cloud/webhook
+            api_domain = f"{domain}-api"
+
+            # Generate telegram bot nginx config (uses -api domain)
+            config_domain, config = nginx.generate_telegram_bot_config(api_domain, port)
+
+            # Install config (named after the -api domain)
+            if nginx.install_config(api_domain, config):
+                logger.info(f"✅ Nginx config installed for {api_domain}.{BASE_DOMAIN}")
                 result_info["steps_completed"].append("nginx_config")
-                
+
                 # Reload nginx
                 if nginx.reload_nginx():
                     logger.info(f"✅ Nginx reloaded successfully")
@@ -321,7 +323,7 @@ def run_telegram_bot_pipeline(
                     logger.warning(f"⚠️ DNS provisioning failed for {api_domain} — webhook may not work")
             else:
                 logger.info(f"ℹ️ DNS provisioning skipped (using wildcard DNS)")
-                logger.info(f"  Webhook will be available at: https://{full_domain}/webhook")
+                logger.info(f"  Webhook will be available at: https://{domain}-api.{BASE_DOMAIN}/webhook")
                 result_info["dns_skipped"] = True
         
         except Exception as e:
@@ -332,9 +334,10 @@ def run_telegram_bot_pipeline(
         logger.info("📋 Step 8/12: HTTP verification (base template)...")
         try:
             import requests
-            
-            full_domain = _frontend_domain(domain)
-            health_url = f"https://{full_domain}/health"
+
+            # Health check uses the -api domain (same as webhook + nginx config)
+            api_full_domain = f"{domain}-api.{BASE_DOMAIN}"
+            health_url = f"https://{api_full_domain}/health"
             
             # Fast HTTP check (< 1 second)
             response = requests.get(health_url, timeout=10, verify=True)
@@ -375,20 +378,21 @@ def run_telegram_bot_pipeline(
             logger.info("🔗 Starting async Telegram webhook registration...")
             logger.info("📋 Step 9/12: Telegram webhook registration (async)")
             
-            # Verify DNS resolves locally first
-            dns_resolves = _verify_dns_resolves(full_domain)
+            # Verify DNS resolves locally first (use -api domain)
+            api_full_domain = f"{domain}-api.{BASE_DOMAIN}"
+            dns_resolves = _verify_dns_resolves(api_full_domain)
             if not dns_resolves:
-                logger.warning(f"⚠️ DNS not resolving locally for {full_domain}")
+                logger.warning(f"⚠️ DNS not resolving locally for {api_full_domain}")
                 logger.info("ℹ️ Starting async registration anyway (Telegram's DNS may differ)")
                 result_info["dns_verification"] = "local_failed"
             else:
-                logger.info(f"✅ Local DNS verification passed for {full_domain}")
+                logger.info(f"✅ Local DNS verification passed for {api_full_domain}")
                 result_info["dns_verification"] = "success"
-            
+
             # Start async webhook registration with retries
             register_webhook_async(
                 bot_token=bot_token,
-                domain=full_domain,
+                domain=domain,
                 project_id=project_id,
                 max_retries=9,
                 initial_delay=10
@@ -495,9 +499,10 @@ def run_telegram_bot_pipeline(
             
             # Wait for PM2 restart to complete
             time.sleep(3)
-            
-            full_domain = _frontend_domain(domain)
-            health_url = f"https://{full_domain}/health"
+
+            # Health check uses -api domain (same as nginx config + webhook)
+            api_full_domain = f"{domain}-api.{BASE_DOMAIN}"
+            health_url = f"https://{api_full_domain}/health"
             
             # Fast HTTP check
             response = requests.get(health_url, timeout=10, verify=True)

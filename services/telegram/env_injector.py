@@ -266,8 +266,8 @@ def inject_webhook_config(project_path: str, domain: str, port: int, project_id:
             env_file.touch()
             os.chmod(env_file, stat.S_IRUSR | stat.S_IWUSR)
         
-        # Build webhook URL
-        webhook_url = f"https://{domain}/webhook"
+        # Build webhook URL (uses -api subdomain, same as _webhook_url())
+        webhook_url = _webhook_url(domain)
         
         # Read existing content
         with open(env_file, 'r') as f:
