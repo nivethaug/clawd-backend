@@ -47,7 +47,7 @@ inside that user's container.
 | Item | Why deferred | Upgrade trigger |
 |---|---|---|
 | Dynamic backend preview (FastAPI/Express live) | Separate `RuntimeContainer` project | When live backend preview becomes a product requirement |
-| Scheduler user-code isolation (`services/scheduler/execution_engine.py`) | Separate project — currently imports user `executor.py` into shared process | When scheduler is re-evaluated for security |
+| ~~Scheduler user-code isolation~~ | ✅ **DONE** — see §14 (bwrap sandbox per job) | — |
 | userns-remap, custom seccomp, AppArmor | Adds ops complexity disproportionate to current threat model | When paying customers exist OR real escape attempt detected |
 | gVisor / Kata / Firecracker | Drop-in via ContainerManager abstraction; premature at current scale | When noisy-neighbor or escape risk warrants |
 | Disk quotas | No noisy-neighbor problem yet | When a user fills the disk |
@@ -440,3 +440,181 @@ Track:
 - [worker_vps_setup.md](./worker_vps_setup.md) — current worker architecture
 - [worker_file_proxy.md](./worker_file_proxy.md) — main → worker proxy (unaffected by this work)
 - [worker_scaling.md](./worker_scaling.md) — capacity model this work extends
+- [scheduler.md](./scheduler.md) — scheduler service (sandbox + scraping API)
+
+---
+
+## §14 Scheduler Executor Isolation (bwrap sandbox)
+
+**Status**: ✅ Deployed
+
+Each `execute_task(job)` call runs in a fresh bwrap subprocess instead of in-process via importlib. This was the largest privilege-escalation surface in the platform — Claude-generated executor code had full access to `DATABASE_URL`, `/root`, and the host PID table.
+
+### Architecture
+
+```
+clawd-scheduler daemon (worker VPS)
+  → polls scheduler_jobs (main DB)
+  → for each due job:
+    subprocess.run([scheduler-sandbox.sh, venv, project_path],
+                   input=job_json, timeout=120, env=minimal_env)
+      → bwrap (mount namespace + PID namespace isolation)
+        → scheduler_runner.py
+          → import executor.py
+          → executor.execute_task(job)
+          → print JSON result
+      ← bwrap exits
+  → parse result → update_job_run → log_job
+```
+
+### Security guarantees
+
+| Resource | Before (importlib) | After (bwrap sandbox) |
+|---|---|---|
+| `DATABASE_URL` | ✅ readable via `os.environ` | ❌ blocked (whitelisted env) |
+| `/root/clawd-backend/.env` | ✅ readable | ❌ not mounted |
+| `/workspaces` (other users) | ✅ readable | ❌ not mounted |
+| Host PID table | ✅ enumerable via `/proc` | ❌ `--unshare-pid` |
+| `pm2 list` | ✅ executable | ❌ pm2 not in sandbox |
+| Crash isolation | ❌ executor crash kills scheduler | ✅ only subprocess dies |
+| Cross-project env bleed | ✅ shared `os.environ` | ❌ fresh env per job |
+
+### Per-job env whitelist
+
+```python
+_SCHEDULER_ENV_KEYS = {
+    'PROJECT_ID', 'PROJECT_PATH', 'BACKEND_URL',
+    'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID',
+    'DISCORD_WEBHOOK_URL',
+    'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'EMAIL_TO',
+    'API_ENDPOINT',
+    'PATH', 'HOME', 'LANG', 'LC_ALL',
+}
+```
+
+The project's own `.env` (loaded by `config.py` via `load_dotenv`) is the source of truth for channel-specific keys. `DATABASE_URL` never enters the sandbox.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `scripts/scheduler-sandbox.sh` | bwrap wrapper — same mount conventions as `bot-sandbox.sh` |
+| `scripts/scheduler_runner.py` | Runs inside sandbox — stdin JSON → execute_task → stdout JSON |
+| `services/scheduler/execution_engine.py` | `execute_job()` → `subprocess.run(timeout=120)`, fallback to importlib in local dev |
+| `services/scheduler/scheduler.py` | Daemon — ThreadPoolExecutor, `FUTURE_WAIT_TIMEOUT = JOB_TIMEOUT_SECONDS + 30` |
+
+---
+
+## §15 Per-Project Database Isolation
+
+**Status**: ✅ Deployed
+
+Each Telegram/Discord bot gets its own isolated PostgreSQL database + user. Previously, the durable pipeline passed the **platform** DB URL (`admin:StrongAdminPass123@host/dreampilot`) into every bot's `.env`, leaking platform credentials to Claude Code inside Docker containers.
+
+### Architecture
+
+```
+project_creation_runs.py
+  → _provision_project_database(project_name, project_id)
+    → CREATE DATABASE "proj{id}_{name}_db"     ← separate database (empty)
+    → CREATE USER "proj{id}_{name}_u"           ← separate user (random 32-char password)
+    → GRANT ALL only on proj{id}_{name}_db      ← zero access to dreampilot
+  → database_url = postgresql://proj{id}_u:random@host/proj{id}_db
+  → passed to bot env_injector → written into .env
+```
+
+### Security guarantees
+
+| Resource | Before (platform DB) | After (per-project DB) |
+|---|---|---|
+| Platform `users` table | ✅ readable | ❌ not accessible |
+| Platform `billing_*` tables | ✅ readable | ❌ not accessible |
+| `scheduler_jobs` table | ✅ readable/writable | ❌ not accessible |
+| Other bots' data | ✅ readable (shared DB) | ❌ isolated database |
+| Bot's own `users` table | ✅ | ✅ (in its own DB) |
+
+The per-project user has **zero grants** on the `dreampilot` database. Postgres denies by default — no explicit `REVOKE` needed.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `services/project_creation_runs.py` | `_provision_project_database()` — uses psycopg2 over TCP (works from worker VPS) |
+| `services/telegram/env_injector.py` | Writes `DATABASE_URL` into bot `.env` from provisioning result |
+| `services/discord/env_injector.py` | Same |
+
+---
+
+## §16 Container Reaper — PID-based Active Detection
+
+**Status**: ✅ Deployed
+
+The container reaper uses a PID file (`/tmp/.claude_active_pid` inside the container) to detect active Claude sessions, instead of fragile `pgrep` pattern matching.
+
+### How it works
+
+```
+Chat starts → ClaudeCodeAgent.query()
+  → mark_claude_active(process.pid)
+    → writes PID to /tmp/.claude_active_pid inside container
+
+Reaper checks (every 60s):
+  has_active_claude()
+    Layer 1: read /tmp/.claude_active_pid → kill -0 PID → alive? → skip container
+    Layer 2: /proc scan fallback (safety net)
+
+Chat ends → finally block
+  → mark_claude_inactive()
+    → rm /tmp/.claude_active_pid
+
+Reaper checks:
+  has_active_claude() → file not found → return False → stop container
+```
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `services/container_manager.py` | `has_active_claude()`, `mark_claude_active()`, `mark_claude_inactive()` |
+| `claude_code_agent.py` | Calls `mark_claude_active(pid)` after spawn, `mark_claude_inactive()` in finally |
+| `scripts/container_reaper.py` | PM2 loop calling `ContainerManager.cleanup_idle()` |
+
+---
+
+## §17 Web Scraping API
+
+**Status**: ✅ Deployed
+
+Server-side Chrome DevTools scraping API at `POST /internal/scrape`. Runs on the main VPS where Chrome Headless Shell is installed. Callers (bwrap sandboxes, Docker containers) reach it via `BACKEND_URL/internal/scrape` — no local Chrome needed.
+
+### Tiered approach
+
+| Tier | Method | Speed | RAM | Use case |
+|---|---|---|---|---|
+| 1. JSON API | `api_client.get_crypto_price()` etc. | ~200ms | 0MB | Public APIs (CoinGecko, weather) |
+| 2. Fast HTML | `api_client.fetch_page(url, extract_js)` | ~200ms | ~5MB | Static pages (news, products) |
+| 3. Chrome CDP | `web_scraper.scrape_url(ScrapeConfig(scroll=True))` | ~2-5s | ~50MB/tab | JS-rendered SPAs, scroll |
+
+**`render=false`** (default): `httpx` fetches HTML → BeautifulSoup parses → CSS selectors applied.
+**`render=true`**: Chrome Headless Shell renders via CDP websocket. Each request opens a fresh tab (concurrent-safe, max 10).
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `services/cdp_scraper.py` | Async CDP-over-websocket client |
+| `app.py POST /internal/scrape` | Endpoint — IP-guarded, branches on `render` flag |
+| `templates/*/services/api_client.py` | `fetch_page()` — fast HTML mode |
+| `templates/*/services/web_scraper.py` | `scrape_url()` — auto-selects render mode |
+
+### Chrome installation (main VPS)
+
+```bash
+# Chrome Headless Shell (lightweight, ~50MB, no GUI code)
+cd /tmp
+JSON=$(curl -s https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)
+URL=$(echo "$JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); [print(x['url']) for x in d['channels']['Stable']['downloads']['chrome-headless-shell'] if 'linux' in x.get('platform','')]")
+wget -q "$URL" -O chromium.zip
+unzip -q chromium.zip -d /opt/
+ln -sf /opt/chrome-headless-shell-linux64/chrome-headless-shell /usr/bin/chromium
+```

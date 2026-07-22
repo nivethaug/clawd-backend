@@ -319,13 +319,20 @@ docker exec dreampilot-postgres psql -U admin -d postgres -c "SELECT 1;"
 
 ---
 
-## Phase 6 — Chrome (for the devtools MCP verification phase)
+## Phase 6 — Chrome (for the devtools MCP verification phase + scraping API)
 
-Claude uses the `chrome-devtools` MCP to verify built sites. It needs Chrome running headless with
-remote debugging on port 9222.
+Claude uses the `chrome-devtools` MCP to verify built sites. The platform
+also runs a web scraping API (`/internal/scrape`) that uses Chrome to render
+pages. Chrome needs to run headless with remote debugging on port 9222.
+
+### Worker VPS: Chrome for chat verification
+
+The worker VPS Chrome is used by Claude's MCP during chat/project creation
+to verify built frontends. Each Docker container connects to it via the
+Docker bridge gateway (`172.17.0.1:9223`).
 
 ```bash
-# Install Chrome
+# Install Chrome (worker VPS — for Claude chat verification)
 wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 apt install -y /tmp/chrome.deb && rm /tmp/chrome.deb
 
@@ -351,6 +358,66 @@ EOF
 systemctl daemon-reload
 systemctl enable --now chrome-devtools.service
 curl -s http://127.0.0.1:9222/json/version | head -1   # JSON with "Browser": "Chrome/..."
+```
+
+### Main VPS: Chrome Headless Shell (for scraping API)
+
+The main VPS runs Chrome Headless Shell for the `/internal/scrape` endpoint.
+This is a lighter build (~50MB) with no GUI code — purpose-built for
+headless automation. Scheduler jobs and bots call this via the API.
+
+```bash
+# Install Chrome Headless Shell (main VPS — for /internal/scrape)
+cd /tmp
+JSON=$(curl -s https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)
+URL=$(echo "$JSON" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for x in d['channels']['Stable']['downloads']['chrome-headless-shell']:
+    if 'linux' in x.get('platform', ''):
+        print(x['url'])
+        break
+")
+wget -q "$URL" -O chromium.zip
+unzip -q chromium.zip -d /opt/
+ln -sf /opt/chrome-headless-shell-linux64/chrome-headless-shell /usr/bin/chromium
+chmod +x /opt/chrome-headless-shell-linux64/chrome-headless-shell
+
+# Install required shared libraries
+apt install -y unzip libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 \
+  libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+  libgbm1 libpango-1.0-0 libasound2t64
+
+# Verify
+/usr/bin/chromium --version
+
+# Systemd service
+cat > /etc/systemd/system/chrome-devtools.service <<'EOF'
+[Unit]
+Description=Chrome Headless Shell (DevTools + scraping API)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/chromium --no-sandbox --disable-dev-shm-usage \
+  --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/chrome-debug-profile about:blank
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now chrome-devtools
+sleep 3
+curl -s http://127.0.0.1:9222/json/version | python3 -m json.tool
+
+# Test the scraping endpoint
+curl -s -X POST http://localhost:8002/internal/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com","extract_js":"return document.title"}' | python3 -m json.tool
+# Expected: {"success": true, "data": "Example Domain", "rendered": false}
 ```
 
 ---
