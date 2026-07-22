@@ -1,92 +1,197 @@
 #!/usr/bin/env python3
 """
-API Client - External API calls.
+API Client module.
+ALL external API calls go here.
+Easy to modify by AI agents.
 
-AI agents can modify this file to add new API integrations.
-All external HTTP requests go through this module.
+AI agents can add helper functions here for dynamic integrations.
 """
-import logging
+
 import requests
-from typing import Optional, Dict, Any
 
-logger = logging.getLogger('services.api_client')
-
-# API endpoints
-API_URLS = {
-    "bitcoin": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
-}
-
-# Default timeout for all requests
 REQUEST_TIMEOUT = 10
 
 
-def fetch_data(api_name: str) -> Any:
+# ============================================================================
+# UTILITY FUNCTIONS (Do not modify)
+# ============================================================================
+
+def fetch_json(url: str, params: dict = None, timeout: int = REQUEST_TIMEOUT) -> dict:
     """
-    Fetch data from an external API.
+    Generic JSON fetcher for public APIs.
 
     Args:
-        api_name: Key name from API_URLS dict
+        url: API endpoint URL
+        params: Optional query parameters
+        timeout: Request timeout in seconds
 
     Returns:
-        Parsed response data
-
-    Raises:
-        ValueError: If api_name not found
-        requests.RequestException: If request fails
+        dict with success status and data or error
     """
-    url = API_URLS.get(api_name)
-    if not url:
-        raise ValueError(f"Unknown API: {api_name}")
+    try:
+        response = requests.get(url, params=params, timeout=timeout)
+        response.raise_for_status()
+        return {"success": True, "data": response.json()}
+    except requests.exceptions.Timeout:
+        return {"success": False, "error": "Request timeout"}
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        return {"success": False, "error": "Failed to fetch data"}
 
-    logger.info(f"API request: {api_name} -> {url[:80]}...")
-    response = requests.get(url, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    data = response.json()
-    logger.info(f"API response: {api_name} -> {str(data)[:100]}")
+
+def safe_get(data: dict, *keys, default=None):
+    """
+    Safely get nested dictionary value.
+
+    Example:
+        safe_get(response, "data", "price", default=0)
+    """
+    for key in keys:
+        try:
+            data = data[key]
+        except (KeyError, TypeError):
+            return default
     return data
 
 
-def fetch_bitcoin_price() -> float:
+def fetch_page(url: str, extract_js: str = None, render: bool = False, timeout: int = 15) -> dict:
     """
-    Fetch current Bitcoin price in USD.
+    Fetch and extract data from a web page via the platform scraping API.
 
-    Returns:
-        Bitcoin price as float
-    """
-    data = fetch_data("bitcoin")
-    return data["bitcoin"]["usd"]
-
-
-def get_json(url: str, params: Optional[Dict] = None) -> Dict:
-    """
-    Generic GET request returning JSON.
+    Two modes (tiered for performance):
+      - render=False (default): Fast HTTP fetch + HTML parsing (~200ms).
+        Use for static pages: news, product listings, tables, blogs.
+      - render=True: Full Chrome rendering via CDP (~2-5s, JS executes).
+        Use for SPAs (React/Vue), infinite scroll, login-required pages.
 
     Args:
-        url: Request URL
-        params: Optional query parameters
+        url: Target URL to scrape
+        extract_js: JavaScript extraction expression. Examples:
+            "return document.title"
+            "return document.querySelector('h1').textContent"
+            "return Array.from(document.querySelectorAll('.item')).map(e => e.textContent.trim())"
+            If None, returns page title + body text.
+        render: If True, use Chrome CDP (slower but handles JS-rendered pages).
+        timeout: Request timeout in seconds
 
     Returns:
-        JSON response as dict
+        {"success": True, "data": <extracted_data>, "rendered": bool}
+        {"success": False, "error": "..."} on failure
     """
-    response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    return response.json()
+    import os
+    api_url = os.getenv("BACKEND_URL", "https://api.dreamagent.cloud")
+    if not extract_js:
+        extract_js = "return document.title"
+    try:
+        resp = requests.post(
+            f"{api_url}/internal/scrape",
+            json={"url": url, "extract_js": extract_js, "render": render, "timeout": timeout},
+            timeout=timeout + 5,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "error": str(e)}
 
 
-def post_json(url: str, data: Optional[Dict] = None) -> Dict:
+# ============================================================================
+# API HELPER FUNCTIONS (AI can add more below)
+# ============================================================================
+
+def get_crypto_price(coin_id: str = "bitcoin", currency: str = "usd") -> dict:
     """
-    Generic POST request returning JSON.
+    Fetch cryptocurrency price from CoinGecko API.
 
     Args:
-        url: Request URL
-        data: Optional request body
+        coin_id: Coin identifier (e.g., 'bitcoin', 'ethereum')
+        currency: Target currency (e.g., 'usd', 'eur')
 
     Returns:
-        JSON response as dict
+        dict with price data or error info
     """
-    response = requests.post(url, json=data, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    return response.json()
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {"ids": coin_id, "vs_currencies": currency}
+
+        response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+
+        if coin_id in data and currency in data[coin_id]:
+            return {
+                "success": True,
+                "price": data[coin_id][currency],
+                "coin": coin_id,
+                "currency": currency
+            }
+        return {"success": False, "error": "Coin not found"}
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_weather(latitude: float = 40.71, longitude: float = -74.01) -> dict:
+    """
+    Fetch weather data from Open-Meteo API.
+
+    Args:
+        latitude: Latitude coordinate
+        longitude: Longitude coordinate
+
+    Returns:
+        dict with weather data or error info
+    """
+    try:
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current_weather": True
+        }
+
+        response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+
+        weather = data.get("current_weather", {})
+        return {
+            "success": True,
+            "temperature": weather.get("temperature"),
+            "windspeed": weather.get("windspeed"),
+            "weathercode": weather.get("weathercode")
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_news(query: str = "technology", page: int = 1) -> dict:
+    """
+    Fetch news from Hacker News API.
+
+    Returns:
+        dict with top story titles
+    """
+    try:
+        url = "https://hacker-news.firebaseio.com/v0/topstories.json"
+        response = requests.get(url, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        story_ids = response.json()[:5]
+
+        stories = []
+        for sid in story_ids:
+            story_resp = requests.get(
+                f"https://hacker-news.firebaseio.com/v0/item/{sid}.json",
+                timeout=REQUEST_TIMEOUT
+            )
+            if story_resp.ok:
+                stories.append(story_resp.json().get("title", ""))
+
+        return {"success": True, "stories": stories}
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ============================================================================
@@ -94,7 +199,7 @@ def post_json(url: str, data: Optional[Dict] = None) -> Dict:
 # ============================================================================
 
 # The web_scraper.py module provides Chrome DevTools Protocol (CDP) scraping
-# capabilities. Here's how to use it in your bot:
+# capabilities. Here's how to use it in your scheduler:
 #
 # from services.web_scraper import WebScraper, ScrapeConfig, scrape_url
 # from services.web_scraper import register_scraper, get_scraper

@@ -152,7 +152,10 @@ def _build_wait_selector(config: ScrapeConfig) -> Optional[str]:
 
 
 def scrape_url(config: "ScrapeConfig") -> "ScrapeResult":
-    """Scrape a URL using the server-side Chrome scraping API.
+    """Scrape a URL using the server-side scraping API (tiered).
+
+    Tries fast HTML mode first (render=False). If the page needs JS rendering
+    (config.scroll, config.auth, or caller sets render=True), uses Chrome CDP.
 
     Args:
         config: ScrapeConfig with url, selectors, and options
@@ -172,6 +175,12 @@ def scrape_url(config: "ScrapeConfig") -> "ScrapeResult":
         if config.scroll:
             extract_js = f"window.scrollTo(0, document.body.scrollHeight); " + extract_js
 
+        # Decide render mode:
+        # - render=True (Chrome CDP) if: scroll, auth, or pagination requested
+        #   (these need a real browser to execute JS / interact)
+        # - render=False (fast HTTP) for simple extraction (default)
+        needs_render = config.scroll or config.auth or config.pagination
+
         endpoint = f"{SCRAPER_API_URL}/internal/scrape"
         payload = {
             "url": config.url,
@@ -179,6 +188,7 @@ def scrape_url(config: "ScrapeConfig") -> "ScrapeResult":
             "wait_for_selector": wait_selector,
             "wait_ms": wait_ms,
             "timeout": config.timeout,
+            "render": needs_render,
         }
 
         resp = requests.post(endpoint, json=payload, timeout=SCRAPER_TIMEOUT)

@@ -55,6 +55,46 @@ def safe_get(data: dict, *keys, default=None):
     return data
 
 
+def fetch_page(url: str, extract_js: str = None, render: bool = False, timeout: int = 15) -> dict:
+    """
+    Fetch and extract data from a web page via the platform scraping API.
+
+    Two modes (tiered for performance):
+      - render=False (default): Fast HTTP fetch + HTML parsing (~200ms).
+        Use for static pages: news, product listings, tables, blogs.
+      - render=True: Full Chrome rendering via CDP (~2-5s, JS executes).
+        Use for SPAs (React/Vue), infinite scroll, login-required pages.
+
+    Args:
+        url: Target URL to scrape
+        extract_js: JavaScript extraction expression. Examples:
+            "return document.title"
+            "return document.querySelector('h1').textContent"
+            "return Array.from(document.querySelectorAll('.item')).map(e => e.textContent.trim())"
+            If None, returns page title + body text.
+        render: If True, use Chrome CDP (slower but handles JS-rendered pages).
+        timeout: Request timeout in seconds
+
+    Returns:
+        {"success": True, "data": <extracted_data>, "rendered": bool}
+        {"success": False, "error": "..."} on failure
+    """
+    import os
+    api_url = os.getenv("BACKEND_URL", "https://api.dreamagent.cloud")
+    if not extract_js:
+        extract_js = "return document.title"
+    try:
+        resp = requests.post(
+            f"{api_url}/internal/scrape",
+            json={"url": url, "extract_js": extract_js, "render": render, "timeout": timeout},
+            timeout=timeout + 5,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "error": str(e)}
+
+
 # ============================================================================
 # API HELPER FUNCTIONS (AI can add more below)
 # ============================================================================

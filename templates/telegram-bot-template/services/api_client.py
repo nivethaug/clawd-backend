@@ -1,29 +1,30 @@
+#!/usr/bin/env python3
 """
 API Client module.
 ALL external API calls go here.
 Easy to modify by AI agents.
 
-# DreamAgent: AI can add helper functions here for dynamic integrations
+AI agents can add helper functions here for dynamic integrations.
 """
 
 import requests
-from utils.logger import logger
-from config import API_TIMEOUT
+
+REQUEST_TIMEOUT = 10
 
 
 # ============================================================================
 # UTILITY FUNCTIONS (Do not modify)
 # ============================================================================
 
-def fetch_json(url: str, params: dict = None, timeout: int = API_TIMEOUT) -> dict:
+def fetch_json(url: str, params: dict = None, timeout: int = REQUEST_TIMEOUT) -> dict:
     """
     Generic JSON fetcher for public APIs.
-    
+
     Args:
         url: API endpoint URL
         params: Optional query parameters
         timeout: Request timeout in seconds
-    
+
     Returns:
         dict with success status and data or error
     """
@@ -32,28 +33,17 @@ def fetch_json(url: str, params: dict = None, timeout: int = API_TIMEOUT) -> dic
         response.raise_for_status()
         return {"success": True, "data": response.json()}
     except requests.exceptions.Timeout:
-        logger.error(f"API timeout: {url}")
         return {"success": False, "error": "Request timeout"}
     except requests.exceptions.RequestException as e:
-        logger.error(f"API error: {e}")
         return {"success": False, "error": str(e)}
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
         return {"success": False, "error": "Failed to fetch data"}
 
 
 def safe_get(data: dict, *keys, default=None):
     """
     Safely get nested dictionary value.
-    
-    Args:
-        data: Dictionary to search
-        *keys: Nested keys
-        default: Default value if key not found
-    
-    Returns:
-        Value at nested key or default
-    
+
     Example:
         safe_get(response, "data", "price", default=0)
     """
@@ -65,6 +55,46 @@ def safe_get(data: dict, *keys, default=None):
     return data
 
 
+def fetch_page(url: str, extract_js: str = None, render: bool = False, timeout: int = 15) -> dict:
+    """
+    Fetch and extract data from a web page via the platform scraping API.
+
+    Two modes (tiered for performance):
+      - render=False (default): Fast HTTP fetch + HTML parsing (~200ms).
+        Use for static pages: news, product listings, tables, blogs.
+      - render=True: Full Chrome rendering via CDP (~2-5s, JS executes).
+        Use for SPAs (React/Vue), infinite scroll, login-required pages.
+
+    Args:
+        url: Target URL to scrape
+        extract_js: JavaScript extraction expression. Examples:
+            "return document.title"
+            "return document.querySelector('h1').textContent"
+            "return Array.from(document.querySelectorAll('.item')).map(e => e.textContent.trim())"
+            If None, returns page title + body text.
+        render: If True, use Chrome CDP (slower but handles JS-rendered pages).
+        timeout: Request timeout in seconds
+
+    Returns:
+        {"success": True, "data": <extracted_data>, "rendered": bool}
+        {"success": False, "error": "..."} on failure
+    """
+    import os
+    api_url = os.getenv("BACKEND_URL", "https://api.dreamagent.cloud")
+    if not extract_js:
+        extract_js = "return document.title"
+    try:
+        resp = requests.post(
+            f"{api_url}/internal/scrape",
+            json={"url": url, "extract_js": extract_js, "render": render, "timeout": timeout},
+            timeout=timeout + 5,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "error": str(e)}
+
+
 # ============================================================================
 # API HELPER FUNCTIONS (AI can add more below)
 # ============================================================================
@@ -72,25 +102,22 @@ def safe_get(data: dict, *keys, default=None):
 def get_crypto_price(coin_id: str = "bitcoin", currency: str = "usd") -> dict:
     """
     Fetch cryptocurrency price from CoinGecko API.
-    
+
     Args:
         coin_id: Coin identifier (e.g., 'bitcoin', 'ethereum')
         currency: Target currency (e.g., 'usd', 'eur')
-    
+
     Returns:
         dict with price data or error info
     """
     try:
-        url = f"https://api.coingecko.com/api/v3/simple/price"
-        params = {
-            "ids": coin_id,
-            "vs_currencies": currency
-        }
-        
-        response = requests.get(url, params=params, timeout=API_TIMEOUT)
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {"ids": coin_id, "vs_currencies": currency}
+
+        response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         data = response.json()
-        
+
         if coin_id in data and currency in data[coin_id]:
             return {
                 "success": True,
@@ -98,37 +125,73 @@ def get_crypto_price(coin_id: str = "bitcoin", currency: str = "usd") -> dict:
                 "coin": coin_id,
                 "currency": currency
             }
-        else:
-            return {"success": False, "error": "Coin not found"}
-            
-    except requests.exceptions.Timeout:
-        logger.error(f"API timeout for {coin_id}")
-        return {"success": False, "error": "Request timeout"}
-    except requests.exceptions.RequestException as e:
-        logger.error(f"API error: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Coin not found"}
+
     except Exception as e:
-        # Safety net - never crash the bot
-        logger.error(f"Unexpected error in get_crypto_price: {e}")
-        return {"success": False, "error": "Failed to fetch data"}
+        return {"success": False, "error": str(e)}
 
 
-def get_weather(city: str) -> dict:
+def get_weather(latitude: float = 40.71, longitude: float = -74.01) -> dict:
     """
-    Fetch weather data (placeholder for future implementation).
+    Fetch weather data from Open-Meteo API.
 
     Args:
-        city: City name
+        latitude: Latitude coordinate
+        longitude: Longitude coordinate
 
     Returns:
         dict with weather data or error info
     """
-    # TODO: Implement with OpenWeatherMap or similar
-    logger.info(f"Weather request for {city} - not implemented")
-    return {
-        "success": False,
-        "error": "Weather API not configured yet"
-    }
+    try:
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current_weather": True
+        }
+
+        response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+
+        weather = data.get("current_weather", {})
+        return {
+            "success": True,
+            "temperature": weather.get("temperature"),
+            "windspeed": weather.get("windspeed"),
+            "weathercode": weather.get("weathercode")
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_news(query: str = "technology", page: int = 1) -> dict:
+    """
+    Fetch news from Hacker News API.
+
+    Returns:
+        dict with top story titles
+    """
+    try:
+        url = "https://hacker-news.firebaseio.com/v0/topstories.json"
+        response = requests.get(url, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        story_ids = response.json()[:5]
+
+        stories = []
+        for sid in story_ids:
+            story_resp = requests.get(
+                f"https://hacker-news.firebaseio.com/v0/item/{sid}.json",
+                timeout=REQUEST_TIMEOUT
+            )
+            if story_resp.ok:
+                stories.append(story_resp.json().get("title", ""))
+
+        return {"success": True, "stories": stories}
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ============================================================================
@@ -136,7 +199,7 @@ def get_weather(city: str) -> dict:
 # ============================================================================
 
 # The web_scraper.py module provides Chrome DevTools Protocol (CDP) scraping
-# capabilities. Here's how to use it in your bot:
+# capabilities. Here's how to use it in your scheduler:
 #
 # from services.web_scraper import WebScraper, ScrapeConfig, scrape_url
 # from services.web_scraper import register_scraper, get_scraper

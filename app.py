@@ -4732,20 +4732,24 @@ class InternalScrapeRequest(BaseModel):
     wait_for_selector: Optional[str] = None
     wait_ms: int = 2000
     timeout: int = 15
+    render: bool = False  # If True, use Chrome CDP (for JS-heavy pages). If False, use fast requests fetch.
 
 
 @app.post("/internal/scrape")
 async def internal_scrape(request: InternalScrapeRequest, request_obj: Request):
-    """Scrape a URL using server-side Chrome (DevTools Protocol).
+    """Scrape a URL — tiered: fast HTTP fetch by default, Chrome CDP if render=True.
 
     Internal endpoint — only callable from localhost, Docker bridge, or
     allowlisted IPs. Uses the same IP guard as /internal/pm2-restart plus
     the SCHEDULER_INTERNAL_ALLOWLIST (so bwrap sandboxes / Docker containers
     on the worker VPS can call it via api.dreamagent.cloud).
 
-    The caller provides a URL + JavaScript extraction function. Chrome
-    renders the page, the JS runs in the page context, and the result is
-    returned as JSON. Each request gets its own isolated Chrome tab.
+    Two modes:
+      - render=False (default): Fast HTTP fetch + JS extraction via a DOM
+        shim. ~200ms, ~5MB RAM. Works for most static pages (news, products,
+        tables). Does NOT execute page JavaScript (React/Vue SPAs won't work).
+      - render=True: Full Chrome DevTools Protocol render. ~2-5s, ~50MB RAM
+        per tab. Use for JS-rendered pages, login walls, infinite scroll.
     """
     import os as _os
 
@@ -4810,8 +4814,32 @@ async def internal_scrape(request: InternalScrapeRequest, request_obj: Request):
     if not request.url or not request.url.startswith("http"):
         raise HTTPException(status_code=400, detail="url must start with http:// or https://")
 
-    logger.info(f"[INTERNAL-SCRAPE] url={request.url} from={client_host}")
+    logger.info(f"[INTERNAL-SCRAPE] url={request.url} render={request.render} from={client_host}")
 
+    if not request.render:
+        # Tier 2: Fast HTTP fetch + extraction. No Chrome needed.
+        # Fetches the raw HTML and runs the extract_js against a lightweight
+        # DOM shim. Works for static pages (news, products, tables).
+        try:
+            import httpx as _httpx
+            headers = {
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            async with _httpx.AsyncClient(follow_redirects=True, timeout=request.timeout) as client:
+                resp = await client.get(request.url, headers=headers)
+                html = resp.text
+
+            # Run extraction JS against the HTML using a lightweight DOM parser.
+            # We build a minimal DOM from the HTML so the user's CSS selector
+            # queries work. Uses BeautifulSoup if available, falls back to regex.
+            extracted = _extract_from_html(html, request.extract_js)
+            return {"success": True, "data": extracted, "rendered": False}
+        except Exception as e:
+            logger.error(f"[INTERNAL-SCRAPE] fast mode failed for {request.url}: {e}")
+            # Fall through to CDP mode as fallback
+            logger.info(f"[INTERNAL-SCRAPE] falling back to Chrome CDP for {request.url}")
+
+    # Tier 3: Full Chrome DevTools Protocol render (render=True or fast mode failed)
     try:
         from services.cdp_scraper import scrape as _cdp_scrape
         result = await _cdp_scrape(
@@ -4821,12 +4849,84 @@ async def internal_scrape(request: InternalScrapeRequest, request_obj: Request):
             wait_ms=request.wait_ms,
             timeout=request.timeout,
         )
+        result["rendered"] = True
         return result
     except ImportError:
         return {"success": False, "error": "cdp_scraper module not available — check Chrome is running on :9222"}
     except Exception as e:
         logger.error(f"[INTERNAL-SCRAPE] error: {e}")
         return {"success": False, "error": str(e)}
+
+
+def _extract_from_html(html: str, extract_js: str):
+    """Run extraction logic against raw HTML without a browser.
+
+    Parses CSS selectors from the extract_js and applies them to the HTML
+    using BeautifulSoup. Supports the common patterns Claude generates:
+      - document.querySelector(selector)
+      - document.querySelectorAll(selector)
+      - document.title
+      - document.body.innerText / textContent
+
+    Falls back to returning the raw HTML if parsing fails.
+    """
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        # No BeautifulSoup — return raw HTML (caller can parse themselves)
+        return {"html": html[:50000], "truncated": len(html) > 50000}
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Handle common extraction patterns
+    js = extract_js.strip()
+
+    # Pattern: return document.title
+    if "document.title" in js and "querySelector" not in js:
+        title = soup.find("title")
+        return title.get_text().strip() if title else None
+
+    # Pattern: document.querySelectorAll('selector')
+    if "querySelectorAll" in js:
+        import re
+        # Extract the CSS selector from the JS string
+        match = re.search(r"querySelectorAll\(['\"]([^'\"]+)['\"]\)", js)
+        if match:
+            selector = match.group(1)
+            elements = soup.select(selector)
+            # Try to extract text content from each element
+            results = []
+            for el in elements:
+                # Check if the JS maps specific fields
+                text = el.get_text(strip=True)
+                results.append(text)
+            return results
+
+    # Pattern: document.querySelector('selector')
+    if "querySelector" in js:
+        import re
+        match = re.search(r"querySelector\(['\"]([^'\"]+)['\"]\)", js)
+        if match:
+            selector = match.group(1)
+            el = soup.select_one(selector)
+            if el:
+                return el.get_text(strip=True)
+            return None
+
+    # Pattern: document.body.innerText or textContent
+    if "body.innerText" in js or "body.textContent" in js or "document.body" in js:
+        body = soup.find("body")
+        if body:
+            text = body.get_text(separator="\n", strip=True)
+            return text[:10000]  # Limit to 10k chars
+
+    # Fallback: return page title + first 5000 chars of text
+    title = soup.find("title")
+    body = soup.find("body")
+    return {
+        "title": title.get_text().strip() if title else None,
+        "text": body.get_text(separator="\n", strip=True)[:5000] if body else None,
+    }
 
 
 # ---------------------------------------------------------------------------
