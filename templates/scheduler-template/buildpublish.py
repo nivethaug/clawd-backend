@@ -4,8 +4,11 @@ Scheduler Build & Publish Script
 Run from project root: python buildpublish.py [--skip-deps] [--no-restart]
 
 IMPORTANT: Call this script AFTER making ANY changes to scheduler/executor.py!
-The centralized clawd-scheduler process caches executor modules in memory
-(importlib). Without a restart, the old executor code keeps running.
+In sandbox mode (EXECUTION_MODE=container), each job loads executor.py fresh
+in a new bwrap subprocess, so code changes take effect immediately without a
+restart. In local-dev in-process mode, the scheduler caches modules in memory
+(importlib) and DOES require a restart to pick up changes. Restarting is good
+hygiene regardless — it clears any stale connections.
 
 Steps:
 1. Install Python dependencies (from requirements.txt)

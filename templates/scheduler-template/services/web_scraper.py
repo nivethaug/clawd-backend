@@ -4,6 +4,13 @@ CDP Web Scraper Template for Bots
 A Chrome DevTools Protocol (CDP) scraping template designed for LLMs to extend
 for any website. Built on the MCPClient pattern.
 
+SANDBOX NOTE: This module requires Chrome/Chromium with remote debugging.
+Scheduled jobs run inside a bwrap sandbox (scheduler-sandbox.sh) which does
+NOT mount Chrome or npm. The web_scraper will fail with a launch error inside
+the sandbox. Use the HTTP-based fetchers in services/api_client.py instead
+(get_crypto_price, get_weather, get_news, fetch_json) for scheduled jobs —
+those only need network access, which the sandbox provides.
+
 USAGE:
     # Standalone usage
     from services.web_scraper import scrape_url, ScrapeConfig

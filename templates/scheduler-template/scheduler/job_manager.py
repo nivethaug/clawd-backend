@@ -21,18 +21,33 @@ Usage by AI agents inside executor.py or directly:
 
     # Get execution logs
     job_manager.get_logs(42)
+
+BACKEND_URL must point to the public API (https://api.dreamagent.cloud), NOT
+localhost. The executor runs inside a bwrap sandbox on the worker VPS where
+localhost only sees its own isolated filesystem. The backend runs on the
+main VPS behind nginx. The worker VPS IP is allowlisted on the backend via
+SCHEDULER_INTERNAL_ALLOWLIST so these calls bypass JWT auth.
 """
 
 import os
 import requests
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8002")
+# BACKEND_URL is injected by env_injector.py from SCHEDULER_BACKEND_URL.
+# The default is empty (not localhost) so a misconfiguration surfaces as a
+# clear connection error rather than silently hitting the wrong host.
+BACKEND_URL = os.getenv("BACKEND_URL", "")
 PROJECT_ID = os.getenv("PROJECT_ID", "1")
 TIMEOUT = 10
 
 
 def _api(method: str, path: str, **kwargs) -> dict:
     """Call the scheduler API."""
+    if not BACKEND_URL:
+        return {
+            "success": False,
+            "error": "BACKEND_URL not configured. Set it in this project's .env "
+                     "(should be https://api.dreamagent.cloud, not localhost).",
+        }
     url = f"{BACKEND_URL}/api/scheduler{path}"
     kwargs.setdefault("timeout", TIMEOUT)
     try:
