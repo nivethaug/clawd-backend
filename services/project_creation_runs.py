@@ -982,12 +982,16 @@ def _run_bot_or_scheduler_pipeline(
         from services.scheduler.worker import run_scheduler_pipeline
 
         append_chunk(run_id, "log", "Starting scheduler project creation pipeline")
+        # backend_url=None lets env_injector.py resolve it from SCHEDULER_BACKEND_URL
+        # env (or its hardcoded https://api.dreamagent.cloud default). Passing
+        # localhost:8002 here would override the env_injector default and leak
+        # into the project's .env — Claude inside the container can't reach it.
         return run_scheduler_pipeline(
             project_id=project_id,
             project_name=name,
             description=description,
             project_path=project_path,
-            backend_url=f"http://localhost:{os.getenv('PORT', '8002')}",
+            backend_url=None,
             telegram_bot_token=payload.get("telegram_bot_token"),
             telegram_chat_id=payload.get("telegram_chat_id"),
             discord_webhook_url=payload.get("discord_webhook_url"),
