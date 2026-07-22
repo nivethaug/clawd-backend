@@ -64,10 +64,20 @@ def inject_scheduler_env(
     if not scheduler_path.exists():
         return False, f"Scheduler directory not found: {scheduler_path}"
 
-    # Default backend URL
+    # Default backend URL — where job_manager.py sends /api/scheduler/* calls.
+    # Resolution order:
+    #   1. Explicit backend_url arg (caller knows best)
+    #   2. SCHEDULER_BACKEND_URL env (operator config — set on main VPS to the
+    #      public API URL the worker VPS executors should call, e.g.
+    #      "https://api.dreamagent.cloud". Must be paired with the matching
+    #      SCHEDULER_INTERNAL_ALLOWLIST on the backend so the worker's IP
+    #      bypasses JWT — see api/scheduler_router.py.)
+    #   3. PORT env fallback (local dev — "http://localhost:{port}")
     if not backend_url:
-        backend_port = os.getenv("PORT", "8002")
-        backend_url = f"http://localhost:{backend_port}"
+        backend_url = os.getenv("SCHEDULER_BACKEND_URL")
+        if not backend_url:
+            backend_port = os.getenv("PORT", "8002")
+            backend_url = f"http://localhost:{backend_port}"
 
     # SMTP from backend .env (shared - Hostinger)
     smtp_host = os.getenv("SMTP_HOST", "smtp.hostinger.com")

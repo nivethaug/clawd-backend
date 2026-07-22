@@ -114,6 +114,78 @@ Environment variables:
 | `SCHEDULER_INTERVAL` | `10` | Poll interval in seconds |
 | `SCHEDULER_MAX_WORKERS` | `10` | Parallel job workers |
 
+## Executor isolation (bwrap sandbox)
+
+Each `execute_task(job)` call runs inside a fresh bwrap sandbox
+(`scripts/scheduler-sandbox.sh`) rather than in-process via importlib. The
+scheduler daemon stays alive forever; executor crashes are contained.
+
+**Engaged when** `EXECUTION_MODE=container` (set in `ecosystem.scheduler.json`).
+When unset, the scheduler falls back to in-process importlib (local dev).
+
+**What the sandbox blocks:**
+- `/root` (platform source + DATABASE_URL)
+- `/workspaces` (other users' projects)
+- host PID table (`--unshare-pid`)
+- platform env vars (only whitelisted keys passed: `PROJECT_ID`, channel
+  tokens, SMTP creds, `BACKEND_URL`, `PATH`, `HOME`)
+
+**What the sandbox allows:**
+- Own project directory (read-write)
+- Shared venv (read-only)
+- Network for outbound fetches (email, Telegram, Discord, public APIs)
+
+### Worker VPS deployment
+
+The scheduler must run on the **worker VPS** (where project files and bwrap
+already live). It connects to the main VPS Postgres over the network.
+
+On the worker VPS `/root/clawd-backend/.env.postgres`:
+```
+DB_HOST=<main VPS private or public IP>
+DB_PORT=5432
+DB_NAME=dreampilot
+DB_USER=admin
+DB_PASSWORD=...
+```
+
+Start (uses `start-scheduler.sh` which sources `.env.postgres`):
+```bash
+pm2 start ecosystem.scheduler.json
+pm2 save
+```
+
+Verify isolation is engaged:
+```bash
+pm2 logs clawd-scheduler --lines 50 | grep "sandbox="
+# Expect: "Executing job N for project X (task_type=..., sandbox=True)"
+```
+
+### Scheduler API auth bypass (worker VPS)
+
+The executor's `job_manager.py` (used by Claude during AI edits to create
+test jobs) calls `/api/scheduler/*` on the backend. It has no user JWT, so
+those calls 401 by default.
+
+Set `SCHEDULER_INTERNAL_ALLOWLIST` on the **main VPS backend** (where the
+API runs) to the worker VPS IP. Requests from that IP bypass JWT auth:
+
+```
+# /root/clawd-backend/.env  (main VPS)
+SCHEDULER_INTERNAL_ALLOWLIST=203.0.113.10
+```
+
+Multiple IPs/CIDRs supported (comma-separated). The bypass still enforces
+project-scoping — the executor can only touch its own project's jobs.
+
+Pair with `SCHEDULER_BACKEND_URL` on the main VPS so newly created projects
+get the correct URL in their `.env` (not `localhost:8002`):
+
+```
+# /root/clawd-backend/.env  (main VPS)
+SCHEDULER_BACKEND_URL=https://api.dreamagent.cloud
+```
+
 ## Related
 
 - [project_creation.md](./project_creation.md)
