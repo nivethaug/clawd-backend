@@ -493,30 +493,81 @@ class ContainerManager:
         the chat's Claude). Also used by the container reaper to avoid stopping
         containers with active sessions.
 
-        Detection: looks for the @anthropic-ai/claude-code process — the
-        actual CLI binary that Claude Code Agent spawns. This avoids matching:
-        - chrome-devtools-mcp (MCP server launched from ~/.claude/)
-        - zai-mcp-server (MCP server launched from ~/.claude/)
-        - our own sh -c detection command (self-match)
-        - stale leftover processes
+        Detection strategy (multi-layered):
+          1. PID file check: ClaudeCodeAgent writes /tmp/.claude_active_pid on
+             spawn and removes it on completion. If the file exists AND the PID
+             is alive, Claude is active.
+          2. Process scan fallback: scan /proc/*/cmdline for the claude CLI
+             binary path (@anthropic-ai/claude-code). Excludes MCP servers
+             (chrome-devtools-mcp, zai-mcp) and our own detection shell.
 
-        We use the @anthropic-ai/claude-code npm package path which appears
-        in the process cmdline when the CLI is running.
+        The PID file is the primary signal — set by mark_claude_active() and
+        cleared by mark_claude_inactive(). The process scan is a safety net
+        for cases where the PID file wasn't written (e.g. older code paths).
         """
         if not self._container_exists():
             return False
+
+        # Layer 1: PID file check (fast, reliable, no false positives)
+        pid_r = _run_docker([
+            "exec", self.container_name,
+            "sh", "-c",
+            # Read the PID file and check if that PID is still alive
+            "PID=$(cat /tmp/.claude_active_pid 2>/dev/null); "
+            "if [ -n \"$PID\" ] && kill -0 \"$PID\" 2>/dev/null; then echo yes; exit 0; fi; "
+            "echo no",
+        ], timeout=5)
+        if pid_r.returncode == 0 and pid_r.stdout.strip() == "yes":
+            return True
+
+        # Layer 2: Process scan fallback (safety net)
         r = _run_docker([
             "exec", self.container_name,
             "sh", "-c",
-            # Match @anthropic-ai/claude-code in the process list.
-            # Use tr to obfuscate so our own sh -c doesn't self-match.
-            # pgrep -f matches the full cmdline. The 'a' + 'nthropic' split
-            # prevents our command from containing the full pattern.
-            "pgrep -f \"@$(echo anthropic)-ai/cl\" >/dev/null 2>&1 && echo yes || echo no",
+            # Scan /proc/*/cmdline for the claude CLI package path.
+            # Obfuscate 'anthropic' to avoid self-match.
+            "for f in /proc/[0-9]*/cmdline; do "
+            "  if tr '\\0' ' ' < \"$f\" 2>/dev/null | grep -q \"cl$(echo aude)-code\"; then "
+            "    # Exclude MCP servers that are children of claude, not claude itself "
+            "    PID=$(echo \"$f\" | grep -o '[0-9]*'); "
+            "    CMD=$(tr '\\0' ' ' < \"$f\" 2>/dev/null); "
+            "    case \"$CMD\" in "
+            "      *chrome-devtools*|*zai-mcp*|*mcp-server*) continue;; "
+            "      *) echo yes; exit 0;; "
+            "    esac; "
+            "  fi; "
+            "done; echo no",
+        ], timeout=8)
+        if r.returncode == 0 and r.stdout.strip() == "yes":
+            return True
+
+        return False
+
+    def mark_claude_active(self, pid: int) -> None:
+        """Write the active Claude PID to a file inside the container.
+
+        Called by ClaudeCodeAgent.start() after spawning the CLI subprocess.
+        The reaper and project-creation check this file via has_active_claude().
+        """
+        if not self._container_exists():
+            return
+        _run_docker([
+            "exec", self.container_name,
+            "sh", "-c", f"echo {pid} > /tmp/.claude_active_pid",
         ], timeout=5)
-        if r.returncode != 0:
-            return False
-        return r.stdout.strip() == "yes"
+
+    def mark_claude_inactive(self) -> None:
+        """Remove the active Claude PID file.
+
+        Called by ClaudeCodeAgent.stop() / finally block after the query
+        completes. Signals to the reaper that the container can be reaped.
+        """
+        if not self._container_exists():
+            return
+        _run_docker([
+            "exec", self.container_name,
+            "sh", "-c", "rm -f /tmp/.claude_active_pid",
+        ], timeout=5)
 
     def cleanup_processes(self, spare_patterns: Optional[List[str]] = None) -> int:
         """Kill processes inside the container except PID 1 and any matching spare_patterns.

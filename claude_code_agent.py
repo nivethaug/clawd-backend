@@ -913,6 +913,20 @@ class ClaudeCodeAgent:
         process = spawn.process
         effective_command = spawn.effective_command
 
+        # Mark container as having an active Claude process (PID file for reaper).
+        # The reaper checks this PID to decide whether the container can be
+        # stopped. Without it, the reaper would kill the container mid-query.
+        try:
+            import os as _os
+            if _os.getenv("EXECUTION_MODE", "local").lower() == "container":
+                from services.container_manager import ContainerManager
+                user_id = getattr(self, 'user_id', None)
+                if user_id:
+                    cm = ContainerManager(user_id)
+                    cm.mark_claude_active(process.pid)
+        except Exception:
+            pass  # non-fatal — reaper falls back to process scan
+
         # Log full command (truncate prompt for readability)
         cmd_display = ' '.join(effective_command)
         if len(cmd_display) > 200:
@@ -1211,6 +1225,17 @@ class ClaudeCodeAgent:
             # 3. Container reaper (kills everything when user goes idle)
             # 4. Claude's prompt instructs it to kill its own serve processes
             await self._cleanup_after_query()
+
+            # Mark container as inactive (clear PID file so reaper can stop it).
+            # This runs AFTER all cleanup, signaling the container is safe to reap.
+            try:
+                if os.getenv("EXECUTION_MODE", "local").lower() == "container":
+                    user_id = getattr(self, 'user_id', None)
+                    if user_id:
+                        from services.container_manager import ContainerManager
+                        ContainerManager(user_id).mark_claude_inactive()
+            except Exception:
+                pass  # non-fatal
 
     @property
     def is_running(self) -> bool:
