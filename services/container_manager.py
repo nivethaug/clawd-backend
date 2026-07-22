@@ -490,16 +490,36 @@ class ContainerManager:
 
         Used by project-creation to detect when a parallel chat is in flight
         so it can skip the pre-run cleanup_processes() (which would SIGKILL
-        the chat's Claude).
+        the chat's Claude). Also used by the container reaper to avoid stopping
+        containers with active sessions.
+
+        Detection: pgrep for the claude binary specifically. We match the
+        process name 'claude' (not -f full cmdline) to avoid false positives
+        from paths like /home/dreampilot/.claude/ (MCP config), npm cache dirs
+        containing 'claude' in the path, or chrome-devtools-mcp launched from
+        Claude's .claude directory. Those are NOT active Claude sessions —
+        they're stale leftovers that should be cleaned up.
         """
         if not self._container_exists():
             return False
         r = _run_docker([
             "exec", self.container_name,
             "sh", "-c",
-            # pgrep returns 0 if any match, 1 if none. -f matches full cmdline.
-            # Match either the binary name 'claude' or the npm package path.
-            "pgrep -f 'claude' >/dev/null 2>&1 && echo yes || echo no",
+            # pgrep -x matches exact process name only (not cmdline).
+            # The Claude CLI runs as 'node' with 'claude' in args, so -x
+            # alone misses it. Instead we check for the actual running CLI
+            # by looking for the claude binary invocation pattern.
+            #
+            # But we must EXCLUDE:
+            # - chrome-devtools-mcp (launched from ~/.claude/ → has 'claude' in path)
+            # - zai-mcp-server (launched from ~/.claude/)
+            # - stale .claude/ config watchers
+            #
+            # Strategy: check for the claude CLI process specifically.
+            # The CLI binary is 'claude' (symlinked from @anthropic-ai/claude-code).
+            # When running, ps shows it as a node process with 'claude' in the cmdline.
+            # We match the binary path, not just any 'claude' substring.
+            "ps aux | grep '[c]laude' | grep -v chrome-devtools-mcp | grep -v zai-mcp | grep -v '.claude/' | head -1 | grep -q . && echo yes || echo no",
         ], timeout=5)
         if r.returncode != 0:
             return False
