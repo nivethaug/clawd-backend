@@ -6704,12 +6704,14 @@ async def chat_stream_endpoint(
                     """Wait for query to complete in background, then save to DB."""
                     # Wait for the handler's query_complete event
                     query_event = getattr(handler, '_query_complete', None)
+                    _timed_out = False
                     if query_event:
                         try:
-                            await asyncio.wait_for(query_event.wait(), timeout=1200)
+                            await asyncio.wait_for(query_event.wait(), timeout=1800)
                             logger.info(f"[ACP-STREAM] Query completed, saving full response")
                         except asyncio.TimeoutError:
-                            logger.warning(f"[ACP-STREAM] Query completion timed out after 1200s (20 min)")
+                            _timed_out = True
+                            logger.warning(f"[ACP-STREAM] Query completion timed out after 1800s (30 min)")
 
                     # Prefer _last_query_response (full final response from Claude Agent)
                     if hasattr(handler, '_last_query_response') and handler._last_query_response:
@@ -6731,6 +6733,20 @@ async def chat_stream_endpoint(
                                 await save_response_to_db(content)
                                 await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                                 return
+
+                    # If timed out with no response, save a timeout notice so
+                    # the user knows what happened and can retry.
+                    if _timed_out:
+                        timeout_msg = (
+                            "⏱️ **This request took longer than 30 minutes and timed out.**\n\n"
+                            "The AI was working on your request but didn't finish in time. "
+                            "This usually happens with complex tasks or slow API responses.\n\n"
+                            "**Your previous message was received.** Please send a new message "
+                            "to continue — the AI will pick up from where it left off."
+                        )
+                        logger.info("[ACP-STREAM] Saving timeout notice to DB")
+                        await save_response_to_db(timeout_msg)
+                        return
 
                     logger.warning(f"[ACP-STREAM] Background save: no content found to save")
                 
@@ -6772,12 +6788,14 @@ async def chat_stream_endpoint(
                         try:
                             # Wait for the handler's query_complete event (set when Claude finishes)
                             query_event = getattr(handler, '_query_complete', None)
+                            _bg_timed_out = False
                             if query_event:
                                 try:
-                                    await asyncio.wait_for(query_event.wait(), timeout=1200)
+                                    await asyncio.wait_for(query_event.wait(), timeout=1800)
                                     logger.info(f"[ACP-STREAM] Query completed, saving full response")
                                 except asyncio.TimeoutError:
-                                    logger.warning(f"[ACP-STREAM] Query completion timed out after 1200s (20 min)")
+                                    _bg_timed_out = True
+                                    logger.warning(f"[ACP-STREAM] Query completion timed out after 1800s (30 min)")
 
                             # Prefer _last_query_response (full final response from Claude Agent)
                             if hasattr(handler, '_last_query_response') and handler._last_query_response:
@@ -6802,6 +6820,19 @@ async def chat_stream_endpoint(
                                         await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                                         return
 
+                            # If timed out with no response chunks, save a timeout notice
+                            if _bg_timed_out:
+                                timeout_msg = (
+                                    "⏱️ **This request took longer than 30 minutes and timed out.**\n\n"
+                                    "The AI was working on your request but didn't finish in time. "
+                                    "This usually happens with complex tasks or slow API responses.\n\n"
+                                    "**Your previous message was received.** Please send a new message "
+                                    "to continue — the AI will pick up from where it left off."
+                                )
+                                logger.info("[ACP-STREAM] Saving timeout notice to DB (background)")
+                                await save_response_to_db(timeout_msg)
+                                return
+
                             # Fall back to what we collected before disconnect
                             if real_chunks:
                                 content = '\n'.join(real_chunks).strip()
@@ -6809,7 +6840,7 @@ async def chat_stream_endpoint(
                                 await save_response_to_db(content)
                                 await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
                             else:
-                                logger.warning(f"[ACP-STREAM] Background save: no content found after 600s wait")
+                                logger.warning(f"[ACP-STREAM] Background save: no content found after 1800s wait")
                         except Exception as e:
                             logger.error(f"[ACP-STREAM] Background save error: {e}")
                         finally:

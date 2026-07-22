@@ -654,13 +654,13 @@ class ClaudeCodeAgent:
         logger.info("[CLAUDE-AGENT] Cancel called but no running process found")
         return False
 
-    async def query(self, prompt: str, timeout: float = 1200.0) -> Optional[str]:
+    async def query(self, prompt: str, timeout: float = 1800.0) -> Optional[str]:
         """
         Send a query to Claude Code and return the final answer.
 
         Args:
             prompt: The text prompt to send to Claude Code
-            timeout: Maximum time to wait for a response in seconds (default: 20 minutes)
+            timeout: Maximum time to wait for a response in seconds (default: 30 minutes)
 
         Returns:
             The final answer from Claude Code (extracted from response using heuristics), or None if no response
@@ -1174,11 +1174,44 @@ class ClaudeCodeAgent:
             return answer
 
         except asyncio.TimeoutError:
-            # Kill process on timeout
-            logger.error("Query timeout - killing subprocess")
+            # Kill process on timeout — CRITICAL: must fully terminate Claude.
+            # process.kill() sends SIGKILL to the process. But in container mode
+            # the process runs via docker exec, so we also need to kill the
+            # process group (Claude spawns child processes: MCP servers, etc).
+            logger.error(f"[CLAUDE-AGENT] Query timeout after {timeout}s — killing subprocess (PID={process.pid if process else '?'})")
             if process and process.returncode is None:
-                process.kill()
+                pid = process.pid
+                # Try SIGTERM on the process group first (graceful)
+                try:
+                    os.killpg(pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                # Wait briefly for graceful shutdown
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    # SIGKILL the entire process group (Claude + all children)
+                    logger.warning(f"[CLAUDE-AGENT] SIGTERM didn't stop process group {pid}, sending SIGKILL")
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
                 await process.wait()
+
+                # Mark container inactive so reaper can clean up
+                try:
+                    if os.getenv("EXECUTION_MODE", "local").lower() == "container":
+                        user_id = getattr(self, 'user_id', None)
+                        if user_id:
+                            from services.container_manager import ContainerManager
+                            ContainerManager(user_id).mark_claude_inactive()
+                except Exception:
+                    pass
+
             raise
 
         finally:
