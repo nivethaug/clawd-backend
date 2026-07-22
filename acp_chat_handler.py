@@ -3333,8 +3333,36 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 logger.error(f"[ACP-CHAT] Query error: {e}")
                 import traceback
                 logger.error(f"[ACP-CHAT] Traceback: {traceback.format_exc()}")
-                await chunk_queue.put(f"Error: {str(e)}")
-                self._last_query_response = None
+
+                # Determine if this is a recoverable error (Claude crashed/timed out)
+                # or a system error. Show a user-friendly message either way.
+                error_str = str(e).lower()
+                if "137" in error_str or "sigkill" in error_str or "killed" in error_str:
+                    # Claude was killed (OOM, reaper, container stop)
+                    user_msg = (
+                        "⚠️ **The AI encountered an internal error and stopped.**\n\n"
+                        "This can happen when the system is under heavy load or the "
+                        "request was too complex. Your conversation has been saved.\n\n"
+                        "**Please send your message again** — the AI will start fresh "
+                        "and pick up from where we left off."
+                    )
+                elif "timeout" in error_str or "timed out" in error_str:
+                    # Already handled by the timeout path — don't double-report
+                    user_msg = (
+                        "⏱️ **This request took too long and timed out.**\n\n"
+                        "Please send a new message to continue."
+                    )
+                else:
+                    # Generic internal error
+                    user_msg = (
+                        "⚠️ **The AI stopped due to an internal server error.**\n\n"
+                        "Your previous message was received but couldn't be fully "
+                        "processed. **Please send a new message to continue** — "
+                        "the AI will start fresh."
+                    )
+
+                await chunk_queue.put(user_msg)
+                self._last_query_response = user_msg
                 # (Resume-id self-healing block removed — we no longer use --resume
                 # so there is no stored id to clear. Conversation continuity comes
                 # from session_context injected into the prompt.)
