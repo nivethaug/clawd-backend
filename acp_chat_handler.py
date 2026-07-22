@@ -578,7 +578,7 @@ Backend API: `{backend_url}/api/scheduler`
     └── ...
 └── services/
     ├── api_client.py        ← YOU MODIFY THIS (add API helpers)
-    └── web_scraper.py       ← USE for website data (CDP scraper)
+    └── web_scraper.py       ← USE for website data (calls scraping API)
 ```
 
 ---
@@ -622,10 +622,10 @@ Only add a NEW function if you need an API NOT listed above.
 ### Website Data (Scraping)
 
 If the request involves fetching website data:
-1. Use the existing CDP scraper in services/web_scraper.py (do NOT create a new scraping system).
-2. Add a helper wrapper in services/api_client.py that builds a ScrapeConfig and calls scrape_url().
-3. If site-specific steps are required, subclass WebScraper and register it.
-4. Add a utility helper per request (e.g., scrape_site_headlines()).
+1. Use `api_client.fetch_page(url, extract_js)` — fast HTML mode by default (~200ms).
+2. For JS-heavy pages (React/Vue, infinite scroll), use `web_scraper.scrape_url()` with scroll=True.
+3. Do NOT create a new scraping system — the existing web_scraper.py calls the platform scraping API.
+4. Add a wrapper helper in services/api_client.py per request (e.g., scrape_site_headlines()).
 
 ### Step 3: Add task handler to scheduler/executor.py
 
@@ -2022,10 +2022,10 @@ Which option would you like to use for this change?
 ## WEBSITE DATA (SCRAPING) — REQUIRED FLOW
 
 If the user request needs website data:
-1. Use the existing CDP scraper in `services/web_scraper.py` (do NOT build a new scraper).
-2. Add a helper wrapper in `services/api_client.py` that builds `ScrapeConfig` and calls `scrape_url()`.
-3. If site-specific steps are needed, subclass `WebScraper` and register it.
-4. Add a utility helper per request (e.g., `scrape_site_headlines()`).
+1. Use `api_client.fetch_page(url, extract_js)` for fast HTML extraction (~200ms).
+2. For JS-rendered pages, use `web_scraper.scrape_url()` with scroll=True (Chrome CDP, ~2-5s).
+3. Do NOT build a new scraper — the existing web_scraper.py calls the platform scraping API.
+4. Add a helper wrapper in `services/api_client.py` per request (e.g., `scrape_site_headlines()`).
 5. Keep selectors specific and cap pagination.
 
 ---
@@ -2443,7 +2443,7 @@ def process_user_input(text: str) -> str:
 
 - `services/ai_logic.py` - Main AI logic (primary modification target)
 - `services/api_client.py` - API helper functions
-- `services/web_scraper.py` - CDP web scraper (extend existing scraper only)
+- `services/web_scraper.py` - Web scraper via platform API (extend existing scraper only)
 - `commands/start.py` - Welcome message text only
 - `commands/ask.py` - Query routing
 
@@ -2535,10 +2535,10 @@ if text_lower.startswith("!top"):      # WRONG — ! is stripped
 ## WEBSITE DATA (SCRAPING) — REQUIRED FLOW
 
 If the user request requires website data:
-1. Use the existing CDP scraper in `services/web_scraper.py` (do NOT build a new scraper).
-2. Add a helper wrapper in `services/api_client.py` that builds `ScrapeConfig` and calls `scrape_url()`.
-3. If site-specific steps are needed, subclass `WebScraper` and register it.
-4. Add a utility helper per request (e.g., `scrape_site_headlines()`).
+1. Use `api_client.fetch_page(url, extract_js)` for fast HTML extraction (~200ms).
+2. For JS-rendered pages, use `web_scraper.scrape_url()` with scroll=True (Chrome CDP, ~2-5s).
+3. Do NOT build a new scraper — the existing web_scraper.py calls the platform scraping API.
+4. Add a helper wrapper in `services/api_client.py` per request (e.g., `scrape_site_headlines()`).
 5. Keep selectors specific and cap pagination.
 
 ---

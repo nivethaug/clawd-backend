@@ -162,17 +162,18 @@ IMPORTANT: api_client.py already has these functions:
 - get_weather(latitude, longitude)
 - get_news(query, page)
 - fetch_json(url, params) — generic JSON fetcher
+- fetch_page(url, extract_js) — fast web page scraper (~200ms, no Chrome needed)
 Only add to api_client.py if you need an API NOT listed above.
 
 ==================================================
-WEBSITE DATA (MANDATORY)
+WEBSITE DATA (SCRAPING)
 ==================================================
 
 If the user request requires fetching website data (scraping):
-1. USE the existing CDP scraper in services/web_scraper.py (do NOT create a new scraper system).
-2. Add a helper wrapper in services/api_client.py that builds a ScrapeConfig and calls scrape_url().
-3. If site-specific steps are needed, subclass WebScraper in services/web_scraper.py and register it.
-4. Always include the target URL in ScrapeConfig.url and keep selectors specific.
+1. Use `api_client.fetch_page(url, extract_js)` for fast HTML extraction (~200ms).
+2. For JS-rendered pages, use `web_scraper.scrape_url()` with scroll=True (Chrome CDP, ~2-5s).
+3. Do NOT create a new scraper — web_scraper.py calls the platform scraping API internally.
+4. Add a helper wrapper in services/api_client.py per request (e.g., scrape_site_headlines()).
 
 Add a utility helper for each website-based request:
 - Name it for the intent, e.g., scrape_site_headlines(), scrape_product_prices().
