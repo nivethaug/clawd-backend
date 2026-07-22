@@ -113,6 +113,13 @@ if [ ! -f "$RUNNER" ]; then
   exit 6
 fi
 
+# The runner must be readable INSIDE the bwrap sandbox. bwrap only mounts
+# $PROJECT_DIR and $VENV by default, so the runner (which lives in
+# /root/clawd-backend/scripts/) is invisible without an explicit ro-bind.
+# We mount the whole scripts/ dir read-only — it contains only sandbox + runner
+# scripts, no secrets.
+BWRAP_ARGS+=(--ro-bind "$SCRIPT_DIR" "$SCRIPT_DIR")
+
 if [ "$SANDBOX_DEBUG" = "1" ]; then
   echo "--- launching bwrap scheduler_runner.py ---" >> "$DEBUG_LOG" 2>&1
 fi

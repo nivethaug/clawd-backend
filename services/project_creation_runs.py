@@ -395,6 +395,18 @@ def _get_project(project_id: int) -> Optional[Dict[str, Any]]:
 
 
 def _database_url() -> Optional[str]:
+    """DEPRECATED — returns the PLATFORM database URL.
+
+    Previously, every bot's .env got the platform DB credentials (admin user
+    on the dreampilot database). This leaked platform credentials to Claude
+    Code running inside Docker containers, which could read sibling projects'
+    .env files and connect directly to the platform DB.
+
+    Use _provision_project_database() instead, which creates an isolated
+    per-project database + user with no access to the platform DB.
+
+    Kept only as a fallback if provisioning fails (bot runs DB-less).
+    """
     if os.getenv("USE_POSTGRES", "true").lower() != "true":
         return None
     db_host = os.getenv("DB_HOST", "localhost")
@@ -403,6 +415,102 @@ def _database_url() -> Optional[str]:
     db_user = os.getenv("DB_USER", "admin")
     db_password = os.getenv("DB_PASSWORD", "")
     return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+
+def _provision_project_database(project_name: str, project_id: int) -> Optional[str]:
+    """Create an isolated PostgreSQL database + user for a bot project.
+
+    Returns a DATABASE_URL scoped to the new database. The new user has NO
+    access to the platform dreampilot database — only its own {project}_db.
+
+    This replaces _database_url() for bot projects (Telegram, Discord).
+    The platform admin credentials are used ONLY to run CREATE DATABASE /
+    CREATE USER, then discarded. The bot's .env gets the restricted user.
+
+    Mirrors DatabaseProvisioner.create_database_and_user() in
+    infrastructure_manager.py but uses direct psycopg2 (TCP) instead of
+    docker exec, so it works from the worker VPS.
+
+    Returns None if Postgres is not configured or provisioning fails —
+    bots with DATABASE_URL=None still work (their template guards on it).
+    """
+    if os.getenv("USE_POSTGRES", "true").lower() != "true":
+        return None
+
+    import string as _string
+    import random as _random
+
+    db_host = os.getenv("DB_HOST", "localhost")
+    db_port = int(os.getenv("DB_PORT", "5432"))
+    admin_user = os.getenv("DB_USER", "admin")
+    admin_password = os.getenv("DB_PASSWORD", "")
+    admin_db = os.getenv("DB_NAME", "dreampilot")
+
+    # Sanitize: lowercase, hyphens → underscores, strip non-alphanumeric.
+    # Prefix with project_id to guarantee uniqueness across projects with
+    # similar names. Truncate to keep under Postgres's 63-char identifier limit.
+    raw = re.sub(r'[^a-z0-9]', '_', project_name.lower())[:20]
+    db_name = f"proj{project_id}_{raw}_db"[:60]
+    username = f"proj{project_id}_{raw}_u"[:60]
+    password = ''.join(_random.choice(_string.ascii_letters + _string.digits) for _ in range(32))
+
+    try:
+        import psycopg2
+        from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+
+        # Connect as admin to the platform DB to create the new database + user.
+        # autocommit is required — CREATE DATABASE cannot run inside a transaction.
+        admin_conn = psycopg2.connect(
+            host=db_host, port=db_port,
+            dbname=admin_db, user=admin_user, password=admin_password,
+            connect_timeout=10,
+        )
+        admin_conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        admin_cur = admin_conn.cursor()
+
+        # Drop stale database/user if they exist (e.g. project re-created after deletion)
+        try:
+            admin_cur.execute(f'DROP DATABASE IF EXISTS "{db_name}";')
+            admin_cur.execute(f'DROP USER IF EXISTS "{username}";')
+        except Exception:
+            admin_conn.rollback()
+
+        # Create fresh isolated database + user
+        admin_cur.execute(f'CREATE DATABASE "{db_name}";')
+        admin_cur.execute(f'CREATE USER "{username}" WITH PASSWORD \'{password}\';')
+        admin_cur.execute(f'GRANT ALL PRIVILEGES ON DATABASE "{db_name}" TO "{username}";')
+        admin_cur.close()
+        admin_conn.close()
+
+        # Connect to the NEW database to grant schema permissions (PG 15+ requires this)
+        proj_conn = psycopg2.connect(
+            host=db_host, port=db_port,
+            dbname=db_name, user=admin_user, password=admin_password,
+            connect_timeout=10,
+        )
+        proj_conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        proj_cur = proj_conn.cursor()
+        proj_cur.execute(f'GRANT ALL ON SCHEMA public TO "{username}";')
+        proj_cur.execute(
+            f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{username}";'
+        )
+        proj_cur.close()
+        proj_conn.close()
+
+        database_url = f"postgresql://{username}:{password}@{db_host}:{db_port}/{db_name}"
+        logger.info(
+            "[PROJECT-RUN] provisioned isolated DB '%s' + user '%s' for project %s",
+            db_name, username, project_id,
+        )
+        return database_url
+
+    except Exception as e:
+        logger.error(
+            "[PROJECT-RUN] failed to provision per-project DB for project %s: %s. "
+            "Bot will run DB-less (template degrades gracefully).",
+            project_id, e,
+        )
+        return None
 
 
 def _run_logged_subprocess(
@@ -840,6 +948,7 @@ def _run_bot_or_scheduler_pipeline(
         from services.telegram.worker import run_telegram_bot_pipeline
 
         append_chunk(run_id, "log", "Starting Telegram bot creation pipeline")
+        db_url = _provision_project_database(name, project_id)
         return run_telegram_bot_pipeline(
             project_id=project_id,
             project_name=name,
@@ -848,7 +957,7 @@ def _run_bot_or_scheduler_pipeline(
             project_path=project_path,
             domain=domain,
             port=8000 + (project_id % 1000),
-            database_url=_database_url(),
+            database_url=db_url,
             initial_environment_variables=initial_env_vars,
         )
 
@@ -856,6 +965,7 @@ def _run_bot_or_scheduler_pipeline(
         from services.discord.worker import run_discord_bot_pipeline
 
         append_chunk(run_id, "log", "Starting Discord bot creation pipeline")
+        db_url = _provision_project_database(name, project_id)
         return run_discord_bot_pipeline(
             project_id=project_id,
             project_name=name,
@@ -864,7 +974,7 @@ def _run_bot_or_scheduler_pipeline(
             project_path=project_path,
             domain=domain,
             port=8000 + (project_id % 1000),
-            database_url=_database_url(),
+            database_url=db_url,
             initial_environment_variables=initial_env_vars,
         )
 
