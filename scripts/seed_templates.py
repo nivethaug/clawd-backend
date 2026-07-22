@@ -309,9 +309,58 @@ TEMPLATES: List[Dict[str, Any]] = [
         "description": "Create a non-profit website that inspires action through immersive storytelling. Full-screen hero with video background showing impact, animated statistics counters that count up on scroll, programs section with image cards that expand on hover revealing stories, donation form with progress bar that fills with warm gradient, volunteer signup with map of active locations, and a stories carousel with emotional photography. Warm, hopeful palette with earth greens and sky blues.",
         "featured": False,
     },
-    # ── Telegram, Discord, Scheduler templates — add tomorrow ──
-    # The script will skip these types if they're not in the list.
-    # To add them, append entries with type_id 2 (Telegram), 3 (Discord), 5 (Scheduler).
+    # ── Telegram Bot Templates ──
+    {
+        "name": "AI Assistant Bot",
+        "type_id": 2,
+        "category": "Telegram Bot",
+        "description": "Build an intelligent Telegram AI assistant bot. Features: /start with rich welcome message and inline keyboard menu, /ask command that forwards user questions to an AI model and streams responses back with typing indicators, /weather command with location-based forecasts, /translate command supporting 20+ languages, conversation memory per user, rate limiting, and admin commands for broadcasting. Clean inline keyboard navigation, emoji-enhanced responses, and error handling that never shows raw errors to users.",
+        "featured": True,
+    },
+    {
+        "name": "Community Manager Bot",
+        "type_id": 2,
+        "category": "Telegram Bot",
+        "description": "Create a Telegram community management bot for Discord-style group moderation. Features: /rules command with group guidelines, /warn and /kick admin commands with reason tracking, welcome message for new members with captcha verification, anti-spam detection with configurable thresholds, profanity filter, user reputation system with /rep leaderboard, scheduled announcements, and a web dashboard link for admins. Professional inline keyboards and group-friendly formatting.",
+        "featured": False,
+    },
+    {
+        "name": "E-Commerce Store Bot",
+        "type_id": 2,
+        "category": "Telegram Bot",
+        "description": "Build a Telegram shopping bot with full product catalog browsing. Features: /shop command showing categories as inline keyboards, product cards with images/prices/descriptions, add-to-cart with quantity selectors, /cart command with checkout flow, order tracking with status updates, /deals command showing daily promotions, customer support ticket system, and payment integration via Telegram Payments API. Product images displayed as media groups, clean price formatting.",
+        "featured": False,
+    },
+    # ── Discord Bot Templates ──
+    {
+        "name": "Moderation Discord Bot",
+        "type_id": 3,
+        "category": "Discord Bot",
+        "description": "Build a Discord moderation bot with comprehensive server management. Features: /ban, /kick, /mute slash commands with reason logging, auto-mod with configurable filters for spam/links/mentions, warning system with progressive punishment (warn → mute → kick → ban), logging channel for all mod actions, /userinfo showing member history and warnings, role management with reaction roles, and a configurable welcome message with auto-role assignment. Clean embeds with color-coded severity.",
+        "featured": True,
+    },
+    {
+        "name": "Music Discord Bot",
+        "type_id": 3,
+        "category": "Discord Bot",
+        "description": "Create a Discord music bot with high-quality audio playback. Features: /play with YouTube/Spotify search, queue management with /skip, /queue, /shuffle commands, volume control and audio filters (bass boost, nightcore), playlist support with /playlist save/load, now-playing embed with progress bar and thumbnail, DJ-only mode with role permissions, and auto-disconnect when idle. Rich embeds with album art and timestamps.",
+        "featured": False,
+    },
+    # ── Scheduler Templates ──
+    {
+        "name": "Price Alert Scheduler",
+        "type_id": 5,
+        "category": "Scheduler",
+        "description": "Create a scheduled price alert system for crypto and metals. Features: BTC/ETH/silver/gold price tracking via public APIs, configurable alert thresholds (above X, below Y, percent change), delivery to email + Telegram + Discord, price change summary with sparkline data, multiple alert profiles, and scheduling options (every 5min, hourly, daily summary). Clean formatted messages with price, change percentage, and trend indicators.",
+        "featured": True,
+    },
+    {
+        "name": "Daily Digest Scheduler",
+        "type_id": 5,
+        "category": "Scheduler",
+        "description": "Build a daily digest scheduler that compiles and delivers a personalized briefing. Features: weather forecast for user's location, top news headlines from configurable categories (tech, finance, sports), crypto portfolio summary with top holdings, upcoming calendar events, motivational quote of the day, and a weekly summary every Monday. Delivered via email with clean HTML formatting or Telegram message. Configurable delivery time and content sections.",
+        "featured": False,
+    },
 ]
 
 # ──────────────────────────────────────────────────────────────────────
@@ -329,6 +378,12 @@ GALLERY: List[Dict[str, Any]] = [
     {"name": "Crypto Dashboard", "type_id": 1, "description": "Create a real-time crypto tracking dashboard that feels like a trading terminal. Live price tickers with flash-on-update animation, portfolio allocation as interactive pie chart, recent transactions table with gas tracker, price alert setup with notification preferences, and candlestick charts with drawing tools. Dark theme with green/red indicators, monospace numbers, and data density inspired by TradingView."},
     {"name": "Agency Website", "type_id": 1, "description": "Build a creative agency website that showcases bold imagination. Portfolio grid with case study cards that expand on hover revealing project metrics, services section with icon animations and capability descriptions, team bios with personality-reveal hover states, client logos in an elegant infinite scroll, and a contact form with project type selector and budget range slider. Bold, modern design with smooth scroll animations."},
     {"name": "Real Estate Listings", "type_id": 1, "description": "Create a real estate site that makes property browsing feel aspirational. Search filters with map integration showing property pins, property cards with hero image carousels and key specs, detail page with full-gallery lightbox and mortgage calculator, agent contact form with availability matching, and saved favorites with comparison view. Clean, aspirational design with large imagery and premium typography."},
+    # ── Bot + Scheduler gallery entries ──
+    {"name": "Telegram Tip Bot", "type_id": 2, "description": "Build a Telegram tip bot for community microtransactions. Features: /tip @user command with amount, /balance to check wallet, /withdraw to external address, leaderboard of top tippers, daily bonus claim, transaction history with receipt embeds, and admin dashboard for treasury management. Clean inline keyboards, QR code generation for deposits, and formatted balance cards."},
+    {"name": "Discord Giveaway Bot", "type_id": 3, "description": "Create a Discord giveaway bot that makes contests exciting. Features: /giveaway create with prize/duration/winner-count, animated giveaway embed with countdown timer and participant counter, /raffle command for instant draws, winner DM notification with prize claim button, giveaway history and statistics, and role-restricted entries. Rich embeds with celebration reactions and confetti."},
+    {"name": "Weather Alert Scheduler", "type_id": 5, "description": "Build a scheduled weather alert system with severe weather notifications. Features: hourly forecast delivery to email/Telegram, severe weather alerts (storm, heat, frost) with immediate push, 7-day forecast summary every morning, air quality index tracking, UV index warnings, and configurable location preferences per user. Clean weather cards with icons and temperature trends."},
+    {"name": "RSS Monitor Scheduler", "type_id": 5, "description": "Create an RSS feed monitor scheduler that delivers curated content. Features: subscribe to multiple RSS feeds, keyword filtering to include/exclude topics, digest delivery every N hours via email, duplicate detection across feeds, AI-generated summary of each article, trending topics tracker, and per-feed enable/disable. Clean formatted digest with article title, source, AI summary, and link."},
+    {"name": "Server Health Monitor", "type_id": 5, "description": "Build a scheduled server health monitoring system. Features: ping/Uptime checks for configured URLs every 5 minutes, CPU/RAM/disk usage alerts when thresholds exceeded, SSL certificate expiry warnings, response time tracking with trends, downtime incident logging, and status report delivery via Telegram/email. Clean status dashboard data with uptime percentages and response time charts."},
 ]
 
 
@@ -506,15 +561,19 @@ def wait_for_completion(project_id: int) -> str:
     return "timeout"
 
 
-def mark_as_template(project_id: int, title: str, category: str, featured: bool) -> bool:
-    """Mark a completed project as a template."""
+def mark_as_template(project_id: int, title: str, description: str, category: str, featured: bool) -> bool:
+    """Mark a completed project as a template.
+
+    Passes the FULL description (not a generic 'Template: {title}' placeholder)
+    so template cards in the /templates browser show the premium prompt text.
+    """
     resp = _request(
         "POST",
         f"{API_URL}/projects/{project_id}/mark-as-template",
         headers=_headers(),
         json_body={
             "title": title,
-            "description": f"Template: {title}",
+            "description": description,
             "category": category,
             "is_featured": featured,
         },
@@ -641,7 +700,7 @@ def run_templates(
 
         status = wait_for_completion(pid)
         if status == "completed":
-            ok = mark_as_template(pid, name, tmpl["category"], tmpl.get("featured", False))
+            ok = mark_as_template(pid, name, tmpl["description"], tmpl["category"], tmpl.get("featured", False))
             if ok:
                 log.info(f"  📋 Marked as template")
                 _mark_completed(progress, "templates", name, pid, "template published")
@@ -884,7 +943,7 @@ if __name__ == "__main__":
 
                 if status == "completed":
                     if kind == "template":
-                        ok = mark_as_template(pid, name, item.get("category", "Website"), item.get("featured", False))
+                        ok = mark_as_template(pid, name, item["description"], item.get("category", "Website"), item.get("featured", False))
                     else:
                         ok = publish_to_gallery(pid, name, item["description"], False)
                     if ok:
