@@ -7,6 +7,7 @@ Uses Claude Code Agent to modify executor.py + api_client.py.
 Adds task handlers, API helpers, and FETCH_DATA_REGISTRY entries.
 """
 
+import os
 import shutil
 from pathlib import Path
 from typing import Tuple
@@ -31,7 +32,13 @@ class SchedulerEditor:
     def __init__(self, project_path: str, project_id: int = None, backend_url: str = None):
         self.project_path = Path(project_path)
         self.project_id = project_id
-        self.backend_url = backend_url or "http://localhost:8002"
+        # Default to public API, not localhost. env_injector.py writes the
+        # correct BACKEND_URL into each project's .env from SCHEDULER_BACKEND_URL.
+        # The _build_prompt method reads it from .env at prompt-build time so
+        # the curl commands Claude generates point at a reachable host.
+        self.backend_url = backend_url or os.getenv(
+            "SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud"
+        )
         self.executor_path = self.project_path / "scheduler" / "executor.py"
         self.api_client_path = self.project_path / "services" / "api_client.py"
         self.backup_executor = self.project_path / "scheduler" / "executor.py.backup"
@@ -39,6 +46,24 @@ class SchedulerEditor:
 
         # Token usage from last query
         self._last_token_usage = None
+
+    def _read_project_env_value(self, key: str):
+        """Read a single key from the project's .env file.
+
+        Used so the prompt embeds the correct BACKEND_URL (public API, not
+        localhost) — the same value Claude will see when job_manager.py runs.
+        """
+        try:
+            env_file = self.project_path / ".env"
+            if not env_file.exists():
+                return None
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if line.startswith(f"{key}="):
+                    return line.split("=", 1)[1].strip()
+        except Exception:
+            pass
+        return None
 
     def enhance_executor(self, description: str, project_name: str) -> Tuple[bool, str]:
         """
@@ -101,8 +126,13 @@ class SchedulerEditor:
 
     def _build_prompt(self, description: str, project_name: str) -> str:
         """Build AI prompt for executor enhancement."""
-        # Build the job creation API instruction
-        jobs_api_url = f"{self.backend_url}/api/scheduler/projects/{self.project_id}/jobs"
+        # Resolve the real BACKEND_URL from the project's .env — NOT from the
+        # backend's own env. The backend runs on the main VPS, but this prompt
+        # is consumed by Claude inside a Docker container on the worker VPS
+        # where localhost:8002 is empty. env_injector.py writes BACKEND_URL into
+        # the project .env from SCHEDULER_BACKEND_URL (the public API URL).
+        backend_url = self._read_project_env_value("BACKEND_URL") or self.backend_url
+        jobs_api_url = f"{backend_url}/api/scheduler/projects/{self.project_id}/jobs"
         meta_block = build_workflow_meta_block(
             project_type_id=5,
             project_type="scheduler",
@@ -252,6 +282,12 @@ When sending messages via Telegram or Discord:
 ==================================================
 JOB CREATION - REQUIRED FINAL STEP
 ==================================================
+
+⚠️ CRITICAL — DO NOT PROBE PORTS. DO NOT try localhost, 127.0.0.1, or
+host.docker.internal. The backend API is at {backend_url} — this is the
+ONLY reachable URL. It is on the main VPS behind nginx and is ALREADY
+running. The worker VPS IP is allowlisted so requests from here bypass
+JWT auth — no Authorization header needed.
 
 After modifying files, you MUST create the job by EXECUTING this curl command.
 Do NOT just print it — actually RUN it using Bash:

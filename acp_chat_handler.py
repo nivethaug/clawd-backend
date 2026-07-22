@@ -248,6 +248,26 @@ class ACPChatHandler:
             prompt_kind=prompt_kind,
         )
 
+    def _read_project_env_value(self, key: str):
+        """Read a single key from the project's .env file.
+
+        Used so prompts embed the correct BACKEND_URL (the public API, not
+        localhost) without depending on the backend's own os.environ — which
+        is unreachable from inside the Docker container Claude runs in.
+        Returns None if .env is missing or key absent.
+        """
+        try:
+            env_file = Path(self.project_path) / ".env"
+            if not env_file.exists():
+                return None
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if line.startswith(f"{key}="):
+                    return line.split("=", 1)[1].strip()
+        except Exception:
+            pass
+        return None
+
     def _load_project_metadata(self):
         """Load project domain from database to populate prompt placeholders."""
         # Set defaults first (will be overwritten if DB lookup succeeds)
@@ -499,7 +519,15 @@ class ACPChatHandler:
         Covers: executor.py enhancement, REST API job management, api_client helpers.
         """
         import os
-        backend_url = f"http://localhost:{os.getenv('PORT', '8002')}"
+        # Read BACKEND_URL from the project's .env — NOT from the backend's own env.
+        # The backend runs on the main VPS, but this prompt is consumed by Claude
+        # inside a Docker container on the worker VPS where localhost:8002 is empty.
+        # The project .env is injected by env_injector.py with SCHEDULER_BACKEND_URL
+        # (defaults to the public API URL). Reading it here ensures the curl commands
+        # Claude generates point at the reachable host.
+        backend_url = self._read_project_env_value("BACKEND_URL") or os.getenv(
+            "SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud"
+        )
         jobs_base = f"{backend_url}/api/scheduler/projects/{self.project_id}/jobs"
 
         context_section = ""
@@ -675,7 +703,14 @@ immediately (Step "Run a job immediately") to verify the new code is live.
 
 ## JOB MANAGEMENT REST API
 
-The backend is running and ready. Use curl to manage jobs.
+⚠️ **CRITICAL — DO NOT PROBE PORTS. DO NOT try localhost, 127.0.0.1, or host.docker.internal.**
+
+The backend API is at `{backend_url}` — this is the ONLY reachable URL.
+It is on a different server (the main VPS), behind nginx. It is ALREADY
+running and ready. You do NOT need to start it, check ports, or scan.
+The worker VPS IP is allowlisted so requests from here bypass JWT auth.
+
+Use curl directly against `{backend_url}/api/scheduler/...` — no auth header needed.
 
 ### List all jobs
 
