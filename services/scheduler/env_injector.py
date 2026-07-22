@@ -67,17 +67,16 @@ def inject_scheduler_env(
     # Default backend URL — where job_manager.py sends /api/scheduler/* calls.
     # Resolution order:
     #   1. Explicit backend_url arg (caller knows best)
-    #   2. SCHEDULER_BACKEND_URL env (operator config — set on main VPS to the
-    #      public API URL the worker VPS executors should call, e.g.
-    #      "https://api.dreamagent.cloud". Must be paired with the matching
-    #      SCHEDULER_INTERNAL_ALLOWLIST on the backend so the worker's IP
-    #      bypasses JWT — see api/scheduler_router.py.)
-    #   3. PORT env fallback (local dev — "http://localhost:{port}")
+    #   2. SCHEDULER_BACKEND_URL env (operator config)
+    #   3. Hardcoded public API URL (safe default — works from Docker/bwrap)
+    #
+    # We NEVER default to localhost:8002. The executor runs inside a Docker
+    # container or bwrap sandbox on the worker VPS where localhost is empty.
+    # The only always-reachable URL is the public API. localhost only works
+    # in local dev (EXECUTION_MODE != container), which is handled by the
+    # SCHEDULER_BACKEND_URL env override.
     if not backend_url:
-        backend_url = os.getenv("SCHEDULER_BACKEND_URL")
-        if not backend_url:
-            backend_port = os.getenv("PORT", "8002")
-            backend_url = f"http://localhost:{backend_port}"
+        backend_url = os.getenv("SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud")
 
     # SMTP from backend .env (shared - Hostinger)
     smtp_host = os.getenv("SMTP_HOST", "smtp.hostinger.com")
