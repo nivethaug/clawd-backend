@@ -1,73 +1,86 @@
 """
-CDP Web Scraper Template for Bots
+Web Scraper — calls the server-side Chrome DevTools scraping API.
 
-A Chrome DevTools Protocol (CDP) scraping template designed for LLMs to extend
-for any website. Built on the MCPClient pattern.
+This module provides the SAME interface as the old CDP-based web_scraper
+(ScrapeConfig, ScrapeResult, scrape_url, WebScraper) but delegates the
+actual Chrome rendering to the platform's /internal/scrape endpoint.
 
-SANDBOX NOTE: This module requires Chrome/Chromium with remote debugging.
-Scheduled jobs run inside a bwrap sandbox (scheduler-sandbox.sh) which does
-NOT mount Chrome or npm. The web_scraper will fail with a launch error inside
-the sandbox. Use the HTTP-based fetchers in services/api_client.py instead
-(get_crypto_price, get_weather, get_news, fetch_json) for scheduled jobs —
-those only need network access, which the sandbox provides.
+HOW IT WORKS:
+    Your code (bwrap sandbox / Docker container)
+      → HTTP POST to BACKEND_URL/internal/scrape
+        → Server-side Chrome renders the page
+        → Your extraction JS runs in Chrome
+        ← JSON data returned
+
+The executor's sandbox does NOT have Chrome installed. Chrome runs once on
+the main VPS as a systemd service. This module is a thin HTTP client that
+calls the scraping API — no local browser needed.
 
 USAGE:
-    # Standalone usage
     from services.web_scraper import scrape_url, ScrapeConfig
-    config = ScrapeConfig(url="https://example.com", items_selector=".item", fields={"title": ".title"})
+
+    # Simple extraction
+    config = ScrapeConfig(
+        url="https://example.com",
+        fields={"title": "h1", "price": ".price"}
+    )
     result = scrape_url(config)
     print(result.data)
 
-    # Custom scraper
-    from services.web_scraper import WebScraper, ScrapeConfig
-    class MyScraper(WebScraper):
-        def scrape(self):
-            self.navigate(self.config.url)
-            self.wait_for_text("loaded")
-            return self.extract_by_config(self.config)
+    # Custom JS extraction (full power — any JS that returns a value)
+    config = ScrapeConfig(
+        url="https://example.com",
+        js_extract="return Array.from(document.querySelectorAll('.item')).map(e => e.textContent.trim())"
+    )
+    result = scrape_url(config)
+    print(result.data)
 
-EXAMPLES:
-    See NewsScraperExample and EcommerceScraperExample at bottom of file.
+    # With pagination + wait
+    config = ScrapeConfig(
+        url="https://example.com/products",
+        items_selector=".product",
+        fields={"name": ".name", "price": ".price"},
+        wait_for=["Loading complete"],
+        max_pages=3,
+        scroll=True
+    )
+    result = scrape_url(config)
 """
 
-import subprocess
+import os
 import json
 import time
-import re
-import os
-import shutil
-import urllib.request
-from urllib.error import URLError
-from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime
+from typing import Optional, Dict, Any, List
+
+import requests
 
 
-# -----------------------------------------------------------------------------
-#  Configuration Data Classes
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Configuration data classes (unchanged interface for backward compat)
+# ---------------------------------------------------------------------------
 
 @dataclass
 class ScrapeConfig:
     """Per-site selector configuration for scraping."""
     url: str
-    items_selector: str  # CSS selector for list of items
-    fields: Dict[str, str]  # field_name → CSS selector (relative to item)
+    items_selector: str = ""  # CSS selector for list of items
+    fields: Dict[str, str] = field(default_factory=dict)  # field_name → CSS selector
     wait_for: Optional[List[str]] = None  # text/selector to wait for before extracting
-    pagination: Optional[str] = None  # next-page button selector
+    pagination: Optional[str] = None  # next-page button selector (not supported via API yet)
     max_pages: int = 1  # maximum pages to scrape
     scroll: bool = False  # scroll to bottom for lazy-loaded content
-    auth: Optional[Dict[str, str]] = None  # login config (url, user_selector, pass_selector, submit_selector, username, password)
+    auth: Optional[Dict[str, str]] = None  # login config (not supported via API yet)
     js_extract: Optional[str] = None  # raw JS string for complex extraction
-    timeout: int = 10000  # default timeout in ms
+    timeout: int = 15  # scrape timeout in seconds
 
 
 @dataclass
 class ScrapeResult:
     """Structured output from scraping operation."""
     url: str
-    data: List[Dict[str, Any]] = field(default_factory=list)
+    data: Any = None  # extracted data (list of dicts, or raw value)
     metadata: Dict[str, Any] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
     duration_ms: float = 0.0
@@ -77,333 +90,169 @@ class ScrapeResult:
         return asdict(self)
 
 
-# -----------------------------------------------------------------------------
-#  MCP Client (from reference implementation)
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# API client
+# ---------------------------------------------------------------------------
 
-class MCPClient:
-    """Direct MCP server communication from Python for Chrome DevTools Protocol."""
+# Resolve the scraping API URL. Uses BACKEND_URL (same as job_manager.py).
+# During chat/creation: BACKEND_URL is set by env_injector to the public API.
+# During sandbox execution: loaded from project .env via config.py.
+SCRAPER_API_URL = os.getenv("BACKEND_URL", "https://api.dreamagent.cloud")
+SCRAPER_TIMEOUT = 30  # HTTP request timeout (Chrome render can take time)
 
-    def __init__(self):
-        self.process = None
-        self.chrome_process = None
-        self.started_chrome = False
-        self.request_id = 0
-        self.tools: List[Dict] = []
 
-    def _is_debug_port_ready(self) -> bool:
-        """Check if Chrome debugging port is ready."""
-        try:
-            with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2):
-                return True
-        except (URLError, TimeoutError, OSError):
-            return False
+def _build_extract_js(config: ScrapeConfig) -> str:
+    """Build the JavaScript extraction function from ScrapeConfig.
 
-    def _find_chrome_executable(self) -> Optional[str]:
-        """Find Chrome or Edge executable."""
-        env_path = os.getenv("CHROME_PATH")
-        if env_path and Path(env_path).exists():
-            return env_path
+    If js_extract is provided, use it directly (full custom power).
+    Otherwise, build from items_selector + fields.
+    """
+    if config.js_extract:
+        return config.js_extract
 
-        candidates = [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        ]
+    if not config.items_selector:
+        # Simple page extraction — return page title + text
+        return "return { title: document.title, text: document.body.innerText.substring(0, 5000) }"
 
-        for exe in candidates:
-            if Path(exe).exists():
-                return exe
+    # Build item extraction JS from selector + fields
+    fields_json = json.dumps(config.fields)
+    return f"""
+        const items = document.querySelectorAll('{config.items_selector}');
+        const fieldMap = {fields_json};
+        return Array.from(items).map(item => {{
+            const obj = {{}};
+            for (const [field, selector] of Object.entries(fieldMap)) {{
+                const el = item.querySelector(selector);
+                if (el) {{
+                    if (el.tagName === 'A') {{
+                        obj[field] = {{ text: el.textContent.trim(), href: el.href }};
+                    }} else if (el.tagName === 'IMG') {{
+                        obj[field] = {{ src: el.src, alt: el.alt || '' }};
+                    }} else {{
+                        obj[field] = el.textContent.trim();
+                    }}
+                }} else {{
+                    obj[field] = null;
+                }}
+            }}
+            return obj;
+        }});
+    """
 
-        return shutil.which("chrome") or shutil.which("msedge")
 
-    def _ensure_chrome_debugging(self):
-        """Ensure Chrome is running with debugging port 9222."""
-        if self._is_debug_port_ready():
-            print("[OK] Chrome debugging endpoint ready on :9222")
-            return
+def _build_wait_selector(config: ScrapeConfig) -> Optional[str]:
+    """Extract a CSS selector to wait for from config.wait_for."""
+    if not config.wait_for:
+        return None
+    # wait_for is a list of texts/selectors — use the first one that looks like a CSS selector
+    for wf in config.wait_for:
+        if any(c in wf for c in ".#["):
+            return wf
+    return None
 
-        chrome_exe = self._find_chrome_executable()
-        if not chrome_exe:
-            raise RuntimeError(
-                "Chrome/Edge not found. Install browser or set CHROME_PATH, then run with "
-                "--remote-debugging-port=9222."
-            )
 
-        profile_dir = Path(r"C:\Temp\chrome-mcp-debug-profile")
-        profile_dir.mkdir(parents=True, exist_ok=True)
+def scrape_url(config: "ScrapeConfig") -> "ScrapeResult":
+    """Scrape a URL using the server-side Chrome scraping API.
 
-        cmd = [
-            chrome_exe,
-            "--remote-debugging-port=9222",
-            f"--user-data-dir={str(profile_dir)}",
-            "--no-first-run",
-        ]
+    Args:
+        config: ScrapeConfig with url, selectors, and options
 
-        print(f"[NET] Launching browser for DevTools: {chrome_exe}")
-        self.chrome_process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        self.started_chrome = True
+    Returns:
+        ScrapeResult with extracted data
+    """
+    start_time = time.time()
+    result = ScrapeResult(url=config.url)
 
-        for _ in range(20):
-            if self._is_debug_port_ready():
-                print("[OK] Chrome DevTools endpoint is live")
-                return
-            time.sleep(0.5)
+    try:
+        extract_js = _build_extract_js(config)
+        wait_selector = _build_wait_selector(config)
+        wait_ms = 3000 if config.scroll else 2000
 
-        raise RuntimeError("Chrome launched but DevTools endpoint :9222 is not reachable")
+        # If scroll is requested, add scroll JS before extraction
+        if config.scroll:
+            extract_js = f"window.scrollTo(0, document.body.scrollHeight); " + extract_js
 
-    def _tool_text(self, result: Dict[str, Any]) -> str:
-        """Extract text from tool result."""
-        if isinstance(result, dict):
-            return str(result.get("text", ""))
-        return str(result)
-
-    def _ensure_mcp_browser_connection(self):
-        """Ensure MCP server is connected to browser."""
-        for attempt in range(1, 6):
-            probe = self.call_tool("list_pages", {})
-            text = self._tool_text(probe)
-            if "Could not connect to Chrome" not in text:
-                print("[OK] MCP connected to browser target")
-                return
-
-            print(f"[WARN] MCP browser connection retry {attempt}/5")
-            if attempt == 1:
-                self._ensure_chrome_debugging()
-            time.sleep(1)
-
-        raise RuntimeError(
-            "MCP could not connect to Chrome after retries. Ensure browser is running with "
-            "--remote-debugging-port=9222."
-        )
-
-    def start_server(self):
-        """Start MCP server and connect to Chrome."""
-        self._ensure_chrome_debugging()
-        print("[STARTING] MCP server...")
-        cmd = (
-            "npx --registry https://registry.npmjs.org "
-            "chrome-devtools-mcp@0.20.2 --browserUrl=http://127.0.0.1:9222"
-        )
-        self.process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-            shell=True,
-        )
-        time.sleep(2)
-        print("[OK] MCP server started")
-        self._initialize()
-        self._load_tools()
-        self._ensure_mcp_browser_connection()
-
-    def _send_request(self, method: str, params: Optional[Dict] = None) -> Dict:
-        """Send JSON-RPC request to MCP server."""
-        self.request_id += 1
-        request = {
-            "jsonrpc": "2.0",
-            "id": self.request_id,
-            "method": method,
-            "params": params or {},
+        endpoint = f"{SCRAPER_API_URL}/internal/scrape"
+        payload = {
+            "url": config.url,
+            "extract_js": extract_js,
+            "wait_for_selector": wait_selector,
+            "wait_ms": wait_ms,
+            "timeout": config.timeout,
         }
-        self.process.stdin.write(json.dumps(request) + "\n")
-        self.process.stdin.flush()
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError("No response from MCP server")
-        response = json.loads(line)
-        if "error" in response:
-            raise RuntimeError(f"MCP error: {response['error']}")
-        return response.get("result", {})
 
-    def _initialize(self):
-        """Initialize MCP connection."""
-        print("[INIT] Initializing MCP connection...")
-        result = self._send_request(
-            "initialize",
-            {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "web-scraper", "version": "1.0.0"},
-            },
-        )
-        print(f"[OK] Connected to: {result.get('serverInfo', {}).get('name', 'Unknown')}")
-        self.process.stdin.write(
-            json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"
-        )
-        self.process.stdin.flush()
+        resp = requests.post(endpoint, json=payload, timeout=SCRAPER_TIMEOUT)
 
-    def _load_tools(self):
-        """Load available MCP tools."""
-        print("[LOAD] Loading available tools...")
-        result = self._send_request("tools/list")
-        self.tools = result.get("tools", [])
-        print(f"[OK] Found {len(self.tools)} tools")
+        if resp.status_code != 200:
+            result.errors.append(f"API returned HTTP {resp.status_code}: {resp.text[:200]}")
+            return result
 
-    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict:
-        """Call an MCP tool with arguments."""
-        result = self._send_request("tools/call", {"name": tool_name, "arguments": arguments})
-        content = result.get("content", [])
-        return content[0] if content else result
+        data = resp.json()
+        if data.get("success"):
+            result.data = data.get("data")
+            result.metadata["pages_scraped"] = 1
+            result.metadata["total_items"] = len(result.data) if isinstance(result.data, list) else 1
+        else:
+            result.errors.append(data.get("error", "Unknown scrape error"))
 
-    def close(self):
-        """Close MCP server and browser."""
-        if self.process:
-            self.process.terminate()
-            self.process.wait()
-            print("[OK] MCP server stopped")
-        if self.started_chrome and self.chrome_process and self.chrome_process.poll() is None:
-            self.chrome_process.terminate()
-            print("[OK] Browser debug session stopped")
+    except requests.exceptions.Timeout:
+        result.errors.append("Scrape API request timed out")
+    except requests.exceptions.ConnectionError as e:
+        result.errors.append(f"Cannot reach scrape API at {SCRAPER_API_URL}: {e}")
+    except Exception as e:
+        result.errors.append(str(e))
+
+    result.duration_ms = (time.time() - start_time) * 1000
+    return result
 
 
-# -----------------------------------------------------------------------------
-#  Web Scraper Base Class
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Compatibility shims — keep old class-based interface working
+# ---------------------------------------------------------------------------
 
 class WebScraper:
-    """Base class for web scrapers using Chrome DevTools Protocol."""
-
-    MAX_RETRIES = 5
-    BASE_DELAY = 0.2  # Base delay for exponential backoff in seconds
+    """Backward-compat wrapper. Delegates to scrape_url via the API."""
 
     def __init__(self, config: ScrapeConfig):
         self.config = config
-        self.mcp = MCPClient()
-        self.page_id = None
+
+    def scrape(self) -> ScrapeResult:
+        """Run the scrape."""
+        return scrape_url(self.config)
 
     def connect(self):
-        """Connect to MCP server and browser."""
-        self.mcp.start_server()
-        # Open new page and get page ID
-        result = self.mcp.call_tool("new_page", {"url": "about:blank"})
-        self.page_id = result.get("pageId")
+        """No-op — no local Chrome connection needed."""
+        pass
+
+    def close(self):
+        """No-op."""
+        pass
+
+    # The following methods are kept for code that subclasses WebScraper.
+    # They build a ScrapeConfig and call scrape_url under the hood.
 
     def navigate(self, url: str) -> bool:
-        """Navigate to URL with retry logic."""
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                self.mcp.call_tool("navigate_page", {"type": "url", "url": url})
-                time.sleep(1)  # Wait for initial load
-                return True
-            except Exception as e:
-                if attempt == self.MAX_RETRIES - 1:
-                    raise
-                delay = self.BASE_DELAY * (2 ** attempt)
-                time.sleep(delay)
-        return False
-
-    def take_snapshot(self) -> str:
-        """Take an accessibility-tree snapshot (token-efficient)."""
-        result = self.mcp.call_tool("take_snapshot", {})
-        return result.get("text", "")
-
-    def evaluate_script(self, fn_body: str) -> Any:
-        """Evaluate JavaScript with auto try/catch."""
-        safe = f"""() => {{
-            try {{
-                {fn_body}
-            }} catch(e) {{
-                return {{ error: e.message }};
-            }}
-        }}"""
-        result = self.mcp.call_tool("evaluate_script", {"function": safe})
-        raw = result.get("text", "{}")
-
-        try:
-            if "```json" in raw:
-                match = re.search(r'```json\s*(.*?)\s*```', raw, re.DOTALL)
-                if match:
-                    raw = match.group(1)
-            elif "```" in raw:
-                match = re.search(r'```\s*(.*?)\s*```', raw, re.DOTALL)
-                if match:
-                    raw = match.group(1)
-
-            raw = raw.strip()
-            if raw.startswith("{"):
-                return json.loads(raw)
-            return {"raw": raw}
-        except Exception:
-            return {"raw": raw}
-
-    def find_uid(self, snapshot: str, pattern: str) -> Optional[str]:
-        """Find element UID in snapshot using regex pattern."""
-        m = re.search(pattern, snapshot, re.IGNORECASE)
-        return m.group(1) if m else None
-
-    def click_uid(self, uid: str):
-        """Click element by UID."""
-        self.mcp.call_tool("click", {"uid": uid})
-        time.sleep(0.3)  # Allow UI to respond
-
-    def fill_uid(self, uid: str, value: str):
-        """Fill input element by UID."""
-        self.mcp.call_tool("fill", {"uid": uid, "value": value})
-        time.sleep(0.2)
-
-    def type_text(self, text: str, submit_key: Optional[str] = None):
-        """Type text into focused element."""
-        kwargs = {"text": text}
-        if submit_key:
-            kwargs["submitKey"] = submit_key
-        self.mcp.call_tool("type_text", kwargs)
-
-    def press_key(self, key: str):
-        """Press keyboard key/combination."""
-        self.mcp.call_tool("press_key", {"key": key})
-
-    def wait_for(self, texts: List[str], timeout: int = 8000):
-        """Wait for text to appear on page."""
-        try:
-            self.mcp.call_tool("wait_for", {"text": texts, "timeout": timeout})
-        except Exception:
-            pass
-
-    def wait_for_text(self, text: str, timeout: int = 8000):
-        """Wait for specific text to appear."""
-        self.wait_for([text], timeout)
-
-    def scroll_to_bottom(self):
-        """Scroll page to bottom for lazy-loaded content."""
-        self.evaluate_script("""
-            window.scrollTo(0, document.body.scrollHeight);
-        """)
-        time.sleep(0.5)
+        self.config.url = url
+        return True
 
     def extract_text(self, selector: str) -> Optional[str]:
-        """Extract text from element matching CSS selector."""
-        result = self.evaluate_script(f"""
-            const el = document.querySelector('{selector}');
-            return el ? el.textContent.trim() : null;
-        """)
-        if isinstance(result, dict):
-            return result.get("raw")
-        return result
+        result = scrape_url(ScrapeConfig(
+            url=self.config.url,
+            js_extract=f"const el = document.querySelector('{selector}'); return el ? el.textContent.trim() : null",
+            timeout=self.config.timeout,
+        ))
+        return result.data if not result.errors else None
 
     def extract_list(self, selector: str) -> List[str]:
-        """Extract text from all elements matching CSS selector."""
-        result = self.evaluate_script(f"""
-            const els = document.querySelectorAll('{selector}');
-            return Array.from(els).map(el => el.textContent.trim());
-        """)
-        if isinstance(result, dict):
-            return result.get("raw", [])
-        return result if isinstance(result, list) else []
+        result = scrape_url(ScrapeConfig(
+            url=self.config.url,
+            js_extract=f"return Array.from(document.querySelectorAll('{selector}')).map(e => e.textContent.trim())",
+            timeout=self.config.timeout,
+        ))
+        return result.data if isinstance(result.data, list) and not result.errors else []
 
     def extract_table(self, selector: str) -> List[Dict[str, str]]:
-        """Extract table data as list of row dicts."""
-        result = self.evaluate_script(f"""
+        js = f"""
             const table = document.querySelector('{selector}');
             if (!table) return [];
             const rows = Array.from(table.querySelectorAll('tr'));
@@ -418,290 +267,55 @@ class WebScraper:
                 }});
                 return rowObj;
             }});
-        """)
-        if isinstance(result, dict):
-            return result.get("raw", [])
-        return result if isinstance(result, list) else []
+        """
+        result = scrape_url(ScrapeConfig(url=self.config.url, js_extract=js, timeout=self.config.timeout))
+        return result.data if isinstance(result.data, list) and not result.errors else []
 
     def extract_links(self, selector: str = "a") -> List[Dict[str, str]]:
-        """Extract links from elements matching CSS selector."""
-        result = self.evaluate_script(f"""
-            const links = document.querySelectorAll('{selector}');
-            return Array.from(links).map(link => ({{
-                text: link.textContent.trim(),
-                href: link.href,
-                title: link.title || ''
-            }}));
-        """)
-        if isinstance(result, dict):
-            return result.get("raw", [])
-        return result if isinstance(result, list) else []
+        result = scrape_url(ScrapeConfig(
+            url=self.config.url,
+            js_extract=f"""return Array.from(document.querySelectorAll('{selector}')).map(link => ({{text: link.textContent.trim(), href: link.href, title: link.title || ''}}))""",
+            timeout=self.config.timeout,
+        ))
+        return result.data if isinstance(result.data, list) and not result.errors else []
 
-    def extract_by_config(self, config: ScrapeConfig) -> ScrapeResult:
-        """Extract data using configuration-driven approach."""
-        start_time = time.time()
-        result = ScrapeResult(url=config.url)
+    def evaluate_script(self, js_body: str) -> Any:
+        result = scrape_url(ScrapeConfig(
+            url=self.config.url,
+            js_extract=js_body,
+            timeout=self.config.timeout,
+        ))
+        return result.data if not result.errors else {"error": result.errors[0]}
 
-        try:
-            # Navigate and wait
-            self.navigate(config.url)
-
-            if config.auth:
-                self._handle_auth(config.auth)
-
-            if config.wait_for:
-                self.wait_for(config.wait_for, config.timeout)
-
-            if config.scroll:
-                self.scroll_to_bottom()
-
-            # Custom JS extraction if provided
-            if config.js_extract:
-                data = self.evaluate_script(config.js_extract)
-                if isinstance(data, dict) and "raw" in data:
-                    data = data["raw"]
-                if isinstance(data, list):
-                    result.data = data
-                else:
-                    result.data = [data]
-                return result
-
-            # Config-driven extraction
-            all_data = []
-            for page_num in range(1, config.max_pages + 1):
-                items = self._extract_items(config.items_selector, config.fields)
-                all_data.extend(items)
-
-                # Pagination
-                if config.pagination and page_num < config.max_pages:
-                    if not self._next_page(config.pagination):
-                        break
-
-            result.data = all_data
-            result.metadata["pages_scraped"] = page_num
-            result.metadata["total_items"] = len(all_data)
-
-        except Exception as e:
-            result.errors.append(str(e))
-
-        result.duration_ms = (time.time() - start_time) * 1000
-        return result
-
-    def _extract_items(self, items_selector: str, fields: Dict[str, str]) -> List[Dict[str, Any]]:
-        """Extract items using selector and field mappings."""
-        js_fields = json.dumps(fields)
-        result = self.evaluate_script(f"""
-            const items = document.querySelectorAll('{items_selector}');
-            const fieldMap = {js_fields};
-            return Array.from(items).map(item => {{
-                const obj = {{}};
-                for (const [field, selector] of Object.entries(fieldMap)) {{
-                    const el = item.querySelector(selector);
-                    if (el) {{
-                        // Handle different element types
-                        if (el.tagName === 'A') {{
-                            obj[field] = {{
-                                text: el.textContent.trim(),
-                                href: el.href,
-                                title: el.title || ''
-                            }};
-                        }} else if (el.tagName === 'IMG') {{
-                            obj[field] = {{
-                                src: el.src,
-                                alt: el.alt || ''
-                            }};
-                        }} else {{
-                            obj[field] = el.textContent.trim();
-                        }}
-                    }} else {{
-                        obj[field] = null;
-                    }}
-                }}
-                return obj;
-            }});
-        """)
-        if isinstance(result, dict) and "raw" in result:
-            result = result["raw"]
-        return result if isinstance(result, list) else []
-
-    def _next_page(self, pagination_selector: str) -> bool:
-        """Click next page button and wait."""
-        try:
-            snapshot = self.take_snapshot()
-            uid = self.find_uid(snapshot, pagination_selector)
-            if uid:
-                self.click_uid(uid)
-                time.sleep(1)
-                return True
-            return False
-        except Exception:
-            return False
-
-    def _handle_auth(self, auth: Dict[str, str]):
-        """Handle login with auth config."""
-        if auth.get("url"):
-            self.navigate(auth["url"])
-
-        snapshot = self.take_snapshot()
-
-        # Fill username
-        if auth.get("user_selector") and auth.get("username"):
-            uid = self.find_uid(snapshot, auth["user_selector"])
-            if uid:
-                self.click_uid(uid)
-                time.sleep(0.2)
-                self.type_text(auth["username"])
-
-        # Fill password
-        if auth.get("pass_selector") and auth.get("password"):
-            uid = self.find_uid(snapshot, auth["pass_selector"])
-            if uid:
-                self.click_uid(uid)
-                time.sleep(0.2)
-                self.type_text(auth["password"])
-
-        # Submit
-        if auth.get("submit_selector"):
-            uid = self.find_uid(snapshot, auth["submit_selector"])
-            if uid:
-                self.click_uid(uid)
-                time.sleep(1)
-
-    def scrape(self) -> ScrapeResult:
-        """Main scrape method - override in subclasses."""
-        return self.extract_by_config(self.config)
-
-    def close(self):
-        """Close MCP connection."""
-        self.mcp.close()
-
-
-# -----------------------------------------------------------------------------
-#  Example Scraper Subclasses
-# -----------------------------------------------------------------------------
 
 class NewsScraperExample(WebScraper):
     """Example news site scraper."""
-
-    def scrape(self) -> ScrapeResult:
-        """Scrape news articles."""
-        return self.extract_by_config(self.config)
+    pass
 
 
 class EcommerceScraperExample(WebScraper):
     """Example e-commerce product page scraper."""
-
-    def scrape(self) -> ScrapeResult:
-        """Scrape product listings."""
-        return self.extract_by_config(self.config)
+    pass
 
 
-# -----------------------------------------------------------------------------
-#  Scraper Registry (for LLM extension)
-# -----------------------------------------------------------------------------
-
-SCRAPERS: Dict[str, type] = {
-    "news": NewsScraperExample,
-    "ecommerce": EcommerceScraperExample,
-}
+# Scraper registry (for LLM extensibility — kept for backward compat)
+_registry: Dict[str, type] = {}
 
 
 def register_scraper(name: str, scraper_class: type):
     """Register a custom scraper class."""
-    SCRAPERS[name] = scraper_class
+    _registry[name] = scraper_class
 
 
-def get_scraper(name: str, config: ScrapeConfig) -> WebScraper:
-    """Get scraper instance by name."""
-    if name not in SCRAPERS:
-        raise ValueError(f"Unknown scraper: {name}")
-    return SCRAPERS[name](config)
+def get_scraper(name: str) -> Optional[type]:
+    """Get a registered scraper class."""
+    return _registry.get(name)
 
 
-# -----------------------------------------------------------------------------
-#  Standalone Functions
-# -----------------------------------------------------------------------------
-
-def scrape_url(url: str, config: Optional[ScrapeConfig] = None) -> ScrapeResult:
-    """
-    Standalone function to scrape a URL.
-
-    USAGE:
-        config = ScrapeConfig(url="https://example.com", items_selector=".item", fields={"title": ".title"})
-        result = scrape_url(config.url, config)
-        print(result.data)
-    """
-    if config is None:
-        config = ScrapeConfig(url=url, items_selector="body", fields={})
-
-    scraper = WebScraper(config)
-    try:
-        scraper.connect()
-        return scraper.scrape()
-    finally:
-        scraper.close()
-
-
-def scrape_with_scraper(scraper_name: str, config: ScrapeConfig) -> ScrapeResult:
-    """
-    Scrape using a registered scraper.
-
-    USAGE:
-        config = ScrapeConfig(url="https://news.com", items_selector=".article", fields={"headline": ".headline"})
-        result = scrape_with_scraper("news", config)
-    """
-    scraper = get_scraper(scraper_name, config)
-    try:
-        scraper.connect()
-        return scraper.scrape()
-    finally:
-        scraper.close()
-
-
-# -----------------------------------------------------------------------------
-#  CLI Interface
-# -----------------------------------------------------------------------------
-
-def main():
-    """CLI interface for testing."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="CDP Web Scraper")
-    parser.add_argument("url", help="URL to scrape")
-    parser.add_argument("--items", required=True, help="CSS selector for items")
-    parser.add_argument("--fields", required=True, help="Field mappings (JSON: {\"title\": \".title\"})")
-    parser.add_argument("--pages", type=int, default=1, help="Max pages to scrape")
-    parser.add_argument("--scroll", action="store_true", help="Scroll to bottom")
-    parser.add_argument("--output", help="Output JSON file")
-
-    args = parser.parse_args()
-
-    try:
-        fields = json.loads(args.fields)
-    except json.JSONDecodeError:
-        print("Error: --fields must be valid JSON")
-        return 1
-
-    config = ScrapeConfig(
-        url=args.url,
-        items_selector=args.items,
-        fields=fields,
-        max_pages=args.pages,
-        scroll=args.scroll,
-    )
-
-    result = scrape_url(args.url, config)
-
-    if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
-            json.dump(result.to_dict(), f, indent=2, ensure_ascii=False)
-        print(f"Saved to {args.output}")
-    else:
-        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
-
-    return 0
-
-
-if __name__ == "__main__":
-    import sys
-    sys.exit(main())
+def scrape_with_scraper(name: str, config: ScrapeConfig) -> ScrapeResult:
+    """Scrape using a registered scraper."""
+    scraper_class = _registry.get(name)
+    if not scraper_class:
+        return ScrapeResult(url=config.url, errors=[f"Unknown scraper: {name}"])
+    scraper = scraper_class(config)
+    return scraper.scrape()

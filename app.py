@@ -4722,6 +4722,114 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
 
 
 # ---------------------------------------------------------------------------
+# Internal scrape endpoint — server-side Chrome DevTools scraping
+# ---------------------------------------------------------------------------
+
+class InternalScrapeRequest(BaseModel):
+    """Request body for /internal/scrape."""
+    url: str
+    extract_js: str = "return document.title"
+    wait_for_selector: Optional[str] = None
+    wait_ms: int = 2000
+    timeout: int = 15
+
+
+@app.post("/internal/scrape")
+async def internal_scrape(request: InternalScrapeRequest, request_obj: Request):
+    """Scrape a URL using server-side Chrome (DevTools Protocol).
+
+    Internal endpoint — only callable from localhost, Docker bridge, or
+    allowlisted IPs. Uses the same IP guard as /internal/pm2-restart plus
+    the SCHEDULER_INTERNAL_ALLOWLIST (so bwrap sandboxes / Docker containers
+    on the worker VPS can call it via api.dreamagent.cloud).
+
+    The caller provides a URL + JavaScript extraction function. Chrome
+    renders the page, the JS runs in the page context, and the result is
+    returned as JSON. Each request gets its own isolated Chrome tab.
+    """
+    import os as _os
+
+    # Security: same IP guard as /internal/pm2-restart + SCHEDULER_INTERNAL_ALLOWLIST
+    client_host = request_obj.client.host if request_obj.client else ""
+
+    # Allow loopback + Docker bridge + private nets (same as pm2-restart)
+    is_local = (client_host.startswith("127.") or client_host.startswith("172.")
+                or client_host.startswith("10.") or client_host == "::1")
+
+    # Also check SCHEDULER_INTERNAL_ALLOWLIST (same list used by scheduler_router)
+    if not is_local:
+        try:
+            import ipaddress as _ip
+            allowlist_raw = _os.getenv("SCHEDULER_INTERNAL_ALLOWLIST", "").strip()
+            if allowlist_raw:
+                for entry in allowlist_raw.split(","):
+                    entry = entry.strip()
+                    if not entry:
+                        continue
+                    try:
+                        net = _ip.ip_network(entry, strict=False)
+                        if _ip.ip_address(client_host) in net:
+                            is_local = True
+                            break
+                    except ValueError:
+                        continue
+        except Exception:
+            pass
+
+    # Check X-Forwarded-For for requests through nginx
+    if not is_local:
+        xff = request_obj.headers.get("x-forwarded-for", "")
+        if xff:
+            # The XFF chain — original client is first entry. We check it
+            # against the allowlist (nginx is a trusted proxy).
+            for xff_ip in [s.strip() for s in xff.split(",") if s.strip()]:
+                try:
+                    import ipaddress as _ip
+                    allowlist_raw = _os.getenv("SCHEDULER_INTERNAL_ALLOWLIST", "").strip()
+                    if allowlist_raw:
+                        for entry in allowlist_raw.split(","):
+                            entry = entry.strip()
+                            if not entry:
+                                continue
+                            try:
+                                net = _ip.ip_network(entry, strict=False)
+                                if _ip.ip_address(xff_ip) in net:
+                                    is_local = True
+                                    break
+                            except ValueError:
+                                continue
+                except Exception:
+                    pass
+                if is_local:
+                    break
+
+    if not is_local:
+        raise HTTPException(status_code=403, detail="Internal endpoint — not accessible from public network")
+
+    # Validate URL
+    if not request.url or not request.url.startswith("http"):
+        raise HTTPException(status_code=400, detail="url must start with http:// or https://")
+
+    logger.info(f"[INTERNAL-SCRAPE] url={request.url} from={client_host}")
+
+    try:
+        from services.cdp_scraper import scrape as _cdp_scrape
+        result = await _cdp_scrape(
+            url=request.url,
+            extract_js=request.extract_js,
+            wait_for_selector=request.wait_for_selector,
+            wait_ms=request.wait_ms,
+            timeout=request.timeout,
+        )
+        return result
+    except ImportError:
+        return {"success": False, "error": "cdp_scraper module not available — check Chrome is running on :9222"}
+    except Exception as e:
+        logger.error(f"[INTERNAL-SCRAPE] error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Environment Variables endpoints
 # ---------------------------------------------------------------------------
 
