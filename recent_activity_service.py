@@ -147,7 +147,7 @@ def get_recent_activity_optimized(
         WHERE p.user_id = %s
         GROUP BY p.id
     )
-    SELECT 
+    SELECT
         lm.project_id,
         lm.project_name,
         lm.project_description,
@@ -171,14 +171,13 @@ def get_recent_activity_optimized(
         with get_db() as cur:
             cur.execute(query, (user_id, user_id, limit, offset))
             rows = cur.fetchall()
-            
+
             results = []
             for row in rows:
                 # Handle RealDictCursor vs tuple
                 if isinstance(row, dict):
                     result = dict(row)
                 else:
-                    # Tuple result (if cursor_factory not set)
                     result = {
                         "project_id": row[0],
                         "project_name": row[1],
@@ -194,22 +193,138 @@ def get_recent_activity_optimized(
                         "total_sessions": row[11],
                         "total_messages": row[12]
                     }
-                
+
+                # Sanitize text fields — replace invalid UTF-8 bytes
+                for key in ("last_message_preview", "project_name", "project_description",
+                            "last_session_label"):
+                    val = result.get(key)
+                    if isinstance(val, str):
+                        try:
+                            result[key] = val.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+                        except Exception:
+                            result[key] = str(val).encode("ascii", errors="replace").decode("ascii")
+                    elif isinstance(val, (bytes, bytearray)):
+                        result[key] = val.decode("utf-8", errors="replace")
+
                 # Format datetime to ISO string
                 if result.get("last_activity"):
                     if isinstance(result["last_activity"], datetime):
                         result["last_activity"] = result["last_activity"].isoformat() + "Z"
                     elif hasattr(result["last_activity"], 'isoformat'):
                         result["last_activity"] = result["last_activity"].isoformat() + "Z"
-                
+
                 results.append(result)
-            
+
             logger.info(f"✓ Fetched {len(results)} recent activity items for user {user_id}")
             return results
-            
+
     except Exception as e:
+        # If the main query fails due to invalid UTF-8 in message content
+        # (0xe2 = partial multi-byte sequence), retry without the content
+        # preview field. The activity feed still works — just without the
+        # last message preview text.
+        if "UTF8" in str(e) or "byte sequence" in str(e):
+            logger.warning(f"⚠ Recent activity UTF-8 error, retrying without preview: {e}")
+            return _get_recent_activity_no_preview(user_id, limit, offset)
         logger.error(f"❌ Failed to fetch recent activity: {e}")
         raise
+
+
+def _get_recent_activity_no_preview(user_id: int, limit: int, offset: int) -> List[Dict[str, Any]]:
+    """Fallback query that skips message.content (avoids UTF-8 decode errors).
+
+    Returns the same shape as get_recent_activity_optimized but with
+    last_message_preview = None for all rows. Used when the main query
+    fails due to invalid byte sequences in stored message content.
+    """
+    query = """
+    WITH latest_messages AS (
+        SELECT DISTINCT ON (p.id)
+            p.id AS project_id,
+            p.name AS project_name,
+            p.description AS project_description,
+            p.status AS project_status,
+            p.domain,
+            p.active_session_id,
+            m.created_at AS last_activity,
+            m.role AS last_message_role,
+            s.id AS last_session_id,
+            s.label AS last_session_label
+        FROM projects p
+        INNER JOIN sessions s ON s.project_id = p.id
+        INNER JOIN messages m ON m.session_id = s.id
+        WHERE p.user_id = %s
+        ORDER BY p.id, m.created_at DESC
+    ),
+    project_stats AS (
+        SELECT
+            p.id AS project_id,
+            COUNT(DISTINCT s.id) AS total_sessions,
+            COUNT(m.id) AS total_messages
+        FROM projects p
+        LEFT JOIN sessions s ON s.project_id = p.id
+        LEFT JOIN messages m ON m.session_id = s.id
+        WHERE p.user_id = %s
+        GROUP BY p.id
+    )
+    SELECT
+        lm.project_id,
+        lm.project_name,
+        lm.project_description,
+        lm.project_status,
+        lm.domain,
+        lm.active_session_id,
+        lm.last_activity,
+        lm.last_session_id,
+        lm.last_session_label,
+        lm.last_message_role,
+        NULL AS last_message_preview,
+        COALESCE(ps.total_sessions, 0) AS total_sessions,
+        COALESCE(ps.total_messages, 0) AS total_messages
+    FROM latest_messages lm
+    LEFT JOIN project_stats ps ON ps.project_id = lm.project_id
+    ORDER BY lm.last_activity DESC
+    LIMIT %s OFFSET %s;
+    """
+    try:
+        with get_db() as cur:
+            cur.execute(query, (user_id, user_id, limit, offset))
+            rows = cur.fetchall()
+
+            results = []
+            for row in rows:
+                if isinstance(row, dict):
+                    result = dict(row)
+                else:
+                    result = {
+                        "project_id": row[0],
+                        "project_name": row[1],
+                        "project_description": row[2],
+                        "project_status": row[3],
+                        "domain": row[4],
+                        "active_session_id": row[5],
+                        "last_activity": row[6],
+                        "last_session_id": row[7],
+                        "last_session_label": row[8],
+                        "last_message_role": row[9],
+                        "last_message_preview": row[10],
+                        "total_sessions": row[11],
+                        "total_messages": row[12]
+                    }
+
+                if result.get("last_activity"):
+                    if isinstance(result["last_activity"], datetime):
+                        result["last_activity"] = result["last_activity"].isoformat() + "Z"
+                    elif hasattr(result["last_activity"], 'isoformat'):
+                        result["last_activity"] = result["last_activity"].isoformat() + "Z"
+
+                results.append(result)
+
+            logger.info(f"✓ Fetched {len(results)} recent activity items (no preview fallback) for user {user_id}")
+            return results
+    except Exception as e:
+        logger.error(f"❌ Fallback recent activity query also failed: {e}")
+        return []
 
 
 def get_recent_activity_simple(
