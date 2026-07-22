@@ -493,33 +493,26 @@ class ContainerManager:
         the chat's Claude). Also used by the container reaper to avoid stopping
         containers with active sessions.
 
-        Detection: pgrep for the claude binary specifically. We match the
-        process name 'claude' (not -f full cmdline) to avoid false positives
-        from paths like /home/dreampilot/.claude/ (MCP config), npm cache dirs
-        containing 'claude' in the path, or chrome-devtools-mcp launched from
-        Claude's .claude directory. Those are NOT active Claude sessions —
-        they're stale leftovers that should be cleaned up.
+        Detection: looks for the @anthropic-ai/claude-code process — the
+        actual CLI binary that Claude Code Agent spawns. This avoids matching:
+        - chrome-devtools-mcp (MCP server launched from ~/.claude/)
+        - zai-mcp-server (MCP server launched from ~/.claude/)
+        - our own sh -c detection command (self-match)
+        - stale leftover processes
+
+        We use the @anthropic-ai/claude-code npm package path which appears
+        in the process cmdline when the CLI is running.
         """
         if not self._container_exists():
             return False
         r = _run_docker([
             "exec", self.container_name,
             "sh", "-c",
-            # pgrep -x matches exact process name only (not cmdline).
-            # The Claude CLI runs as 'node' with 'claude' in args, so -x
-            # alone misses it. Instead we check for the actual running CLI
-            # by looking for the claude binary invocation pattern.
-            #
-            # But we must EXCLUDE:
-            # - chrome-devtools-mcp (launched from ~/.claude/ → has 'claude' in path)
-            # - zai-mcp-server (launched from ~/.claude/)
-            # - stale .claude/ config watchers
-            #
-            # Strategy: check for the claude CLI process specifically.
-            # The CLI binary is 'claude' (symlinked from @anthropic-ai/claude-code).
-            # When running, ps shows it as a node process with 'claude' in the cmdline.
-            # We match the binary path, not just any 'claude' substring.
-            "ps aux | grep '[c]laude' | grep -v chrome-devtools-mcp | grep -v zai-mcp | grep -v '.claude/' | head -1 | grep -q . && echo yes || echo no",
+            # Match @anthropic-ai/claude-code in the process list.
+            # Use tr to obfuscate so our own sh -c doesn't self-match.
+            # pgrep -f matches the full cmdline. The 'a' + 'nthropic' split
+            # prevents our command from containing the full pattern.
+            "pgrep -f \"@$(echo anthropic)-ai/cl\" >/dev/null 2>&1 && echo yes || echo no",
         ], timeout=5)
         if r.returncode != 0:
             return False
