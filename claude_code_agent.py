@@ -953,6 +953,7 @@ class ClaudeCodeAgent:
             result_exit_grace = float(os.environ.get("CLAUDE_AGENT_RESULT_EXIT_GRACE_SECONDS", "2.0"))
             
             # Read stdout line by line (plain text, not JSON-RPC) with progress updates
+            _heartbeat_counter = 0
             while True:
                 try:
                     # Use timeout-based reading for progress updates
@@ -963,6 +964,21 @@ class ClaudeCodeAgent:
                     
                     if not line:
                         break
+
+                    # Heartbeat: touch the sentinel file every ~30 lines (every ~30s)
+                    # so the reaper knows Claude is still active during long queries.
+                    # Without this, the 30-min TTL on the sentinel could expire
+                    # during a legitimate long-running chat → reaper kills container.
+                    _heartbeat_counter += 1
+                    if _heartbeat_counter % 30 == 0:
+                        try:
+                            if os.getenv("EXECUTION_MODE", "local").lower() == "container":
+                                user_id = getattr(self, 'user_id', None)
+                                if user_id:
+                                    from services.container_manager import ContainerManager
+                                    ContainerManager(user_id).mark_claude_active()
+                        except Exception:
+                            pass
 
                     # Decode and strip the line
                     line_text = line.decode("utf-8", errors="replace").rstrip("\n\r")

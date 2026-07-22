@@ -488,47 +488,47 @@ class ContainerManager:
     def has_active_claude(self) -> bool:
         """True if a Claude CLI process is currently running inside this container.
 
-        Used by project-creation to detect when a parallel chat is in flight
-        so it can skip the pre-run cleanup_processes() (which would SIGKILL
-        the chat's Claude). Also used by the container reaper to avoid stopping
-        containers with active sessions.
+        Uses a timestamped sentinel file approach that works across PID
+        namespaces (the host PID from docker exec doesn't match container PIDs).
 
-        Detection strategy (multi-layered):
-          1. PID file check: ClaudeCodeAgent writes /tmp/.claude_active_pid on
-             spawn and removes it on completion. If the file exists AND the PID
-             is alive, Claude is active.
-          2. Process scan fallback: scan /proc/*/cmdline for the claude CLI
-             binary path (@anthropic-ai/claude-code). Excludes MCP servers
-             (chrome-devtools-mcp, zai-mcp) and our own detection shell.
-
-        The PID file is the primary signal — set by mark_claude_active() and
-        cleared by mark_claude_inactive(). The process scan is a safety net
-        for cases where the PID file wasn't written (e.g. older code paths).
+        Detection strategy:
+          1. Sentinel file: /tmp/.claude_active — created by mark_claude_active(),
+             removed by mark_claude_inactive(). If the file exists AND was
+             touched within the last 30 minutes, Claude is considered active.
+             The 30-min TTL handles crashes where the finally block doesn't run
+             (process killed, OOM, etc.) — after 30 min the stale sentinel
+             expires and the reaper can stop the container.
+          2. /proc scan fallback: safety net for cases where the sentinel
+             wasn't written (e.g. older code paths, manual docker exec).
         """
         if not self._container_exists():
             return False
 
-        # Layer 1: PID file check (fast, reliable, no false positives)
-        pid_r = _run_docker([
+        # Layer 1: Sentinel file check (timestamped — survives PID namespace mismatch)
+        sentinel_r = _run_docker([
             "exec", self.container_name,
             "sh", "-c",
-            # Read the PID file and check if that PID is still alive
-            "PID=$(cat /tmp/.claude_active_pid 2>/dev/null); "
-            "if [ -n \"$PID\" ] && kill -0 \"$PID\" 2>/dev/null; then echo yes; exit 0; fi; "
+            # Check if sentinel exists AND was touched within 30 minutes.
+            # -maxdepth 0 means only check the file itself, not recurse.
+            "if [ -f /tmp/.claude_active ]; then "
+            "  AGE=$(( $(date +%s) - $(stat -c %Y /tmp/.claude_active 2>/dev/null || echo 0) )); "
+            "  if [ $AGE -lt 1800 ]; then echo yes; exit 0; fi; "
+            "  # Sentinel is stale (>30 min) — clean it up "
+            "  rm -f /tmp/.claude_active; "
+            "fi; "
             "echo no",
         ], timeout=5)
-        if pid_r.returncode == 0 and pid_r.stdout.strip() == "yes":
+        if sentinel_r.returncode == 0 and sentinel_r.stdout.strip() == "yes":
             return True
 
-        # Layer 2: Process scan fallback (safety net)
+        # Layer 2: /proc scan fallback (safety net)
         r = _run_docker([
             "exec", self.container_name,
             "sh", "-c",
             # Scan /proc/*/cmdline for the claude CLI package path.
-            # Obfuscate 'anthropic' to avoid self-match.
+            # Obfuscate to avoid self-match.
             "for f in /proc/[0-9]*/cmdline; do "
             "  if tr '\\0' ' ' < \"$f\" 2>/dev/null | grep -q \"cl$(echo aude)-code\"; then "
-            "    # Exclude MCP servers that are children of claude, not claude itself "
             "    PID=$(echo \"$f\" | grep -o '[0-9]*'); "
             "    CMD=$(tr '\\0' ' ' < \"$f\" 2>/dev/null); "
             "    case \"$CMD\" in "
@@ -543,30 +543,38 @@ class ContainerManager:
 
         return False
 
-    def mark_claude_active(self, pid: int) -> None:
-        """Write the active Claude PID to a file inside the container.
+    def mark_claude_active(self, pid: int = None) -> None:
+        """Create a sentinel file inside the container marking Claude as active.
 
-        Called by ClaudeCodeAgent.start() after spawning the CLI subprocess.
-        The reaper and project-creation check this file via has_active_claude().
+        Called by ClaudeCodeAgent.query() after spawning the CLI subprocess.
+        The reaper checks this file via has_active_claude().
+
+        Uses a timestamped sentinel file instead of a PID file because:
+        - The spawning process (clawd-worker-api) runs on the HOST
+        - Claude runs INSIDE the container (different PID namespace)
+        - A host PID written to the container is meaningless — kill -0 fails
+        - The sentinel file approach works regardless of PID namespace
+
+        The file is touched every call (updates mtime for TTL check).
         """
         if not self._container_exists():
             return
         _run_docker([
             "exec", self.container_name,
-            "sh", "-c", f"echo {pid} > /tmp/.claude_active_pid",
+            "sh", "-c", "touch /tmp/.claude_active",
         ], timeout=5)
 
     def mark_claude_inactive(self) -> None:
-        """Remove the active Claude PID file.
+        """Remove the sentinel file.
 
-        Called by ClaudeCodeAgent.stop() / finally block after the query
-        completes. Signals to the reaper that the container can be reaped.
+        Called by ClaudeCodeAgent finally block after the query completes.
+        Signals to the reaper that the container can be reaped.
         """
         if not self._container_exists():
             return
         _run_docker([
             "exec", self.container_name,
-            "sh", "-c", "rm -f /tmp/.claude_active_pid",
+            "sh", "-c", "rm -f /tmp/.claude_active",
         ], timeout=5)
 
     def cleanup_processes(self, spare_patterns: Optional[List[str]] = None) -> int:
