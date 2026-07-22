@@ -1313,12 +1313,25 @@ curl -s -o /dev/null -w "%{{http_code}}" https://{self.frontend_domain}/TARGET_P
  
 **Verification flow — follow this exact sequence, NO deviations:**
 
-1. **Try Chrome DevTools evaluate_script ONCE** on the main page (or the page you edited).
-   - If it succeeds → verification complete → respond to user.
-   - If it fails (error, timeout, connection refused) → go to step 2.
-2. **Fall back to curl** — check all pages return 200.
-   - If curl returns 200 for every page → verification complete → respond to user.
-3. **STOP.** Do NOT loop. Do NOT retry Chrome DevTools. Do NOT re-read files. Do NOT check `which google-chrome`.
+⚠️ **CRITICAL: Verification must be done ONLY on the LIVE URL after buildpublish.**
+
+1. **Run `buildpublish.py` FIRST** — this deploys the frontend and backend to the live server.
+   ```bash
+   cd {self.project_path}/frontend && python3 buildpublish.py --skip-deps
+   # AND/OR
+   cd {self.project_path}/backend && python3 buildpublish.py --skip-deps
+   ```
+   Do NOT verify before publishing. The code is not live until buildpublish runs.
+
+2. **Wait 3 seconds** for PM2 + nginx to pick up the new build.
+
+3. **Verify on the LIVE URL only** — `https://{self.frontend_domain}`:
+   - **Try Chrome DevTools evaluate_script ONCE** on `https://{self.frontend_domain}/ROUTE`
+     - If it succeeds → verification complete → respond to user.
+     - If it fails → go to step 4.
+4. **Fall back to curl** on the live URL — check pages return 200.
+   - If curl returns 200 → verification complete → respond to user.
+5. **STOP.** Do NOT loop. Do NOT retry. Do NOT re-read files.
 
 **Max 1 verification attempt total** — either Chrome DevTools OR curl, not both unless Chrome fails.
 After verification (successful or failed) → respond to the user immediately.
@@ -1337,6 +1350,10 @@ If Chrome DevTools fails 1 time, STOP retrying. Use curl to confirm the site is 
 ❌ NEVER say "Now let me use Chrome DevTools to verify" more than once
 ❌ NEVER spend more than 2 turns on verification after all code changes are made
 ❌ NEVER retry Chrome DevTools after it fails once — fall back to curl immediately
+❌ NEVER start a local server (`npx serve`, `python -m http.server`, `vite dev`) — the site is ALREADY deployed via buildpublish
+❌ NEVER verify on `localhost`, `127.0.0.1`, `0.0.0.0`, or container IPs (`172.x.x.x`) — ONLY use `https://{self.frontend_domain}`
+❌ NEVER verify before running `buildpublish.py` — code is not live until published
+❌ NEVER try to run the backend locally to test — it's already running on the server via PM2
 ❌ NEVER rely on code review alone — ACTUAL testing is required
 ❌ NEVER test on localhost — always test on the LIVE site only
 ❌ NEVER take PNG screenshots (~48KB, 12,000 tokens)
