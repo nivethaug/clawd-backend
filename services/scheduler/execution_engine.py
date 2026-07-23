@@ -115,9 +115,27 @@ def _execute_in_sandbox(project_id: int, project_path: str, job: dict) -> dict:
         stdin  ← json.dumps(job)
         stdout → one JSON line: {"status":..., "message":...}
         exit 0 always (status field carries success/failure)
+
+    Includes a 2-retry with 3s delay for path-not-found errors. This handles
+    the race condition where the scheduler polls immediately after a restart
+    (from buildpublish.py) but the filesystem/container hasn't fully settled.
+    The first attempt may fail with 'project_path not found', but the path
+    appears within 3 seconds once the mount completes.
     """
-    if not os.path.isdir(project_path):
-        return {"status": "failed", "message": f"project_path not found: {project_path}"}
+    # Retry path check — handles race condition after scheduler restart
+    # where the container mount isn't ready yet on the first poll.
+    for attempt in range(3):
+        if os.path.isdir(project_path):
+            break
+        if attempt < 2:
+            logger.warning(
+                f"project_path not found (attempt {attempt + 1}/3), "
+                f"retrying in 3s: {project_path}"
+            )
+            import time as _time
+            _time.sleep(3)
+    else:
+        return {"status": "failed", "message": f"project_path not found after 3 retries: {project_path}"}
 
     # Ensure the sandbox script is executable. Windows Git checks these out
     # without the +x bit (same issue hit by backend-sandbox.sh — see
