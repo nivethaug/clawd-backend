@@ -901,6 +901,7 @@ def _run_website_pipeline(
     description: str,
     template_id: Optional[str],
     initial_env_vars: List[Dict[str, Any]],
+    user_id: Optional[int] = None,
 ) -> None:
     session_name = f"project-{project_id}-{name.replace(' ', '-')}"
     with get_db() as conn:
@@ -1155,6 +1156,7 @@ def execute_run(run_id: int) -> Dict[str, Any]:
                 description,
                 selected_template_id,
                 payload.get("initial_environment_variables") or [],
+                user_id=user_id,
             )
             project = _get_project(project_id)
             if project and project.get("status") == "creating":
