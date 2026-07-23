@@ -10,8 +10,82 @@ Uses database_postgres.get_db() for thread-safe pooled connections.
 
 import json
 import logging
+import os
+import subprocess
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+
+
+def _ensure_executor_path(project_path: Optional[str], project_id: Optional[int]) -> None:
+    """Ensure the executor.py file exists at the host path.
+
+    If the project files only exist inside the Docker container (not synced
+    to the host bind mount), copy them from the container. This fixes the
+    recurring 'Executor not found' error after pause/resume or when the
+    project was created by a worker on a different VPS.
+
+    Called by resume_job() and run_job_now() before triggering execution.
+    """
+    if not project_path:
+        return
+
+    executor_path = os.path.join(project_path, "scheduler", "executor.py")
+    if os.path.isfile(executor_path):
+        return  # Path exists, nothing to do
+
+    logger.info("[SCHEDULER] executor path missing, attempting container sync: %s", executor_path)
+
+    # Extract user_id from the path (/workspaces/user_{id}/...)
+    user_id = None
+    if "/user_" in project_path:
+        parts = project_path.split("/user_")
+        if len(parts) > 1:
+            uid_str = parts[1].split("/")[0]
+            if uid_str.isdigit():
+                user_id = int(uid_str)
+
+    if not user_id:
+        logger.warning("[SCHEDULER] could not extract user_id from path: %s", project_path)
+        return
+
+    container_name = f"dreamagent-user-{user_id}"
+
+    # The container path mirrors the host path but with /workspace prefix
+    # instead of /workspaces/user_{id}
+    # Host:      /workspaces/user_24/scheduler/1811_xxx/
+    # Container: /workspace/scheduler/1811_xxx/
+    if "/workspaces/user_" in project_path and user_id:
+        container_path = project_path.replace(f"/workspaces/user_{user_id}", "/workspace", 1)
+    else:
+        container_path = project_path
+
+    try:
+        # Check if the container has the files
+        check = subprocess.run(
+            ["docker", "exec", container_name, "test", "-f",
+             os.path.join(container_path, "scheduler", "executor.py")],
+            capture_output=True, timeout=10,
+        )
+        if check.returncode != 0:
+            logger.warning("[SCHEDULER] executor not found in container either: %s", container_path)
+            return
+
+        # Create host directory and copy from container
+        os.makedirs(project_path, exist_ok=True)
+        subprocess.run(
+            ["docker", "cp", f"{container_name}:{container_path}/.", project_path],
+            capture_output=True, timeout=60,
+        )
+        logger.info("[SCHEDULER] ✓ synced project files from container %s → %s",
+                     container_name, project_path)
+
+    except subprocess.TimeoutExpired:
+        logger.warning("[SCHEDULER] container sync timed out for %s", project_path)
+    except FileNotFoundError:
+        # docker not available on this VPS
+        pass
+    except Exception as e:
+        logger.warning("[SCHEDULER] container sync failed for %s: %s", project_path, e)
 
 from database_postgres import get_db
 from services.scheduler.parser import calculate_next_run
@@ -244,10 +318,18 @@ def resume_job(job_id: int):
     Sets next_run to NOW() so the next scheduler poll (within 10s) picks
     it up. The user expects the job to start running right away after
     resume, not wait a full interval cycle.
+
+    Also ensures the executor path exists on the host filesystem. If the
+    project files only exist inside the Docker container (not synced to
+    the host bind mount), copies them from the container so the scheduler
+    can find them.
     """
     job = get_job(job_id)
     if not job:
         raise ValueError(f"Job {job_id} not found")
+
+    # Ensure executor path exists on host before resuming
+    _ensure_executor_path(job.get('project_path'), job.get('project_id'))
 
     with get_db() as cur:
         cur.execute("""
@@ -262,7 +344,16 @@ def run_job_now(job_id: int) -> dict:
     """
     Trigger a job to run immediately.
     Sets next_run = NOW() so the next scheduler poll picks it up.
+    Also ensures the executor path exists on the host filesystem.
     """
+    # Get job details to check path before triggering
+    job = get_job(job_id)
+    if not job:
+        raise ValueError(f"Job {job_id} not found")
+
+    # Ensure executor path exists on host before triggering
+    _ensure_executor_path(job.get('project_path'), job.get('project_id'))
+
     with get_db() as cur:
         cur.execute("""
             UPDATE scheduler_jobs
