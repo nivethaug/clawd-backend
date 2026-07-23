@@ -968,8 +968,11 @@ def _run_website_pipeline(
         prefix="[OPENCLAW] ",
     )
 
-    # Clear the sentinel — build is done, reaper can stop the container
-    _mark_container_inactive(user_id)
+    # Re-touch the sentinel to keep it fresh for the NEXT project in the queue.
+    # Don't remove it — removing creates a race window where the parallel
+    # worker's next cleanup runs and kills this worker's processes. The
+    # 70-minute TTL handles eventual cleanup.
+    _mark_container_active(user_id)
 
     if openclaw_code != 0:
         raise RuntimeError(f"openclaw_wrapper.py failed with exit code {openclaw_code}")
