@@ -310,10 +310,13 @@ TEMPLATES: List[Dict[str, Any]] = [
         "featured": False,
     },
     # ── Telegram Bot Templates ──
+    # Bot tokens are read from env vars: TELEGRAM_BOT_TOKEN_1, _2, _3
+    # and DISCORD_BOT_TOKEN_1, _2. Set them before running the seed.
     {
         "name": "AI Assistant Bot",
         "type_id": 2,
         "category": "Telegram Bot",
+        "bot_token_env": "TELEGRAM_BOT_TOKEN_1",
         "description": "Build 'Aria,' an intelligent Telegram AI assistant that feels like chatting with a brilliant, warm concierge. The bot greets users with a personalized welcome and an elegant inline keyboard menu — Ask AI, Weather, Translate, Summary, Settings. The /ask command streams thoughtful, well-formatted responses with typing indicators that build anticipation. Weather delivers beautifully formatted 5-day forecasts with emoji icons. Translate handles 20+ languages with instant detection. Conversation memory remembers context across messages, so follow-up questions feel natural. Rate limiting is invisible to good users but stops abuse cold. Admin commands allow broadcasting announcements. Every response uses clean inline keyboards, tasteful emoji accents, and graceful error messages that never expose raw exceptions. Inspired by ChatGPT's polish and Telegram's native design language.",
         "featured": True,
     },
@@ -321,6 +324,7 @@ TEMPLATES: List[Dict[str, Any]] = [
         "name": "Community Manager Bot",
         "type_id": 2,
         "category": "Telegram Bot",
+        "bot_token_env": "TELEGRAM_BOT_TOKEN_2",
         "description": "Create 'Guardian,' a Telegram community management bot that makes group moderation feel effortless and professional. New members are welcomed with a warm message and an inline captcha button — verification completes in one tap. The /rules command displays guidelines in a beautifully formatted message with emoji section headers. Admin commands (/warn, /mute, /kick, /ban) include reason tracking and DM notifications to the affected user. Anti-spam detection runs silently with configurable thresholds — first offense warns, repeat offenses escalate automatically. A reputation system rewards helpful members with /rep points and a monthly leaderboard. Scheduled announcements post automatically at configured times. Every action is logged to a private admin channel with clean, color-coded embed-style messages. The tone is authoritative but friendly, never robotic.",
         "featured": False,
     },
@@ -328,6 +332,7 @@ TEMPLATES: List[Dict[str, Any]] = [
         "name": "E-Commerce Store Bot",
         "type_id": 2,
         "category": "Telegram Bot",
+        "bot_token_env": "TELEGRAM_BOT_TOKEN_3",
         "description": "Build 'Boutique,' a Telegram shopping bot that makes browsing and buying feel like a premium retail experience. The /shop command opens an inline keyboard of curated categories — each tap reveals product cards with high-resolution images, prices formatted with currency symbols, and concise descriptions that make you want to tap 'Add to Cart.' The cart flows as a premium drawer experience: swipe through items, adjust quantities with inline +/- buttons, and see the running total update live. Checkout is a single-page flow with Telegram Payments API integration. Order tracking sends proactive status updates ('Your order has shipped! 📦') with tracking links. A /deals command showcases daily promotions with countdown timers. Customer support tickets route to admins seamlessly. Inspired by Shopify's checkout polish and Telegram's media group formatting.",
         "featured": False,
     },
@@ -336,6 +341,7 @@ TEMPLATES: List[Dict[str, Any]] = [
         "name": "Moderation Discord Bot",
         "type_id": 3,
         "category": "Discord Bot",
+        "bot_token_env": "DISCORD_BOT_TOKEN_1",
         "description": "Build 'Sentinel,' a Discord moderation bot that makes server management feel commanding and precise. Slash commands (/ban, /kick, /mute, /warn) are clean and fast, each producing a rich embed with the user's avatar, the moderator's name, the reason, and a color-coded severity indicator (yellow = warn, orange = mute, red = kick, dark red = ban). Auto-mod runs silently in the background with configurable filters for spam detection, link blocking, mention limits, and profanity — each rule logs to a private mod-log channel with the flagged message and action taken. The warning system escalates automatically: 3 warnings → 1h mute, 5 warnings → 24h mute, 7 warnings → kick. Reaction roles let members self-assign roles by tapping emoji on a welcome message. New members get a warm welcome embed with server rules and role selection. /userinfo shows a member's full history: join date, warnings, reputation, and activity stats. Every embed uses consistent branding — the bot's avatar as thumbnail, a dark theme with accent colors, and a professional footer.",
         "featured": True,
     },
@@ -343,6 +349,7 @@ TEMPLATES: List[Dict[str, Any]] = [
         "name": "Music Discord Bot",
         "type_id": 3,
         "category": "Discord Bot",
+        "bot_token_env": "DISCORD_BOT_TOKEN_2",
         "description": "Create 'Harmony,' a Discord music bot that turns voice channels into a premium listening experience. The /play command searches YouTube and Spotify with smart autocomplete, queueing tracks instantly with a confirmation embed showing album art, title, duration, and requester. The now-playing embed is a living dashboard — a progress bar that updates in real-time, album thumbnail, and inline buttons for skip, pause, shuffle, and loop. Audio quality is pristine with optional filters: bass boost for EDM, nightcore for energy, vaporwave for chill. Queue management is visual — /queue shows the upcoming tracks as a formatted list with durations and requesters. Playlists can be saved with /playlist save and loaded later. DJ-only mode restricts control to users with the DJ role, preventing queue hijacking. The bot auto-disconnects after 5 minutes of idle to free resources. Every embed has consistent styling — dark background, accent gradient, album art thumbnails, and timestamps. Inspired by Rythm's reliability and Spotify's visual polish.",
         "featured": False,
     },
@@ -379,8 +386,8 @@ GALLERY: List[Dict[str, Any]] = [
     {"name": "Agency Website", "type_id": 1, "description": "Build a creative agency website that showcases bold imagination. Portfolio grid with case study cards that expand on hover revealing project metrics, services section with icon animations and capability descriptions, team bios with personality-reveal hover states, client logos in an elegant infinite scroll, and a contact form with project type selector and budget range slider. Bold, modern design with smooth scroll animations."},
     {"name": "Real Estate Listings", "type_id": 1, "description": "Create a real estate site that makes property browsing feel aspirational. Search filters with map integration showing property pins, property cards with hero image carousels and key specs, detail page with full-gallery lightbox and mortgage calculator, agent contact form with availability matching, and saved favorites with comparison view. Clean, aspirational design with large imagery and premium typography."},
     # ── Bot + Scheduler gallery entries ──
-    {"name": "Telegram Tip Bot", "type_id": 2, "description": "Build 'Tippy,' a Telegram tip bot that makes community microtransactions feel generous and fun. The /tip @user 100 command sends a beautifully formatted receipt card with the recipient's name, amount in monospace, and a personalized message field. /balance shows a premium wallet card with current balance, lifetime sent/received totals, and a mini sparkline of recent activity. /withdraw generates a QR code inline for easy deposits. A daily bonus claim button appears every 24 hours with a satisfying 'Claimed!' animation. The leaderboard ranks top tippers weekly with medal emojis (🥇🥈🥉) and total tipped amounts. Transaction history is viewable as paginated inline cards with timestamps and counterparties. Admin treasury commands are hidden behind a clean dashboard menu. Inspired by NanoTipper's simplicity and Cash App's receipt design."},
-    {"name": "Discord Giveaway Bot", "type_id": 3, "description": "Create 'LuckyDraw,' a Discord giveaway bot that turns every contest into a community celebration. The /giveaway command launches a stunning embed — prize title with a trophy emoji, shimmering countdown timer that ticks down in real-time, participant counter that pulses with each new entry, and a prominent reaction button (🎉) that members tap to enter. When the timer hits zero, the winner reveal is dramatic: the embed transforms with a golden border, the winner's avatar and username display center-stage, confetti reactions flood the message, and the winner gets an instant DM with a claim button. /raffle draws instant winners for quick contests. Giveaway history tracks past winners, prize values, and participation rates. Role-restricted entries let admins limit giveaways to specific roles. Every embed uses the bot's branded color scheme — deep purple with gold accents for the premium contest feel. Inspired by GiveawayBot's reliability with premium visual polish."},
+    {"name": "Telegram Tip Bot", "type_id": 2, "bot_token_env": "TELEGRAM_BOT_TOKEN_4", "description": "Build 'Tippy,' a Telegram tip bot that makes community microtransactions feel generous and fun. The /tip @user 100 command sends a beautifully formatted receipt card with the recipient's name, amount in monospace, and a personalized message field. /balance shows a premium wallet card with current balance, lifetime sent/received totals, and a mini sparkline of recent activity. /withdraw generates a QR code inline for easy deposits. A daily bonus claim button appears every 24 hours with a satisfying 'Claimed!' animation. The leaderboard ranks top tippers weekly with medal emojis (🥇🥈🥉) and total tipped amounts. Transaction history is viewable as paginated inline cards with timestamps and counterparties. Admin treasury commands are hidden behind a clean dashboard menu. Inspired by NanoTipper's simplicity and Cash App's receipt design."},
+    {"name": "Discord Giveaway Bot", "type_id": 3, "bot_token_env": "DISCORD_BOT_TOKEN_3", "description": "Create 'LuckyDraw,' a Discord giveaway bot that turns every contest into a community celebration. The /giveaway command launches a stunning embed — prize title with a trophy emoji, shimmering countdown timer that ticks down in real-time, participant counter that pulses with each new entry, and a prominent reaction button (🎉) that members tap to enter. When the timer hits zero, the winner reveal is dramatic: the embed transforms with a golden border, the winner's avatar and username display center-stage, confetti reactions flood the message, and the winner gets an instant DM with a claim button. /raffle draws instant winners for quick contests. Giveaway history tracks past winners, prize values, and participation rates. Role-restricted entries let admins limit giveaways to specific roles. Every embed uses the bot's branded color scheme — deep purple with gold accents for the premium contest feel. Inspired by GiveawayBot's reliability with premium visual polish."},
     {"name": "Weather Alert Scheduler", "type_id": 5, "description": "Build 'SkyWatch,' a scheduled weather alert system that delivers forecasts like a personal meteorologist. Every morning at 6:00 AM, a beautifully formatted weather briefing arrives via email and Telegram: current conditions with a large emoji icon (☀️⛅🌧️⛈️), hourly temperature graph for the next 12 hours, 'bring an umbrella' alerts when precipitation probability exceeds 40%, and a 7-day outlook as a scannable table. Severe weather alerts (storm warnings, heat advisories, frost alerts) fire immediately with a red-priority push notification including safety recommendations. Air quality index tracking shows AQI value with color-coded health categories (good/moderate/unhealthy). UV index warnings remind users to apply sunscreen when the index exceeds 6. Users configure multiple locations — home, work, travel destination — and switch between them. The message format uses clean section headers, emoji weather icons, and temperature trend arrows. Inspired by Carrot Weather's personality and Apple Weather's visual design."},
     {"name": "RSS Monitor Scheduler", "type_id": 5, "description": "Create 'FeedCurator,' an RSS feed monitor scheduler that delivers a curated content briefing like a personal editorial assistant. Users subscribe to multiple RSS feeds — TechCrunch, Hacker News, The Verge, specialized blogs — and the scheduler compiles new articles every 4 hours into a single digest email. Keyword filters work bidirectionally: 'include' keywords surface relevant articles ('AI, GPT, startup'), while 'exclude' keywords suppress noise ('crypto spam, sponsored, ad). Duplicate detection prevents the same story from appearing multiple times across feeds. Each article in the digest includes: source name as a badge, title as a link, a 2-line AI-generated summary that captures the key insight, and a relevance score. Trending topics across all feeds are highlighted at the top: '🔥 Trending: GPT-5, Apple Vision Pro, Startup Funding.' The digest uses a clean newsletter format with section dividers, monospace timestamps, and a table of contents at the top. Per-feed enable/disable lets users temporarily mute noisy sources. Inspired by Axios newsletters and Feedly's curation features."},
     {"name": "Server Health Monitor", "type_id": 5, "description": "Build 'PulseGuard,' a scheduled server health monitoring system that watches infrastructure like a 24/7 operations command center. Every 5 minutes, the scheduler pings configured URLs (API endpoints, websites, services) and records response times. If any endpoint fails to respond within 5 seconds or returns a 5xx error, an immediate alert fires to Telegram and email with: the failing URL, HTTP status code, response time if available, and the timestamp. CPU usage alerts trigger above 80% sustained for 3 checks (15 minutes). RAM alerts fire above 90%. Disk space warnings at 85%, critical at 95%. SSL certificate expiry warnings send at 30 days, 7 days, and 1 day before expiration. Response time trends are tracked and a daily status report at 09:00 summarizes: uptime percentage per endpoint (99.98%), average response time with trend arrow (↑ slower / ↓ faster), total incidents in the last 24h, and a clean status table with green/yellow/red indicators. The daily report uses monospace numbers, emoji status indicators (✅⚠️🔴), and a professional ops-team tone. Inspired by Pingdom alerts and UptimeRobot dashboards."},
@@ -487,19 +494,29 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {AUTH_TOKEN}", "Content-Type": "application/json"}
 
 
-def create_project(name: str, description: str, type_id: int) -> Optional[dict]:
+def create_project(name: str, description: str, type_id: int, bot_token: str = None) -> Optional[dict]:
     """Create a project via the API. Returns project dict or None.
 
     Handles 409 (another creation in progress) by waiting and retrying up to
     PROJECT_TIMEOUT seconds — the API enforces one creation at a time per user.
+
+    Args:
+        name: Project name
+        description: Project description (build prompt)
+        type_id: Project type (1=website, 2=telegram, 3=discord, 5=scheduler)
+        bot_token: Bot token (required for type_id 2 and 3)
     """
+    body: dict = {"name": name, "description": description, "type_id": type_id}
+    if bot_token:
+        body["bot_token"] = bot_token
+
     start = time.time()
     while time.time() - start < PROJECT_TIMEOUT:
         resp = _request(
             "POST",
             f"{API_URL}/projects",
             headers=_headers(),
-            json_body={"name": name, "description": description, "type_id": type_id},
+            json_body=body,
             timeout=30,
         )
         if resp is None:
@@ -688,8 +705,20 @@ def run_templates(
             stats.already_exists += 1
             continue
 
+        # Resolve bot token from env if the template requires one
+        bot_token = None
+        token_env = tmpl.get("bot_token_env")
+        if token_env:
+            bot_token = os.getenv(token_env, "")
+            if not bot_token:
+                log.warning(f"  ⏭️ Skipped — {token_env} not set (required for bot project)")
+                log.warning(f"      Set it: export {token_env}=<token_from_botfather_or_discord_portal>")
+                stats.skipped += 1
+                continue
+            log.info(f"  Using bot token from {token_env}")
+
         # Create + wait + mark
-        project = create_project(name, tmpl["description"], tmpl["type_id"])
+        project = create_project(name, tmpl["description"], tmpl["type_id"], bot_token=bot_token)
         if not project:
             stats.failed += 1
             continue
@@ -762,8 +791,18 @@ def run_gallery(
             stats.already_exists += 1
             continue
 
+        # Resolve bot token from env if the gallery item requires one
+        bot_token = None
+        token_env = item.get("bot_token_env")
+        if token_env:
+            bot_token = os.getenv(token_env, "")
+            if not bot_token:
+                log.warning(f"  ⏭️ Skipped — {token_env} not set (required for bot project)")
+                stats.skipped += 1
+                continue
+
         # Create + wait + publish
-        project = create_project(name, item["description"], item["type_id"])
+        project = create_project(name, item["description"], item["type_id"], bot_token=bot_token)
         if not project:
             stats.failed += 1
             continue
@@ -928,7 +967,20 @@ if __name__ == "__main__":
                             g_stats.already_exists += 1
                     continue
 
-                project = create_project(name, item["description"], item["type_id"])
+                bot_token = None
+                token_env = item.get("bot_token_env")
+                if token_env:
+                    bot_token = os.getenv(token_env, "")
+                    if not bot_token:
+                        log.warning(f"  [W{worker_id}] ⏭️ Skipped — {token_env} not set")
+                        with lock:
+                            if kind == "template":
+                                t_stats.skipped += 1
+                            else:
+                                g_stats.skipped += 1
+                        continue
+
+                project = create_project(name, item["description"], item["type_id"], bot_token=bot_token)
                 if not project:
                     with lock:
                         if kind == "template":
