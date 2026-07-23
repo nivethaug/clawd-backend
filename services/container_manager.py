@@ -600,9 +600,14 @@ class ContainerManager:
         Returns the number of processes killed.
         """
         if spare_patterns is None:
-            # By default, spare anything that looks like an active Claude
-            # chat session or its chrome-devtools MCP server.
-            spare_patterns = ["claude", "chrome-devtools-mcp"]
+            # Spare active Claude sessions, MCP servers, AND build tools.
+            # Build tools (node/npm/vite/esbuild) are spared because a parallel
+            # project creation may be running its own build. Killing the other
+            # project's build would cause exit 137.
+            spare_patterns = [
+                "claude", "chrome-devtools-mcp",
+                "npm", "vite", "esbuild",  # build tools from parallel creation
+            ]
 
         # List all PIDs except PID 1
         r = _run_docker([
