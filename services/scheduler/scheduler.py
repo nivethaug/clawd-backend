@@ -51,8 +51,6 @@ def _execute_single_job(job: dict):
     project_path = job.get('project_path', '')
     task_type = job.get('task_type', 'unknown')
 
-    logger.info(f"[JOB-DEBUG] Starting job {job_id}: type={task_type} project={project_id} path={project_path}")
-
     try:
         result = execute_job(
             project={"id": project_id, "path": project_path},
@@ -71,12 +69,10 @@ def _execute_single_job(job: dict):
         # Log the execution
         log_job(job_id, status, message)
 
-        logger.info(f"[JOB-DEBUG] Job {job_id} done: status={status} message={message[:100]} next_run={next_run}")
+        logger.info(f"Job {job_id} ({task_type}): {status} - {message}")
 
     except Exception as e:
-        logger.error(f"[JOB-DEBUG] Job {job_id} EXCEPTION: {e}")
-        import traceback
-        logger.error(f"[JOB-DEBUG] Job {job_id} TRACE: {traceback.format_exc()}")
+        logger.error(f"Job {job_id} execution error: {e}")
         try:
             log_job(job_id, 'failed', str(e))
         except Exception:

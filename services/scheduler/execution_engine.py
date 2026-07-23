@@ -95,18 +95,9 @@ def execute_job(project: dict, job: dict) -> dict:
     project_path = project.get("path", "")
 
     logger.info(
-        f"[EXEC-DEBUG] Job {job.get('id')} project={project_id} "
-        f"task_type={job.get('task_type')} sandbox={_USE_SANDBOX} "
-        f"path={project_path}"
+        f"Executing job {job.get('id')} for project {project_id} "
+        f"(task_type={job.get('task_type')}, sandbox={_USE_SANDBOX})"
     )
-    if project_path:
-        path_exists = os.path.isdir(project_path)
-        executor_exists = os.path.isfile(os.path.join(project_path, "scheduler", "executor.py"))
-        logger.info(
-            f"[EXEC-DEBUG] path exists={path_exists} executor exists={executor_exists} "
-            f"EXECUTION_MODE={os.getenv('EXECUTION_MODE', 'local')} "
-            f"SANDBOX_SCRIPT={_SANDBOX_SCRIPT} exists={os.path.isfile(_SANDBOX_SCRIPT)}"
-        )
 
     if _USE_SANDBOX:
         return _execute_in_sandbox(project_id, project_path, job)
@@ -197,23 +188,17 @@ def _execute_in_sandbox(project_id: int, project_path: str, job: dict) -> dict:
     plus a retry for race conditions after scheduler restart.
     """
     # Check if path exists, if not try to sync from container, then retry
-    logger.info(f"[SANDBOX-DEBUG] checking path: {project_path}")
     for attempt in range(3):
         if os.path.isdir(project_path):
-            logger.info(f"[SANDBOX-DEBUG] path found on attempt {attempt + 1}: {project_path}")
             break
-        logger.warning(f"[SANDBOX-DEBUG] path NOT found (attempt {attempt + 1}/3): {project_path}")
         # Try container sync on first miss
         if attempt == 0:
-            logger.info(f"[SANDBOX-DEBUG] attempting container sync for project {project_id}")
             if _sync_from_container(project_id, project_path):
-                logger.info(f"[SANDBOX-DEBUG] container sync succeeded, rechecking path")
                 continue  # Sync succeeded, recheck path
-            else:
-                logger.warning(f"[SANDBOX-DEBUG] container sync failed")
         if attempt < 2:
             logger.warning(
-                f"[SANDBOX-DEBUG] retrying in 3s: {project_path}"
+                f"project_path not found (attempt {attempt + 1}/3), "
+                f"retrying in 3s: {project_path}"
             )
             import time as _time
             _time.sleep(3)
