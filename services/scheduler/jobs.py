@@ -239,18 +239,21 @@ def pause_job(job_id: int):
 
 
 def resume_job(job_id: int):
-    """Resume a paused job by recalculating next_run."""
+    """Resume a paused job — fire immediately (next_run = NOW()).
+
+    Sets next_run to NOW() so the next scheduler poll (within 10s) picks
+    it up. The user expects the job to start running right away after
+    resume, not wait a full interval cycle.
+    """
     job = get_job(job_id)
     if not job:
         raise ValueError(f"Job {job_id} not found")
 
-    next_run = calculate_next_run(job['job_type'], job['schedule_value'])
-
     with get_db() as cur:
         cur.execute("""
-            UPDATE scheduler_jobs SET status = 'active', next_run = %s
+            UPDATE scheduler_jobs SET status = 'active', next_run = NOW()
             WHERE id = %s
-        """, (next_run, job_id))
+        """, (job_id,))
         conn = cur._connection
         conn.commit()
 
