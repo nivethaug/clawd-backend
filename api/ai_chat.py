@@ -376,6 +376,25 @@ async def process_message(
         }
         
         if not active_project:
+            # Before showing selection prompt, try to extract project name from
+            # the user's message (e.g., "switch to webjob-abc123" or just
+            # "webjob-abc123"). This lets users switch projects via text on
+            # Telegram without tapping inline buttons.
+            if projects:
+                msg_lower = message.lower().strip()
+                for project in projects:
+                    domain = project.get("domain", "").lower()
+                    name = project.get("name", "").lower()
+                    if domain and (domain in msg_lower or f"switch to {domain}" in msg_lower
+                                   or name in msg_lower or f"switch to {name}" in msg_lower):
+                        active_project = project
+                        logger.info(f"[AI-CHAT:TELEGRAM] ✓ Auto-switched from message text: {domain}")
+                        # Persist the selection
+                        chat_repo.set_active_project(user_id, domain)
+                        await session_manager.update_session(session_id, {"active_project_id": domain})
+                        break
+
+        if not active_project:
             if source == "telegram":
                 # Telegram with no project: DON'T send to LLM at all.
                 # Return instant "select a project" with inline buttons.
