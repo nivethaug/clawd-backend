@@ -189,24 +189,64 @@ Website Creation Rules:
 Telegram Bot Creation Rules:
 - Default to a maximum of 5 commands. Only generate additional commands if the user explicitly requests more.
 - Always include: Bot Purpose, Commands, User Flow, Optional AI Features, Integrations only if needed, Deployment Notes, Final Expectations.
-- Keep bot specifications practical and MVP-focused.""",
+- Keep bot specifications practical and MVP-focused.
+- Specify the bot personality, response tone, and formatting style (inline keyboards, emoji, markdown).
+- Always include a /start welcome message with inline menu or help listing.
+- Include a /help command that lists all available commands with descriptions.
+- If AI features are requested, specify: which model, response length, system prompt direction, and multi-language support.
+- Specify whether the bot uses inline keyboards, reply keyboards, or plain text for navigation.
+- Include error handling direction: user-friendly messages, never raw exceptions, graceful fallbacks.
+- If integrations are needed, name the external API and the data flow direction (bot sends/receives).
+- Describe the conversation memory strategy: per-user context, session timeout, max history.
+- For e-commerce bots, specify: product catalog format, cart flow, payment method, order tracking.
+- For community bots, specify: moderation features, welcome flow, captcha, anti-spam rules.
+- For AI assistant bots, specify: system prompt direction, response formatting, rate limiting, fallback behavior.""",
         "discordbot": """Selected Project Type: Discord Bot
 
 Discord Bot Creation Rules:
 - Default to a maximum of 5 slash commands. Only generate additional slash commands if the user explicitly requests more.
 - Include: Bot Purpose, Slash Commands, Events, Permissions, Optional AI Features, Final Expectations.
-- Keep Discord bot specifications practical and MVP-focused.""",
+- Keep Discord bot specifications practical and MVP-focused.
+- Specify the bot's embed style: color scheme, thumbnail usage, footer text, field layout.
+- Always include a /help slash command listing all commands with descriptions.
+- Specify which Discord events the bot listens to (on_message, on_member_join, on_reaction_add, etc).
+- Include role/permission requirements: which roles can use admin commands, default permissions.
+- If moderation features: specify warn/mute/kick/ban flow, logging channel, auto-mod rules.
+- If music features: specify source (YouTube/Spotify), queue management, audio quality, DJ roles.
+- If AI features: specify model, response length, system prompt direction, thread vs channel replies.
+- Include error handling: user-friendly embed messages, never raw exceptions.
+- For community bots: specify welcome message format, auto-role assignment, reaction roles.
+- For utility bots: specify the core workflow, data sources, and response formatting.""",
         "tradingbot": """Selected Project Type: Trading Bot
 
 Trading Bot Creation Rules:
 - Always include: Strategy, Indicators, Risk Management, Stop Loss, Take Profit, Position Sizing, Exchange, Final Expectations.
 - Risk management is mandatory.
-- Never imply guaranteed profit.""",
+- Never imply guaranteed profit.
+- Specify the trading strategy clearly: trend following, mean reversion, grid, DCA, arbitrage, or signal-based.
+- Name the technical indicators used (RSI, MACD, Bollinger Bands, EMA, etc) and their parameters.
+- Specify the exchange and API: spot vs futures, sandbox vs live, WebSocket vs REST polling.
+- Risk parameters must include: max position size (% of capital), max daily loss, max open positions, cooldown after loss.
+- Always include paper trading / backtesting mode as the default before live trading.
+- Specify the notification system: Telegram alerts on trade execution, Discord webhook for summaries, email for daily reports.
+- Include a dashboard or status command showing: open positions, P&L, strategy status, last trades.
+- Never remove or weaken risk management controls unless the user explicitly requests it with a warning.""",
         "scheduler": """Selected Project Type: Scheduler
 
 Scheduler Creation Rules:
-- Keep the prompt focused on: Jobs, Schedule, Retry, Notifications, Monitoring.
-- Describe the recurring workflows clearly.""",
+- Always include: Job Purpose, Data Sources, Schedule, Delivery Channels, Message Format, Final Expectations.
+- Describe the recurring workflows clearly with specific schedule values (e.g., every 5m, hourly, daily:09:00).
+- Specify the data source: public API name + endpoint, web scraping target, or computed value.
+- For API-based jobs, name the exact API (CoinGecko, Open-Meteo, gold-api.com, Hacker News API, etc).
+- For scraping jobs, specify: target URL, data to extract, and whether JS rendering is needed.
+- Specify delivery channels: email (SMTP), Telegram (bot message), Discord (webhook), or API endpoint.
+- Describe the message format: what data fields to include, formatting style, dynamic variables.
+- If multiple data points are needed, specify the FETCH_DATA_REGISTRY entries and template variables.
+- Include error handling direction: what happens on API failure, rate limit, or network timeout.
+- For alert jobs, specify: threshold conditions (above/below/percent change), comparison logic, cooldown period.
+- For digest jobs, specify: content sections, compilation order, delivery time, HTML vs plain text format.
+- For monitoring jobs, specify: what to check, healthy vs unhealthy thresholds, alert frequency.
+- Always mention that jobs use the platform's job_manager.py and scheduler_jobs API for creation.""",
         "custom": """Selected Project Type: Custom
 
 Custom Project Creation Rules:
@@ -226,12 +266,18 @@ Website Editing Rules:
 
 Telegram Bot Editing Rules:
 - Include affected commands, message handlers, user flow changes, integrations if needed, constraints, and final behavior.
-- Default to a maximum of 5 commands. Only include additional commands if the user explicitly requests more.""",
+- Default to a maximum of 5 commands. Only include additional commands if the user explicitly requests more.
+- Preserve existing command structure and keyboard navigation unless the edit explicitly changes it.
+- Specify which handler files are affected (handlers/*.py, services/ai_logic.py, etc).
+- If AI behavior changes: specify new system prompt direction, response format, or model parameters.""",
         "discordbot": """Selected Project Type: Discord Bot
 
 Discord Bot Editing Rules:
 - Include affected slash commands, events, permission behavior, optional AI behavior, constraints, and final behavior.
-- Default to a maximum of 5 slash commands. Only include additional slash commands if the user explicitly requests more.""",
+- Default to a maximum of 5 slash commands. Only include additional slash commands if the user explicitly requests more.
+- Preserve existing embed style and command structure unless explicitly changing them.
+- Specify which cogs/modules/files are affected.
+- If moderation rules change: specify the new thresholds, logging format, and escalation flow.""",
         "tradingbot": """Selected Project Type: Trading Bot
 
 Trading Bot Editing Rules:
@@ -241,7 +287,12 @@ Trading Bot Editing Rules:
 
 Scheduler Editing Rules:
 - Include affected jobs, schedule, retry behavior, notifications, monitoring, constraints, and final behavior.
-- Preserve existing active jobs unless the user explicitly asks to replace them.""",
+- Preserve existing active jobs unless the user explicitly asks to replace them.
+- Specify which executor.py handlers are affected and whether new task_type routes need to be added.
+- If data sources change: name the new API endpoint or scraping target.
+- If delivery channels change: specify new email/Telegram/Discord configuration.
+- If schedule changes: specify the new interval and whether the job should fire immediately after update.
+- Always mention buildpublish.py for deploying executor changes.""",
         "custom": """Selected Project Type: Custom
 
 Custom Project Editing Rules:
