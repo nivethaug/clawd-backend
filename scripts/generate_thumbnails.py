@@ -116,7 +116,7 @@ def capture_screenshot(url: str, output_path: str) -> bool:
     raw_path = output_path.replace(".png", "_raw.png")
 
     cmd = [
-        "/usr/bin/chromium",
+        os.getenv("CHROMIUM_PATH", "/usr/bin/chromium"),
         "--headless=new",
         "--no-sandbox",
         "--disable-dev-shm-usage",
@@ -451,8 +451,11 @@ if __name__ == "__main__":
 
     # Verify Chromium is available
     import shutil
-    if not shutil.which("chromium"):
-        log.error("ERROR: chromium not found. Install: apt install chromium")
+    chromium_path = os.getenv("CHROMIUM_PATH", "/usr/bin/chromium")
+    if not Path(chromium_path).exists() and not shutil.which("chromium"):
+        log.error(f"ERROR: chromium not found at {chromium_path}. Install: apt install chromium OR set CHROMIUM_PATH env")
+        log.error("  On main VPS: symlink chrome-headless-shell → /usr/bin/chromium")
+        log.error("  On worker VPS: apt install chromium")
         sys.exit(1)
 
     log.info(f"{'=' * 50}")
