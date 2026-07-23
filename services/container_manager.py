@@ -591,19 +591,31 @@ class ContainerManager:
         those would SIGKILL the chat (exit code 137) and lose the user's
         in-flight conversation.
 
+        MAX PARALLEL: when a parallel Claude session is detected (sentinel
+        exists), cleanup is SKIPPED ENTIRELY. This is because even with
+        spare_patterns, killing orphaned processes can destabilize the
+        other session's build tools (node, esbuild children). It's safer
+        to leave everything alone and let the build finish naturally.
+        The container reaper handles final cleanup when both sessions end.
+
         Args:
             spare_patterns: substrings matched against each process's
                 /proc/<pid>/cmdline. If a process matches ANY pattern, it is
-                NOT killed. Defaults to claude + chrome-devtools-mcp so
-                active chats survive parallel project creation.
+                NOT killed.
 
         Returns the number of processes killed.
         """
+        # Check if a parallel Claude session is running — if so, skip cleanup
+        # entirely to avoid killing the other session's build dependencies.
+        if self.has_active_claude():
+            logger.info(
+                "[CONTAINER] skipping cleanup in %s — parallel Claude session detected "
+                "(sentinel active). Letting the other build finish naturally.",
+                self.container_name,
+            )
+            return 0
+
         if spare_patterns is None:
-            # Spare active Claude sessions, MCP servers, AND build tools.
-            # Build tools (node/npm/vite/esbuild) are spared because a parallel
-            # project creation may be running its own build. Killing the other
-            # project's build would cause exit 137.
             spare_patterns = [
                 "claude", "chrome-devtools-mcp",
                 "npm", "vite", "esbuild",  # build tools from parallel creation

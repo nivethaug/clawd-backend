@@ -485,6 +485,34 @@ def _check_existing_gallery() -> set[str]:
         return set()
 
 
+def _check_existing_projects() -> set[str]:
+    """Fetch ALL existing project names to prevent duplicates.
+
+    Queries the /projects endpoint (not /templates or /gallery) so we catch
+    duplicates during the creation window — after create_project() returns
+    but before mark_as_template() or publish_to_gallery() runs (~7 min gap).
+
+    This is the PRIMARY dedup check. Called per-item inside the loop (not
+    cached at startup) to catch duplicates created by concurrent runs.
+    """
+    headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
+    resp = _request("GET", f"{API_URL}/projects", headers=headers, timeout=15)
+    if resp is None or resp.status_code not in (200, 201):
+        log.warning("  ⚠️ Could not fetch existing projects — duplicate check disabled")
+        return set()
+    try:
+        data = resp.json()
+        # API returns a list of project dicts
+        projects = data if isinstance(data, list) else data.get("projects", []) if isinstance(data, dict) else []
+        names = set()
+        for p in projects:
+            if isinstance(p, dict):
+                names.add(p.get("name", ""))
+        return names
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return set()
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Core API operations
 # ──────────────────────────────────────────────────────────────────────
@@ -676,8 +704,8 @@ def run_templates(
     if limit:
         items = items[:limit]
 
-    existing = _check_existing_templates() if not dry_run else set()
-
+    # Don't cache dedup check at startup — re-query per item to catch
+    # duplicates created by concurrent runs or previous partial runs.
     if dry_run:
         log.info(f"\n{'=' * 60}")
         log.info(f"DRY RUN — Templates ({len(items)} items)")
@@ -695,15 +723,17 @@ def run_templates(
         name = tmpl["name"]
         log.info(f"\n[{i}/{len(items)}] {name} ({tmpl['category']})")
 
-        # Resume check
+        # Resume check (progress file)
         if _is_completed(progress, "templates", name):
             log.info(f"  ⏭️ Skipped (already in progress file)")
             stats.skipped += 1
             continue
 
-        # Duplicate check
-        if name in existing:
-            log.info(f"  ⏭️ Skipped (already exists on server)")
+        # Per-item duplicate check — query projects table (not templates)
+        # so we catch duplicates during the creation window.
+        existing_projects = _check_existing_projects()
+        if name in existing_projects:
+            log.info(f"  ⏭️ Skipped (project already exists on server)")
             _mark_completed(progress, "templates", name, None, "already exists")
             stats.already_exists += 1
             continue
@@ -730,19 +760,28 @@ def run_templates(
         log.info(f"  Created project {pid}, waiting for completion...")
         log.debug(f"  Project response: {json.dumps(project)[:200]}")
 
+        # Write progress IMMEDIATELY after project creation — before
+        # waiting for completion. If the process crashes during the
+        # 7-minute build, the progress entry exists and the next run
+        # won't recreate the project.
+        _mark_completed(progress, "templates", name, pid, "project created, waiting for build")
+
         status = wait_for_completion(pid)
         if status == "completed":
             ok = mark_as_template(pid, name, tmpl["description"], tmpl["category"], tmpl.get("featured", False))
             if ok:
                 log.info(f"  📋 Marked as template")
+                # Update progress detail
                 _mark_completed(progress, "templates", name, pid, "template published")
                 stats.created += 1
             else:
-                log.error(f"  ⚠️ Failed to mark as template")
-                stats.failed += 1
+                log.error(f"  ⚠️ Failed to mark as template (project still created)")
+                stats.created += 1  # project exists, just template marking failed
         elif status == "timeout":
+            log.warning(f"  ⏰ Build timed out — project {pid} exists but may be incomplete")
             stats.timeout += 1
         else:
+            log.error(f"  ❌ Build failed")
             stats.failed += 1
 
     stats.end_time = time.time()
@@ -765,8 +804,7 @@ def run_gallery(
     if limit:
         items = items[:limit]
 
-    existing = _check_existing_gallery() if not dry_run else set()
-
+    # Don't cache dedup check at startup — re-query per item
     if dry_run:
         log.info(f"\n{'=' * 60}")
         log.info(f"DRY RUN — Gallery ({len(items)} items)")
@@ -784,15 +822,16 @@ def run_gallery(
         name = item["name"]
         log.info(f"\n[{i}/{len(items)}] {name}")
 
-        # Resume check
+        # Resume check (progress file)
         if _is_completed(progress, "gallery", name):
             log.info(f"  ⏭️ Skipped (already in progress file)")
             stats.skipped += 1
             continue
 
-        # Duplicate check
-        if name in existing:
-            log.info(f"  ⏭️ Skipped (already exists on server)")
+        # Per-item duplicate check — query projects table
+        existing_projects = _check_existing_projects()
+        if name in existing_projects:
+            log.info(f"  ⏭️ Skipped (project already exists on server)")
             _mark_completed(progress, "gallery", name, None, "already exists")
             stats.already_exists += 1
             continue
@@ -817,6 +856,9 @@ def run_gallery(
         log.info(f"  Created project {pid}, waiting for completion...")
         log.debug(f"  Project response: {json.dumps(project)[:200]}")
 
+        # Write progress IMMEDIATELY after project creation
+        _mark_completed(progress, "gallery", name, pid, "project created, waiting for build")
+
         status = wait_for_completion(pid)
         if status == "completed":
             ok = publish_to_gallery(pid, name, item["description"], i <= 5)
@@ -825,8 +867,8 @@ def run_gallery(
                 _mark_completed(progress, "gallery", name, pid, "gallery published")
                 stats.created += 1
             else:
-                log.error(f"  ⚠️ Failed to publish to gallery")
-                stats.failed += 1
+                log.error(f"  ⚠️ Failed to publish to gallery (project still created)")
+                stats.created += 1
         elif status == "timeout":
             stats.timeout += 1
         else:
@@ -887,10 +929,13 @@ if __name__ == "__main__":
             sys.exit(1)
 
     # Load or reset progress
-    if args.fresh:
+    if args.fresh and not args.dry_run:
         progress: Dict[str, Any] = {"templates": {}, "gallery": {}}
         _save_progress(progress)
         log.info("📂 Started fresh (progress file reset)")
+    elif args.fresh and args.dry_run:
+        progress: Dict[str, Any] = {"templates": {}, "gallery": {}}
+        log.info("📂 Fresh mode (dry-run — progress file NOT reset)")
     else:
         progress = _load_progress()
         completed_t = len(progress.get("templates", {}))
