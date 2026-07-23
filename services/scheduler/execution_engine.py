@@ -108,6 +108,74 @@ def execute_job(project: dict, job: dict) -> dict:
 # Sandbox path (prod) — subprocess + bwrap
 # ---------------------------------------------------------------------------
 
+def _sync_from_container(project_id: int, project_path: str) -> bool:
+    """Sync project files from Docker container to host if missing.
+
+    The scheduler runs on the host (worker VPS) and looks for executor.py at
+    the host bind-mount path (/workspaces/user_{id}/...). If the path is
+    missing (project created from a different VPS, bind mount stale, etc.),
+    this function copies the files from the Docker container where Claude
+    created them.
+
+    Returns True if path exists after sync attempt, False if still missing.
+    """
+    executor_path = os.path.join(project_path, "scheduler", "executor.py")
+    if os.path.isfile(executor_path):
+        return True  # Already exists, nothing to do
+
+    logger.info("[EXEC-ENGINE] executor missing, syncing from container: %s", project_path)
+
+    # Extract user_id from the host path
+    user_id = None
+    if "/user_" in project_path:
+        parts = project_path.split("/user_")
+        if len(parts) > 1:
+            uid_str = parts[1].split("/")[0]
+            if uid_str.isdigit():
+                user_id = int(uid_str)
+
+    if not user_id:
+        logger.warning("[EXEC-ENGINE] could not extract user_id from path: %s", project_path)
+        return False
+
+    container_name = f"dreamagent-user-{user_id}"
+
+    # Map host path → container path:
+    # /workspaces/user_24/scheduler/1811_xxx → /workspace/scheduler/1811_xxx
+    container_path = project_path.replace(f"/workspaces/user_{user_id}", "/workspace", 1)
+
+    try:
+        import subprocess as _sp
+        # Check if container has the files
+        check = _sp.run(
+            ["docker", "exec", container_name, "test", "-f",
+             os.path.join(container_path, "scheduler", "executor.py")],
+            capture_output=True, timeout=10,
+        )
+        if check.returncode != 0:
+            logger.warning("[EXEC-ENGINE] executor not in container either: %s", container_path)
+            return False
+
+        # Sync from container to host
+        os.makedirs(project_path, exist_ok=True)
+        _sp.run(
+            ["docker", "cp", f"{container_name}:{container_path}/.", project_path],
+            capture_output=True, timeout=60,
+        )
+        logger.info("[EXEC-ENGINE] ✓ synced project %s from container %s",
+                     project_id, container_name)
+        return os.path.isfile(executor_path)
+
+    except _sp.TimeoutExpired:
+        logger.warning("[EXEC-ENGINE] container sync timed out for project %s", project_id)
+    except FileNotFoundError:
+        logger.debug("[EXEC-ENGINE] docker not available on this VPS")
+    except Exception as e:
+        logger.warning("[EXEC-ENGINE] container sync failed for project %s: %s", project_id, e)
+
+    return False
+
+
 def _execute_in_sandbox(project_id: int, project_path: str, job: dict) -> dict:
     """Run execute_task inside scripts/scheduler-sandbox.sh via subprocess.
 
@@ -116,17 +184,17 @@ def _execute_in_sandbox(project_id: int, project_path: str, job: dict) -> dict:
         stdout → one JSON line: {"status":..., "message":...}
         exit 0 always (status field carries success/failure)
 
-    Includes a 2-retry with 3s delay for path-not-found errors. This handles
-    the race condition where the scheduler polls immediately after a restart
-    (from buildpublish.py) but the filesystem/container hasn't fully settled.
-    The first attempt may fail with 'project_path not found', but the path
-    appears within 3 seconds once the mount completes.
+    Includes auto-sync from Docker container if the host path is missing,
+    plus a retry for race conditions after scheduler restart.
     """
-    # Retry path check — handles race condition after scheduler restart
-    # where the container mount isn't ready yet on the first poll.
+    # Check if path exists, if not try to sync from container, then retry
     for attempt in range(3):
         if os.path.isdir(project_path):
             break
+        # Try container sync on first miss
+        if attempt == 0:
+            if _sync_from_container(project_id, project_path):
+                continue  # Sync succeeded, recheck path
         if attempt < 2:
             logger.warning(
                 f"project_path not found (attempt {attempt + 1}/3), "
