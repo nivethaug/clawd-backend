@@ -391,7 +391,7 @@ async def process_message(
                         logger.info(f"[AI-CHAT:TELEGRAM] ✓ Auto-switched from message text: {domain}")
                         # Persist the selection
                         chat_repo.set_active_project(user_id, domain)
-                        await session_manager.update_session(session_id, {"active_project_id": domain})
+                        await session_manager.set_active_project(session_id, domain)
                         break
 
         if not active_project:
