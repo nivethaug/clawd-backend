@@ -79,7 +79,7 @@ CONTAINER_USER_UID: int = int(os.getenv("CONTAINER_USER_UID", "1001"))
 CONTAINER_USER_GID: int = int(os.getenv("CONTAINER_USER_GID", "1001"))
 
 # Idle timeout — container stopped after this much inactivity (seconds).
-CONTAINER_IDLE_TIMEOUT_SECONDS: int = int(os.getenv("CONTAINER_IDLE_TIMEOUT_SECONDS", "900"))
+CONTAINER_IDLE_TIMEOUT_SECONDS: int = int(os.getenv("CONTAINER_IDLE_TIMEOUT_SECONDS", "4200"))
 
 # Subprocess timeout for docker CLI calls (not for the containerized work itself).
 _DOCKER_CMD_TIMEOUT = 30
@@ -508,12 +508,13 @@ class ContainerManager:
         sentinel_r = _run_docker([
             "exec", self.container_name,
             "sh", "-c",
-            # Check if sentinel exists AND was touched within 30 minutes.
-            # -maxdepth 0 means only check the file itself, not recurse.
+            # Check if sentinel exists AND was touched within 70 minutes.
+            # 70 min covers long project creation builds (up to 30 min openclaw
+            # + build time) plus the heartbeat re-touching every ~30s.
             "if [ -f /tmp/.claude_active ]; then "
             "  AGE=$(( $(date +%s) - $(stat -c %Y /tmp/.claude_active 2>/dev/null || echo 0) )); "
-            "  if [ $AGE -lt 1800 ]; then echo yes; exit 0; fi; "
-            "  # Sentinel is stale (>30 min) — clean it up "
+            "  if [ $AGE -lt 4200 ]; then echo yes; exit 0; fi; "
+            "  # Sentinel is stale (>70 min) — clean it up "
             "  rm -f /tmp/.claude_active; "
             "fi; "
             "echo no",

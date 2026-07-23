@@ -394,6 +394,38 @@ def _get_project(project_id: int) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+def _mark_container_active(user_id: Optional[int]) -> None:
+    """Mark the user's container as having an active Claude session.
+
+    Touches the sentinel file inside the container so the reaper doesn't
+    stop it during a long-running build (project creation takes 20-30 min).
+    """
+    if not user_id:
+        return
+    try:
+        import os as _os
+        if _os.getenv("EXECUTION_MODE", "local").lower() == "container":
+            from services.container_manager import ContainerManager
+            ContainerManager(user_id).mark_claude_active()
+            logger.info("[PROJECT-RUN] marked container active for user %s (reaper protection)", user_id)
+    except Exception as e:
+        logger.warning("[PROJECT-RUN] failed to mark container active: %s", e)
+
+
+def _mark_container_inactive(user_id: Optional[int]) -> None:
+    """Clear the sentinel after build completes — reaper can stop the container."""
+    if not user_id:
+        return
+    try:
+        import os as _os
+        if _os.getenv("EXECUTION_MODE", "local").lower() == "container":
+            from services.container_manager import ContainerManager
+            ContainerManager(user_id).mark_claude_inactive()
+            logger.info("[PROJECT-RUN] marked container inactive for user %s", user_id)
+    except Exception as e:
+        logger.warning("[PROJECT-RUN] failed to mark container inactive: %s", e)
+
+
 def _database_url() -> Optional[str]:
     """DEPRECATED — returns the PLATFORM database URL.
 
@@ -912,6 +944,12 @@ def _run_website_pipeline(
         write_initial_environment_variables(env_path, initial_env_vars)
         append_chunk(run_id, "log", f"Initial environment variables applied: {[item.get('key') for item in initial_env_vars]}")
 
+    # Mark the container as having active Claude so the reaper doesn't kill it
+    # mid-build. openclaw_wrapper.py invokes Claude inside the container for
+    # up to 30 minutes. Without the sentinel, the reaper sees the container
+    # as idle (last_used_at is stale) and stops it → build fails (exit 137).
+    _mark_container_active(user_id)
+
     openclaw_code = _run_logged_subprocess(
         run_id,
         [
@@ -928,6 +966,10 @@ def _run_website_pipeline(
         timeout=int(os.getenv("PROJECT_CREATION_OPENCLAW_TIMEOUT", "1800")),
         prefix="[OPENCLAW] ",
     )
+
+    # Clear the sentinel — build is done, reaper can stop the container
+    _mark_container_inactive(user_id)
+
     if openclaw_code != 0:
         raise RuntimeError(f"openclaw_wrapper.py failed with exit code {openclaw_code}")
 
