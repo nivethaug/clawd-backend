@@ -22,15 +22,20 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("ACCESS_TOKEN_EXPIRE_HOURS", "24"))
 
 # Webhook Configuration
-# IMPORTANT: Set WEBHOOK_URL or WEBHOOK_DOMAIN in environment for production
-# If not set, webhook registration will be skipped (useful for development/polling mode)
+# The webhook URL is registered with Telegram so it can send updates to our bot.
+# nginx routes {domain}-api.dreamagent.cloud → bot port. The webhook MUST use
+# the -api domain, not the bare domain (which is for the frontend, not the bot).
 WEBHOOK_PORT = int(os.getenv("PORT", "8010"))  # Port for FastAPI server
-WEBHOOK_DOMAIN = os.getenv("WEBHOOK_DOMAIN")  # Domain (e.g., mybot.dreamagent.cloud)
+WEBHOOK_DOMAIN = os.getenv("WEBHOOK_DOMAIN")  # Bare domain (e.g., mybot-abc123)
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
 
-# Construct webhook URL - only set if properly configured
+# Construct webhook URL - only set if properly configured.
+# Uses {domain}-api.dreamagent.cloud (the backend API domain where nginx
+# routes the /webhook endpoint to this bot's port).
 WEBHOOK_URL = None
 if os.getenv("WEBHOOK_URL"):
+    # Explicit full URL takes priority
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 elif WEBHOOK_DOMAIN and WEBHOOK_DOMAIN != "example.com":
-    WEBHOOK_URL = f"https://{WEBHOOK_DOMAIN}.dreamagent.cloud{WEBHOOK_PATH}"
+    # Construct from domain + -api suffix + path
+    WEBHOOK_URL = f"https://{WEBHOOK_DOMAIN}-api.dreamagent.cloud{WEBHOOK_PATH}"
