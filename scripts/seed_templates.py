@@ -664,12 +664,15 @@ def run_templates(
     progress: Dict[str, Any],
     limit: Optional[int] = None,
     dry_run: bool = False,
+    type_filter: Optional[int] = None,
 ) -> RunStats:
     """Create all template projects with resume + duplicate protection."""
     stats = RunStats("Templates")
     stats.start_time = time.time()
 
     items = TEMPLATES
+    if type_filter:
+        items = [t for t in items if t.get("type_id") == type_filter]
     if limit:
         items = items[:limit]
 
@@ -750,12 +753,15 @@ def run_gallery(
     progress: Dict[str, Any],
     limit: Optional[int] = None,
     dry_run: bool = False,
+    type_filter: Optional[int] = None,
 ) -> RunStats:
     """Create all gallery projects with resume + duplicate protection."""
     stats = RunStats("Gallery")
     stats.start_time = time.time()
 
     items = GALLERY
+    if type_filter:
+        items = [g for g in items if g.get("type_id") == type_filter]
     if limit:
         items = items[:limit]
 
@@ -852,6 +858,7 @@ if __name__ == "__main__":
     mode.add_argument("--gallery", action="store_true", help="Create gallery only")
     mode.add_argument("--all", action="store_true", help="Create both (default)")
     parser.add_argument("--limit", type=int, default=None, help="Process only first N items")
+    parser.add_argument("--type", type=int, default=None, help="Filter by project type_id (1=website, 2=telegram, 3=discord, 5=scheduler)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without calling API")
     parser.add_argument("--fresh", action="store_true", help="Ignore previous progress (no resume)")
     parser.add_argument("--resume", action="store_true", default=True, help="Resume from progress (default)")
@@ -1036,9 +1043,9 @@ if __name__ == "__main__":
         all_stats.extend([t_stats, g_stats])
 
     elif args.all or args.templates:
-        all_stats.append(run_templates(progress, args.limit, args.dry_run))
+        all_stats.append(run_templates(progress, args.limit, args.dry_run, type_filter=args.type))
     if (args.parallel <= 1 and args.all) or args.gallery:
-        all_stats.append(run_gallery(progress, args.limit, args.dry_run))
+        all_stats.append(run_gallery(progress, args.limit, args.dry_run, type_filter=args.type))
 
     # Final summary
     overall_end = time.time()
