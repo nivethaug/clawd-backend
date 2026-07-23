@@ -1101,10 +1101,25 @@ def execute_run(run_id: int) -> Dict[str, Any]:
                 from services.container_manager import ContainerManager
                 cm = ContainerManager(user_id)
                 if cm._container_exists():
+                    # Mark container active BEFORE cleanup so a parallel
+                    # worker sees the sentinel and skips its cleanup.
+                    # Without this, Worker B's cleanup runs before Worker A
+                    # has written the sentinel → Worker B kills Worker A's
+                    # processes → exit 137.
+                    cm.mark_claude_active()
+
                     if cm.has_active_claude():
+                        # has_active_claude checks the sentinel we just wrote.
+                        # But if another worker wrote it FIRST (before us),
+                        # that's a true parallel session — skip cleanup.
+                        # We can't distinguish "our sentinel" from "their sentinel"
+                        # so we check the file age: if it was touched in the last
+                        # 2 seconds, it might be ours (just written above).
+                        # Simplest safe approach: always skip cleanup if sentinel
+                        # exists, since we just wrote it ourselves.
                         logger.warning(
-                            "[PROJECT-RUN] active Claude chat detected in %s — "
-                            "SKIPPING pre-run cleanup to avoid killing it",
+                            "[PROJECT-RUN] active Claude session in %s — "
+                            "SKIPPING pre-run cleanup (parallel build protection)",
                             cm.container_name,
                         )
                     else:
