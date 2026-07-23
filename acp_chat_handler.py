@@ -3669,7 +3669,7 @@ def get_acp_chat_handler(session_key: str, project_path: str = None, project_typ
                 """SELECT s.project_id, p.project_path, p.name, p.type_id
                    FROM sessions s
                    JOIN projects p ON s.project_id = p.id
-                   WHERE s.session_key = ?""",
+                   WHERE s.session_key = %s""",
                 (session_key,)
             ).fetchone()
 
@@ -3687,20 +3687,26 @@ def get_acp_chat_handler(session_key: str, project_path: str = None, project_typ
     
     if not project_path:
         return None
-    
-    # Validate project path based on type
-    # type_id 2 = telegram bot, type_id 3 = discord bot (no frontend/src needed)
-    # type_id 1 = website (needs frontend/src)
-    if project_type_id in (2, 3, 5):
-        # Bot/scheduler project - just validate project path exists
-        if not Path(project_path).exists():
-            logger.warning(f"[ACP-CHAT] Project path not found: {project_path}")
-            return None
+
+    # In container mode, skip path validation — the files exist inside the
+    # Docker container, not on the host. The session_chat_worker runs on the
+    # worker VPS where the bind-mount source IS accessible, but the main VPS
+    # API doesn't have these paths. The worker will validate via Docker.
+    _is_container = os.getenv("EXECUTION_MODE", "local").lower() == "container"
+    if not _is_container:
+        # Local mode: validate paths exist on the host filesystem
+        if project_type_id in (2, 3, 5):
+            if not Path(project_path).exists():
+                logger.warning(f"[ACP-CHAT] Project path not found: {project_path}")
+                return None
+        else:
+            frontend_src = Path(project_path) / "frontend" / "src"
+            if not frontend_src.exists():
+                logger.warning(f"[ACP-CHAT] Frontend src not found: {frontend_src}")
+                return None
     else:
-        # Website project - validate frontend/src exists
-        frontend_src = Path(project_path) / "frontend" / "src"
-        if not frontend_src.exists():
-            logger.warning(f"[ACP-CHAT] Frontend src not found: {frontend_src}")
-            return None
+        # Container mode: don't validate host paths — Claude runs inside Docker
+        # and accesses files via the bind mount (/workspace → /workspaces/user_{id})
+        logger.debug(f"[ACP-CHAT] Container mode — skipping path validation for {project_path}")
     
     return ACPChatHandler(project_path, project_name, project_type_id=project_type_id, project_id=db_project_id)

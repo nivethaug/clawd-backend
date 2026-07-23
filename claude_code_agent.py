@@ -81,7 +81,7 @@ def resolve_user_id_for_project(project_id: Optional[int]) -> Optional[int]:
         from database_adapter import get_db
         with get_db() as conn:
             row = conn.execute(
-                "SELECT user_id FROM projects WHERE id = ?",
+                "SELECT user_id FROM projects WHERE id = %s",
                 (project_id,),
             ).fetchone()
         if row:
