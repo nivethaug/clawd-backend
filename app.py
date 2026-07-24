@@ -4944,13 +4944,36 @@ async def internal_chat_execute(request: InternalChatExecuteRequest, request_obj
     Called by the main VPS backend when it can't execute locally (project
     files only exist inside Docker on this worker VPS).
 
-    Same IP guard as /internal/pm2-restart.
+    Uses the same IP guard + SCHEDULER_INTERNAL_ALLOWLIST as /internal/scrape
+    so the main VPS (public IP) can reach it.
     """
     import os as _os
 
     client_host = request_obj.client.host if request_obj.client else ""
+
+    # Allow loopback + Docker bridge + private nets
     is_local = (client_host.startswith("127.") or client_host.startswith("172.")
                 or client_host.startswith("10.") or client_host == "::1")
+
+    # Also check SCHEDULER_INTERNAL_ALLOWLIST (same as /internal/scrape)
+    if not is_local:
+        try:
+            import ipaddress as _ip
+            allowlist_raw = _os.getenv("SCHEDULER_INTERNAL_ALLOWLIST", "").strip()
+            if allowlist_raw:
+                for entry in allowlist_raw.split(","):
+                    entry = entry.strip()
+                    if not entry:
+                        continue
+                    try:
+                        net = _ip.ip_network(entry, strict=False)
+                        if _ip.ip_address(client_host) in net:
+                            is_local = True
+                            break
+                    except ValueError:
+                        continue
+        except Exception:
+            pass
 
     if not is_local:
         raise HTTPException(status_code=403, detail="Internal endpoint — not accessible from public network")
