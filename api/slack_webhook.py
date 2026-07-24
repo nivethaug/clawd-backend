@@ -629,3 +629,141 @@ async def slack_setup_status(x_slack_setup_secret: Optional[str] = Header(None))
         "interactions_url": "/bot/slack/interactions",
         "events_url": "/bot/slack/events",
     }
+
+
+# ---------------------------------------------------------------------------
+# Slack OAuth callback — handles the "Add to Slack" flow
+# ---------------------------------------------------------------------------
+
+@router.get("/bot/slack/oauth/callback")
+async def slack_oauth_callback(
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    state: Optional[str] = None,
+):
+    """Handle Slack OAuth v2 callback.
+
+    After the user authorizes the app via the Slack install URL, Slack
+    redirects here with a ?code= param. We exchange it for bot tokens
+    (bot_access_token + bot_user_id) via oauth.v2.access.
+
+    The tokens are stored in .env for the platform Slack client. Since this
+    is a single-tenant platform bot (not per-user OAuth), we store the bot
+    token globally.
+    """
+    import os
+    import httpx
+    from pathlib import Path
+
+    if error:
+        logger.error(f"[SLACK-OAUTH] Slack returned error: {error}")
+        return _oauth_result_page(False, f"Slack authorization failed: {error}")
+
+    if not code:
+        return _oauth_result_page(False, "Missing authorization code from Slack")
+
+    client_id = os.getenv("SLACK_CLIENT_ID", "")
+    client_secret = os.getenv("SLACK_CLIENT_SECRET", "")
+
+    if not client_id or not client_secret:
+        logger.error("[SLACK-OAUTH] SLACK_CLIENT_ID or SLACK_CLIENT_SECRET not configured")
+        return _oauth_result_page(False, "Server not configured for Slack OAuth")
+
+    redirect_uri = os.getenv(
+            "SLACK_OAUTH_REDIRECT_URI",
+            "https://api.dreamagent.cloud/bot/slack/oauth/callback",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://slack.com/api/oauth.v2.access",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                },
+            )
+            data = resp.json()
+
+        if not data.get("ok"):
+            error_msg = data.get("error", "Unknown error")
+            logger.error(f"[SLACK-OAUTH] oauth.v2.access failed: {error_msg}")
+            return _oauth_result_page(False, f"Slack token exchange failed: {error_msg}")
+
+        bot_token = data.get("access_token", "")
+        bot_user_id = data.get("bot_user_id", "")
+        team_id = data.get("team", {}).get("id", "")
+        team_name = data.get("team", {}).get("name", "")
+        app_id = data.get("app_id", "")
+
+        if not bot_token:
+            return _oauth_result_page(False, "No access token returned from Slack")
+
+        # Store the bot token in .env (single-tenant platform bot)
+        _update_env_var("SLACK_BOT_TOKEN", bot_token)
+        if team_id:
+            _update_env_var("SLACK_TEAM_ID", team_id)
+
+        logger.info(f"[SLACK-OAUTH] ✅ Slack bot authorized for team '{team_name}' ({team_id})")
+
+        # Auto-register slash commands now that we have a bot token
+        try:
+            from services.slack_client import register_slash_commands
+            await register_slash_commands()
+            logger.info("[SLACK-OAUTH] ✅ Slash commands registered")
+        except Exception as reg_err:
+            logger.warning(f"[SLACK-OAUTH] Slash command registration failed: {reg_err}")
+
+        return _oauth_result_page(
+            True,
+            f"Slack bot connected to '{team_name}'! You can now use /dreamagent commands.",
+        )
+
+    except Exception as e:
+        logger.error(f"[SLACK-OAUTH] Callback error: {e}", exc_info=True)
+        return _oauth_result_page(False, f"Internal error: {e}")
+
+
+def _update_env_var(key: str, value: str) -> None:
+    """Update or append a key=value in the backend .env file."""
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    try:
+        lines = env_path.read_text().splitlines() if env_path.exists() else []
+        found = False
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                lines[i] = f"{key}={value}"
+                found = True
+                break
+        if not found:
+            lines.append(f"{key}={value}")
+        env_path.write_text("\n".join(lines) + "\n")
+        os.environ[key] = value
+        logger.info(f"[SLACK-OAUTH] Updated {key} in .env")
+    except Exception as e:
+        logger.warning(f"[SLACK-OAUTH] Failed to update {key} in .env: {e}")
+        os.environ[key] = value
+
+
+def _oauth_result_page(success: bool, message: str):
+    """Return a simple HTML page for the OAuth redirect result."""
+    from fastapi.responses import HTMLResponse
+    color = "#22c55e" if success else "#ef4444"
+    title = "Slack Connected!" if success else "Slack Setup Failed"
+    icon = "✅" if success else "❌"
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>{title}</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+    <body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0b0c10;">
+        <div style="text-align:center;padding:2rem;max-width:400px;">
+            <div style="font-size:3rem;margin-bottom:1rem;">{icon}</div>
+            <h1 style="color:{color};font-size:1.5rem;margin-bottom:0.5rem;">{title}</h1>
+            <p style="color:#a1a1aa;font-size:0.95rem;line-height:1.5;">{message}</p>
+            <p style="color:#52525b;font-size:0.8rem;margin-top:1.5rem;">You can close this tab and return to DreamAgent.</p>
+        </div>
+    </body>
+    </html>
+    """)
