@@ -6258,11 +6258,41 @@ async def delete_project_session(
     # Release lock if held by this session
     SessionLockService.release_lock(project_id, session_id)
 
-    # Step 2: Delete messages and session from backend database
+    # Step 2: Delete messages, chat runs, chunks, and session from database
     with get_db() as conn:
-        conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-        conn.execute("DELETE FROM sessions WHERE id = ? AND project_id = ?", (session_id, project_id))
+        # Delete session chat chunks + runs
+        conn.execute("DELETE FROM session_chat_chunks WHERE run_id IN (SELECT id FROM session_chat_runs WHERE session_id = %s)", (session_id,))
+        conn.execute("DELETE FROM session_chat_runs WHERE session_id = %s", (session_id,))
+        # Delete messages
+        conn.execute("DELETE FROM messages WHERE session_id = %s", (session_id,))
+        # Delete session
+        conn.execute("DELETE FROM sessions WHERE id = %s AND project_id = %s", (session_id, project_id))
         conn.commit()
+
+    # Step 2b: Clear DevOps session context (Telegram/Discord/Slack)
+    # If this session was the active selected session for any user,
+    # clear the pointer so the user isn't stuck on a deleted session.
+    try:
+        with get_db() as conn:
+            # Clear users.active_project_session_id if it pointed to this session
+            conn.execute(
+                "UPDATE users SET active_project_session_id = NULL WHERE active_project_session_id = %s",
+                (session_id,)
+            )
+            # Clear ai_sessions.active_project_session_id for all transport sessions
+            conn.execute(
+                "UPDATE ai_sessions SET active_project_session_id = NULL WHERE active_project_session_id = %s",
+                (session_id,)
+            )
+            # Clear processing flag if this session was processing
+            conn.execute(
+                "UPDATE sessions SET processing = false, processing_channel = NULL, processing_started_at = NULL WHERE id = %s",
+                (session_id,)
+            )
+            conn.commit()
+        logger.info(f"[SESSION-DELETE] Cleared DevOps session pointers for session {session_id}")
+    except Exception as e:
+        logger.warning(f"[SESSION-DELETE] Failed to clear DevOps pointers: {e}")
 
     # Step 3: Delete corresponding OpenClaw session
     # OpenClaw session key format: "agent:main:openai-user:adapter-session-{session_key}"
