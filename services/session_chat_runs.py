@@ -578,7 +578,7 @@ async def wait_for_run(run_id: int, poll_seconds: float = 2.0, timeout_seconds: 
                 _inline_executed = True
                 try:
                     # Try proxying to worker-api first (it has Docker + files)
-                    worker_url = os.getenv("DREAMPILOT_WORKER_API_URL", "")
+                    worker_url = os.getenv("WORKER_VPS_URL", "")
                     if worker_url:
                         import httpx
                         logger.info("[SESSION-RUN] Proxying run %s to %s/internal/chat-execute", run_id, worker_url)
