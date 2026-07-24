@@ -4930,6 +4930,43 @@ def _extract_from_html(html: str, extract_js: str):
 
 
 # ---------------------------------------------------------------------------
+# Internal chat-execute endpoint — proxy session chat to this worker
+# ---------------------------------------------------------------------------
+
+class InternalChatExecuteRequest(BaseModel):
+    run_id: int
+
+
+@app.post("/internal/chat-execute")
+async def internal_chat_execute(request: InternalChatExecuteRequest, request_obj: Request):
+    """Execute a session chat run on this worker (has Docker + project files).
+
+    Called by the main VPS backend when it can't execute locally (project
+    files only exist inside Docker on this worker VPS).
+
+    Same IP guard as /internal/pm2-restart.
+    """
+    import os as _os
+
+    client_host = request_obj.client.host if request_obj.client else ""
+    is_local = (client_host.startswith("127.") or client_host.startswith("172.")
+                or client_host.startswith("10.") or client_host == "::1")
+
+    if not is_local:
+        raise HTTPException(status_code=403, detail="Internal endpoint — not accessible from public network")
+
+    logger.info(f"[INTERNAL-CHAT] Executing run {request.run_id} from {client_host}")
+
+    try:
+        from services.session_chat_runs import execute_run
+        await execute_run(request.run_id)
+        return {"success": True, "run_id": request.run_id}
+    except Exception as e:
+        logger.error(f"[INTERNAL-CHAT] Run {request.run_id} failed: {e}")
+        return {"success": False, "error": str(e)[:500]}
+
+
+# ---------------------------------------------------------------------------
 # Environment Variables endpoints
 # ---------------------------------------------------------------------------
 

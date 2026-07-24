@@ -569,24 +569,40 @@ async def wait_for_run(run_id: int, poll_seconds: float = 2.0, timeout_seconds: 
             return {"status": status, "message": run.get("error") or f"Session chat {status}."}
 
         # Self-healing: if the run is still queued after 3 seconds, no
-        # separate worker is running. Execute it inline.
+        # separate worker is running. Proxy it to the worker-api (which
+        # has Docker + project files) for execution.
         if status == "queued" and not _inline_executed:
             elapsed = (datetime.utcnow() - start).total_seconds()
             if elapsed > 3:
-                logger.info("[SESSION-RUN] No worker claimed run %s after %.1fs — executing inline", run_id, elapsed)
+                logger.info("[SESSION-RUN] No worker claimed run %s after %.1fs — proxying to worker-api", run_id, elapsed)
                 _inline_executed = True
                 try:
-                    # Claim it ourselves
-                    wid = f"{socket.gethostname()}:{os.getpid()}-inline"
-                    with get_db() as conn:
-                        conn.execute(
-                            "UPDATE session_chat_runs SET status = 'running', worker_id = %s, started_at = NOW() WHERE id = %s AND status = 'queued'",
-                            (wid, run_id),
-                        )
-                        conn.commit()
-
-                    # Execute inline
-                    await execute_run(run_id)
+                    # Try proxying to worker-api first (it has Docker + files)
+                    worker_url = os.getenv("DREAMPILOT_WORKER_API_URL", "")
+                    if worker_url:
+                        import httpx
+                        logger.info("[SESSION-RUN] Proxying run %s to %s/internal/chat-execute", run_id, worker_url)
+                        async with httpx.AsyncClient(timeout=1800) as client:
+                            resp = await client.post(
+                                f"{worker_url}/internal/chat-execute",
+                                json={"run_id": run_id},
+                                timeout=1800,
+                            )
+                            if resp.status_code == 200:
+                                logger.info("[SESSION-RUN] Worker-api executed run %s", run_id)
+                            else:
+                                logger.error("[SESSION-RUN] Worker-api returned %s: %s", resp.status_code, resp.text[:200])
+                    else:
+                        # No worker-api URL — execute inline (local dev)
+                        logger.info("[SESSION-RUN] No worker-api URL — executing inline")
+                        wid = f"{socket.gethostname()}:{os.getpid()}-inline"
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE session_chat_runs SET status = 'running', worker_id = %s, started_at = NOW() WHERE id = %s AND status = 'queued'",
+                                (wid, run_id),
+                            )
+                            conn.commit()
+                        await execute_run(run_id)
                 except Exception as e:
                     logger.error("[SESSION-RUN] Inline execution failed for run %s: %s", run_id, e, exc_info=True)
                     # Mark as failed so wait loop doesn't spin forever
