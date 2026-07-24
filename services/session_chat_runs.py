@@ -544,7 +544,15 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
 
 
 async def wait_for_run(run_id: int, poll_seconds: float = 2.0, timeout_seconds: float = 1800.0) -> Dict[str, Any]:
+    """Wait for a run to complete. If no separate worker claims it within
+    a few seconds, execute it inline (self-healing fallback).
+
+    This allows the worker-api process to handle Telegram/Discord session
+    chat WITHOUT requiring a separate session_chat_worker PM2 process.
+    """
     start = datetime.utcnow()
+    _inline_executed = False
+
     while (datetime.utcnow() - start).total_seconds() < timeout_seconds:
         run = get_run(run_id)
         if not run:
@@ -559,7 +567,42 @@ async def wait_for_run(run_id: int, poll_seconds: float = 2.0, timeout_seconds: 
                     ).fetchone()
                 return {"status": "success", "message": _row_value(row, "content") or "Session chat completed."}
             return {"status": status, "message": run.get("error") or f"Session chat {status}."}
+
+        # Self-healing: if the run is still queued after 3 seconds, no
+        # separate worker is running. Execute it inline.
+        if status == "queued" and not _inline_executed:
+            elapsed = (datetime.utcnow() - start).total_seconds()
+            if elapsed > 3:
+                logger.info("[SESSION-RUN] No worker claimed run %s after %.1fs — executing inline", run_id, elapsed)
+                _inline_executed = True
+                try:
+                    # Claim it ourselves
+                    wid = f"{socket.gethostname()}:{os.getpid()}-inline"
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE session_chat_runs SET status = 'running', worker_id = %s, started_at = NOW() WHERE id = %s AND status = 'queued'",
+                            (wid, run_id),
+                        )
+                        conn.commit()
+
+                    # Execute inline
+                    await execute_run(run_id)
+                except Exception as e:
+                    logger.error("[SESSION-RUN] Inline execution failed for run %s: %s", run_id, e, exc_info=True)
+                    # Mark as failed so wait loop doesn't spin forever
+                    try:
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE session_chat_runs SET status = 'failed', error = %s, completed_at = NOW() WHERE id = %s",
+                                (str(e)[:500], run_id),
+                            )
+                            conn.commit()
+                    except Exception:
+                        pass
+                    return {"status": "error", "message": f"Session chat failed: {e}"}
+
         await asyncio.sleep(poll_seconds)
+
     return {"status": "timeout", "message": "Session chat is still running. Check the session again shortly."}
 
 
