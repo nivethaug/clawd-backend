@@ -4099,9 +4099,25 @@ async def delete_project(
     # Step 3: DELETE FROM DATABASE FIRST (so UI shows correct count immediately)
     with get_db() as conn:
         # Delete messages first (foreign key dependency)
-        conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)", (project_id,))
-        conn.execute("DELETE FROM sessions WHERE project_id = ?", (project_id,))
-        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        conn.execute("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE project_id = %s)", (project_id,))
+        # Delete scheduler jobs + logs
+        conn.execute("DELETE FROM scheduler_logs WHERE job_id IN (SELECT id FROM scheduler_jobs WHERE project_id = %s)", (project_id,))
+        conn.execute("DELETE FROM scheduler_jobs WHERE project_id = %s", (project_id,))
+        # Delete session chat runs + chunks
+        conn.execute("DELETE FROM session_chat_chunks WHERE run_id IN (SELECT id FROM session_chat_runs WHERE session_id IN (SELECT id FROM sessions WHERE project_id = %s))", (project_id,))
+        conn.execute("DELETE FROM session_chat_runs WHERE session_id IN (SELECT id FROM sessions WHERE project_id = %s)", (project_id,))
+        # Delete commit logs
+        conn.execute("DELETE FROM commit_log WHERE project_id = %s", (project_id,))
+        # Delete project AI chat messages
+        conn.execute("DELETE FROM projectchat WHERE project_id = %s", (project_id,))
+        # Delete AI sessions for this project
+        conn.execute("DELETE FROM ai_sessions WHERE project_id = %s", (project_id,))
+        # Delete token usage for this project
+        conn.execute("DELETE FROM token_usage WHERE project_id = %s", (project_id,))
+        # Delete sessions
+        conn.execute("DELETE FROM sessions WHERE project_id = %s", (project_id,))
+        # Delete project last
+        conn.execute("DELETE FROM projects WHERE id = %s", (project_id,))
         conn.commit()
     
     logger.info(f"✓ Deleted project {project_id} from database (infrastructure cleanup in background)")
