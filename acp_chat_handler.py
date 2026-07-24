@@ -201,15 +201,20 @@ class ACPChatHandler:
         # Load project metadata from database
         self._load_project_metadata()
 
-        # Validate paths based on project type
-        if self.is_bot_project:
-            # Bot projects don't need frontend/src
-            if not self.project_path.exists():
-                raise ValueError(f"Project path does not exist: {self.project_path}")
+        # Validate paths based on project type — BUT skip in container mode.
+        # In container mode, files live inside Docker (/workspace → /workspaces).
+        # The host path may not exist on the main VPS where the API runs.
+        # Claude accesses files via docker exec, not the host filesystem.
+        _is_container = os.getenv("EXECUTION_MODE", "local").lower() == "container"
+        if not _is_container:
+            if self.is_bot_project:
+                if not self.project_path.exists():
+                    raise ValueError(f"Project path does not exist: {self.project_path}")
+            else:
+                if not self.frontend_src_path.exists():
+                    raise ValueError(f"Frontend src path does not exist: {self.frontend_src_path}")
         else:
-            # Web apps need frontend/src
-            if not self.frontend_src_path.exists():
-                raise ValueError(f"Frontend src path does not exist: {self.frontend_src_path}")
+            logger.debug(f"[ACP-CHAT] Container mode — skipping __init__ path validation for {self.project_path}")
 
 
     def set_existing_plan(self, plan_content: str):
