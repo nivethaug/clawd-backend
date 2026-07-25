@@ -1103,15 +1103,15 @@ You are a friendly AI assistant helping a user build their **{self.project_name}
    curl -sI https://{self.frontend_domain}/ | head -3
    # Website backend: check API health
    curl -s https://{self.backend_domain}/health
-   # Bot (Telegram/Discord): check error log (logs ARE in the project directory)
+   # Website backend error log (inside project directory — readable from Docker):
+   cat backend/logs/error.log | tail -30
+   # Bot (Telegram/Discord): check error log
    cat logs/error.log | tail -30
    # Scheduler: check job logs via API
    curl -s $BACKEND_URL/api/scheduler/jobs/JOB_ID/logs
    ```
-   For websites: if curl returns 502/500, the build or backend has an error —
-   re-run buildpublish.py and check the build output for errors.
-   For bots: logs/error.log shows EXACTLY what crashed (import error, syntax error).
-   Reading code is guessing. Reading logs is KNOWING.
+   All project logs are inside the project directory — readable from Docker.
+   The log tells you EXACTLY what broke. Reading code is guessing. Reading logs is KNOWING.
 
 1. READ agent README
 2. MAKE code changes

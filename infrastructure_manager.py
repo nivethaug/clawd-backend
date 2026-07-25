@@ -607,6 +607,11 @@ class ServiceManager:
                         # around 600-800MB during startup. Give headroom so PM2 does
                         # not kill+restart the sandbox mid-init.
                         "max_memory_restart": "900M",
+                        # Logs inside the project directory so Claude inside Docker
+                        # can read them via the bind mount.
+                        "out_file": f"{backend_path}/logs/out.log",
+                        "error_file": f"{backend_path}/logs/error.log",
+                        "log_date_format": "YYYY-MM-DD HH:mm:ss",
                         "env": env_vars
                     }]
                 }
@@ -622,9 +627,16 @@ class ServiceManager:
                         "exec_mode": "fork",
                         "watch": False,
                         "max_memory_restart": "500M",
+                        "out_file": f"{backend_path}/logs/out.log",
+                        "error_file": f"{backend_path}/logs/error.log",
+                        "log_date_format": "YYYY-MM-DD HH:mm:ss",
                         "env": env_vars
                     }]
                 }
+
+            # Create logs directory so PM2 can write there
+            logs_dir = Path(backend_path) / "logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
 
             # Write ecosystem config file
             import json
