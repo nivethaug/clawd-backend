@@ -522,7 +522,7 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {AUTH_TOKEN}", "Content-Type": "application/json"}
 
 
-def create_project(name: str, description: str, type_id: int, bot_token: str = None) -> Optional[dict]:
+def create_project(name: str, description: str, type_id: int, bot_token: str = None, email_to: str = None) -> Optional[dict]:
     """Create a project via the API. Returns project dict or None.
 
     Handles 409 (another creation in progress) by waiting and retrying up to
@@ -533,10 +533,13 @@ def create_project(name: str, description: str, type_id: int, bot_token: str = N
         description: Project description (build prompt)
         type_id: Project type (1=website, 2=telegram, 3=discord, 5=scheduler)
         bot_token: Bot token (required for type_id 2 and 3)
+        email_to: Email recipient (for scheduler projects — SMTP auto-injected)
     """
     body: dict = {"name": name, "description": description, "type_id": type_id}
     if bot_token:
         body["bot_token"] = bot_token
+    if email_to:
+        body["email_to"] = email_to
 
     start = time.time()
     while time.time() - start < PROJECT_TIMEOUT:
@@ -751,7 +754,9 @@ def run_templates(
             log.info(f"  Using bot token from {token_env}")
 
         # Create + wait + mark
-        project = create_project(name, tmpl["description"], tmpl["type_id"], bot_token=bot_token)
+        # For scheduler projects, pass email_to so they have a delivery channel
+        email_to = os.getenv("SEED_EMAIL_TO", "") if tmpl.get("type_id") == 5 else None
+        project = create_project(name, tmpl["description"], tmpl["type_id"], bot_token=bot_token, email_to=email_to)
         if not project:
             stats.failed += 1
             continue
@@ -847,7 +852,9 @@ def run_gallery(
                 continue
 
         # Create + wait + publish
-        project = create_project(name, item["description"], item["type_id"], bot_token=bot_token)
+        # For scheduler gallery projects, pass email_to
+        gallery_email = os.getenv("SEED_EMAIL_TO", "") if item.get("type_id") == 5 else None
+        project = create_project(name, item["description"], item["type_id"], bot_token=bot_token, email_to=gallery_email)
         if not project:
             stats.failed += 1
             continue
@@ -1032,7 +1039,9 @@ if __name__ == "__main__":
                                 g_stats.skipped += 1
                         continue
 
-                project = create_project(name, item["description"], item["type_id"], bot_token=bot_token)
+                # For scheduler gallery projects, pass email_to
+                gallery_email = os.getenv("SEED_EMAIL_TO", "") if item.get("type_id") == 5 else None
+                project = create_project(name, item["description"], item["type_id"], bot_token=bot_token, email_to=gallery_email)
                 if not project:
                     with lock:
                         if kind == "template":
