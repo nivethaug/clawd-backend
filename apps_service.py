@@ -541,7 +541,8 @@ def _get_process_names_for_project(project: Dict[str, Any], fallback_domain: str
     domain = _normalize_domain(project.get("domain") or fallback_domain)
 
     if type_id == 1:
-        return [f"{domain}-frontend", f"{domain}-backend"]
+        # Website: only backend PM2 (frontend served by nginx static)
+        return [f"{domain}-backend"]
     if type_id == 2:
         return [f"{domain}-bot", f"tg-bot-{project_id}"]
     if type_id == 3:

@@ -9233,22 +9233,77 @@ def _get_pm2_log_specs(project_row) -> list[dict]:
 
 
 def _build_project_logs(project_row, num_lines: int) -> dict:
-    """Build the log_groups response for a project."""
-    specs = _get_pm2_log_specs(project_row)
+    """Build the log_groups response for a project.
+
+    Reads logs from project directory (backend/logs/, logs/) instead of
+    ~/.pm2/logs/. Project directory logs are readable from Docker containers.
+    """
     d = dict(project_row) if not isinstance(project_row, dict) else project_row
+    project_path = d.get("project_path", "")
+    type_id = d.get("type_id")
+    domain = (d.get("domain") or "").split(".")[0]
+
+    # Determine log locations based on project type
+    if type_id == 1:
+        # Website: backend logs in project dir, frontend served by nginx (no logs)
+        specs = [
+            {"label": "Backend", "out": f"{project_path}/backend/logs/out.log",
+             "err": f"{project_path}/backend/logs/error.log"},
+        ]
+    elif type_id in (2, 3):
+        # Bot: logs in project dir
+        specs = [
+            {"label": "Application", "out": f"{project_path}/logs/out.log",
+             "err": f"{project_path}/logs/error.log"},
+        ]
+    elif type_id == 5:
+        # Scheduler: logs via API (no file logs for individual projects)
+        return {
+            "project_id": d.get("id"),
+            "project_name": d.get("name"),
+            "type_id": type_id,
+            "log_groups": [{
+                "label": "Scheduler Jobs",
+                "process_name": "clawd-scheduler",
+                "stdout": "",
+                "stderr": "Use the scheduler job logs API to view execution results.",
+                "stdout_lines": 0,
+                "stderr_lines": 1,
+                "exists": True,
+            }],
+        }
+    else:
+        specs = [
+            {"label": "Application", "out": f"{project_path}/logs/out.log",
+             "err": f"{project_path}/logs/error.log"},
+        ]
+
+    # Also check old PM2 log paths as fallback
+    pm2_domain = domain or d.get("name", "")
+    pm2_specs = []
+    for spec in specs:
+        pm2_specs.append({
+            "label": spec["label"],
+            "out": spec["out"],
+            "err": spec["err"],
+            "pm2_out": os.path.join(PM2_LOGS_DIR, f"{pm2_domain}-backend-out.log") if type_id == 1 else os.path.join(PM2_LOGS_DIR, f"{pm2_domain}-bot-out.log") if type_id == 2 else "",
+            "pm2_err": os.path.join(PM2_LOGS_DIR, f"{pm2_domain}-backend-error.log") if type_id == 1 else os.path.join(PM2_LOGS_DIR, f"{pm2_domain}-bot-error.log") if type_id == 2 else "",
+        })
 
     log_groups = []
-    for spec in specs:
-        proc = spec["process_name"]
-        out_path = os.path.join(PM2_LOGS_DIR, f"{proc}-out.log")
-        err_path = os.path.join(PM2_LOGS_DIR, f"{proc}-error.log")
+    for spec in pm2_specs:
+        # Try project directory first, fall back to PM2 logs
+        stdout_content, out_exists = _read_log_tail(spec["out"], num_lines)
+        if not out_exists and spec.get("pm2_out"):
+            stdout_content, out_exists = _read_log_tail(spec["pm2_out"], num_lines)
 
-        stdout_content, out_exists = _read_log_tail(out_path, num_lines)
-        stderr_content, err_exists = _read_log_tail(err_path, num_lines)
+        stderr_content, err_exists = _read_log_tail(spec["err"], num_lines)
+        if not err_exists and spec.get("pm2_err"):
+            stderr_content, err_exists = _read_log_tail(spec["pm2_err"], num_lines)
 
         log_groups.append({
             "label": spec["label"],
-            "process_name": proc,
+            "process_name": spec.get("pm2_out", "").split("/")[-1].replace("-out.log", "") if spec.get("pm2_out") else spec["label"].lower(),
             "stdout": stdout_content,
             "stderr": stderr_content,
             "stdout_lines": stdout_content.count("\n") if stdout_content else 0,
@@ -9285,7 +9340,7 @@ async def get_project_logs(
 
     with get_db() as conn:
         row = conn.execute(
-            "SELECT id, name, domain, type_id, user_id FROM projects WHERE id = %s",
+            "SELECT id, name, domain, type_id, user_id, project_path FROM projects WHERE id = %s",
             (project_id,),
         ).fetchone()
 
@@ -9323,7 +9378,7 @@ async def download_project_logs(
 
     with get_db() as conn:
         row = conn.execute(
-            "SELECT id, name, domain, type_id, user_id FROM projects WHERE id = %s",
+            "SELECT id, name, domain, type_id, user_id, project_path FROM projects WHERE id = %s",
             (project_id,),
         ).fetchone()
 
@@ -10059,9 +10114,8 @@ def _restart_and_rewebhook(project_id: int, project_path: str, domain: str, type
     """
     try:
         if type_id == 1:
-            # Website — restart both frontend and backend via worker-api
+            # Website — only restart backend (frontend served by nginx static)
             if domain:
-                _restart_pm2_via_worker_api(f"{domain}-frontend")
                 _restart_pm2_via_worker_api(f"{domain}-backend")
         elif type_id == 2:
             # Telegram bot — restart PM2 + re-register webhook
