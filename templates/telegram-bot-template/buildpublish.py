@@ -198,21 +198,29 @@ def restart_pm2():
 
 
 def _post_restart_webhook(bot_token, domain, project_id, pm2_process_name):
-    """Re-register webhook + verify PM2 status after restart (any strategy)."""
+    """Re-register webhook after restart. Skip PM2 status check inside containers."""
     import time
     time.sleep(2)
 
-    # Verify process is running (best-effort — may not work inside sandbox)
-    result = subprocess.run(
-        f"pm2 describe {pm2_process_name} 2>/dev/null",
-        shell=True,
-        capture_output=True,
-        text=True
-    )
-    if "online" in result.stdout.lower():
-        print(f"✅ PM2 process is online: {pm2_process_name}")
+    # Skip PM2 status check inside Docker/bwrap — PM2 isn't accessible there.
+    # The worker-api already confirmed the restart succeeded (or it fell back
+    # to direct pm2 on the host). Checking pm2 describe from inside a container
+    # just produces confusing warnings.
+    if not os.environ.get("DREAMPILOT_WORKER_API_URL"):
+        # On host (not in container) — check PM2 status
+        result = subprocess.run(
+            f"pm2 describe {pm2_process_name} 2>/dev/null",
+            shell=True,
+            capture_output=True,
+            text=True
+        )
+        if "online" in result.stdout.lower():
+            print(f"✅ PM2 process is online: {pm2_process_name}")
+        else:
+            print(f"⚠️ PM2 process status unknown")
     else:
-        print(f"⚠️ PM2 process status unknown (may be in sandbox)")
+        # Inside container/sandbox — PM2 was restarted via worker-api, trust it
+        print(f"✅ Restart handled by worker-api (container mode)")
 
     # Re-register webhook if token and domain available
     if bot_token and domain:
