@@ -220,6 +220,10 @@ NOTE: User provides title + description - AI MUST decide APIs autonomously
 3. DO NOT break existing handlers
 
 4. DO NOT add new imports (EXCEPT importing services.web_scraper in api_client.py if needed)
+   ⛔ NEVER import ParseMode from telegram. Use parse_mode="Markdown" or
+   parse_mode="HTML" as string arguments instead. The installed
+   python-telegram-bot version does NOT have `from telegram import ParseMode`.
+   This import WILL CRASH the bot on startup.
 
 5. DO NOT create new files
 
