@@ -1099,7 +1099,7 @@ You are a friendly AI assistant helping a user build their **{self.project_name}
 
 0. 🔴 **IF SOMETHING IS BROKEN: READ LOGS FIRST.** Before reading code, before making changes:
    ```bash
-   # Website frontend: check if site is up
+   # Website frontend: check if site is up (nginx serves static dist/ — no PM2 process)
    curl -sI https://{self.frontend_domain}/ | head -3
    # Website backend: check API health
    curl -s https://{self.backend_domain}/health
@@ -1110,8 +1110,11 @@ You are a friendly AI assistant helping a user build their **{self.project_name}
    # Scheduler: check job logs via API
    curl -s $BACKEND_URL/api/scheduler/jobs/JOB_ID/logs
    ```
-   All project logs are inside the project directory — readable from Docker.
-   The log tells you EXACTLY what broke. Reading code is guessing. Reading logs is KNOWING.
+   For websites: frontend is served by nginx (static files, no PM2 process to check).
+   If frontend returns 404/500, re-run buildpublish.py to rebuild dist/.
+   If backend returns 502, check backend/logs/error.log for the crash reason.
+   For bots: logs/error.log shows EXACTLY what crashed (import error, syntax error).
+   Reading code is guessing. Reading logs is KNOWING.
 
 1. READ agent README
 2. MAKE code changes
