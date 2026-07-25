@@ -586,41 +586,47 @@ def _oom_events() -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────
 
 def _top_procs() -> Dict[str, Any]:
-    """Top 5 processes by CPU% and by RAM."""
-    raw = _run(["ps", "-eo", "pid,pcpu,pmem,rss,comm", "--no-headers", "--sort=-pcpu"])
+    """Top 15 processes by RAM and top 5 by CPU%. Includes full command line."""
+    # Top 15 by memory with full command
+    raw = _run(["ps", "-eo", "pid,user,pcpu,pmem,rss,etimes,comm,args", "--no-headers", "--sort=-rss"])
+    by_mem: List[Dict[str, Any]] = []
+    if raw:
+        for line in raw.splitlines()[:15]:
+            parts = line.split(None, 7)
+            if len(parts) < 6:
+                continue
+            try:
+                by_mem.append({
+                    "pid": int(parts[0]),
+                    "user": parts[1],
+                    "cpu": float(parts[2]),
+                    "mem_percent": float(parts[3]),
+                    "rss_mb": round(int(parts[4]) / 1024, 1),
+                    "uptime_s": int(parts[5]),
+                    "name": parts[6].strip() if len(parts) > 6 else "",
+                    "cmd": parts[7].strip()[:200] if len(parts) > 7 else "",
+                })
+            except (ValueError, IndexError):
+                continue
+
+    # Top 5 by CPU
+    raw = _run(["ps", "-eo", "pid,user,pcpu,pmem,rss,comm", "--no-headers", "--sort=-pcpu"])
     by_cpu: List[Dict[str, Any]] = []
     if raw:
         for line in raw.splitlines()[:5]:
-            parts = line.split(None, 4)
+            parts = line.split(None, 5)
             if len(parts) < 5:
                 continue
             try:
                 by_cpu.append({
                     "pid": int(parts[0]),
-                    "cpu": float(parts[1]),
-                    "mem_percent": float(parts[2]),
-                    "rss_mb": round(int(parts[3]) / 1024, 1),
-                    "name": parts[4].strip(),
+                    "user": parts[1],
+                    "cpu": float(parts[2]),
+                    "mem_percent": float(parts[3]),
+                    "rss_mb": round(int(parts[4]) / 1024, 1),
+                    "name": parts[5].strip() if len(parts) > 5 else "",
                 })
-            except ValueError:
-                continue
-
-    raw = _run(["ps", "-eo", "pid,pcpu,pmem,rss,comm", "--no-headers", "--sort=-rss"])
-    by_mem: List[Dict[str, Any]] = []
-    if raw:
-        for line in raw.splitlines()[:5]:
-            parts = line.split(None, 4)
-            if len(parts) < 5:
-                continue
-            try:
-                by_mem.append({
-                    "pid": int(parts[0]),
-                    "cpu": float(parts[1]),
-                    "mem_percent": float(parts[2]),
-                    "rss_mb": round(int(parts[3]) / 1024, 1),
-                    "name": parts[4].strip(),
-                })
-            except ValueError:
+            except (ValueError, IndexError):
                 continue
 
     return {"by_cpu": by_cpu, "by_mem": by_mem}
