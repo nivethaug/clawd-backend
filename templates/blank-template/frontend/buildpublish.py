@@ -420,10 +420,14 @@ def main():
     if success:
         fix_permissions()
     
-    # Step 8: Restart PM2 + nginx (MANDATORY by default)
+    # Step 8: Reload nginx (frontend is served by nginx, no PM2 needed)
+    # nginx serves dist/ directly via root + try_files. After rebuild,
+    # nginx picks up the new files immediately. reload is belt-and-suspenders.
     if not args.no_restart and success:
-        restart_pm2()  # Uses {project_name} placeholder
+        # Skip PM2 restart — nginx serves static files, no serve process needed
+        # restart_pm2()  # Disabled: nginx serves dist/ directly
         reload_nginx()
+        print("✅ Frontend updated (nginx serves new dist/ files)")
 
     # Step 9: Cleanup node_modules (after restart so nothing is needed anymore)
     if success:

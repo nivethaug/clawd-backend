@@ -2707,77 +2707,28 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 logger.error(f"❌ Backend service failed to start: {self.service_name}")
                 logger.info("PHASE_6_SERVICE_COMPLETE: failed (backend)")
                 return False
-            
-            # Start frontend service using PM2 with npx serve for static files
+
+            # Frontend is served directly by nginx (root + try_files in the
+            # generated nginx config). No PM2 serve process needed — it was
+            # consuming ~100MB RAM per project for nothing. nginx serves the
+            # dist/ directory directly, which is faster and uses zero memory.
             dist_path = self.project_path / "frontend" / "dist"
 
             if dist_path.exists():
-                # Use domain for frontend service name
                 frontend_app_name = f"{self.domain}-frontend"
-
-                # Stop existing service if any
-                # logger.info(f"🔄 Stopping existing frontend service if any...")  # Commented for cleaner logs
+                # Delete any leftover PM2 serve process from older deployments
                 subprocess.run(["pm2", "delete", frontend_app_name], capture_output=True)
-
-                # Start PM2 service with npx serve -s dist -l port
-                logger.info(f"[SERVICE] Starting frontend service: {frontend_app_name}")
-
-                # NOTE: Frontend is NOT sandboxed via bwrap because npx serve
-                # needs access to npm cache and global node_modules to resolve
-                # the 'serve' package. Frontend only serves static dist/ files
-                # (no user code execution) so the risk is minimal.
-                # Backend and bots ARE sandboxed (they run user code).
-                frontend_cmd = [
-                    "pm2",
-                    "start",
-                    "npx",
-                    "--name",
-                    frontend_app_name,
-                    "--",
-                    "serve",
-                    "-s",
-                    "dist",
-                    "-l",
-                    str(self.ports["frontend"])
-                ]
-
-                # logger.info(f"[SERVICE] Frontend command: {' '.join(frontend_cmd)}")  # Commented for cleaner logs
-                # logger.info(f"[SERVICE] Frontend working directory: {self.project_path / 'frontend'}")  # Commented for cleaner logs
-
-                frontend_result = subprocess.run(
-                    frontend_cmd,
-                    cwd=str(self.project_path / "frontend"),
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-
-                # logger.info("DEPLOY: PM2 service started")  # Commented for cleaner logs
-                # logger.info(f"[SERVICE] Frontend service started successfully: {frontend_app_name}")  # Commented for cleaner logs
-                # logger.info(f"[SERVICE] Frontend stdout: {frontend_result.stdout[:200]}")  # Commented for cleaner logs
+                logger.info(f"[SERVICE] Frontend served by nginx (no PM2 process): {frontend_app_name}")
                 self.frontend_app_name = frontend_app_name
             else:
-                logger.warning("⚠️ Frontend dist not found, creating service anyway")
-                self.frontend_app_name = self.service_manager.create_frontend_service(
-                    self.project_name,
-                    self.ports["frontend"],
-                    self.project_path,
-                    domain=self.domain  # Use domain for PM2 app name
-                )
-                fallback_success = self.service_manager.start_frontend_service(
-                    self.frontend_app_name,
-                    self.project_path
-                )
-                if not fallback_success:
-                    logger.error("❌ Frontend service creation failed")
-                    logger.info("PHASE_6_SERVICE_COMPLETE: failed (frontend)")
-                    return False
+                logger.warning("⚠️ Frontend dist not found — site will show nginx default page until built")
+                self.frontend_app_name = f"{self.domain}-frontend"
 
-            logger.info(f"⚙️ PM2 frontend service: {self.frontend_app_name}")
+            logger.info(f"⚙️ Frontend: nginx static ({self.frontend_app_name})")
             logger.info(f"⚙️ PM2 backend service: {self.service_name}")
 
-            # Service Stability Check
-            logger.info("[SERVICE] Waiting for PM2 services to stabilize...")
+            # Service Stability Check — only backend needs PM2 now
+            logger.info("[SERVICE] Waiting for PM2 backend to stabilize...")
             time.sleep(5)
 
             pm2_check = subprocess.run(
