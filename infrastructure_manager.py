@@ -2142,12 +2142,10 @@ class InfrastructureManager:
                     pass  # DNS resolving correctly
                     # logger.info(f"[DNS] Domain resolving correctly: {frontend_domain}")  # Commented for cleaner logs
 
-            logger.info("[VERIFY] Checking frontend availability")
-            frontend_check = subprocess.run(
-                ["curl", "-I", f"http://localhost:{self.ports['frontend']}"],
-                capture_output=True,
-                text=True
-            )
+            # Frontend is served by nginx (static dist/) — no port to check.
+            # nginx serves via root + try_files in the config we generated.
+            # Skip frontend port verification entirely.
+            logger.info("[VERIFY] Frontend served by nginx static (no port check needed)")
 
             # Backend health check with retry logic
             # logger.info("[VERIFY] Checking backend health (with retries)")  # Commented for cleaner logs
@@ -2180,8 +2178,8 @@ class InfrastructureManager:
             # logger.info(f"[VERIFY] Backend health check response (stderr): {backend_check.stderr[:200] if backend_check else 'None'}")  # Commented for cleaner logs
             # logger.info(f"[VERIFY] Backend health check return code: {backend_check.returncode if backend_check else 'None'}")  # Commented for cleaner logs
 
-            if "200" not in frontend_check.stdout:
-                raise RuntimeError("Frontend verification failed")
+            # Frontend verification removed — nginx serves static files,
+            # no PM2 serve process to check.
 
             if not backend_healthy:
                 logger.error(f"[VERIFY] Backend verification failed after {max_backend_retries} attempts")
