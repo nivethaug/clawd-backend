@@ -9278,28 +9278,53 @@ def _build_project_logs(project_row, num_lines: int) -> dict:
              "err": f"{project_path}/logs/error.log"},
         ]
 
-    # Also check old PM2 log paths as fallback
+    # Also check old PM2 log paths as fallback (with glob for PID suffixes)
     pm2_domain = domain or d.get("name", "")
     pm2_specs = []
     for spec in specs:
+        # PM2 log files have format: {name}-out.log OR {name}-out-{pid}.log
+        pm2_prefix_out = ""
+        pm2_prefix_err = ""
+        if type_id == 1:
+            pm2_prefix_out = f"{pm2_domain}-backend"
+            pm2_prefix_err = f"{pm2_domain}-backend"
+        elif type_id == 2:
+            pm2_prefix_out = f"{pm2_domain}-bot"
+            pm2_prefix_err = f"{pm2_domain}-bot"
+        elif type_id == 3:
+            pm2_prefix_out = f"dc-bot-"
+            pm2_prefix_err = f"dc-bot-"
+
         pm2_specs.append({
             "label": spec["label"],
             "out": spec["out"],
             "err": spec["err"],
-            "pm2_out": os.path.join(PM2_LOGS_DIR, f"{pm2_domain}-backend-out.log") if type_id == 1 else os.path.join(PM2_LOGS_DIR, f"{pm2_domain}-bot-out.log") if type_id == 2 else "",
-            "pm2_err": os.path.join(PM2_LOGS_DIR, f"{pm2_domain}-backend-error.log") if type_id == 1 else os.path.join(PM2_LOGS_DIR, f"{pm2_domain}-bot-error.log") if type_id == 2 else "",
+            "pm2_prefix_out": pm2_prefix_out,
+            "pm2_prefix_err": pm2_prefix_err,
         })
 
+    import glob
     log_groups = []
     for spec in pm2_specs:
-        # Try project directory first, fall back to PM2 logs
+        # Try project directory first
         stdout_content, out_exists = _read_log_tail(spec["out"], num_lines)
-        if not out_exists and spec.get("pm2_out"):
-            stdout_content, out_exists = _read_log_tail(spec["pm2_out"], num_lines)
+        if not out_exists and spec.get("pm2_prefix_out"):
+            # Fall back to PM2 logs (glob for PID suffix: {prefix}-out.log or {prefix}-out-{pid}.log)
+            for pattern in [f"{spec['pm2_prefix_out']}-out.log", f"{spec['pm2_prefix_out']}-out-*.log"]:
+                matches = sorted(glob.glob(os.path.join(PM2_LOGS_DIR, pattern)), key=os.path.getmtime, reverse=True)
+                if matches:
+                    stdout_content, out_exists = _read_log_tail(matches[0], num_lines)
+                    if out_exists:
+                        break
 
         stderr_content, err_exists = _read_log_tail(spec["err"], num_lines)
-        if not err_exists and spec.get("pm2_err"):
-            stderr_content, err_exists = _read_log_tail(spec["pm2_err"], num_lines)
+        if not err_exists and spec.get("pm2_prefix_err"):
+            for pattern in [f"{spec['pm2_prefix_err']}-error.log", f"{spec['pm2_prefix_err']}-error-*.log"]:
+                matches = sorted(glob.glob(os.path.join(PM2_LOGS_DIR, pattern)), key=os.path.getmtime, reverse=True)
+                if matches:
+                    stderr_content, err_exists = _read_log_tail(matches[0], num_lines)
+                    if err_exists:
+                        break
 
         log_groups.append({
             "label": spec["label"],
