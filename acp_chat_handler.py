@@ -1097,6 +1097,17 @@ You are a friendly AI assistant helping a user build their **{self.project_name}
 
 **Follow this exact order every time:**
 
+0. 🔴 **IF SOMETHING IS BROKEN: READ LOGS FIRST.** Before reading code, before making changes:
+   ```bash
+   # Website: check if site is up
+   curl -sI https://{self.frontend_domain}/ | head -3
+   # Bot: check error log
+   cat logs/error.log | tail -30
+   # Scheduler: check job logs
+   curl -s $BACKEND_URL/api/scheduler/jobs/JOB_ID/logs
+   ```
+   The log tells you EXACTLY what broke. Reading code is guessing. Reading logs is KNOWING.
+
 1. READ agent README
 2. MAKE code changes
 3. UPDATE agent folder

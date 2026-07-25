@@ -325,6 +325,15 @@ Rules:
 CRITICAL RULES
 ==================================================
 
+🔴 RULE ZERO: CHECK JOB LOGS BEFORE FIXING ANYTHING.
+If a job is failing, ALWAYS check the execution log FIRST:
+
+```bash
+curl -s $BACKEND_URL/api/scheduler/jobs/JOB_ID/logs | python3 -m json.tool
+```
+
+The log tells you EXACTLY what broke. Never guess from code — read logs first.
+
 1. KEEP execute_task function signature: def execute_task(job: dict) -> dict
 2. KEEP all existing handlers (telegram, discord, email, api, trade)
 3. KEEP FETCH_DATA_REGISTRY and resolve_content logic

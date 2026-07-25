@@ -212,6 +212,24 @@ NOTE: User provides title + description - AI MUST decide APIs autonomously
 🔒 CRITICAL RULES (MANDATORY)
 ==================================================
 
+🔴 RULE ZERO: READ LOGS BEFORE FIXING ANYTHING.
+If the bot is not working (webhook not received, 502, crash, no response),
+ALWAYS read the error log FIRST before making any code changes:
+
+```bash
+cat logs/error.log | tail -30
+cat logs/out.log | tail -10
+```
+
+The log tells you EXACTLY what broke (import error, syntax error, missing
+dependency). Reading code files is guessing. Reading logs is KNOWING.
+Never spend 10+ tool calls reading code when 1 log read reveals the answer.
+
+After fixing, ALWAYS verify the bot starts cleanly:
+```bash
+curl -s https://{domain}-api.dreamagent.cloud/health
+```
+
 1. KEEP function signature EXACT:
    def process_user_input(text: str, user: Optional[User] = None) -> str
 
