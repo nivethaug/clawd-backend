@@ -1099,8 +1099,12 @@ You are a friendly AI assistant helping a user build their **{self.project_name}
 
 0. 🔴 **IF SOMETHING IS BROKEN: READ LOGS FIRST.** Before reading code, before making changes:
    ```bash
-   # Website: check if site is up
+   # Website frontend: check if site is up
    curl -sI https://{self.frontend_domain}/ | head -3
+   # Website backend: check API health
+   curl -s https://{self.backend_domain}/health
+   # Website backend error log (if backend is down):
+   cat backend/logs/error.log | tail -30
    # Bot: check error log
    cat logs/error.log | tail -30
    # Scheduler: check job logs
