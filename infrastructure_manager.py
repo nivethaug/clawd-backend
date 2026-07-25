@@ -2737,13 +2737,11 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 text=True
             )
 
-            if self.frontend_app_name not in pm2_check.stdout:
-                raise RuntimeError(f"Frontend service {self.frontend_app_name} not running")
-
+            # Frontend is served by nginx (no PM2 process) — skip frontend check
             if self.service_name not in pm2_check.stdout:
                 raise RuntimeError(f"Backend service {self.service_name} not running")
 
-            logger.info("[SERVICE] ✓ PM2 services running")
+            logger.info(f"[SERVICE] ✓ Backend PM2 running: {self.service_name}")
 
             # PHASE_8_DNS: Create DNS records for project domain
             logger.info("PHASE_8_DNS_START")
