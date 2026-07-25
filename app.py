@@ -4108,8 +4108,8 @@ async def delete_project(
         conn.execute("DELETE FROM session_chat_runs WHERE session_id IN (SELECT id FROM sessions WHERE project_id = %s)", (project_id,))
         # Delete commit logs
         conn.execute("DELETE FROM commit_log WHERE project_id = %s", (project_id,))
-        # Delete project AI chat messages
-        conn.execute("DELETE FROM projectchat WHERE project_id = %s", (project_id,))
+        # Delete project AI chat messages (uses project_domain, not project_id)
+        conn.execute("DELETE FROM projectchat WHERE project_domain = %s", (project_domain or project_name,))
         # Delete AI sessions for this project
         conn.execute("DELETE FROM ai_sessions WHERE project_id = %s", (project_id,))
         # Delete token usage for this project
