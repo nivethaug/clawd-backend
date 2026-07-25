@@ -1022,10 +1022,17 @@ class ServiceManager:
                         logger.error("Frontend build timed out")
                         raise Exception("Frontend build timed out")
                 
-                # Use PM2 built-in serve command for SPA routing
-                # Run: pm2 serve dist {port} -s --name {app_name} from frontend directory
+                # Use PM2 built-in serve command for SPA routing with project-local logs
+                frontend_logs_dir = project_frontend_path / "logs"
+                frontend_logs_dir.mkdir(parents=True, exist_ok=True)
                 subprocess.run(
-                    ["pm2", "serve", str(frontend_dist_path), str(frontend_port), "-s", "--name", app_name],
+                    [
+                        "pm2", "serve", str(frontend_dist_path), str(frontend_port),
+                        "-s", "--name", app_name,
+                        "--log", str(frontend_logs_dir / "out.log"),
+                        "--error", str(frontend_logs_dir / "error.log"),
+                        "--time",
+                    ],
                     capture_output=True,
                     timeout=30
                 )
