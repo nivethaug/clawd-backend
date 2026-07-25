@@ -226,46 +226,43 @@ def re_register_webhook(bot_token: str, domain: str, project_id: str):
     """
     Re-register Telegram webhook after restart.
     Called automatically when bot restarts to ensure webhook is up-to-date.
-    
+
     Args:
         bot_token: Telegram bot token
-        domain: Webhook domain
+        domain: Webhook domain (bare, e.g. 'mybot-abc123')
         project_id: Project ID
-    
+
     Safety:
         - Non-blocking (won't fail restart if webhook registration fails)
         - Timeout: 10 seconds
         - Logs success/failure
+        - Does NOT delete old webhook first (if new registration fails,
+          the old webhook stays active — bot keeps working)
     """
     import requests
-    
+
     try:
-        # Build webhook URL (matches nginx /webhook location)
-        webhook_url = f"https://{domain}.dreamagent.cloud/webhook"
-        
+        # Build webhook URL — MUST use -api subdomain (where nginx routes /webhook)
+        # NOT the bare domain (that's the frontend, no route to bot)
+        webhook_url = f"https://{domain}-api.dreamagent.cloud/webhook"
+
         print(f"🔗 Re-registering webhook: {webhook_url}")
-        
-        # Delete old webhook first (cleanup)
-        delete_url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
-        try:
-            requests.get(delete_url, timeout=5)
-            print("✓ Old webhook removed")
-        except:
-            pass  # Ignore errors
-        
-        # Register new webhook
+
+        # Register new webhook (setWebhook overwrites the old one atomically)
+        # Do NOT call deleteWebhook first — if setWebhook fails, the old
+        # webhook stays active and the bot keeps working.
         telegram_api_url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
-        
+
         payload = {
             "url": webhook_url,
             "allowed_updates": ["message", "edited_message", "callback_query"]
         }
-        
+
         response = requests.post(telegram_api_url, json=payload, timeout=10)
-        
+
         if response.status_code == 200:
             result = response.json()
-            
+
             if result.get("ok"):
                 print(f"✅ Webhook re-registered successfully")
                 print(f"📍 URL: {webhook_url}")
@@ -274,7 +271,7 @@ def re_register_webhook(bot_token: str, domain: str, project_id: str):
                 print(f"⚠️ Webhook registration failed: {error_msg}")
         else:
             print(f"⚠️ Webhook registration failed with status {response.status_code}")
-    
+
     except requests.exceptions.Timeout:
         print("⚠️ Webhook registration timeout (non-critical)")
     except requests.exceptions.RequestException as e:
