@@ -4473,7 +4473,8 @@ class InternalProvisionRequest(BaseModel):
     project_subdomain: str            # {sub}.{BASE_DOMAIN} for nginx server_name
     frontend_port: int
     backend_port: int
-    project_folder: str               # e.g. 686_test_xxx (for frontend dist path)
+    project_folder: str               # e.g. 686_test_xxx (legacy path fallback)
+    dist_path: Optional[str] = None   # absolute path to frontend dist (container-aware)
 
 
 class InternalRemoveNginxRequest(BaseModel):
@@ -4482,6 +4483,7 @@ class InternalRemoveNginxRequest(BaseModel):
     frontend_port: int
     backend_port: int
     project_folder: str
+    dist_path: Optional[str] = None
 
 
 @app.post("/projects/{project_id}/publish/frontend", response_model=BuildPublishResponse)
@@ -5402,6 +5404,7 @@ async def internal_provision_custom_domain(request: InternalProvisionRequest):
             request.backend_port,
             request.project_folder,
             [request.domain],
+            dist_path=request.dist_path,
         )
     except Exception as e:
         nginx_err = str(e)
@@ -5438,6 +5441,7 @@ async def internal_remove_custom_domain_nginx(request: InternalRemoveNginxReques
             request.backend_port,
             request.project_folder,
             [],  # no custom domains
+            dist_path=request.dist_path,
         )
         return {"success": bool(ok)}
     except Exception as e:
@@ -5459,6 +5463,7 @@ async def internal_custom_domain_server_ip():
 async def _run_custom_domain_provision(
     project_id: int, domain: str, project_subdomain: str,
     frontend_port: int, backend_port: int, project_folder: str,
+    dist_path: Optional[str] = None,
 ) -> dict:
     """Provision SSL+nginx on the VPS that hosts the project.
 
@@ -5472,6 +5477,7 @@ async def _run_custom_domain_provision(
         "frontend_port": frontend_port,
         "backend_port": backend_port,
         "project_folder": project_folder,
+        "dist_path": dist_path,
     }
     if _project_lives_on_worker(project_id):
         try:
@@ -5490,6 +5496,7 @@ async def _run_custom_domain_provision(
 async def _run_custom_domain_nginx_regen(
     project_id: int, project_subdomain: str,
     frontend_port: int, backend_port: int, project_folder: str,
+    dist_path: Optional[str] = None,
 ) -> bool:
     """Regenerate nginx (no custom domain) on the VPS that hosts the project."""
     payload = {
@@ -5497,6 +5504,7 @@ async def _run_custom_domain_nginx_regen(
         "frontend_port": frontend_port,
         "backend_port": backend_port,
         "project_folder": project_folder,
+        "dist_path": dist_path,
     }
     if _project_lives_on_worker(project_id):
         try:
@@ -5674,13 +5682,17 @@ async def verify_custom_domain(
     backend_port = project.get("backend_port")
     project_path = project.get("project_path", "")
     project_folder = project_path.rstrip("/").split("/")[-1] if project_path else project_subdomain
+    # Absolute path to the built frontend dist. MUST be passed explicitly —
+    # the nginx generator's fallback assumes /root/dreampilot/... which does
+    # not exist on the worker (worker uses /workspaces/user_X/...).
+    dist_path = f"{project_path.rstrip('/')}/frontend/dist" if project_path else None
 
     provision_ok = False
     provision_msg = ""
     if frontend_port and backend_port:
         result = await _run_custom_domain_provision(
             project_id, domain_name, project_subdomain,
-            frontend_port, backend_port, project_folder,
+            frontend_port, backend_port, project_folder, dist_path,
         )
         provision_ok = bool(result.get("success", False))
         provision_msg = result.get("message", "")
@@ -5853,12 +5865,13 @@ async def remove_custom_domain(
     backend_port = project.get("backend_port")
     project_path = project.get("project_path", "")
     project_folder = project_path.rstrip("/").split("/")[-1] if project_path else project_subdomain
+    dist_path = f"{project_path.rstrip('/')}/frontend/dist" if project_path else None
 
     if frontend_port and backend_port:
         try:
             ok = await _run_custom_domain_nginx_regen(
                 project_id, project_subdomain,
-                frontend_port, backend_port, project_folder,
+                frontend_port, backend_port, project_folder, dist_path,
             )
             if not ok:
                 logger.error(f"[CUSTOM_DOMAIN] nginx regen failed on removal for {removed_domain}")
