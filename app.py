@@ -1123,6 +1123,10 @@ app.include_router(scheduler_router, prefix="/api/scheduler", tags=["scheduler"]
 from api.validate_router import router as validate_router
 app.include_router(validate_router, prefix="/api/validate", tags=["validation"])
 
+# Register Web Terminal router (WebSocket + REST)
+from api.terminal_router import router as terminal_router
+app.include_router(terminal_router, tags=["terminal"])
+
 # Register Billing API router
 from api.billing_router import router as billing_router
 app.include_router(billing_router, prefix="/api/billing", tags=["billing"])
