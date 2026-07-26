@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import threading
 """
 Web Terminal API Router — WebSocket for interactive shell + REST for quick commands.
 
@@ -162,11 +163,42 @@ async def terminal_websocket(websocket: WebSocket, host: str, token: str = Query
                 await websocket.send_json({"type": "error", "message": str(e)})
                 continue
 
-            # Stream output lines
+            # Stream output lines — run blocking read in a thread, pass via queue
             try:
+                import queue as _queue
+                stream_queue = _queue.Queue()
+                _SENTINEL = {"type": "__done__"}
+
+                def _stream_to_queue():
+                    """Blocking function: read stdout and push to queue."""
+                    try:
+                        for chunk in current_cmd.read_stream():
+                            stream_queue.put(chunk)
+                    except Exception as e:
+                        stream_queue.put({"type": "stderr", "data": f"Read error: {e}\n"})
+                    finally:
+                        stream_queue.put(_SENTINEL)
+
+                # Start background thread for stdout reading
+                stream_thread = threading.Thread(target=_stream_to_queue, daemon=True)
+                stream_thread.start()
+
+                # Async loop: pull from queue and send via WebSocket
                 loop = asyncio.get_event_loop()
-                for chunk in current_cmd.read_stream():
+                while True:
+                    try:
+                        chunk = await loop.run_in_executor(None, stream_queue.get, 2.0)
+                    except Exception:
+                        # Timeout — check if still alive
+                        if not stream_thread.is_alive():
+                            break
+                        continue
+
+                    if chunk is _SENTINEL:
+                        break
                     await websocket.send_json(chunk)
+
+                stream_thread.join(timeout=5)
 
                 # Wait for completion
                 result = await loop.run_in_executor(None, current_cmd.wait)
