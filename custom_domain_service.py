@@ -149,7 +149,8 @@ def _row_to_dict(row: Any) -> Dict[str, Any]:
 # DNS INSTRUCTIONS
 # ============================================================================
 
-def get_dns_instructions(domain: str, project_subdomain: str) -> Dict[str, Any]:
+def get_dns_instructions(domain: str, project_subdomain: str,
+                         server_ip: Optional[str] = None) -> Dict[str, Any]:
     """
     Build DNS instructions for the user.
 
@@ -159,9 +160,20 @@ def get_dns_instructions(domain: str, project_subdomain: str) -> Dict[str, Any]:
     For root domains (example.com):
         A @ -> server_ip
         (also recommend CNAME www -> project_subdomain.{BASE_DOMAIN})
+
+    Args:
+        domain: The custom domain being configured.
+        project_subdomain: The project's auto-generated subdomain
+            ({sub}.{BASE_DOMAIN}) that CNAMEs should target.
+        server_ip: Optional explicit origin IP for A-record instructions.
+            If None, auto-detects via _get_server_ip() (the IP of the
+            machine running this code). Callers should pass the IP of the
+            VPS that actually hosts the project so users point DNS at the
+            right server (main vs worker).
     """
     frontend_target = f"{project_subdomain}.{BASE_DOMAIN}"
-    server_ip = _get_server_ip()
+    if server_ip is None:
+        server_ip = _get_server_ip()
 
     if _is_root_domain(domain):
         return {

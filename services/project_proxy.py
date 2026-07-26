@@ -98,6 +98,56 @@ def _get_client() -> httpx.AsyncClient:
     return _client
 
 
+# ---------------------------------------------------------------------------
+# Internal-call primitives (main → worker)
+# ---------------------------------------------------------------------------
+# These are used by endpoints that stay on main (DB metadata, custom-domain)
+# but need to trigger filesystem/nginx/certbot work on the worker. Unlike the
+# _PROXY_SUBROUTES allowlist (which forwards user-facing project routes), these
+# are explicit, one-off calls to /internal/* endpoints on the worker.
+# Security model matches /internal/chat-execute: worker port 8003 is
+# firewalled to the main VPS only — no auth header needed.
+
+async def post_to_worker(path: str, json_payload: Optional[dict] = None,
+                         timeout: Optional[float] = None) -> dict:
+    """POST json to {WORKER_VPS_URL}{path} and return the parsed JSON response.
+
+    Raises RuntimeError if no worker is configured or the call fails.
+    """
+    base = _get_worker_url()
+    if not base:
+        raise RuntimeError("No worker configured (WORKER_VPS_URL not set)")
+    client = _get_client()
+    try:
+        resp = await client.post(
+            f"{base}{path}",
+            json=json_payload or {},
+            timeout=timeout if timeout is not None else httpx.USE_DEFAULT,
+        )
+        return resp.json()
+    except Exception as exc:
+        raise RuntimeError(f"Worker POST {path} failed: {exc}") from exc
+
+
+async def get_from_worker(path: str, timeout: Optional[float] = None) -> dict:
+    """GET {WORKER_VPS_URL}{path} and return the parsed JSON response.
+
+    Raises RuntimeError if no worker is configured or the call fails.
+    """
+    base = _get_worker_url()
+    if not base:
+        raise RuntimeError("No worker configured (WORKER_VPS_URL not set)")
+    client = _get_client()
+    try:
+        resp = await client.get(
+            f"{base}{path}",
+            timeout=timeout if timeout is not None else httpx.USE_DEFAULT,
+        )
+        return resp.json()
+    except Exception as exc:
+        raise RuntimeError(f"Worker GET {path} failed: {exc}") from exc
+
+
 def _parse_project_id(path: str) -> Optional[int]:
     """Extract the leading numeric project_id from a project-scoped route."""
     m = _PROJECT_PATH_RE.match(path)

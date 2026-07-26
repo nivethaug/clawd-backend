@@ -4457,6 +4457,33 @@ class VerifyDomainResponse(BaseModel):
     checked_at: Optional[str] = None
 
 
+# --- Internal custom-domain provisioning (main → worker) ---
+# These models carry the data the worker needs to run certbot + regenerate
+# nginx WITHOUT re-reading the DB (the worker trusts the main's payload,
+# matching the /internal/chat-execute trust model).
+
+class InternalProvisionRequest(BaseModel):
+    """Provision SSL + regenerate nginx for a custom domain.
+
+    Runs on whichever VPS hosts the project (main calls this locally for
+    main-hosted projects, or POSTs it to the worker for worker-hosted ones).
+    """
+    project_id: int
+    domain: str                       # custom domain to provision
+    project_subdomain: str            # {sub}.{BASE_DOMAIN} for nginx server_name
+    frontend_port: int
+    backend_port: int
+    project_folder: str               # e.g. 686_test_xxx (for frontend dist path)
+
+
+class InternalRemoveNginxRequest(BaseModel):
+    """Regenerate nginx WITHOUT a custom domain (revert to subdomain only)."""
+    project_subdomain: str
+    frontend_port: int
+    backend_port: int
+    project_folder: str
+
+
 @app.post("/projects/{project_id}/publish/frontend", response_model=BuildPublishResponse)
 async def publish_frontend(
     project_id: int,
@@ -5298,6 +5325,193 @@ def _require_website_project(project: dict):
         )
 
 
+def _project_lives_on_worker(project_id: int) -> bool:
+    """True if the project's files are NOT on this VPS (i.e. on the worker).
+
+    Thin wrapper around project_proxy._project_lives_on_worker that only
+    returns the boolean. Used to decide whether certbot/nginx/IP work must
+    be proxied to the worker or run locally.
+    """
+    try:
+        from services.project_proxy import _project_lives_on_worker as _resolve
+        is_worker, _path = _resolve(project_id)
+        return bool(is_worker)
+    except Exception as exc:
+        logger.warning(
+            "[CUSTOM_DOMAIN] location lookup failed for %s: %s — assuming main",
+            project_id, exc,
+        )
+        return False
+
+
+async def _resolve_origin_ip(project_id: int) -> str:
+    """Return the public IP of the VPS hosting this project.
+
+    For main-hosted projects, runs _get_server_ip() locally (this VPS's IP).
+    For worker-hosted projects, asks the worker via /internal/custom-domain/server-ip
+    (the worker runs _get_server_ip() locally and returns its own IP).
+    """
+    if _project_lives_on_worker(project_id):
+        try:
+            from services.project_proxy import get_from_worker
+            data = await get_from_worker("/internal/custom-domain/server-ip", timeout=15.0)
+            ip = data.get("ip")
+            if ip:
+                return ip
+            logger.warning("[CUSTOM_DOMAIN] worker server-ip returned no ip: %s", data)
+        except Exception as exc:
+            logger.warning("[CUSTOM_DOMAIN] failed to fetch worker IP: %s", exc)
+        # Fall through to local detection (best-effort)
+    return custom_domain_service._get_server_ip()
+
+
+# ---------------------------------------------------------------------------
+# Internal endpoints (run on the host that owns the project's filesystem)
+# Same trust model as /internal/chat-execute: worker port firewalled to main.
+# ---------------------------------------------------------------------------
+
+@app.post("/internal/custom-domain/provision")
+async def internal_provision_custom_domain(request: InternalProvisionRequest):
+    """Provision SSL (certbot) + regenerate nginx for a custom domain.
+
+    Runs on the VPS that hosts the project. Called locally by main for
+    main-hosted projects, or proxied to the worker for worker-hosted ones.
+    """
+    logger.info(
+        f"[CUSTOM_DOMAIN-INTERNAL] provision domain={request.domain} "
+        f"project_id={request.project_id} subdomain={request.project_subdomain}"
+    )
+    # --- SSL via certbot (runs locally on this host) ---
+    ssl_result = custom_domain_service.provision_ssl(request.domain)
+    if not ssl_result.get("success", False):
+        return {
+            "success": False,
+            "stage": "ssl",
+            "message": ssl_result.get("message", "SSL provisioning failed"),
+        }
+
+    # --- nginx config (writes to this host's /etc/nginx) ---
+    nginx_ok = False
+    nginx_err = ""
+    try:
+        from infrastructure_manager import NginxConfigurator
+        nginx_cfg = NginxConfigurator()
+        nginx_ok = nginx_cfg.regenerate_with_custom_domains(
+            request.project_subdomain,
+            request.frontend_port,
+            request.backend_port,
+            request.project_folder,
+            [request.domain],
+        )
+    except Exception as e:
+        nginx_err = str(e)
+        logger.error(f"[CUSTOM_DOMAIN-INTERNAL] nginx regen error: {e}")
+
+    if not nginx_ok:
+        return {
+            "success": False,
+            "stage": "nginx",
+            "message": f"SSL ok but nginx regen failed: {nginx_err}",
+        }
+    return {
+        "success": True,
+        "stage": "done",
+        "message": f"SSL + nginx provisioned for {request.domain}",
+    }
+
+
+@app.post("/internal/custom-domain/remove-nginx")
+async def internal_remove_custom_domain_nginx(request: InternalRemoveNginxRequest):
+    """Regenerate nginx WITHOUT any custom domain (revert to subdomain only).
+
+    Runs on the VPS that hosts the project.
+    """
+    logger.info(
+        f"[CUSTOM_DOMAIN-INTERNAL] remove-nginx subdomain={request.project_subdomain}"
+    )
+    try:
+        from infrastructure_manager import NginxConfigurator
+        nginx_cfg = NginxConfigurator()
+        ok = nginx_cfg.regenerate_with_custom_domains(
+            request.project_subdomain,
+            request.frontend_port,
+            request.backend_port,
+            request.project_folder,
+            [],  # no custom domains
+        )
+        return {"success": bool(ok)}
+    except Exception as e:
+        logger.error(f"[CUSTOM_DOMAIN-INTERNAL] nginx remove error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@app.get("/internal/custom-domain/server-ip")
+async def internal_custom_domain_server_ip():
+    """Return this host's public IPv4 (for DNS A-record instructions).
+
+    Lets the main VPS ask the worker 'what IP should the user point DNS at?'
+    without SSH. The worker runs _get_server_ip() locally (ipify/etc.) which
+    returns its own origin IP.
+    """
+    return {"ip": custom_domain_service._get_server_ip()}
+
+
+async def _run_custom_domain_provision(
+    project_id: int, domain: str, project_subdomain: str,
+    frontend_port: int, backend_port: int, project_folder: str,
+) -> dict:
+    """Provision SSL+nginx on the VPS that hosts the project.
+
+    Returns dict with at least {success: bool, message: str}.
+    Main-hosted → run locally. Worker-hosted → POST to worker /internal/custom-domain/provision.
+    """
+    payload = {
+        "project_id": project_id,
+        "domain": domain,
+        "project_subdomain": project_subdomain,
+        "frontend_port": frontend_port,
+        "backend_port": backend_port,
+        "project_folder": project_folder,
+    }
+    if _project_lives_on_worker(project_id):
+        try:
+            from services.project_proxy import post_to_worker
+            # certbot can take ~30-60s; allow generous timeout.
+            return await post_to_worker(
+                "/internal/custom-domain/provision", payload, timeout=180.0
+            )
+        except Exception as exc:
+            logger.error(f"[CUSTOM_DOMAIN] worker provision call failed: {exc}")
+            return {"success": False, "message": f"Worker provision failed: {exc}"}
+    # Local (main-hosted): hit the internal endpoint logic directly.
+    return await internal_provision_custom_domain(InternalProvisionRequest(**payload))
+
+
+async def _run_custom_domain_nginx_regen(
+    project_id: int, project_subdomain: str,
+    frontend_port: int, backend_port: int, project_folder: str,
+) -> bool:
+    """Regenerate nginx (no custom domain) on the VPS that hosts the project."""
+    payload = {
+        "project_subdomain": project_subdomain,
+        "frontend_port": frontend_port,
+        "backend_port": backend_port,
+        "project_folder": project_folder,
+    }
+    if _project_lives_on_worker(project_id):
+        try:
+            from services.project_proxy import post_to_worker
+            data = await post_to_worker(
+                "/internal/custom-domain/remove-nginx", payload, timeout=60.0
+            )
+            return bool(data.get("success", False))
+        except Exception as exc:
+            logger.error(f"[CUSTOM_DOMAIN] worker nginx-remove call failed: {exc}")
+            return False
+    data = await internal_remove_custom_domain_nginx(InternalRemoveNginxRequest(**payload))
+    return bool(data.get("success", False))
+
+
 @app.get("/projects/{project_id}/custom-domain")
 async def get_custom_domain(
     project_id: int,
@@ -5332,9 +5546,12 @@ async def get_custom_domain(
             created_at=domain_info.get("created_at"),
         )
 
-        # Always return DNS instructions so the UI can display them
+        # Always return DNS instructions so the UI can display them.
+        # Resolve the origin IP for the VPS that actually hosts the project
+        # (worker-hosted projects must point DNS at the worker, not main).
+        origin_ip = await _resolve_origin_ip(project_id)
         dns = custom_domain_service.get_dns_instructions(
-            domain_info["domain"], project_subdomain
+            domain_info["domain"], project_subdomain, server_ip=origin_ip
         )
         result["dns_instructions"] = CustomDomainDnsInstructions(
             record_type=dns["record_type"],
@@ -5375,7 +5592,10 @@ async def add_custom_domain(
     except custom_domain_service.DomainConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    dns = custom_domain_service.get_dns_instructions(created["domain"], project_subdomain)
+    origin_ip = await _resolve_origin_ip(project_id)
+    dns = custom_domain_service.get_dns_instructions(
+        created["domain"], project_subdomain, server_ip=origin_ip
+    )
 
     return {
         "success": True,
@@ -5441,66 +5661,52 @@ async def verify_custom_domain(
     custom_domain_service.mark_verified(domain_id)
     logger.info(f"[CUSTOM_DOMAIN] DNS verified for {domain_name}")
 
-    # --- Step 2: SSL provisioning via certbot ---
-    ssl_result = custom_domain_service.provision_ssl(domain_name)
-    ssl_ok = ssl_result.get("success", False)
-    ssl_msg = ssl_result.get("message", "")
-    if not ssl_ok:
+    # --- Steps 2+3: SSL (certbot) + nginx config ---
+    # Runs on the VPS that hosts the project (main calls this locally for
+    # main-hosted projects; for worker-hosted projects the work is proxied
+    # to the worker where the project's files + nginx live).
+    frontend_port = project.get("frontend_port")
+    backend_port = project.get("backend_port")
+    project_path = project.get("project_path", "")
+    project_folder = project_path.rstrip("/").split("/")[-1] if project_path else project_subdomain
+
+    provision_ok = False
+    provision_msg = ""
+    if frontend_port and backend_port:
+        result = await _run_custom_domain_provision(
+            project_id, domain_name, project_subdomain,
+            frontend_port, backend_port, project_folder,
+        )
+        provision_ok = bool(result.get("success", False))
+        provision_msg = result.get("message", "")
+    else:
+        provision_msg = "Missing frontend/backend port — cannot configure nginx"
+
+    if not provision_ok:
+        # SSL may have succeeded but nginx failed (or vice versa). Mark SSL
+        # failed conservatively so the user can retry; the message carries
+        # the precise stage that broke.
         custom_domain_service.mark_failed(domain_id, ssl=True)
         return VerifyDomainResponse(
             success=False,
             status="verified",
             ssl_status="failed",
-            message=f"DNS verified, but SSL provisioning failed: {ssl_msg}",
+            message=f"DNS verified, but provisioning failed: {provision_msg}",
             domain=domain_name,
             checked_at=datetime.now().isoformat(),
         )
 
     custom_domain_service.mark_ssl_active(domain_id)
-    logger.info(f"[CUSTOM_DOMAIN] SSL provisioned for {domain_name}")
-
-    # --- Step 3: Update nginx config to include the custom domain ---
-    frontend_port = project.get("frontend_port")
-    backend_port = project.get("backend_port")
-    project_path = project.get("project_path", "")
-
-    # Derive folder name from path (e.g. /root/.../686_test_xxx -> 686_test_xxx)
-    project_folder = project_path.rstrip("/").split("/")[-1] if project_path else project_subdomain
-
-    nginx_regen_ok = False
-    if frontend_port and backend_port:
-        try:
-            from infrastructure_manager import NginxConfigurator
-            nginx_cfg = NginxConfigurator()
-            nginx_regen_ok = nginx_cfg.regenerate_with_custom_domains(
-                project_subdomain,
-                frontend_port,
-                backend_port,
-                project_folder,
-                [domain_name],
-            )
-        except Exception as e:
-            logger.error(f"[CUSTOM_DOMAIN] Nginx regen error for {domain_name}: {e}")
-
-    if nginx_regen_ok:
-        custom_domain_service.mark_active(domain_id)
-        return VerifyDomainResponse(
-            success=True,
-            status="active",
-            ssl_status="active",
-            message=f"✅ {domain_name} is now live with SSL!",
-            domain=domain_name,
-            checked_at=datetime.now().isoformat(),
-        )
-    else:
-        return VerifyDomainResponse(
-            success=False,
-            status="verified",
-            ssl_status="active",
-            message=f"SSL provisioned but nginx config update failed. Domain may not be live yet.",
-            domain=domain_name,
-            checked_at=datetime.now().isoformat(),
-        )
+    custom_domain_service.mark_active(domain_id)
+    logger.info(f"[CUSTOM_DOMAIN] SSL + nginx provisioned for {domain_name}")
+    return VerifyDomainResponse(
+        success=True,
+        status="active",
+        ssl_status="active",
+        message=f"✅ {domain_name} is now live with SSL!",
+        domain=domain_name,
+        checked_at=datetime.now().isoformat(),
+    )
 
 
 @app.get("/debug/custom-domain/{project_id}")
@@ -5632,7 +5838,8 @@ async def remove_custom_domain(
     # Remove from DB
     custom_domain_service.remove_domain(domain_info["id"])
 
-    # Regenerate nginx config without the custom domain
+    # Regenerate nginx config without the custom domain — on the VPS that
+    # hosts the project (worker for worker-hosted, local for main-hosted).
     frontend_port = project.get("frontend_port")
     backend_port = project.get("backend_port")
     project_path = project.get("project_path", "")
@@ -5640,15 +5847,12 @@ async def remove_custom_domain(
 
     if frontend_port and backend_port:
         try:
-            from infrastructure_manager import NginxConfigurator
-            nginx_cfg = NginxConfigurator()
-            nginx_cfg.regenerate_with_custom_domains(
-                project_subdomain,
-                frontend_port,
-                backend_port,
-                project_folder,
-                [],  # no custom domains
+            ok = await _run_custom_domain_nginx_regen(
+                project_id, project_subdomain,
+                frontend_port, backend_port, project_folder,
             )
+            if not ok:
+                logger.error(f"[CUSTOM_DOMAIN] nginx regen failed on removal for {removed_domain}")
         except Exception as e:
             logger.error(f"[CUSTOM_DOMAIN] Nginx regen error on removal: {e}")
 
