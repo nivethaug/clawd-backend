@@ -33,7 +33,15 @@ def get_user_id_from_token(authorization: Optional[str] = None) -> int:
 
     token = parts[1]
 
-    # Lazy import to avoid circular dependency at module load time
+    # 1) Long-lived service token (ADMIN_METRICS_TOKEN) — same as app.py version
+    import hmac
+    import os
+    admin_token = os.getenv("ADMIN_METRICS_TOKEN", "").strip()
+    admin_uid = int(os.getenv("ADMIN_METRICS_USER_ID", "0") or "0")
+    if admin_token and admin_uid and hmac.compare_digest(token, admin_token):
+        return admin_uid
+
+    # 2) Session token
     from app import AUTH_TOKENS
 
     user_id = AUTH_TOKENS.get(token)
