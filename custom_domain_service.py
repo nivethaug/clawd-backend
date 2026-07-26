@@ -432,7 +432,8 @@ def _dig_cname_chain(domain: str, max_hops: int = 10) -> List[str]:
     return chain
 
 
-def verify_dns(domain: str, project_subdomain: str) -> Dict[str, Any]:
+def verify_dns(domain: str, project_subdomain: str,
+               expected_ip: Optional[str] = None) -> Dict[str, Any]:
     """
     Verify that the domain's DNS points to this project.
 
@@ -443,6 +444,15 @@ def verify_dns(domain: str, project_subdomain: str) -> Dict[str, Any]:
 
     All values are normalized (lowercase, whitespace stripped, trailing
     dots removed) before comparison.
+
+    Args:
+        domain: The custom domain being verified.
+        project_subdomain: The project's auto-generated subdomain.
+        expected_ip: Optional origin IP to compare A records against. If None,
+            auto-detects via _get_server_ip() (the IP of the machine running
+            this code). Callers MUST pass the IP of the VPS hosting the
+            project — otherwise worker-hosted projects verify against the
+            main IP and always fail.
 
     Returns dict with:
         verified: bool
@@ -455,7 +465,8 @@ def verify_dns(domain: str, project_subdomain: str) -> Dict[str, Any]:
         expected_ip: str
     """
     expected_cname = _normalize_dns_value(f"{project_subdomain}.{BASE_DOMAIN}")
-    expected_ip = _get_server_ip()
+    if expected_ip is None:
+        expected_ip = _get_server_ip()
 
     logger.info(f"[CUSTOM_DOMAIN] === Verifying DNS for {domain} ===")
     logger.info(f"[CUSTOM_DOMAIN] Expected CNAME: {expected_cname}")

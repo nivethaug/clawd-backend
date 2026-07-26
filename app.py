@@ -5646,7 +5646,12 @@ async def verify_custom_domain(
     domain_id = domain_info["id"]
 
     # --- Step 1: DNS verification ---
-    dns_result = custom_domain_service.verify_dns(domain_name, project_subdomain)
+    # Verify against the IP of the VPS that hosts the project (worker-hosted
+    # projects point DNS at the worker, so comparing against main's IP fails).
+    origin_ip = await _resolve_origin_ip(project_id)
+    dns_result = custom_domain_service.verify_dns(
+        domain_name, project_subdomain, expected_ip=origin_ip
+    )
     if not dns_result.get("verified"):
         custom_domain_service.mark_failed(domain_id)
         return VerifyDomainResponse(
@@ -5737,7 +5742,8 @@ async def debug_custom_domain(
     domain_name = domain_info["domain"] if domain_info else None
 
     expected_cname = f"{project_subdomain}.{BASE_DOMAIN}"
-    expected_ip = custom_domain_service._get_server_ip()
+    on_worker = _project_lives_on_worker(project_id)
+    expected_ip = await _resolve_origin_ip(project_id)
 
     diagnostics: Dict[str, Any] = {
         "project": {
@@ -5746,6 +5752,7 @@ async def debug_custom_domain(
             "subdomain": project_subdomain,
         },
         "domain": domain_name,
+        "hosting_vps": "worker" if on_worker else "main",
         "expected_ip": expected_ip,
         "expected_cname": expected_cname,
         "ssl_cert_path": f"/etc/letsencrypt/live/{domain_name}/fullchain.pem" if domain_name else None,
@@ -5763,7 +5770,9 @@ async def debug_custom_domain(
     diagnostics["dns_ip_match"] = expected_ip in diagnostics["resolved_ips"]
 
     # --- Full DNS verification ---
-    dns_result = custom_domain_service.verify_dns(domain_name, project_subdomain)
+    dns_result = custom_domain_service.verify_dns(
+        domain_name, project_subdomain, expected_ip=expected_ip
+    )
     diagnostics["dns_verification"] = {
         "verified": dns_result["verified"],
         "method": dns_result["method"],
