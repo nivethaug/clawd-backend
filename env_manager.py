@@ -71,12 +71,25 @@ SENSITIVE_PATTERNS = [
 # must start with a letter. Rejects lowercase, hyphens, dots.
 KEY_REGEX = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
-# Map project type_id -> subdirectory containing the .env file
+# Map project type_id -> subdirectory containing the .env file.
+# An empty string ("") means the .env lives at the project root.
+#
+# These MUST match where copy_*_template() puts the template + where the
+# *_env_injector writes .env at create time, and where the runtime's
+# config.py loads .env from. Verified 2026-07-26:
+#   - website (1): copy -> backend/, inject -> backend/.env     ✅ "backend"
+#   - telegram (2): copy -> telegram/, inject -> telegram/.env  ✅ "telegram"
+#   - discord (3): copy -> discord/, inject -> discord/.env     ✅ "discord"
+#   - scheduler (5): copy -> ROOT, inject -> ROOT/.env         → "" (root)
+#     (scheduler is the outlier: its copy_scheduler_template writes
+#      directly to project_path, not a subdir; config.py loads
+#      _project_dir/.env, i.e. root. The old "scheduler" value pointed
+#      at a phantom subdir and hid create-time channels from GET /env.)
 ENV_SUBDIR_MAP = {
-    1: "backend",      # website
-    2: "telegram",     # telegram bot
-    3: "discord",      # discord bot
-    5: "scheduler",    # scheduler
+    1: "backend",      # website — .env at {project_path}/backend/.env
+    2: "telegram",     # telegram bot — .env at {project_path}/telegram/.env
+    3: "discord",      # discord bot — .env at {project_path}/discord/.env
+    5: "",             # scheduler — .env at {project_path}/.env (root)
 }
 
 # Value returned for masked sensitive variables (never the real value)
@@ -101,6 +114,91 @@ def _is_system(key: str) -> bool:
 # ============================================================================
 # PATH RESOLUTION
 # ============================================================================
+
+def _parse_env_file_keys(path: str) -> "list[tuple[str, str]]":
+    """Return [(key, value), ...] for non-comment KEY=VALUE lines in an env file."""
+    pairs: "list[tuple[str, str]]" = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                pairs.append((k.strip(), v.strip()))
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"[ENV] Failed to parse {path}: {e}")
+    return pairs
+
+
+def _migrate_legacy_scheduler_env(project_path: str) -> None:
+    """
+    Merge a legacy {project_path}/scheduler/.env into {project_path}/.env.
+
+    Idempotent: if scheduler/.env has already been renamed to
+    scheduler/.env.migrated (or doesn't exist), this is a no-op. Only keys
+    missing from root .env are appended (root wins on conflict). Safe to call
+    on every scheduler env access.
+    """
+    root_env = os.path.join(project_path, ".env")
+    legacy_dir = os.path.join(project_path, "scheduler")
+    legacy_env = os.path.join(legacy_dir, ".env")
+    migrated_env = os.path.join(legacy_dir, ".env.migrated")
+
+    # Already migrated, or never had a legacy file -> nothing to do.
+    if not os.path.exists(legacy_env) or os.path.exists(migrated_env):
+        return
+
+    legacy_pairs = _parse_env_file_keys(legacy_env)
+    if not legacy_pairs:
+        # Empty legacy file — just mark migrated.
+        try:
+            os.rename(legacy_env, migrated_env)
+        except OSError:
+            pass
+        return
+
+    root_keys = {k for k, _ in _parse_env_file_keys(root_env)} if os.path.exists(root_env) else set()
+
+    # Append only keys missing from root.
+    new_lines: "list[str]" = []
+    for k, v in legacy_pairs:
+        if k not in root_keys:
+            new_lines.append(f"{k}={v}")
+
+    if new_lines:
+        try:
+            # Preserve a blank line separator if root .env exists and is non-empty.
+            needs_separator = False
+            if os.path.exists(root_env):
+                with open(root_env, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if content and not content.endswith("\n"):
+                    new_lines.insert(0, "")
+                elif content and not content.endswith("\n\n"):
+                    needs_separator = True
+            with open(root_env, "a", encoding="utf-8") as f:
+                if needs_separator:
+                    f.write("\n")
+                f.write("\n".join(new_lines) + "\n")
+            migrated_keys = [ln.split("=", 1)[0] for ln in new_lines if "=" in ln]
+            logger.info(
+                f"[ENV] Migrated {len(new_lines)} key(s) from scheduler/.env -> root .env "
+                f"for {os.path.basename(project_path)}: {migrated_keys}"
+            )
+        except Exception as e:
+            logger.warning(f"[ENV] Migration append failed for {project_path}: {e}")
+            return  # don't rename if append failed
+
+    # Mark as migrated so we never run again.
+    try:
+        os.rename(legacy_env, migrated_env)
+        logger.info(f"[ENV] Renamed scheduler/.env -> scheduler/.env.migrated for {project_path}")
+    except OSError as e:
+        logger.warning(f"[ENV] Could not rename legacy scheduler/.env: {e}")
+
 
 def get_project_env_info(project_id: int) -> Tuple[str, int, Optional[str], str]:
     """
@@ -138,14 +236,28 @@ def get_project_env_info(project_id: int) -> Tuple[str, int, Optional[str], str]
     if not project_path:
         raise ValueError(f"Project {project_id} has no project_path")
 
-    subdir = ENV_SUBDIR_MAP.get(type_id)
-    if not subdir:
+    # type_id not in the map at all -> genuinely unsupported.
+    # type_id in map with subdir="" -> supported, .env at project root.
+    if type_id not in ENV_SUBDIR_MAP:
         raise ValueError(
             f"Environment variable editing is not supported for type_id={type_id}. "
             f"Supported types: {list(ENV_SUBDIR_MAP.keys())}"
         )
+    subdir = ENV_SUBDIR_MAP[type_id]
 
-    env_path = os.path.join(project_path, subdir, ".env")
+    env_path = os.path.join(project_path, subdir, ".env") if subdir else os.path.join(project_path, ".env")
+
+    # One-time migration for scheduler projects (type_id=5):
+    # Before this fix, GET/PUT read from {project_path}/scheduler/.env while
+    # the create-flow + runtime used {project_path}/.env (root). Users who
+    # manually added keys via the env dialog wrote them to scheduler/.env,
+    # which the runtime ignored. Now that we read root, merge any keys from
+    # the legacy scheduler/.env into root .env so nothing is lost. The merge
+    # only adds keys missing from root (root wins on conflict) and then
+    # renames scheduler/.env to .env.migrated so it never runs again.
+    if type_id == 5 and subdir == "":
+        _migrate_legacy_scheduler_env(project_path)
+
     # DEBUG: trace the resolved env path so we can compare it against where
     # inject_scheduler_env / write_env_file actually write.
     import os as _os
