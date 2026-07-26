@@ -55,6 +55,18 @@ SYSTEM_KEYS = frozenset({
     "DB_USER",
     "DB_PASSWORD",
     "COMMAND_PREFIX",
+    # Scheduler infrastructure (injected by env_injector.py at create time).
+    # These are platform-managed — the user never sets them. The channel
+    # keys (EMAIL_TO, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+    # DISCORD_WEBHOOK_URL, API_ENDPOINT) are NOT here: those are user-managed
+    # sender channels shown in the env dialog / SenderChannels UI.
+    "PROJECT_PATH",   # auto-resolved at create time
+    "BACKEND_URL",    # platform API URL (resolved from SCHEDULER_BACKEND_URL)
+    "SMTP_HOST",      # shared SMTP relay (Hostinger) — injected, not user-set
+    "SMTP_PORT",
+    "SMTP_USER",
+    "SMTP_PASS",
+    "SMTP_FROM",
 })
 
 # Patterns that mark a visible variable as sensitive (masked by default)
@@ -453,13 +465,24 @@ def reveal_env_value(path: str, key: str) -> Optional[str]:
     """
     Read a single env var value unmasked.
 
+    System/infrastructure keys are never revealable — returns None for them
+    so platform secrets (SMTP_PASS, BACKEND_URL, DATABASE_URL, etc.) can't
+    be exfiltrated via the reveal endpoint even by the project owner.
+
     Args:
         path: Path to .env file
         key: Variable key to reveal
 
     Returns:
-        The unmasked value, or None if not found.
+        The unmasked value, or None if not found / not allowed.
     """
+    # Defense in depth: system keys are hidden from GET, blocked from PUT,
+    # and must also be blocked from reveal. Without this, a project owner
+    # could POST /env/reveal {"key":"SMTP_PASS"} and read shared infra creds.
+    if _is_system(key):
+        logger.warning(f"[ENV] Reveal blocked for system key '{key}'")
+        return None
+
     if not os.path.exists(path):
         return None
 
