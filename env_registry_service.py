@@ -5,8 +5,10 @@ Provides CRUD operations and lookups for the `env_variable_registry` table.
 
 IMPORTANT: This module only manages METADATA (title, description, docs link,
 category, sensitivity flag). It does NOT store runtime env values.
-Actual values continue to live in project .env files
-(backend/.env, telegram/.env, discord/.env, scheduler/.env).
+Actual values continue to live in project .env files — see ENV_SUBDIR_MAP
+in env_manager.py for the exact path per type
+(website: backend/.env, telegram: telegram/.env, discord: discord/.env,
+scheduler: project-root .env).
 
 Usage:
     from env_registry_service import (

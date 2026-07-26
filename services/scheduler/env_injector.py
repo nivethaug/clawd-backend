@@ -47,7 +47,10 @@ def inject_scheduler_env(
     Create .env file for the scheduler project.
 
     Args:
-        project_path: Path to scheduler/ directory
+        project_path: Path to the scheduler PROJECT ROOT (where config.py,
+                      main.py live). The .env is written here — NOT in a
+                      scheduler/ subdir. This matches copy_scheduler_template
+                      (copies to root) and config.py (loads _project_dir/.env).
         project_id: Project ID
         backend_url: Backend API URL for job_manager
         telegram_bot_token: Telegram bot token
