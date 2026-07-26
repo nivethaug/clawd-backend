@@ -5004,7 +5004,25 @@ async def get_project_env(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+    # DEBUG: trace exactly which .env path is read and whether it exists
+    import os as _os
+    logger.info(
+        f"[ENV-DEBUG] GET /projects/{project_id}/env -> type_id={type_id}, "
+        f"env_path={env_path}, exists={_os.path.exists(env_path)}"
+    )
+
     variables = env_manager.read_env_file(env_path)
+
+    # DEBUG: log keys found, especially scheduler sender-channel keys
+    _found_keys = [v.get("key") for v in variables]
+    _channel_keys = [k for k in _found_keys if k in (
+        "EMAIL_TO", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+        "DISCORD_WEBHOOK_URL", "API_ENDPOINT",
+    )]
+    logger.info(
+        f"[ENV-DEBUG] GET /projects/{project_id}/env -> total_keys={len(_found_keys)}, "
+        f"channel_keys={_channel_keys}, all_keys={_found_keys}"
+    )
 
     # Merge metadata from the env_variable_registry so the UI can display
     # titles, descriptions, docs links, and categories. Runtime values
@@ -5072,6 +5090,14 @@ async def update_project_env(
         env_path, type_id, domain, project_name = env_manager.get_project_env_info(project_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    # DEBUG: trace exactly which .env path is written
+    import os as _os
+    logger.info(
+        f"[ENV-DEBUG] PUT /projects/{project_id}/env -> type_id={type_id}, "
+        f"env_path={env_path}, exists={_os.path.exists(env_path)}, "
+        f"update_keys={list(updates.keys())}, deleted={request.deleted}"
+    )
 
     # Write updates
     if updates:
