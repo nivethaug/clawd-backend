@@ -1618,6 +1618,23 @@ gets reaped at session end. **Never escalate to pkill.**
    serve, `curl` once to confirm 200 + `<div id="root">` BEFORE opening the
    browser.
 
+**URL discipline (CRITICAL — the #1 cause of false-404 death-loops):**
+The chrome-devtools MCP browser runs in a **SEPARATE container** from your
+shell. `localhost:3004` in the browser does NOT reach your `npx serve` — it
+hits an empty server that returns serve's own 404 page
+(`<span>404</span><p>The requested path could not be found</p>`). This 404
+has **no `<title>`** and a ~98-byte body — that signature is **serve's
+fallback, NOT your React app**. If you see it, you used the wrong URL; the
+build is fine. Do NOT rebuild.
+
+- In the browser, ALWAYS use `$CHROME_VERIFY_URL:3004/` (e.g.
+  `http://172.18.0.2:3004/`). NEVER hand-type `localhost:3004` or
+  `127.0.0.1:3004`.
+- In your shell (curl), `localhost:3004` IS correct (the shell shares the
+  container with serve). So `curl http://localhost:3004/` → 200, but
+  `new_page(url: "http://localhost:3004/")` → serve 404. This asymmetry is
+  expected; resolve it by using `$CHROME_VERIFY_URL` for the browser only.
+
 ---
 
 ## EXECUTION ORDER — FOLLOW THIS EXACTLY
@@ -1627,7 +1644,9 @@ gets reaped at session end. **Never escalate to pkill.**
 3. Create domain-appropriate navigation in `src/layout/Navbar.tsx`
 4. Integrate navigation into `Layout.tsx`
 5. Run `npm run build` only after router validation passes
-6. Serve dist: `npx serve -s dist -l 3004` (binds to 0.0.0.0, reachable from host Chrome)
+6. Serve dist: `npx serve -s dist -l 3004` in the background, then `sleep 3`.
+   (serve binds to 0.0.0.0 by default, so it's reachable via the container's
+   bridge IP — which is what the browser must use.)
 7. **BROWSER VERIFICATION (PRIMARY — runs first).** Use `$CHROME_VERIFY_URL`
    (NOT localhost). Run the visibility check from the POST-BUILD VERIFICATION
    section below:
@@ -1637,20 +1656,27 @@ gets reaped at session end. **Never escalate to pkill.**
    If `ok === true` → **verification passed.** Skip curl entirely. Kill the
    serve process and proceed to update AI index files.
 8. **IF BROWSER FAILED — ONE FIX, THEN CURL FALLBACK.** Only enter this step
-   if step 7 returned `ok === false` (or the browser tools errored). Do exactly
-   ONE debug-and-fix cycle:
-   a. Read the error: if the browser reported `headings: 0` or `mainW: 0`, run
-      `get_console_message(types: ["error"])` to capture the JS runtime error.
-   b. Fix the reported error in source (e.g. undefined import, bad hook, route
-      mismatch). Make ONE fix — do not iterate.
-   c. Rebuild (`npm run build`) and re-serve.
-   d. Verify the rebuild with curl (run via Bash):
-      ```
-      curl -s http://localhost:3004/ | grep -E '<title>|<div id="root">|<script'
-      ```
-      The page must have a `<title>` (not "DreamPilot"), `<div id="root">`, and
-      at least one `<script>`. If curl returns these, **mark verified.** Do NOT
-      loop back to the browser. Do NOT attempt a second fix.
+   if step 7 returned `ok === false` (or the browser tools errored).
+   **FIRST: diagnose the 404 before touching anything.** Inspect the page body:
+   - If bodyHTML contains `<span>404</span>` / `<p>The requested path...` AND
+     `title` is empty → that is **serve's own fallback page**, NOT your app. It
+     means the browser used `localhost` (wrong) instead of `$CHROME_VERIFY_URL`.
+     The build is FINE. Fix: `new_page(url: "$CHROME_VERIFY_URL:3004/")` and
+     re-run the visibility check. Do NOT rebuild. Do NOT pkill anything.
+   - Otherwise (real JS error, headings:0 from a runtime crash): do exactly
+     ONE debug-and-fix cycle:
+     a. Read the error: if the browser reported `headings: 0` or `mainW: 0`, run
+        `get_console_message(types: ["error"])` to capture the JS runtime error.
+     b. Fix the reported error in source (e.g. undefined import, bad hook, route
+        mismatch). Make ONE fix — do not iterate.
+     c. Rebuild (`npm run build`) and re-serve.
+     d. Verify the rebuild with curl (run via Bash):
+        ```
+        curl -s http://localhost:3004/ | grep -E '<title>|<div id="root">|<script'
+        ```
+        The page must have a `<title>` (not "DreamPilot"), `<div id="root">`, and
+        at least one `<script>`. If curl returns these, **mark verified.** Do NOT
+        loop back to the browser. Do NOT attempt a second fix.
 
 **Hard rules:**
 - You get AT MOST ONE fix attempt in step 8. If curl still fails after the one
