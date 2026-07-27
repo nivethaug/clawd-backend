@@ -1401,19 +1401,25 @@ def init_schema():
             # ----------------------------------------------------------------
 
             # Seed plans
+            # NOTE: feature lists must stay in sync with the frontend source
+            # of truth — src/lib/subscriptionPlans.ts (SUBSCRIPTION_PLANS) —
+            # so the pricing page and Billing page show identical features.
             seed_plans = [
                 ('free', 'Free', 0, 3, 0, 0, 0, 0, 0, 0, False, 0,
-                 json.dumps(["Unlimited Prompt Assistant", "Unlimited DevOps Assistant",
-                             "Community Templates", "Community Gallery", "GitHub Export", "ZIP Download"])),
-                ('pro', 'Pro', 3900, 30, 0, 0, 0, 0, 1, 1, True, 10,
-                 json.dumps(["Premium Models", "Priority Queue", "Premium Templates",
-                             "Unlimited Deployments", "Custom Domains", "Premium Support"])),
-                ('dream', 'Dream', 9900, 100, 0, 0, 0, 0, 2, 2, True, 20,
-                 json.dumps(["Premium Models", "Fastest Queue", "Premium Support",
-                             "Custom Domains", "Unlimited Deployments"])),
+                 json.dumps(["3 Active Projects", "2M AI Edit Tokens",
+                             "50 Monthly Project AI Credits", "Unlimited Prompt Assistant",
+                             "Unlimited AI DevOps Assistant"])),
+                ('pro', 'Pro', 1900, 10, 0, 0, 0, 1, 1, 1, True, 10,
+                 json.dumps(["10 Active Projects", "10M AI Edit Tokens",
+                             "250 Monthly Project AI Credits", "Premium Models",
+                             "Custom Domains", "Priority Queue"])),
+                ('dream', 'Dream', 3900, 30, 0, 0, 0, 1, 2, 2, True, 20,
+                 json.dumps(["30 Active Projects", "25M AI Edit Tokens",
+                             "1000 Monthly Project AI Credits", "Premium Support",
+                             "Fastest Queue"])),
                 ('enterprise', 'Enterprise', 0, 0, 0, 0, 0, 0, 3, 3, True, 30,
-                 json.dumps(["Unlimited Active Projects", "Dedicated VPS", "Self Hosted",
-                             "Team Workspace", "White Label", "Dedicated Infrastructure", "Contact Sales"])),
+                 json.dumps(["Everything in Dream", "Dedicated VPS", "Self Hosted",
+                             "Enterprise Support"])),
             ]
             for slug, name, price, max_proj, stor, bw, dep, dom, prio, sort, premium, sort_o, feats in seed_plans:
                 cur.execute(
