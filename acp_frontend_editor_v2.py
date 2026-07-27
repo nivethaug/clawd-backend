@@ -1581,6 +1581,45 @@ mobile-only output.
 
 ---
 
+## ⛔ NEVER KILL GLOBAL PROCESSES (CRITICAL — read before any `pkill`/`kill`)
+
+The build toolchain (`vite`, `esbuild`, `npm`, `node`) and the chrome-devtools
+MCP are ALL `node` processes. A single `pkill node` or `pkill -f node` will
+SIGKILL your own `npm run build` mid-flight, leaving a stale/empty `dist/`.
+Your next verification then serves the stale dist, the browser shows a 404,
+you panic, you `pkill node` again — a death-loop that burns minutes of tokens
+and never converges. This has happened. Do not repeat it.
+
+**BANNED commands (NEVER run any of these):**
+- `pkill node` / `pkill -f node` / `pkill -9 node`
+- `pkill npm` / `pkill -f npm`
+- `pkill vite` / `pkill -f vite`
+- `pkill esbuild` / `pkill -f esbuild`
+- `pkill serve` (bare — too broad)
+- `killall node`
+
+**Killing processes is ALWAYS by PORT, never by process name.** To stop the
+preview server, free only the port it bound:
+```bash
+# Kill whatever listens on 3004 (the serve port) — nothing else
+fuser -k 3004/tcp 2>/dev/null || kill $(lsof -t -i:3004) 2>/dev/null
+```
+If `fuser`/`lsof` are missing, leave the serve running — it is harmless and
+gets reaped at session end. **Never escalate to pkill.**
+
+**Build discipline (avoids the 404 death-loop):**
+1. Build: `npm run build` — wait for the literal `✓ built` line before doing
+   anything else. If you don't see it, the build is still running or failed;
+   do NOT serve.
+2. Serve: `npx serve -s dist -l 3004` in the background, then `sleep 3` before
+   any curl/browser check — serve needs a moment to bind. Verifying before the
+   bind shows a connection error that looks identical to a build failure.
+3. Verify the build you just ran, not a previous one. If you killed/restarted
+   serve, `curl` once to confirm 200 + `<div id="root">` BEFORE opening the
+   browser.
+
+---
+
 ## EXECUTION ORDER — FOLLOW THIS EXACTLY
 
 1. Create each required non-Welcome page (fully implemented, 800+ chars)
@@ -1622,7 +1661,8 @@ mobile-only output.
 - `$CHROME_VERIFY_URL` (e.g. `http://172.18.0.2`) is the container's bridge IP
   and IS reachable from host Chrome. NEVER use `http://localhost:3004` in the
   browser — localhost inside the container is NOT reachable from host Chrome.
-9. Kill the serve process: `pkill -f "serve -s dist" 2>/dev/null`
+9. Free the serve port ONLY (never `pkill` by name — see the ⛔ NEVER block):
+   `fuser -k 3004/tcp 2>/dev/null || kill $(lsof -t -i:3004) 2>/dev/null`
 10. Update AI index files (symbols, files, dependencies, summaries)
 
 Wrapper compatibility: if required page files already exist as one-line scaffolds, overwrite all non-Welcome required page files with complete implementations first. Do not edit `src/pages/Welcome.tsx`.
