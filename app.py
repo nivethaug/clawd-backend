@@ -7237,6 +7237,11 @@ async def chat_stream_endpoint(
                                     if new_pids:
                                         logger.info(f"[ACP-STREAM] Cleaning up {len(new_pids)} chrome PIDs after background save: {new_pids}")
                                         handler._kill_chrome_pids(new_pids)
+                                # Also close leftover browser tabs the MCP opened on
+                                # the persistent Chrome — these aren't killed by the
+                                # PID cleanup and accumulate as ~130MB renderers.
+                                if hasattr(handler, '_close_chrome_tabs'):
+                                    handler._close_chrome_tabs()
                             except Exception as chrome_cleanup_err:
                                 logger.warning(f"[ACP-STREAM] Chrome cleanup after background save failed (non-fatal): {chrome_cleanup_err}")
                             SessionLockService.release_processing(session_id)

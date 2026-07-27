@@ -518,6 +518,66 @@ class ACPChatHandler:
                 _send_signal(pid, "KILL", sig.SIGKILL)
                 logger.info(f"[ACP-CHAT] Sent SIGKILL to chrome-devtools-mcp PID: {pid}")
 
+    def _close_chrome_tabs(self):
+        """
+        Close leftover Chrome tabs opened by chrome-devtools-mcp during a session.
+
+        The MCP server is killed by _kill_chrome_pids, but the BROWSER tabs it
+        opened (on the persistent Chrome at :9222/:9223) are NOT closed when the
+        MCP dies — they accumulate as renderer processes (~130MB each) and starve
+        the worker of RAM over time.
+
+        This lists all open page targets via the CDP HTTP API and closes every
+        one except the seed 'about:blank' tab that the systemd Chrome boots with.
+        Safe to call repeatedly; no-op if Chrome is unreachable.
+        """
+        import json
+        import urllib.request
+
+        # Chrome CDP HTTP endpoint. From inside a container the socat forwarder
+        # is at 172.17.0.1:9223 (-> host 127.0.0.1:9222); on the host it's :9222.
+        endpoints = [
+            os.getenv("CHROME_CDP_URL", "http://172.17.0.1:9223"),
+            "http://127.0.0.1:9222",
+        ]
+
+        base = None
+        for ep in endpoints:
+            try:
+                with urllib.request.urlopen(f"{ep}/json/version", timeout=2):
+                    base = ep
+                    break
+            except Exception:
+                continue
+        if not base:
+            return  # Chrome unreachable — nothing to close ( scraper runs on main )
+
+        try:
+            with urllib.request.urlopen(f"{base}/json", timeout=3) as r:
+                targets = json.loads(r.read().decode())
+        except Exception as e:
+            logger.warning(f"[ACP-CHAT] Could not list Chrome tabs: {e}")
+            return
+
+        closed = 0
+        for t in targets:
+            # Only close actual page targets, and keep the seed about:blank alive
+            # so Chrome doesn't exit (some headless builds terminate on 0 tabs).
+            if t.get("type") != "page":
+                continue
+            if (t.get("url") or "").startswith("about:blank"):
+                continue
+            target_id = t.get("id")
+            if not target_id:
+                continue
+            try:
+                urllib.request.urlopen(f"{base}/json/close/{target_id}", timeout=3)
+                closed += 1
+            except Exception as e:
+                logger.warning(f"[ACP-CHAT] Failed to close Chrome tab {target_id}: {e}")
+        if closed:
+            logger.info(f"[ACP-CHAT] Closed {closed} leftover Chrome tab(s)")
+
     def _build_chat_prompt_scheduler(self, user_message: str, session_context: str = "") -> str:
         """
         Build chat prompt for scheduler project modifications.
@@ -2892,7 +2952,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 self._kill_chrome_pids(new_pids)
             else:
                 logger.info(f"[CLAUDE-AGENT] No new chrome PIDs to clean up")
-    
+            # Close leftover browser tabs the MCP opened on the persistent Chrome.
+            self._close_chrome_tabs()
+
     def run_acpx_chat(self, user_message: str, session_context: str = "") -> Dict[str, Any]:
         """
         Run ACPX chat and return the response (fallback synchronous method).
@@ -3449,6 +3511,8 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                     self._kill_chrome_pids(new_pids)
                 else:
                     logger.info(f"[ACP-CHAT] No new chrome PIDs to clean up")
+                # Close leftover browser tabs the MCP opened on the persistent Chrome.
+                self._close_chrome_tabs()
             else:
                 logger.info(
                     "[ACP-CHAT] Query still running — skipping chrome cleanup "
