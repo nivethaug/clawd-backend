@@ -1433,6 +1433,30 @@ def init_schema():
             conn.commit()
             logger.info("✓ Seeded billing_plans")
 
+            # ── One-time price/limit correction for existing billing_plans rows ──
+            # The seed above uses ON CONFLICT (slug) DO NOTHING, so installations
+            # seeded before 2026-07-27 still have the OLD prices/limits:
+            #   pro   = $39 (3900c) / 30 projects
+            #   dream = $99 (9900c) / 100 projects
+            # Correct them to match the public pricing page:
+            #   pro   = $19 (1900c) / 10 projects
+            #   dream = $39 (3900c) / 30 projects
+            # Idempotent: the WHERE clause only matches rows still on the old
+            # values, so re-running is a no-op once corrected.
+            def migrate_correct_plan_prices():
+                cur.execute(
+                    """UPDATE billing_plans
+                          SET price_monthly_cents = 1900, max_active_projects = 10
+                        WHERE slug = 'pro' AND price_monthly_cents = 3900"""
+                )
+                cur.execute(
+                    """UPDATE billing_plans
+                          SET price_monthly_cents = 3900, max_active_projects = 30
+                        WHERE slug = 'dream' AND price_monthly_cents = 9900"""
+                )
+            _run_migration(migrate_correct_plan_prices)
+
+
             # Seed plan_credit_grants
             cur.execute("SELECT id, slug FROM billing_plans")
             plan_map = {row["slug"]: row["id"] for row in cur.fetchall()}
