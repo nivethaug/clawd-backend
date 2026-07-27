@@ -5327,6 +5327,35 @@ def _require_website_project(project: dict):
         )
 
 
+def _require_custom_domain_allowed(user_id: int):
+    """Raise 402 if the user may not use custom domains.
+
+    Custom domains are a paid feature. Allowed for non-free tiers and for
+    admins. This is the backend enforcement that backs the frontend gating
+    (ProjectCard hides the option for free users) — without it a free user
+    could call the endpoints directly.
+    """
+    try:
+        from services.rate_limiter import get_user_tier_and_role
+        info = get_user_tier_and_role(user_id)
+    except Exception as exc:
+        logger.warning(
+            "[CUSTOM_DOMAIN] tier lookup failed for user %s: %s — denying",
+            user_id, exc,
+        )
+        raise HTTPException(
+            status_code=402,
+            detail="Custom domains require a paid plan. Please upgrade to use this feature.",
+        )
+    tier = (info or {}).get("tier", "free")
+    role = (info or {}).get("role", "user")
+    if tier == "free" and role != "admin":
+        raise HTTPException(
+            status_code=402,
+            detail="Custom domains require a paid plan. Please upgrade to use this feature.",
+        )
+
+
 def _project_lives_on_worker(project_id: int) -> bool:
     """True if the project's files are NOT on this VPS (i.e. on the worker).
 
@@ -5528,7 +5557,8 @@ async def get_custom_domain(
     """
     Get the current custom domain for a project and DNS setup instructions.
     """
-    get_user_id_from_token(authorization)
+    user_id = get_user_id_from_token(authorization)
+    _require_custom_domain_allowed(user_id)
 
     row = _get_project_for_domain(project_id)
     if not row:
@@ -5583,7 +5613,8 @@ async def add_custom_domain(
     Add a custom domain to a project (one per project).
     Returns DNS instructions the user must configure.
     """
-    get_user_id_from_token(authorization)
+    user_id = get_user_id_from_token(authorization)
+    _require_custom_domain_allowed(user_id)
 
     row = _get_project_for_domain(project_id)
     if not row:
@@ -5634,7 +5665,8 @@ async def verify_custom_domain(
     Verify DNS for the project's custom domain, then provision SSL and
     update the nginx config so the domain goes live.
     """
-    get_user_id_from_token(authorization)
+    user_id = get_user_id_from_token(authorization)
+    _require_custom_domain_allowed(user_id)
 
     row = _get_project_for_domain(project_id)
     if not row:
@@ -5738,11 +5770,18 @@ async def debug_custom_domain(
     HTTP reachability check, nginx config existence, and SSL cert status.
     """
     # Auth is optional for this debug endpoint — it's read-only diagnostics.
+    # But if the caller IS an authenticated free-tier user, enforce the paid
+    # gate so they can't use diagnostics to reverse-engineer DNS instructions.
     if authorization:
         try:
-            get_user_id_from_token(authorization)
-        except HTTPException:
-            pass  # still allow viewing diagnostics without valid token
+            dbg_user_id = get_user_id_from_token(authorization)
+            _require_custom_domain_allowed(dbg_user_id)
+        except HTTPException as exc:
+            # Re-raise payment-required (402) but swallow auth errors so
+            # unauthenticated debug access still works.
+            if exc.status_code == 402:
+                raise
+            pass
 
     row = _get_project_for_domain(project_id)
     if not row:
@@ -5838,7 +5877,8 @@ async def remove_custom_domain(
     Remove the custom domain from a project and regenerate nginx config
     (reverting to the default subdomain only).
     """
-    get_user_id_from_token(authorization)
+    user_id = get_user_id_from_token(authorization)
+    _require_custom_domain_allowed(user_id)
 
     row = _get_project_for_domain(project_id)
     if not row:
