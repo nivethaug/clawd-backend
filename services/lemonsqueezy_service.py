@@ -329,12 +329,16 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
         return {"handled": True, "action": "plan_assigned", "plan": plan["slug"]}
 
     # --- Subscription cancelled ---
-    if event_name == "subscription_cancelled":
+    if event_name in ("subscription_cancelled", "subscription_expired"):
+        # Both end the subscription: cancelled = user-initiated, expired =
+        # natural end (card declined past grace, fixed-term ended). Both must
+        # downgrade the user to free so paid features don't linger.
+        new_status = "cancelled" if event_name == "subscription_cancelled" else "expired"
         with get_db() as conn:
             conn.execute(
-                """UPDATE subscriptions SET status = 'cancelled', updated_at = NOW()
+                """UPDATE subscriptions SET status = %s, updated_at = NOW()
                    WHERE user_id = %s AND status = 'active'""",
-                (user_id,),
+                (new_status, user_id),
             )
             conn.execute(
                 "UPDATE users SET subscription_tier = 'free' WHERE id = %s",
@@ -345,7 +349,7 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
             conn.commit()
 
         invalidate("all")
-        logger.info(f"[LEMONSQUEZY] Downgraded user {user_id} to free (cancelled)")
+        logger.info(f"[LEMONSQUEEZY] Downgraded user {user_id} to free ({new_status})")
         capture_payment_success(
             event=event_name,
             action="downgraded_to_free",
