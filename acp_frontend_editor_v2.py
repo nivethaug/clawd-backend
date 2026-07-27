@@ -1424,6 +1424,10 @@ class ACPFrontendEditorV2:
             # Phase 4: resolve user_id for container targeting (no-op in local mode).
             from claude_code_agent import resolve_user_id_for_project
             _user_id = resolve_user_id_for_project(self.project_id)
+            # Capture chrome-devtools-mcp PIDs BEFORE the session so we only
+            # reap the ones this session spawned (parallel builds are safe).
+            from services.chrome_cleanup import cleanup_after_session, _get_chrome_devtools_pids
+            _chrome_pids_before = _get_chrome_devtools_pids(_user_id)
             async with ClaudeCodeAgent(
                 repo_path=str(self.frontend_src_path),
                 on_text=on_text,
@@ -1476,12 +1480,25 @@ class ACPFrontendEditorV2:
                 print(f"   Elapsed time: {elapsed:.1f}s", flush=True)
                 print("=" * 80, flush=True)
 
+                # Reap chrome-devtools-mcp processes + leftover browser tabs that
+                # Claude's browser verification opened. Without this, website
+                # CREATE sessions leak ~130MB renderer processes per unclosed tab.
+                try:
+                    cleanup_after_session(_user_id, _chrome_pids_before)
+                except Exception as chrome_err:
+                    logger.warning(f"[ACPX-V2] Chrome cleanup failed (non-fatal): {chrome_err}")
+
                 return (return_code, '\n'.join(stdout_lines), '\n'.join(stderr_lines))
 
         except asyncio.TimeoutError:
             elapsed = (datetime.now() - query_start_time).total_seconds()
             logger.error(f"[ACPX-V2] === TIMEOUT after {CLAUDE_TIMEOUT}s ===")
             print(f"🔴 CLAUDE-AGENT-TIMEOUT: Exceeded {CLAUDE_TIMEOUT}s ({elapsed:.1f}s elapsed, {chunk_count} chunks)", flush=True)
+            # Still reap chrome on timeout — a hung session leaves the most tabs.
+            try:
+                cleanup_after_session(_user_id, _chrome_pids_before)
+            except Exception as chrome_err:
+                logger.warning(f"[ACPX-V2] Chrome cleanup on timeout failed (non-fatal): {chrome_err}")
             return (124, '\n'.join(stdout_lines), f"Timeout after {CLAUDE_TIMEOUT}s")
 
         # Phase 9: Store allowed pages whitelist for guardrails
