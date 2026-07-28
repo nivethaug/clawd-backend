@@ -57,8 +57,8 @@ app = FastAPI(
         }
     ],
     contact={
-        "name": "Clawd Bot Platform",
-        "email": "support@clawd.app"
+        "name": "DreamAgent",
+        "email": "support@dreamagent.cloud"
     },
     license_info={
         "name": "MIT"

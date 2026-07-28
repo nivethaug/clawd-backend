@@ -1047,8 +1047,8 @@ completion_service = CompletionService()
 # ============================================================================
 
 app = FastAPI(
-    title="Clawdbot Adapter API",
-    description="Session-isolated adapter API for Clawdbot",
+    title="DreamAgent API",
+    description="DreamAgent platform API",
     version="1.0.0",
 )
 
@@ -9753,6 +9753,8 @@ async def health_check(authorization: Optional[str] = Header(None)):
         "status": "ok",
         "clawdbot_url": CLAWDBOT_BASE_URL,
         "clawdbot_token": CLAWDBOT_TOKEN[:16] + "...",
+        "agent_url": CLAWDBOT_BASE_URL,
+        "agent_token_set": bool(CLAWDBOT_TOKEN),
         "images_dir": IMAGES_DIR,
         "images_base_url": IMAGES_BASE_URL,
         "image_handling": "workspace_and_text_reference",
@@ -12305,7 +12307,7 @@ async def admin_get_usage_logs(
 
 if __name__ == "__main__":
     import uvicorn
-    print(f"Starting Clawdbot Adapter API...")
+    print(f"Starting DreamAgent API...")
     print(f"Images directory: {IMAGES_DIR}")
     print(f"Images accessible at: {IMAGES_BASE_URL}")
 
