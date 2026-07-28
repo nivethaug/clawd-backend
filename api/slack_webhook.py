@@ -12,6 +12,7 @@ import json
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qs
 
@@ -653,7 +654,6 @@ async def slack_oauth_callback(
     """
     import os
     import httpx
-    from pathlib import Path
 
     if error:
         logger.error(f"[SLACK-OAUTH] Slack returned error: {error}")
