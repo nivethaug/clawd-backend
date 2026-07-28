@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -652,7 +653,6 @@ async def slack_oauth_callback(
     is a single-tenant platform bot (not per-user OAuth), we store the bot
     token globally.
     """
-    import os
     import httpx
 
     if error:
