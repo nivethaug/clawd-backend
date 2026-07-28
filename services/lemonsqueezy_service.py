@@ -66,8 +66,14 @@ def create_checkout_url(
     api_key = os.getenv("LEMONSQUEEZY_API_KEY", "")
     store_id = os.getenv("LEMONSQUEEZY_STORE_ID", "")
 
+    # Masked key fingerprint for logs — last 10 chars only, never the full key.
+    # Helps confirm which key the process is actually using (test vs live)
+    # without exposing the secret. Test-mode and live-mode keys have different
+    # endings, so this is enough to tell them apart in the logs.
+    _key_tail = api_key[-10:] if api_key else "(none)"
+
     if not api_key or not store_id:
-        logger.warning(f"[LEMONSQUEEZY] Not configured — api_key={len(api_key)} chars, store_id={store_id or 'EMPTY'}")
+        logger.warning(f"[LEMONSQUEEZY] Not configured — api_key={len(api_key)} chars, key_tail=...{_key_tail}, store_id={store_id or 'EMPTY'}")
         capture_payment_failure(
             event="checkout_create",
             reason="provider_not_configured",
@@ -80,7 +86,7 @@ def create_checkout_url(
             "dev_mode": True,
         }
 
-    logger.info(f"[LEMONSQUEEZY] Creating checkout: api_key={len(api_key)} chars, store_id={store_id}")
+    logger.info(f"[LEMONSQUEEZY] Creating checkout: api_key={len(api_key)} chars, key_tail=...{_key_tail}, store_id={store_id}, variant_id={variant_id}")
 
     try:
         import httpx
@@ -139,7 +145,7 @@ def create_checkout_url(
         )
         if resp.status_code >= 400:
             error_body = resp.text
-            logger.error(f"[LEMONSQUEEZY] API error {resp.status_code}: {error_body}")
+            logger.error(f"[LEMONSQUEEZY] API error {resp.status_code}: {error_body} (key_tail=...{_key_tail}, store_id={store_id}, variant_id={variant_id})")
             capture_payment_failure(
                 event="checkout_create",
                 reason="provider_api_error",
