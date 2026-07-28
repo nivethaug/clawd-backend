@@ -1,6 +1,6 @@
 # AI Chat Endpoint Test Suite
 
-Comprehensive test suite for the AI chat endpoint at http://195.200.14.37:8002/api/ai/chat
+Comprehensive test suite for the AI chat endpoint.
 
 ## Test Files
 
@@ -100,7 +100,7 @@ Tests use real production projects:
 
 ## Configuration
 
-Tests target: `http://195.200.14.37:8002/api/ai/chat`
+Tests target: the configured backend API endpoint.
 
 Update `BASE_URL` in test files for different environments.
 
