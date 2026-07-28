@@ -80,7 +80,7 @@ async def generate_link_code(authorization: Optional[str] = Header(None)):
 
     return LinkCodeResponse(
         code=code,
-        bot_username="@DreamAgentBot",
+        bot_username="@DreamAgentCloudBot",
         expires_in=600,
     )
 
