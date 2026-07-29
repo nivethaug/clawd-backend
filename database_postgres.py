@@ -1198,6 +1198,16 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added ai_operations table")
 
+            # --- auth_tokens (shared token store for worker VPS) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS auth_tokens (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id)")
+            conn.commit()
+            logger.info("✓ Added auth_tokens table")
+
             # --- credit_transactions (audit ledger) ---
             cur.execute("""CREATE TABLE IF NOT EXISTS credit_transactions (
                 id SERIAL PRIMARY KEY,

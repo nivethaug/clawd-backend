@@ -8154,12 +8154,27 @@ def get_user_id_from_token(authorization: Optional[str] = None) -> int:
             hmac.compare_digest(token, ADMIN_METRICS_TOKEN):
         return ADMIN_METRICS_USER_ID
 
-    # 2) Session token
+    # 2) Session token (in-memory)
     user_id = AUTH_TOKENS.get(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if user_id:
+        return user_id
 
-    return user_id
+    # 3) Fallback: check database for the token (survives worker restart)
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM auth_tokens WHERE token = ?",
+                (token,)
+            ).fetchone()
+        if row:
+            uid = row["user_id"] if isinstance(row, dict) else row[0]
+            # Cache it in memory for future requests
+            AUTH_TOKENS[token] = uid
+            return uid
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 def require_admin(user_id: int) -> None:
@@ -8257,6 +8272,16 @@ async def login(request: LoginRequest):
     # Generate token
     token = generate_token()
     AUTH_TOKENS[token] = user_id
+    # Persist to DB so worker VPS can validate (survives restart)
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO auth_tokens (token, user_id, created_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT (token) DO UPDATE SET user_id = ?",
+                (token, user_id, user_id)
+            )
+            conn.commit()
+    except Exception:
+        pass  # non-fatal — in-memory still works
     
     return AuthResponse(
         token=token,
@@ -8381,6 +8406,16 @@ async def google_login(request: GoogleAuthRequest):
 
     token = generate_token()
     AUTH_TOKENS[token] = user_id
+    # Persist to DB so worker VPS can validate (survives restart)
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO auth_tokens (token, user_id, created_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT (token) DO UPDATE SET user_id = ?",
+                (token, user_id, user_id)
+            )
+            conn.commit()
+    except Exception:
+        pass  # non-fatal — in-memory still works
 
     return AuthResponse(
         token=token,
