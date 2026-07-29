@@ -8305,9 +8305,16 @@ async def logout(authorization: Optional[str] = Header(None)):
     parts = authorization.split()
     if len(parts) == 2 and parts[0].lower() == "bearer":
         token = parts[1]
-        # Remove token from store
+        # Remove token from in-memory store
         if token in AUTH_TOKENS:
             del AUTH_TOKENS[token]
+        # Also remove from DB so it can't be reused
+        try:
+            with get_db() as conn:
+                conn.execute("DELETE FROM auth_tokens WHERE token = ?", (token,))
+                conn.commit()
+        except Exception:
+            pass
     
     return {"message": "Logged out"}
 
