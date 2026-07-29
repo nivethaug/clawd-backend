@@ -10598,10 +10598,9 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
 
         has_writes = usage.get("has_writes", False)
         if not has_writes:
-            logger.info(f"[AUTO-COMMIT] Skipping — no writes detected (has_writes=False)")
-            return
-
-        logger.info(f"[AUTO-COMMIT] Writes detected — committing project {project_id}, session {session_id}")
+            logger.info(f"[AUTO-COMMIT] No writes this session (has_writes=False) — checking for unpushed commits from prior sessions")
+        else:
+            logger.info(f"[AUTO-COMMIT] Writes detected — committing project {project_id}, session {session_id}")
 
         # Get project path, repo_url, domain, type_id from DB
         with get_db() as conn:
@@ -10651,52 +10650,80 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
             logger.error(f"[AUTO-COMMIT] git status failed: {status_result.stderr}")
             return
 
-        if not status_result.stdout.strip():
-            logger.info(f"[AUTO-COMMIT] No changes to commit (git status clean)")
-            return
+        # ── Push any unpushed commits even when this session didn't write ──
+        # Claude sometimes commits directly via Bash (git add -A && git commit)
+        # bypassing auto-commit entirely. Those commits sit locally forever
+        # unless we push them here. This check runs regardless of has_writes
+        # so "deploy/verify" sessions still flush stale local commits.
+        _has_uncommitted = bool(status_result.stdout.strip())
+        _skip_commit = False
+        if not _has_uncommitted:
+            # No new changes, but check if local is ahead of origin (unpushed).
+            _unpushed_result = subprocess.run(
+                ["git", "-C", project_path, "log", "--oneline", "origin/main..HEAD"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if _unpushed_result.returncode == 0 and _unpushed_result.stdout.strip():
+                _unpushed_count = len(_unpushed_result.stdout.strip().splitlines())
+                _preview = _unpushed_result.stdout.strip().splitlines()[0][:80]
+                logger.info(f"[AUTO-COMMIT] {_unpushed_count} unpushed commit(s) detected — pushing. Latest: {_preview}")
+                # Skip the commit step (nothing to commit) but proceed to push.
+                # Set commit_msg/hash to the existing HEAD so the DB log is accurate.
+                _hash_result = subprocess.run(
+                    ["git", "-C", project_path, "rev-parse", "HEAD"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                commit_hash = _hash_result.stdout.strip()
+                commit_msg = "(unpushed by prior session)"
+                commit_status = "pushed"  # will be set below after push
+                _skip_commit = True
+            else:
+                logger.info(f"[AUTO-COMMIT] No changes to commit (git status clean, no unpushed commits)")
+                return
 
-        changed_files = len(status_result.stdout.strip().splitlines())
-        logger.info(f"[AUTO-COMMIT] {changed_files} changed files detected")
+        changed_files = len(status_result.stdout.strip().splitlines()) if _has_uncommitted else 0
+        if not _skip_commit:
+            logger.info(f"[AUTO-COMMIT] {changed_files} changed files detected")
 
-        # Generate commit message from the user's original request
-        commit_msg = f"Auto-commit: website edit (session {session_id})"
+            # Generate commit message from the user's original request
+            commit_msg = f"Auto-commit: website edit (session {session_id})"
 
-        # Try to get a better commit message from the latest user message
-        try:
-            with get_db() as conn:
-                user_msg_row = conn.execute(
-                    "SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
-                    (session_id,)
-                ).fetchone()
-                if user_msg_row:
-                    user_text = user_msg_row["content"][:80].replace("\n", " ").strip()
-                    if user_text:
-                        commit_msg = f"Edit: {user_text}"
-        except Exception:
-            pass
+            # Try to get a better commit message from the latest user message
+            try:
+                with get_db() as conn:
+                    user_msg_row = conn.execute(
+                        "SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+                        (session_id,)
+                    ).fetchone()
+                    if user_msg_row:
+                        user_text = user_msg_row["content"][:80].replace("\n", " ").strip()
+                        if user_text:
+                            commit_msg = f"Edit: {user_text}"
+            except Exception:
+                pass
 
-        # Git add all changes
-        subprocess.run(
-            ["git", "-C", project_path, "add", "-A"],
-            capture_output=True, text=True, timeout=30
-        )
+            # Git add all changes
+            subprocess.run(
+                ["git", "-C", project_path, "add", "-A"],
+                capture_output=True, text=True, timeout=30
+            )
 
-        # Git commit
-        commit_result = subprocess.run(
-            ["git", "-C", project_path, "commit", "-m", commit_msg],
-            capture_output=True, text=True, timeout=30
-        )
-        if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stderr:
-            logger.error(f"[AUTO-COMMIT] Git commit failed: {commit_result.stderr}")
-            return
+            # Git commit
+            commit_result = subprocess.run(
+                ["git", "-C", project_path, "commit", "-m", commit_msg],
+                capture_output=True, text=True, timeout=30
+            )
+            if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stderr:
+                logger.error(f"[AUTO-COMMIT] Git commit failed: {commit_result.stderr}")
+                return
 
-        # Get commit hash
-        hash_result = subprocess.run(
-            ["git", "-C", project_path, "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=10
-        )
-        commit_hash = hash_result.stdout.strip()
-        commit_status = "committed"
+            # Get commit hash
+            hash_result = subprocess.run(
+                ["git", "-C", project_path, "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=10
+            )
+            commit_hash = hash_result.stdout.strip()
+            commit_status = "committed"
 
         # Push if origin remote exists
         remote_result = subprocess.run(
