@@ -702,8 +702,14 @@ class ClaudeCodeAgent:
             # git shows actual file changes, override to True. This catches
             # the timeout case where the wrapper's usage session gets corrupted
             # but Claude DID edit files before the timeout.
+            # Also check all_tools_used for Write/Edit/MultiEdit as a secondary signal.
             if self._last_token_usage and not self._last_token_usage.get("has_writes"):
-                if self._check_git_has_changes():
+                _all_tools = totals.get("all_tools_used", []) if totals else []
+                _tools_have_writes = any(t in _all_tools for t in ("Write", "Edit", "MultiEdit"))
+                if _tools_have_writes:
+                    logger.info("[CLAUDE-AGENT] all_tools_used contains write tools — overriding has_writes=True")
+                    self._last_token_usage["has_writes"] = True
+                elif self._check_git_has_changes():
                     logger.info("[CLAUDE-AGENT] git has changes but wrapper reports no writes — overriding has_writes=True")
                     self._last_token_usage["has_writes"] = True
 
