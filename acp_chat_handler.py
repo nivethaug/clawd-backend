@@ -2915,24 +2915,27 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 on_text=on_text_callback,
                 user_id=_user_id,
             ) as agent:
-                response = await agent.query(full_prompt)
+                try:
+                    response = await agent.query(full_prompt)
 
-                # Capture token usage from the agent
-                self._last_token_usage = agent.last_token_usage
-                if self._last_token_usage:
-                    logger.info(f"[CLAUDE-AGENT] Token usage captured: {self._last_token_usage}")
+                    logger.info(f"[CLAUDE-AGENT] Response received ({len(response)} chars)")
+                    logger.info(f"[CLAUDE-AGENT] Response preview: {response[:200]}...")
 
-                logger.info(f"[CLAUDE-AGENT] Response received ({len(response)} chars)")
-                logger.info(f"[CLAUDE-AGENT] Response preview: {response[:200]}...")
-
-                return {
-                    "status": "success",
-                    "success": True,
-                    "response": response,
-                    "error": None,
-                    "backend": "claude-agent",
-                    "token_usage": self._last_token_usage,
-                }
+                    return {
+                        "status": "success",
+                        "success": True,
+                        "response": response,
+                        "error": None,
+                        "backend": "claude-agent",
+                        "token_usage": self._last_token_usage,
+                    }
+                finally:
+                    # Always capture token usage, even if query() raised —
+                    # _fetch_usage_session runs inside query() before the
+                    # post-processing that can throw, so usage is available.
+                    self._last_token_usage = agent.last_token_usage
+                    if self._last_token_usage:
+                        logger.info(f"[CLAUDE-AGENT] Token usage captured: {self._last_token_usage}")
         
         except Exception as e:
             logger.error(f"[CLAUDE-AGENT] Error: {e}", exc_info=True)
@@ -3382,39 +3385,44 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 ) as agent:
                     self._active_agent = agent  # Track for cancellation
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
-                    response = await agent.query(prompt)
-                    logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars (extracted answer)")
+                    try:
+                        response = await agent.query(prompt)
+                        logger.info(f"[ACP-CHAT] Query complete: {len(response or '')} chars (extracted answer)")
 
-                    # Capture token usage from the agent
-                    self._last_token_usage = agent.last_token_usage
-                    if self._last_token_usage:
-                        logger.info(f"[ACP-CHAT] Token usage captured: {self._last_token_usage}")
-                    else:
-                        logger.debug("[ACP-CHAT] No token usage data available from this query")
+                        # Build full response from all streamed text chunks (not the extracted short answer)
+                        # Filter out TOOL: prefixes, PROGRESS:, and JSON noise to get clean content
+                        text_chunks = []
+                        for chunk in all_chunks:
+                            chunk_stripped = chunk.strip()
+                            if not chunk_stripped or chunk_stripped in ["null", "{}", "[]", "---"]:
+                                continue
+                            if chunk_stripped.startswith("TOOL:") or chunk_stripped.startswith("PROGRESS:"):
+                                continue
+                            if chunk_stripped.startswith("{") or chunk_stripped.startswith("["):
+                                continue
+                            if "z.ai built-in tool" in chunk_stripped.lower() or "analyze_image" in chunk_stripped.lower():
+                                continue
+                            text_chunks.append(chunk_stripped)
 
-                    # Build full response from all streamed text chunks (not the extracted short answer)
-                    # Filter out TOOL: prefixes, PROGRESS:, and JSON noise to get clean content
-                    text_chunks = []
-                    for chunk in all_chunks:
-                        chunk_stripped = chunk.strip()
-                        if not chunk_stripped or chunk_stripped in ["null", "{}", "[]", "---"]:
-                            continue
-                        if chunk_stripped.startswith("TOOL:") or chunk_stripped.startswith("PROGRESS:"):
-                            continue
-                        if chunk_stripped.startswith("{") or chunk_stripped.startswith("["):
-                            continue
-                        if "z.ai built-in tool" in chunk_stripped.lower() or "analyze_image" in chunk_stripped.lower():
-                            continue
-                        text_chunks.append(chunk_stripped)
-
-                    full_response = "\n".join(text_chunks).strip()
-                    if full_response:
-                        self._last_query_response = full_response
-                        logger.info(f"[ACP-CHAT] Stored full response from chunks: {len(full_response)} chars")
-                    else:
-                        # Fallback to extracted answer if no chunks collected
-                        self._last_query_response = response
-                        logger.info(f"[ACP-CHAT] Fallback to extracted answer: {len(response or '')} chars")
+                        full_response = "\n".join(text_chunks).strip()
+                        if full_response:
+                            self._last_query_response = full_response
+                            logger.info(f"[ACP-CHAT] Stored full response from chunks: {len(full_response)} chars")
+                        else:
+                            # Fallback to extracted answer if no chunks collected
+                            self._last_query_response = response
+                            logger.info(f"[ACP-CHAT] Fallback to extracted answer: {len(response or '')} chars")
+                    finally:
+                        # Always capture token usage, even if query() raised —
+                        # _fetch_usage_session runs inside query() before the
+                        # post-processing that can throw, so usage is available.
+                        # Without this, a post-query exception skips usage
+                        # capture and auto-commit never runs despite real edits.
+                        self._last_token_usage = agent.last_token_usage
+                        if self._last_token_usage:
+                            logger.info(f"[ACP-CHAT] Token usage captured: {self._last_token_usage}")
+                        else:
+                            logger.debug("[ACP-CHAT] No token usage data available from this query")
             except Exception as e:
                 logger.error(f"[ACP-CHAT] Query error: {e}")
                 import traceback

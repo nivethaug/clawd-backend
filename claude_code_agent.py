@@ -704,7 +704,7 @@ class ClaudeCodeAgent:
             # but Claude DID edit files before the timeout.
             # Also check all_tools_used for Write/Edit/MultiEdit as a secondary signal.
             if self._last_token_usage and not self._last_token_usage.get("has_writes"):
-                _all_tools = totals.get("all_tools_used", []) if totals else []
+                _all_tools = self._last_token_usage.get("all_tools_used", [])
                 _tools_have_writes = any(t in _all_tools for t in ("Write", "Edit", "MultiEdit"))
                 if _tools_have_writes:
                     logger.info("[CLAUDE-AGENT] all_tools_used contains write tools — overriding has_writes=True")
@@ -822,6 +822,7 @@ class ClaudeCodeAgent:
                 "cost_usd": totals.get("cost_usd", 0),
                 "model": model_name,
                 "has_writes": totals.get("has_writes", False),
+                "all_tools_used": totals.get("all_tools_used", []),
             }
             logger.info(
                 f"[CLAUDE-AGENT] Wrapper usage (session={session_id}): "
