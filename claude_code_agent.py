@@ -734,9 +734,8 @@ class ClaudeCodeAgent:
         """Check if git reports any uncommitted changes in the repo.
 
         Used as a filesystem fallback for has_writes when the wrapper's
-        usage tracking is unreliable (e.g., after a timeout kills Claude
-        mid-stream, the usage session gets corrupted and has_writes=False
-        even though Claude did edit files before being killed).
+        usage tracking is unreliable (e.g., GLM-5.1 edits via Bash sed/rm
+        instead of the Edit tool, so has_writes=False despite real changes).
         """
         try:
             result = subprocess.run(
@@ -746,9 +745,14 @@ class ClaudeCodeAgent:
             )
             has_changes = bool(result.stdout.strip())
             if has_changes:
-                logger.debug(f"[CLAUDE-AGENT] git status shows changes: {result.stdout.strip()[:200]}")
+                logger.info(f"[CLAUDE-AGENT] git status shows changes in {self.repo_path}: {result.stdout.strip()[:300]}")
+            else:
+                logger.info(f"[CLAUDE-AGENT] git status clean (rc={result.returncode}) in {self.repo_path}")
+                if result.stderr.strip():
+                    logger.info(f"[CLAUDE-AGENT] git stderr: {result.stderr.strip()[:200]}")
             return has_changes
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[CLAUDE-AGENT] git status check failed for {self.repo_path}: {e}")
             return False
 
     @staticmethod
