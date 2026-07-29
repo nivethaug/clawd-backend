@@ -373,10 +373,9 @@ async def project_proxy_middleware(request: Request, call_next):
         proxy_user_id = None
     if proxy_user_id:
         headers["X-Proxy-User-Id"] = str(proxy_user_id)
-        # Remove the original Authorization so the worker doesn't try to
-        # validate a token it doesn't know about.
-        headers.pop("authorization", None)
-        headers.pop("Authorization", None)
+        # Keep the original Authorization header — the worker validates it
+        # via DB fallback (auth_tokens table) when in-memory AUTH_TOKENS
+        # misses (empty after restart).
 
     body = await request.body()
 
