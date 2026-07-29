@@ -738,6 +738,11 @@ class ClaudeCodeAgent:
         instead of the Edit tool, so has_writes=False despite real changes).
         """
         try:
+            # Fix dubious ownership for git (common in container bind-mounts)
+            subprocess.run(
+                ["git", "config", "--global", "--add", "safe.directory", str(self.repo_path)],
+                capture_output=True, text=True, timeout=5,
+            )
             result = subprocess.run(
                 ["git", "status", "--porcelain"],
                 cwd=str(self.repo_path),
@@ -750,6 +755,21 @@ class ClaudeCodeAgent:
                 logger.info(f"[CLAUDE-AGENT] git status clean (rc={result.returncode}) in {self.repo_path}")
                 if result.stderr.strip():
                     logger.info(f"[CLAUDE-AGENT] git stderr: {result.stderr.strip()[:200]}")
+                # Diagnostic: show last commit + check if .git exists here at all.
+                # This helps distinguish "clean because committed" from "clean because
+                # wrong path (no .git here)".
+                try:
+                    log_result = subprocess.run(
+                        ["git", "log", "--oneline", "-3"],
+                        cwd=str(self.repo_path),
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if log_result.returncode == 0 and log_result.stdout.strip():
+                        logger.info(f"[CLAUDE-AGENT] git last commits: {log_result.stdout.strip()[:200]}")
+                    elif log_result.returncode != 0:
+                        logger.warning(f"[CLAUDE-AGENT] git log failed (rc={log_result.returncode}): {log_result.stderr.strip()[:200]} — .git may not exist at this path")
+                except Exception:
+                    pass
             return has_changes
         except Exception as e:
             logger.warning(f"[CLAUDE-AGENT] git status check failed for {self.repo_path}: {e}")
