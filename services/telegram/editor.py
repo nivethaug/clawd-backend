@@ -155,6 +155,10 @@ class TelegramBotEditor:
     def _build_enhancement_prompt(self, description: str, bot_name: str) -> str:
         """Build concise AI prompt for bot enhancement with dynamic command generation."""
         from services.container_storage import to_container_path
+        # Derive domain from project path (e.g. .../1920_bot-name_ts/telegram -> parent dir name)
+        _parent = self.project_path.parent.name
+        # Strip leading ID + underscore (e.g. "1920_dreamagent-support_20260729..." -> "dreamagent-support")
+        domain = _parent.split("_", 1)[1].rsplit("_", 1)[0] if "_" in _parent else bot_name.lower().replace(" ", "-")
         meta_block = build_workflow_meta_block(
             project_type_id=2,
             project_type="telegram",
