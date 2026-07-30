@@ -123,6 +123,8 @@ RUN chmod +x /opt/entrypoint.sh
 ENV PATH="/usr/local/bin:/usr/bin:/usr/local/lib/node_modules/.bin:${PATH}"
 ENV NPM_CONFIG_CACHE=/cache/npm
 ENV PIP_CACHE_DIR=/cache/pip
+ENV DISABLE_AUTOUPDATER=1
+ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 WORKDIR /workspace
 

@@ -36,5 +36,10 @@ if [[ -f "$CLAUDE_CONFIG_SRC/.claude.json" ]]; then
     chmod 600 "$CLAUDE_JSON"
 fi
 
+# Disable Claude Code auto-updater so the pinned version (e.g. 2.1.27)
+# stays — without this, Claude silently upgrades to the latest on first run.
+export DISABLE_AUTOUPDATER=1
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
 # Exec the main command (already running as dreampilot)
 exec "$@"
