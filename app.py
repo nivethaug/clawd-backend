@@ -7034,24 +7034,66 @@ async def chat_stream_endpoint(
 
                                         # Pre-charged flat credits from reserve_credits (avoid double count)
                                         _precharged = sum(abs(c.get("amount", 0)) for c in _chat_charged) if _chat_charged else 0
-                                        if _precharged:
+
+                                        # ── NO-EDIT FLAT CHARGE ──────────────────────────
+                                        # If no files were edited (has_writes=False), this was a
+                                        # read-only/plan/data-only chat. Refund the token-based
+                                        # pre-charge and charge a flat 0.75 credits instead —
+                                        # users shouldn't burn their full token quota just to ask
+                                        # a question or check status.
+                                        _has_writes = bool(usage_data.get("has_writes", False))
+                                        if not _has_writes and _precharged > 0:
+                                            # Refund the pre-charge
+                                            try:
+                                                from services.billing_service import refund_credits
+                                                refund_credits(tconn, tuid, "ADD_FEATURE", _chat_charged)
+                                                tconn.commit()
+                                                logger.info(f"[BILLING] No-edit chat: refunded {_precharged} pre-charged credits")
+                                            except Exception as rf_err:
+                                                logger.warning(f"[BILLING] Refund failed (non-fatal): {rf_err}")
+
+                                            # Charge flat 0.75 credits for the read-only chat
+                                            # (rounded to 1 since credits are integers)
+                                            _no_edit_cost = 1
+                                            try:
+                                                from services.billing_service import reserve_credits
+                                                _flat_result = reserve_credits(tconn, tuid, "ADD_FEATURE", amount=1)
+                                                tconn.commit()
+                                                logger.info(f"[BILLING] No-edit chat: charged flat {_no_edit_cost} credit")
+                                            except Exception as fc_err:
+                                                logger.warning(f"[BILLING] Flat charge failed: {fc_err}")
+
+                                            usage_data["credits_charged"] = _no_edit_cost
+                                            record_from_token_usage_json(
+                                                user_id=tuid,
+                                                token_usage_json=usage_data,
+                                                usage_type="ai_chat",
+                                                project_id=project_id,
+                                                session_id=session_id,
+                                                description="ACP chat (no edits — flat rate)",
+                                            )
+                                            # Skip per-token charge for read-only chats
+                                            logger.info(f"[BILLING] No-edit chat: flat rate charged, skipping per-token deduction")
+
+                                        elif _precharged:
                                             usage_data["operation"] = "ADD_FEATURE"
                                             usage_data["credits_charged"] = _precharged + max(0, _total_toks - _precharged)
 
-                                        record_from_token_usage_json(
-                                            user_id=tuid,
-                                            token_usage_json=usage_data,
-                                            usage_type="ai_chat",
-                                            project_id=project_id,
-                                            session_id=session_id,
-                                            description="ACP streaming chat",
-                                        )
+                                            record_from_token_usage_json(
+                                                user_id=tuid,
+                                                token_usage_json=usage_data,
+                                                usage_type="ai_chat",
+                                                project_id=project_id,
+                                                session_id=session_id,
+                                                description="ACP streaming chat",
+                                            )
 
                                         # ── POST-EDIT TOKEN CHARGE ──────────────────────
                                         # The pre-charge only deducted a flat admission cost.
                                         # Now deduct the ACTUAL tokens consumed from edit_token
                                         # (cascading to project_ai if needed).
-                                        if _total_toks > 0:
+                                        # Skip for no-edit chats (already charged flat above).
+                                        if _total_toks > 0 and _has_writes:
                                             try:
                                                 from services.billing_service import charge_token_usage
                                                 _cache_read = int(usage_data.get("cache_read_input_tokens", 0) or 0)
