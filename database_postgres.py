@@ -1495,6 +1495,24 @@ def init_schema():
                 cur.execute("ALTER TABLE plan_credit_grants ALTER COLUMN monthly_limit TYPE NUMERIC(20,2) USING monthly_limit::NUMERIC(20,2)")
             _run_migration(migrate_grants_to_numeric)
 
+            # ── Plan credit grant updates ────────────────────────────────
+            # Update project_ai monthly limits: Pro 250→500, Dream 1000→1100.
+            # Uses UPSERT so existing grant rows are updated (seed uses DO NOTHING).
+            def migrate_plan_credit_grants_update():
+                cur.execute("""
+                    INSERT INTO plan_credit_grants (plan_id, credit_type, monthly_limit)
+                    SELECT p.id, 'project_ai', CASE p.slug
+                        WHEN 'free' THEN 50
+                        WHEN 'pro' THEN 500
+                        WHEN 'dream' THEN 1100
+                        WHEN 'enterprise' THEN 0
+                    END
+                    FROM billing_plans p
+                    WHERE p.slug IN ('free', 'pro', 'dream', 'enterprise')
+                    ON CONFLICT (plan_id, credit_type) DO UPDATE SET monthly_limit = EXCLUDED.monthly_limit
+                """)
+            _run_migration(migrate_plan_credit_grants_update)
+
 
             # Seed plan_credit_grants
             cur.execute("SELECT id, slug FROM billing_plans")
@@ -1502,9 +1520,9 @@ def init_schema():
             seed_grants = [
                 ('free', 'project_ai', 50),
                 ('free', 'edit_token', 2000000),
-                ('pro', 'project_ai', 1000),
+                ('pro', 'project_ai', 500),
                 ('pro', 'edit_token', 25000000),
-                ('dream', 'project_ai', 5000),
+                ('dream', 'project_ai', 1100),
                 ('dream', 'edit_token', 100000000),
                 ('enterprise', 'project_ai', 0),
                 ('enterprise', 'edit_token', 0),
