@@ -255,12 +255,21 @@ class DatabaseProvisioner:
         self.container = POSTGRES_CONTAINER
 
     def _sanitize_db_name(self, name: str) -> str:
-        """Sanitize database name: replace hyphens with underscores, force lowercase.
-        
+        """Sanitize database/user name: allowlist [a-z0-9_] only.
+
+        Strips ALL characters except lowercase letters, digits, and underscores.
+        This prevents SQL injection via project names containing quotes,
+        semicolons, or other SQL metacharacters — these names are interpolated
+        into f-string SQL (DROP DATABASE, CREATE USER, etc.).
+
         PostgreSQL is case-sensitive with identifiers. Using lowercase ensures
         consistency between CREATE DATABASE and connection URLs.
         """
-        return name.replace("-", "_").lower()
+        import re
+        sanitized = re.sub(r'[^a-z0-9_]', '', name.replace("-", "_").lower())
+        if not sanitized:
+            raise ValueError(f"Invalid database name after sanitization: '{name}'")
+        return sanitized
 
     def _execute_sql(self, sql: str, database_name: str = "postgres", check_success: bool = False) -> Tuple[bool, List[Tuple]]:
         """Execute SQL command in PostgreSQL container.

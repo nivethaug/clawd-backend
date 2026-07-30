@@ -48,7 +48,7 @@ class ValidateCredentialsRequest(BaseModel):
 
 
 @router.post("/credentials")
-async def validate_credentials(request: ValidateCredentialsRequest):
+async def validate_credentials(request: ValidateCredentialsRequest, authorization: Optional[str] = Header(None)):
     """
     Validate credentials for a project type before creation.
 
@@ -56,8 +56,22 @@ async def validate_credentials(request: ValidateCredentialsRequest):
     type_id=2 (Telegram bot): Validates bot_token via Telegram getMe.
     type_id=3 (Discord bot): Validates bot_token via Discord users/@me.
     type_id=5 (Scheduler): Validates each provided sender channel.
+
+    Requires authentication — prevents unauthenticated SSRF via the
+    discord_webhook_url and api_endpoint fields.
     """
+    # Auth check — this endpoint makes outbound requests to user-supplied URLs
+    user_id = get_user_id_from_token(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     type_id = request.type_id
+
+    # SSRF protection: validate user-supplied URLs before passing to validators
+    if request.discord_webhook_url:
+        _validate_safe_url(request.discord_webhook_url)
+    if request.api_endpoint:
+        _validate_safe_url(request.api_endpoint)
 
     # Website - no credentials to validate
     if type_id == 1:

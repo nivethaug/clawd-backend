@@ -5399,15 +5399,28 @@ async def _resolve_origin_ip(project_id: int) -> str:
 # ---------------------------------------------------------------------------
 # Internal endpoints (run on the host that owns the project's filesystem)
 # Same trust model as /internal/chat-execute: worker port firewalled to main.
+# IP guard applied to all: only localhost / Docker bridge / private nets.
 # ---------------------------------------------------------------------------
 
+def _check_internal_ip(request_obj: Request) -> None:
+    """Reject requests from public IPs. Only allows loopback, Docker bridge,
+    private network ranges, and the main VPS IP — same model as /internal/pm2-restart."""
+    client_host = request_obj.client.host if request_obj.client else ""
+    _ALLOWED_PUBLIC_IPS = os.getenv("INTERNAL_ALLOWLIST_IPS", "").split(",")
+    if not (client_host.startswith("127.") or client_host.startswith("172.")
+            or client_host.startswith("10.") or client_host == "::1"
+            or client_host in _ALLOWED_PUBLIC_IPS):
+        raise HTTPException(status_code=403, detail="Internal endpoint — not accessible from public network")
+
+
 @app.post("/internal/custom-domain/provision")
-async def internal_provision_custom_domain(request: InternalProvisionRequest):
+async def internal_provision_custom_domain(request: InternalProvisionRequest, request_obj: Request):
     """Provision SSL (certbot) + regenerate nginx for a custom domain.
 
     Runs on the VPS that hosts the project. Called locally by main for
     main-hosted projects, or proxied to the worker for worker-hosted ones.
     """
+    _check_internal_ip(request_obj)
     logger.info(
         f"[CUSTOM_DOMAIN-INTERNAL] provision domain={request.domain} "
         f"project_id={request.project_id} subdomain={request.project_subdomain}"
@@ -5453,11 +5466,12 @@ async def internal_provision_custom_domain(request: InternalProvisionRequest):
 
 
 @app.post("/internal/custom-domain/remove-nginx")
-async def internal_remove_custom_domain_nginx(request: InternalRemoveNginxRequest):
+async def internal_remove_custom_domain_nginx(request: InternalRemoveNginxRequest, request_obj: Request):
     """Regenerate nginx WITHOUT any custom domain (revert to subdomain only).
 
     Runs on the VPS that hosts the project.
     """
+    _check_internal_ip(request_obj)
     logger.info(
         f"[CUSTOM_DOMAIN-INTERNAL] remove-nginx subdomain={request.project_subdomain}"
     )
@@ -5479,13 +5493,14 @@ async def internal_remove_custom_domain_nginx(request: InternalRemoveNginxReques
 
 
 @app.get("/internal/custom-domain/server-ip")
-async def internal_custom_domain_server_ip():
+async def internal_custom_domain_server_ip(request_obj: Request):
     """Return this host's public IPv4 (for DNS A-record instructions).
 
     Lets the main VPS ask the worker 'what IP should the user point DNS at?'
     without SSH. The worker runs _get_server_ip() locally (ipify/etc.) which
     returns its own origin IP.
     """
+    _check_internal_ip(request_obj)
     return {"ip": custom_domain_service._get_server_ip()}
 
 
