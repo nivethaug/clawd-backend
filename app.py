@@ -6736,7 +6736,18 @@ async def chat_stream_endpoint(
     # ── BILLING: Reserve AI credits before processing (ACP mode only) ──────
     _chat_charged = []
     _chat_user_id = None
-    if request.acp_mode:
+    # Free messages: greetings and very short messages (<12 chars) cost
+    # nothing. Users should be able to say "hi", "thanks", "hello" etc.
+    # without burning credits/tokens.
+    _GREETINGS = {"hi", "hello", "hey", "thanks", "thank you", "ok", "okay",
+                   "cool", "nice", "great", "yes", "no", "sure", "done", "test",
+                   "hii", "hiii", "yo", "sup", "hello!", "hi!", "pls", "please"}
+    _msg_clean = (user_content or "").strip().lower()
+    _is_free_message = len(_msg_clean) < 12 or _msg_clean in _GREETINGS
+    if _is_free_message:
+        logger.info(f"[BILLING] Free message (greeting/short, {len(_msg_clean)} chars) — skipping credit reservation")
+
+    if request.acp_mode and not _is_free_message:
         try:
             from services.billing_service import reserve_credits
             with get_db() as bconn:
@@ -7042,7 +7053,27 @@ async def chat_stream_endpoint(
                                         # users shouldn't burn their full token quota just to ask
                                         # a question or check status.
                                         _has_writes = bool(usage_data.get("has_writes", False))
-                                        if not _has_writes and _precharged > 0:
+                                        if _is_free_message and _precharged > 0:
+                                            # Free message (greeting/short) — refund the full pre-charge
+                                            try:
+                                                from services.billing_service import refund_credits
+                                                refund_credits(tconn, tuid, "ADD_FEATURE", _chat_charged)
+                                                tconn.commit()
+                                                logger.info(f"[BILLING] Free message: refunded {_precharged} pre-charged credits — no charge")
+                                            except Exception as rf_err:
+                                                logger.warning(f"[BILLING] Free message refund failed: {rf_err}")
+                                            usage_data["credits_charged"] = 0
+                                            record_from_token_usage_json(
+                                                user_id=tuid,
+                                                token_usage_json=usage_data,
+                                                usage_type="ai_chat",
+                                                project_id=project_id,
+                                                session_id=session_id,
+                                                description="Free message (greeting/short)",
+                                            )
+                                            logger.info(f"[BILLING] Free message: 0 credits charged")
+
+                                        elif not _has_writes and _precharged > 0:
                                             # Refund the pre-charge
                                             try:
                                                 from services.billing_service import refund_credits
@@ -7108,8 +7139,8 @@ async def chat_stream_endpoint(
                                         # The pre-charge only deducted a flat admission cost.
                                         # Now deduct the ACTUAL tokens consumed from edit_token
                                         # (cascading to project_ai if needed).
-                                        # Skip for no-edit chats (already charged flat above).
-                                        if _total_toks > 0 and _has_writes:
+                                        # Skip for no-edit chats and free messages.
+                                        if _total_toks > 0 and _has_writes and not _is_free_message:
                                             try:
                                                 from services.billing_service import charge_token_usage
                                                 _cache_read = int(usage_data.get("cache_read_input_tokens", 0) or 0)
