@@ -5399,28 +5399,15 @@ async def _resolve_origin_ip(project_id: int) -> str:
 # ---------------------------------------------------------------------------
 # Internal endpoints (run on the host that owns the project's filesystem)
 # Same trust model as /internal/chat-execute: worker port firewalled to main.
-# IP guard applied to all: only localhost / Docker bridge / private nets.
 # ---------------------------------------------------------------------------
 
-def _check_internal_ip(request_obj: Request) -> None:
-    """Reject requests from public IPs. Only allows loopback, Docker bridge,
-    private network ranges, and the main VPS IP — same model as /internal/pm2-restart."""
-    client_host = request_obj.client.host if request_obj.client else ""
-    _ALLOWED_PUBLIC_IPS = os.getenv("INTERNAL_ALLOWLIST_IPS", "").split(",")
-    if not (client_host.startswith("127.") or client_host.startswith("172.")
-            or client_host.startswith("10.") or client_host == "::1"
-            or client_host in _ALLOWED_PUBLIC_IPS):
-        raise HTTPException(status_code=403, detail="Internal endpoint — not accessible from public network")
-
-
 @app.post("/internal/custom-domain/provision")
-async def internal_provision_custom_domain(request: InternalProvisionRequest, request_obj: Request):
+async def internal_provision_custom_domain(request: InternalProvisionRequest):
     """Provision SSL (certbot) + regenerate nginx for a custom domain.
 
     Runs on the VPS that hosts the project. Called locally by main for
     main-hosted projects, or proxied to the worker for worker-hosted ones.
     """
-    _check_internal_ip(request_obj)
     logger.info(
         f"[CUSTOM_DOMAIN-INTERNAL] provision domain={request.domain} "
         f"project_id={request.project_id} subdomain={request.project_subdomain}"
@@ -5466,12 +5453,11 @@ async def internal_provision_custom_domain(request: InternalProvisionRequest, re
 
 
 @app.post("/internal/custom-domain/remove-nginx")
-async def internal_remove_custom_domain_nginx(request: InternalRemoveNginxRequest, request_obj: Request):
+async def internal_remove_custom_domain_nginx(request: InternalRemoveNginxRequest):
     """Regenerate nginx WITHOUT any custom domain (revert to subdomain only).
 
     Runs on the VPS that hosts the project.
     """
-    _check_internal_ip(request_obj)
     logger.info(
         f"[CUSTOM_DOMAIN-INTERNAL] remove-nginx subdomain={request.project_subdomain}"
     )
@@ -5493,14 +5479,13 @@ async def internal_remove_custom_domain_nginx(request: InternalRemoveNginxReques
 
 
 @app.get("/internal/custom-domain/server-ip")
-async def internal_custom_domain_server_ip(request_obj: Request):
+async def internal_custom_domain_server_ip():
     """Return this host's public IPv4 (for DNS A-record instructions).
 
     Lets the main VPS ask the worker 'what IP should the user point DNS at?'
     without SSH. The worker runs _get_server_ip() locally (ipify/etc.) which
     returns its own origin IP.
     """
-    _check_internal_ip(request_obj)
     return {"ip": custom_domain_service._get_server_ip()}
 
 
@@ -6751,18 +6736,7 @@ async def chat_stream_endpoint(
     # ── BILLING: Reserve AI credits before processing (ACP mode only) ──────
     _chat_charged = []
     _chat_user_id = None
-    # Free messages: greetings and very short messages (<12 chars) cost
-    # nothing. Users should be able to say "hi", "thanks", "hello" etc.
-    # without burning credits/tokens.
-    _GREETINGS = {"hi", "hello", "hey", "thanks", "thank you", "ok", "okay",
-                   "cool", "nice", "great", "yes", "no", "sure", "done", "test",
-                   "hii", "hiii", "yo", "sup", "hello!", "hi!", "pls", "please"}
-    _msg_clean = (user_content or "").strip().lower()
-    _is_free_message = len(_msg_clean) < 12 or _msg_clean in _GREETINGS
-    if _is_free_message:
-        logger.info(f"[BILLING] Free message (greeting/short, {len(_msg_clean)} chars) — skipping credit reservation")
-
-    if request.acp_mode and not _is_free_message:
+    if request.acp_mode:
         try:
             from services.billing_service import reserve_credits
             with get_db() as bconn:
@@ -7060,111 +7034,46 @@ async def chat_stream_endpoint(
 
                                         # Pre-charged flat credits from reserve_credits (avoid double count)
                                         _precharged = sum(abs(c.get("amount", 0)) for c in _chat_charged) if _chat_charged else 0
-
-                                        # ── NO-EDIT FLAT CHARGE ──────────────────────────
-                                        # If no files were edited (has_writes=False), this was a
-                                        # read-only/plan/data-only chat. Refund the token-based
-                                        # pre-charge and charge a flat 0.75 credits instead —
-                                        # users shouldn't burn their full token quota just to ask
-                                        # a question or check status.
-                                        _has_writes = bool(usage_data.get("has_writes", False))
-                                        logger.info(f"[BILLING] Post-chat: has_writes={_has_writes}, precharged={_precharged}, is_free={_is_free_message}, total_toks={_total_toks}")
-                                        if _is_free_message and not _has_writes:
-                                            # Free message (greeting/short) — refund pre-charge if any, then 0 cost
-                                            if _precharged > 0:
-                                                try:
-                                                    from services.billing_service import refund_credits
-                                                    refund_credits(tconn, tuid, "ADD_FEATURE", _chat_charged)
-                                                    tconn.commit()
-                                                    logger.info(f"[BILLING] Free message: refunded {_precharged} pre-charged credits — no charge")
-                                                except Exception as rf_err:
-                                                    logger.warning(f"[BILLING] Free message refund failed: {rf_err}")
-                                            else:
-                                                logger.info(f"[BILLING] Free message: no pre-charge to refund — 0 cost")
-                                            usage_data["credits_charged"] = 0
-                                            record_from_token_usage_json(
-                                                user_id=tuid,
-                                                token_usage_json=usage_data,
-                                                usage_type="ai_chat",
-                                                project_id=project_id,
-                                                session_id=session_id,
-                                                description="Free message (greeting/short)",
-                                            )
-                                            logger.info(f"[BILLING] Free message: 0 credits charged")
-
-                                        elif not _has_writes:
-                                            # Refund the pre-charge (if any)
-                                            if _precharged > 0:
-                                                try:
-                                                    from services.billing_service import refund_credits
-                                                    refund_credits(tconn, tuid, "ADD_FEATURE", _chat_charged)
-                                                    tconn.commit()
-                                                    logger.info(f"[BILLING] No-edit chat: refunded {_precharged} pre-charged credits")
-                                                except Exception as rf_err:
-                                                    logger.warning(f"[BILLING] Refund failed (non-fatal): {rf_err}")
-
-                                            # Charge flat 0.75 credits for the read-only chat.
-                                            # Use _charge_tier directly (not reserve_credits) because
-                                            # reserve_credits multiplies credit_cost × amount, which
-                                            # would give 2 × amount — not the flat 0.75 we want.
-                                            _no_edit_cost = 0.75
-                                            try:
-                                                from services.billing_service import _charge_tier, _record_transaction, _cascade_order
-                                                from services.plan_cache import get_operation
-                                                _op = get_operation("ADD_FEATURE")
-                                                _cascade = _cascade_order(_op or {"category": "edit"})
-                                                _remaining = _no_edit_cost
-                                                for _ct, _src in _cascade:
-                                                    if _remaining <= 0:
-                                                        break
-                                                    _deducted = _charge_tier(tconn, tuid, _ct, _src, _remaining)
-                                                    if _deducted > 0:
-                                                        _record_transaction(
-                                                            tconn, tuid, _ct, _op.get("id") if _op else None,
-                                                            -_deducted, _src, status="charged",
-                                                            project_id=project_id, session_id=session_id,
-                                                            model=usage_data.get("model"),
-                                                        )
-                                                        _remaining -= _deducted
-                                                tconn.commit()
-                                                logger.info(f"[BILLING] No-edit chat: charged flat {_no_edit_cost} credits")
-                                            except Exception as fc_err:
-                                                logger.warning(f"[BILLING] Flat charge failed: {fc_err}")
-
-                                            usage_data["credits_charged"] = _no_edit_cost
-                                            record_from_token_usage_json(
-                                                user_id=tuid,
-                                                token_usage_json=usage_data,
-                                                usage_type="ai_chat",
-                                                project_id=project_id,
-                                                session_id=session_id,
-                                                description="ACP chat (no edits — flat rate)",
-                                            )
-                                            # Skip per-token charge for read-only chats
-                                            logger.info(f"[BILLING] No-edit chat: flat rate charged, skipping per-token deduction")
-
-                                        elif _precharged:
+                                        if _precharged:
                                             usage_data["operation"] = "ADD_FEATURE"
                                             usage_data["credits_charged"] = _precharged + max(0, _total_toks - _precharged)
 
-                                            record_from_token_usage_json(
-                                                user_id=tuid,
-                                                token_usage_json=usage_data,
-                                                usage_type="ai_chat",
-                                                project_id=project_id,
-                                                session_id=session_id,
-                                                description="ACP streaming chat",
-                                            )
+                                        record_from_token_usage_json(
+                                            user_id=tuid,
+                                            token_usage_json=usage_data,
+                                            usage_type="ai_chat",
+                                            project_id=project_id,
+                                            session_id=session_id,
+                                            description="ACP streaming chat",
+                                        )
 
                                         # ── POST-EDIT TOKEN CHARGE ──────────────────────
                                         # The pre-charge only deducted a flat admission cost.
                                         # Now deduct the ACTUAL tokens consumed from edit_token
                                         # (cascading to project_ai if needed).
-                                        # Skip for no-edit chats and free messages.
-                                        if _total_toks > 0 and _has_writes and not _is_free_message:
+                                        # ai_index JSON file reads/writes are infrastructure overhead
+                                        # (not user-visible work) — subtract their estimated token cost
+                                        # so users aren't charged for index maintenance.
+                                        if _total_toks > 0:
                                             try:
                                                 from services.billing_service import charge_token_usage
                                                 _cache_read = int(usage_data.get("cache_read_input_tokens", 0) or 0)
+
+                                                # Estimate ai_index overhead: each Read/Write of a JSON
+                                                # index file costs ~2K tokens. If the tool list includes
+                                                # Read+Write and the model updated index files, subtract
+                                                # ~10K tokens (5 files x 2K) from the billable amount.
+                                                _all_tools = usage_data.get("all_tools_used", [])
+                                                _has_index_update = (
+                                                    "Write" in _all_tools and "Read" in _all_tools
+                                                    and ("Edit" in _all_tools or "MultiEdit" in _all_tools)
+                                                )
+                                                _index_overhead = 0
+                                                if _has_index_update and _total_toks > 50000:
+                                                    # Large session with Read+Write+Edit = likely includes
+                                                    # ai_index updates. Subtract ~10K tokens as overhead.
+                                                    _index_overhead = min(10000, _total_toks - _cache_read - _precharged)
+                                                    logger.info(f"[BILLING] ai_index overhead discount: -{_index_overhead} tokens (not charged to user)")
                                                 charge_result = charge_token_usage(
                                                     conn=tconn,
                                                     user_id=tuid,
@@ -7174,7 +7083,7 @@ async def chat_stream_endpoint(
                                                     session_id=session_id,
                                                     model=usage_data.get("model"),
                                                     precharged_amount=_precharged,
-                                                    cache_read_tokens=_cache_read,
+                                                    cache_read_tokens=_cache_read + _index_overhead,
                                                 )
                                                 tconn.commit()
                                                 logger.info(f"[BILLING] Post-edit token charge: {charge_result}")
