@@ -390,7 +390,16 @@ class ClaudeCodeAgent:
         # Auto-detect via shutil.which
         claude_path = shutil.which("claude")
         if claude_path:
-            logger.debug(f"Found claude CLI via shutil.which: {claude_path}")
+            # Log the version for debugging (which claude binary is actually running)
+            try:
+                _ver_result = subprocess.run(
+                    [claude_path, "--version"],
+                    capture_output=True, text=True, timeout=10
+                )
+                _claude_ver = (_ver_result.stdout or _ver_result.stderr or "").strip()
+                logger.info(f"[CLAUDE-AGENT] Claude CLI path: {claude_path}, version: {_claude_ver}")
+            except Exception as _ve:
+                logger.warning(f"[CLAUDE-AGENT] Could not get Claude version: {_ve}")
             return claude_path
 
         # Common fallback paths

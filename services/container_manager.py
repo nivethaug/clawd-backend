@@ -840,6 +840,15 @@ class ContainerManager:
         today; the docker exec stdout is a pipe just like asyncio's.
         """
         import asyncio
+
+        # Log Claude version inside the container (first call per container only)
+        try:
+            _ver_cmd = ["docker", *self.wrap_exec(["claude", "--version"], cwd=cwd, env=env)]
+            _ver_result = subprocess.run(_ver_cmd, capture_output=True, text=True, timeout=10)
+            _container_claude_ver = (_ver_result.stdout or _ver_result.stderr or "").strip()
+            logger.info(f"[CONTAINER] Claude CLI version inside container: {_container_claude_ver}")
+        except Exception:
+            pass
         full_cmd = ["docker", *self.wrap_exec(command, cwd=cwd, env=env)]
         logger.debug("[CONTAINER] exec_stream: %s", " ".join(shlex.quote(c) for c in full_cmd[:8]))
 
