@@ -123,19 +123,21 @@ def _cascade_order(op: Dict[str, Any]) -> List[str]:
 
     Returns a list of (credit_type, source) pairs to try in order.
 
-    Edit operations (category='edit') ALWAYS try edit_token first, then fall
-    back to project_ai monthly → project_ai purchased.  This is unconditional
-    (not gated by EARLY_ACCESS_MODE) so edits always consume edit tokens first.
+    Edit operations (category='edit') ALWAYS try edit_token first (monthly
+    then purchased), then fall back to project_ai monthly → purchased.
+    This is unconditional (not gated by EARLY_ACCESS_MODE) so edits always
+    consume edit tokens first.
 
     Creation operations use project_ai monthly → project_ai purchased.
     """
     credit_type = op.get("credit_type", "project_ai")
     op_category = op.get("category", "creation")
 
-    # Edit operations: edit_token → project_ai(monthly) → project_ai(purchased)
+    # Edit operations: edit_token(monthly) → edit_token(purchased) → project_ai(monthly) → project_ai(purchased)
     if op_category == "edit":
         return [
             ("edit_token", "monthly"),
+            ("edit_token", "purchased"),
             ("project_ai", "monthly"),
             ("project_ai", "purchased"),
         ]
