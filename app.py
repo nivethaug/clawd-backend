@@ -7053,7 +7053,7 @@ async def chat_stream_endpoint(
                                         # users shouldn't burn their full token quota just to ask
                                         # a question or check status.
                                         _has_writes = bool(usage_data.get("has_writes", False))
-                                        if _is_free_message and _precharged > 0:
+                                        if _is_free_message and not _has_writes and _precharged > 0:
                                             # Free message (greeting/short) — refund the full pre-charge
                                             try:
                                                 from services.billing_service import refund_credits
