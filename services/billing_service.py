@@ -164,7 +164,7 @@ def can_afford(conn, user_id: int, operation_code: str, amount: int = 1) -> Dict
     if op is None:
         return {"can_afford": False, "error": f"Unknown operation: {operation_code}", "cost": amount}
 
-    cost = int(op.get("credit_cost", 1)) * amount
+    cost = float(op.get("credit_cost", 1)) * amount
     cascade_spec = _cascade_order(op)
 
     # Build cascade with real balance data
@@ -196,8 +196,9 @@ def can_afford(conn, user_id: int, operation_code: str, amount: int = 1) -> Dict
 # Cascade: reserve → commit / refund
 # ======================================================================
 
-def _charge_tier(conn, user_id: int, credit_type: str, source: str, amount: int) -> int:
+def _charge_tier(conn, user_id: int, credit_type: str, source: str, amount) -> float:
     """Deduct credits from a specific tier. Returns amount actually deducted."""
+    amount = float(amount)
     if amount <= 0:
         return 0
 
@@ -214,7 +215,7 @@ def _charge_tier(conn, user_id: int, credit_type: str, source: str, amount: int)
             )
         return deduct
     else:  # purchased
-        purchased = int(bal.get("purchased", 0))
+        purchased = float(bal.get("purchased", 0))
         deduct = min(amount, purchased)
         if deduct > 0:
             conn.execute(
@@ -283,7 +284,7 @@ def reserve_credits(conn, user_id: int, operation_code: str, amount: int = 1) ->
     if op is None:
         return {"success": False, "error": f"Unknown operation: {operation_code}"}
 
-    cost = int(op.get("credit_cost", 1)) * amount
+    cost = float(op.get("credit_cost", 1)) * amount
 
     # Pre-check
     check = can_afford(conn, user_id, operation_code, amount)

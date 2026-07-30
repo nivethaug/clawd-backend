@@ -1189,7 +1189,7 @@ def init_schema():
                 code VARCHAR(50) UNIQUE NOT NULL,
                 name VARCHAR(100) NOT NULL,
                 description TEXT,
-                credit_cost INTEGER NOT NULL DEFAULT 1,
+                credit_cost NUMERIC(10,2) NOT NULL DEFAULT 1,
                 category VARCHAR(20) NOT NULL DEFAULT 'edit',
                 credit_type VARCHAR(30) NOT NULL DEFAULT 'project_ai',
                 enabled BOOLEAN DEFAULT true,
@@ -1216,7 +1216,7 @@ def init_schema():
                 credit_type VARCHAR(30) NOT NULL,
                 project_id INTEGER,
                 session_id INTEGER,
-                credits INTEGER NOT NULL,
+                credits NUMERIC(12,2) NOT NULL,
                 source VARCHAR(20) NOT NULL DEFAULT 'monthly',
                 status VARCHAR(20) NOT NULL DEFAULT 'reserved',
                 cost_usd NUMERIC(12,6) DEFAULT 0,
@@ -1248,8 +1248,7 @@ def init_schema():
             cur.execute("""CREATE TABLE IF NOT EXISTS credit_packs (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(100) NOT NULL,
-                credits INTEGER NOT NULL,
-                credit_type VARCHAR(30) NOT NULL DEFAULT 'project_ai',
+                credits NUMERIC(10,2) NOT NULL,
                 price_cents INTEGER NOT NULL,
                 lemonsqueezy_variant_id VARCHAR(100),
                 active BOOLEAN DEFAULT true,
@@ -1466,6 +1465,22 @@ def init_schema():
                         WHERE slug = 'dream' AND price_monthly_cents = 9900"""
                 )
             _run_migration(migrate_correct_plan_prices)
+
+            # ── Float credits migration ─────────────────────────────────
+            # Change credit_cost and credits columns from INTEGER to NUMERIC
+            # so we can charge fractional credits (0.25, 0.5, 0.75) for
+            # lightweight operations like no-edit chats.
+            def migrate_credit_cost_to_numeric():
+                cur.execute("ALTER TABLE ai_operations ALTER COLUMN credit_cost TYPE NUMERIC(10,2) USING credit_cost::NUMERIC(10,2)")
+            _run_migration(migrate_credit_cost_to_numeric)
+
+            def migrate_credit_transactions_to_numeric():
+                cur.execute("ALTER TABLE credit_transactions ALTER COLUMN credits TYPE NUMERIC(12,2) USING credits::NUMERIC(12,2)")
+            _run_migration(migrate_credit_transactions_to_numeric)
+
+            def migrate_credit_packs_to_numeric():
+                cur.execute("ALTER TABLE credit_packs ALTER COLUMN credits TYPE NUMERIC(10,2) USING credits::NUMERIC(10,2)")
+            _run_migration(migrate_credit_packs_to_numeric)
 
 
             # Seed plan_credit_grants

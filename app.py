@@ -7052,14 +7052,30 @@ async def chat_stream_endpoint(
                                             except Exception as rf_err:
                                                 logger.warning(f"[BILLING] Refund failed (non-fatal): {rf_err}")
 
-                                            # Charge flat 0.75 credits for the read-only chat
-                                            # (rounded to 1 since credits are integers)
-                                            _no_edit_cost = 1
+                                            # Charge flat 0.75 credits for the read-only chat.
+                                            # Use _charge_tier directly (not reserve_credits) because
+                                            # reserve_credits multiplies credit_cost × amount, which
+                                            # would give 2 × amount — not the flat 0.75 we want.
+                                            _no_edit_cost = 0.75
                                             try:
-                                                from services.billing_service import reserve_credits
-                                                _flat_result = reserve_credits(tconn, tuid, "ADD_FEATURE", amount=1)
+                                                from services.billing_service import _charge_tier, _record_transaction, _cascade_order, get_operation
+                                                _op = get_operation("ADD_FEATURE")
+                                                _cascade = _cascade_order(_op or {"category": "edit"})
+                                                _remaining = _no_edit_cost
+                                                for _ct, _src in _cascade:
+                                                    if _remaining <= 0:
+                                                        break
+                                                    _deducted = _charge_tier(tconn, tuid, _ct, _src, _remaining)
+                                                    if _deducted > 0:
+                                                        _record_transaction(
+                                                            tconn, tuid, _ct, _op.get("id") if _op else None,
+                                                            -_deducted, _src, status="charged",
+                                                            project_id=project_id, session_id=session_id,
+                                                            model=usage_data.get("model"),
+                                                        )
+                                                        _remaining -= _deducted
                                                 tconn.commit()
-                                                logger.info(f"[BILLING] No-edit chat: charged flat {_no_edit_cost} credit")
+                                                logger.info(f"[BILLING] No-edit chat: charged flat {_no_edit_cost} credits")
                                             except Exception as fc_err:
                                                 logger.warning(f"[BILLING] Flat charge failed: {fc_err}")
 
