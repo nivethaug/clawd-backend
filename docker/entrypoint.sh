@@ -41,5 +41,10 @@ fi
 export DISABLE_AUTOUPDATER=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
+# Remove any auto-downloaded Claude binary from tmpfs (forces use of the
+# globally-installed pinned version from the Docker image).
+rm -rf /home/dreampilot/.claude/local 2>/dev/null || true
+rm -rf /home/dreampilot/.npm/_npx 2>/dev/null || true
+
 # Exec the main command (already running as dreampilot)
 exec "$@"
