@@ -27,6 +27,13 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+# ── Token-to-credit conversion ──────────────────────────────────────
+# edit_token: 1:1 (1 token = 1 edit token — unchanged)
+# project_ai: 1 credit = 1,000 tokens (covers token overflow after
+#   edit_token exhausted). This lets project_ai credits absorb large
+#   token usage without draining in one chat session.
+TOKENS_PER_CREDIT = 1000
+
 
 # ======================================================================
 # Balance helpers
@@ -437,21 +444,34 @@ def charge_token_usage(
     # Determine cascade: edit_token → project_ai(monthly) → project_ai(purchased)
     cascade = _cascade_order(op or {"category": "edit"})
 
-    remaining = net_tokens
+    remaining = net_tokens  # raw token count
     charged = []
 
     for tier in cascade:
         if remaining <= 0:
             break
         tier_type, tier_source = tier[0], tier[1]
-        deduct = _charge_tier(conn, user_id, tier_type, tier_source, remaining)
+
+        # edit_token: 1:1 (raw tokens). project_ai: 1 credit = TOKENS_PER_CREDIT tokens.
+        if tier_type == "project_ai":
+            charge_amount = remaining // TOKENS_PER_CREDIT  # convert tokens → credits
+        else:
+            charge_amount = remaining  # edit_token: raw tokens (1:1)
+
+        deduct = _charge_tier(conn, user_id, tier_type, tier_source, charge_amount)
         if deduct > 0:
             charged.append({
                 "credit_type": tier_type,
                 "source": tier_source,
                 "amount": deduct,
             })
-            remaining -= deduct
+            # Convert credits back to tokens for the remaining tally when
+            # charging project_ai (so the remainder is in token units for
+            # the next tier or the remaining_uncharged report).
+            if tier_type == "project_ai":
+                remaining -= deduct * TOKENS_PER_CREDIT
+            else:
+                remaining -= deduct
 
     # Record audit transactions
     for c in charged:
