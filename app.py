@@ -7069,15 +7069,18 @@ async def chat_stream_endpoint(
                                         # a question or check status.
                                         _has_writes = bool(usage_data.get("has_writes", False))
                                         logger.info(f"[BILLING] Post-chat: has_writes={_has_writes}, precharged={_precharged}, is_free={_is_free_message}, total_toks={_total_toks}")
-                                        if _is_free_message and not _has_writes and _precharged > 0:
-                                            # Free message (greeting/short) — refund the full pre-charge
-                                            try:
-                                                from services.billing_service import refund_credits
-                                                refund_credits(tconn, tuid, "ADD_FEATURE", _chat_charged)
-                                                tconn.commit()
-                                                logger.info(f"[BILLING] Free message: refunded {_precharged} pre-charged credits — no charge")
-                                            except Exception as rf_err:
-                                                logger.warning(f"[BILLING] Free message refund failed: {rf_err}")
+                                        if _is_free_message and not _has_writes:
+                                            # Free message (greeting/short) — refund pre-charge if any, then 0 cost
+                                            if _precharged > 0:
+                                                try:
+                                                    from services.billing_service import refund_credits
+                                                    refund_credits(tconn, tuid, "ADD_FEATURE", _chat_charged)
+                                                    tconn.commit()
+                                                    logger.info(f"[BILLING] Free message: refunded {_precharged} pre-charged credits — no charge")
+                                                except Exception as rf_err:
+                                                    logger.warning(f"[BILLING] Free message refund failed: {rf_err}")
+                                            else:
+                                                logger.info(f"[BILLING] Free message: no pre-charge to refund — 0 cost")
                                             usage_data["credits_charged"] = 0
                                             record_from_token_usage_json(
                                                 user_id=tuid,
