@@ -77,14 +77,14 @@ def get_all_balances(conn, user_id: int) -> List[Dict[str, Any]]:
     return [dict(r) if not isinstance(r, dict) else r for r in rows]
 
 
-def get_monthly_remaining(balance: Dict[str, Any]) -> int:
+def get_monthly_remaining(balance: Dict[str, Any]) -> float:
     """How many monthly credits remain (can be negative if over-spent)."""
-    return int(balance["monthly_limit"]) - int(balance["used"])
+    return float(balance["monthly_limit"]) - float(balance["used"])
 
 
-def get_total_available(balance: Dict[str, Any]) -> int:
+def get_total_available(balance: Dict[str, Any]) -> float:
     """Total credits available = monthly remaining + purchased."""
-    return get_monthly_remaining(balance) + int(balance.get("purchased", 0))
+    return get_monthly_remaining(balance) + float(balance.get("purchased", 0))
 
 
 # ======================================================================
@@ -175,7 +175,7 @@ def can_afford(conn, user_id: int, operation_code: str, amount: int = 1) -> Dict
         if source == "monthly":
             avail = max(0, get_monthly_remaining(bal))
         else:  # purchased
-            avail = int(bal.get("purchased", 0))
+            avail = float(bal.get("purchased", 0))
         total_available += avail
         cascade.append({
             "credit_type": credit_type,
@@ -545,7 +545,7 @@ def charge_project_creation(
             "operation": op,
         }
 
-    remaining_to_charge = int(op.get("credit_cost", 1))
+    remaining_to_charge = float(op.get("credit_cost", 1))
     charged = []
 
     for tier in check["cascade"]:
@@ -564,7 +564,7 @@ def charge_project_creation(
         return {
             "success": False,
             "error": "insufficient_credits",
-            "cost": int(op.get("credit_cost", 1)),
+            "cost": float(op.get("credit_cost", 1)),
             "charged": charged,
             "operation": op,
         }
@@ -593,7 +593,7 @@ def charge_project_creation(
     return {
         "success": True,
         "operation": op,
-        "cost": int(op.get("credit_cost", 1)),
+        "cost": float(op.get("credit_cost", 1)),
         "charged": charged,
     }
 
@@ -682,11 +682,11 @@ def get_user_billing_summary(conn, user_id: int) -> Dict[str, Any]:
     balance_summaries = []
     for bal in balances:
         monthly_remaining = get_monthly_remaining(bal)
-        purchased = int(bal.get("purchased", 0))
+        purchased = float(bal.get("purchased", 0))
         balance_summaries.append({
             "credit_type": bal["credit_type"],
-            "monthly_limit": int(bal["monthly_limit"]),
-            "used": int(bal["used"]),
+            "monthly_limit": float(bal["monthly_limit"]),
+            "used": float(bal["used"]),
             "monthly_remaining": monthly_remaining,
             "purchased": purchased,
             "total_available": max(0, monthly_remaining) + purchased,

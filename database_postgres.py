@@ -1156,7 +1156,7 @@ def init_schema():
                 id SERIAL PRIMARY KEY,
                 plan_id INTEGER NOT NULL REFERENCES billing_plans(id) ON DELETE CASCADE,
                 credit_type VARCHAR(30) NOT NULL,
-                monthly_limit BIGINT DEFAULT 0,
+                monthly_limit NUMERIC(20,2) DEFAULT 0,
                 created_at TIMESTAMP DEFAULT NOW(),
                 UNIQUE(plan_id, credit_type)
             )""")
@@ -1168,9 +1168,9 @@ def init_schema():
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 credit_type VARCHAR(30) NOT NULL,
-                monthly_limit BIGINT DEFAULT 0,
-                used BIGINT DEFAULT 0,
-                purchased BIGINT DEFAULT 0,
+                monthly_limit NUMERIC(20,2) DEFAULT 0,
+                used NUMERIC(20,2) DEFAULT 0,
+                purchased NUMERIC(20,2) DEFAULT 0,
                 reset_date DATE NOT NULL DEFAULT (DATE_TRUNC('month', NOW()) + INTERVAL '1 month')::date,
                 updated_at TIMESTAMP DEFAULT NOW(),
                 UNIQUE(user_id, credit_type)
@@ -1467,7 +1467,7 @@ def init_schema():
             _run_migration(migrate_correct_plan_prices)
 
             # ── Float credits migration ─────────────────────────────────
-            # Change credit_cost and credits columns from INTEGER to NUMERIC
+            # Change credit-related columns from INTEGER/BIGINT to NUMERIC
             # so we can charge fractional credits (0.25, 0.5, 0.75) for
             # lightweight operations like no-edit chats.
             def migrate_credit_cost_to_numeric():
@@ -1481,6 +1481,19 @@ def init_schema():
             def migrate_credit_packs_to_numeric():
                 cur.execute("ALTER TABLE credit_packs ALTER COLUMN credits TYPE NUMERIC(10,2) USING credits::NUMERIC(10,2)")
             _run_migration(migrate_credit_packs_to_numeric)
+
+            # user_credit_balances is where charges actually land — used/purchased
+            # must be NUMERIC or fractional charges (0.75) will be rounded by PG.
+            def migrate_balances_to_numeric():
+                cur.execute("ALTER TABLE user_credit_balances ALTER COLUMN monthly_limit TYPE NUMERIC(20,2) USING monthly_limit::NUMERIC(20,2)")
+                cur.execute("ALTER TABLE user_credit_balances ALTER COLUMN used TYPE NUMERIC(20,2) USING used::NUMERIC(20,2)")
+                cur.execute("ALTER TABLE user_credit_balances ALTER COLUMN purchased TYPE NUMERIC(20,2) USING purchased::NUMERIC(20,2)")
+            _run_migration(migrate_balances_to_numeric)
+
+            # plan_credit_grants.monthly_limit must match user_credit_balances type
+            def migrate_grants_to_numeric():
+                cur.execute("ALTER TABLE plan_credit_grants ALTER COLUMN monthly_limit TYPE NUMERIC(20,2) USING monthly_limit::NUMERIC(20,2)")
+            _run_migration(migrate_grants_to_numeric)
 
 
             # Seed plan_credit_grants

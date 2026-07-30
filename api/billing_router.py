@@ -132,11 +132,11 @@ async def get_balances(authorization: Optional[str] = Header(None)):
         "balances": [
             {
                 "credit_type": b["credit_type"],
-                "monthly_limit": int(b["monthly_limit"]),
-                "used": int(b["used"]),
+                "monthly_limit": float(b["monthly_limit"]),
+                "used": float(b["used"]),
                 "monthly_remaining": get_monthly_remaining(b),
-                "purchased": int(b.get("purchased", 0)),
-                "total_available": max(0, get_monthly_remaining(b)) + int(b.get("purchased", 0)),
+                "purchased": float(b.get("purchased", 0)),
+                "total_available": max(0, get_monthly_remaining(b)) + float(b.get("purchased", 0)),
                 "reset_date": b.get("reset_date"),
             }
             for b in balances
