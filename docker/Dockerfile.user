@@ -78,7 +78,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
 # container via `docker exec ... claude -p ...`.
 # ─────────────────────────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
-    && claude --version
+    && claude --version \
+    && chmod -R a-w /usr/lib/node_modules/@anthropic-ai/claude-code
 
 # ─────────────────────────────────────────────────────────────────────
 # Non-root user. Matches worker's dreampilot uid/gid (1001) so bind-mounted
