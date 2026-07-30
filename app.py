@@ -7053,6 +7053,7 @@ async def chat_stream_endpoint(
                                         # users shouldn't burn their full token quota just to ask
                                         # a question or check status.
                                         _has_writes = bool(usage_data.get("has_writes", False))
+                                        logger.info(f"[BILLING] Post-chat: has_writes={_has_writes}, precharged={_precharged}, is_free={_is_free_message}, total_toks={_total_toks}")
                                         if _is_free_message and not _has_writes and _precharged > 0:
                                             # Free message (greeting/short) — refund the full pre-charge
                                             try:
@@ -7073,15 +7074,16 @@ async def chat_stream_endpoint(
                                             )
                                             logger.info(f"[BILLING] Free message: 0 credits charged")
 
-                                        elif not _has_writes and _precharged > 0:
-                                            # Refund the pre-charge
-                                            try:
-                                                from services.billing_service import refund_credits
-                                                refund_credits(tconn, tuid, "ADD_FEATURE", _chat_charged)
-                                                tconn.commit()
-                                                logger.info(f"[BILLING] No-edit chat: refunded {_precharged} pre-charged credits")
-                                            except Exception as rf_err:
-                                                logger.warning(f"[BILLING] Refund failed (non-fatal): {rf_err}")
+                                        elif not _has_writes:
+                                            # Refund the pre-charge (if any)
+                                            if _precharged > 0:
+                                                try:
+                                                    from services.billing_service import refund_credits
+                                                    refund_credits(tconn, tuid, "ADD_FEATURE", _chat_charged)
+                                                    tconn.commit()
+                                                    logger.info(f"[BILLING] No-edit chat: refunded {_precharged} pre-charged credits")
+                                                except Exception as rf_err:
+                                                    logger.warning(f"[BILLING] Refund failed (non-fatal): {rf_err}")
 
                                             # Charge flat 0.75 credits for the read-only chat.
                                             # Use _charge_tier directly (not reserve_credits) because
@@ -7089,7 +7091,8 @@ async def chat_stream_endpoint(
                                             # would give 2 × amount — not the flat 0.75 we want.
                                             _no_edit_cost = 0.75
                                             try:
-                                                from services.billing_service import _charge_tier, _record_transaction, _cascade_order, get_operation
+                                                from services.billing_service import _charge_tier, _record_transaction, _cascade_order
+                                                from services.plan_cache import get_operation
                                                 _op = get_operation("ADD_FEATURE")
                                                 _cascade = _cascade_order(_op or {"category": "edit"})
                                                 _remaining = _no_edit_cost
