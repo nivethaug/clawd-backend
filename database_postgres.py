@@ -1513,6 +1513,25 @@ def init_schema():
                 """)
             _run_migration(migrate_plan_credit_grants_update)
 
+            # ── Update creation credit costs ────────────────────────────────
+            def migrate_creation_credit_costs():
+                cur.execute("""
+                    UPDATE ai_operations SET credit_cost = CASE code
+                        WHEN 'WEBSITE' THEN 15
+                        WHEN 'LANDING_PAGE' THEN 15
+                        WHEN 'DASHBOARD' THEN 12
+                        WHEN 'DISCORD_BOT' THEN 12
+                        WHEN 'TELEGRAM_BOT' THEN 12
+                        WHEN 'AUTOMATION' THEN 9
+                        WHEN 'SCHEDULER' THEN 9
+                        WHEN 'API_GENERATION' THEN 7
+                        ELSE credit_cost
+                    END
+                    WHERE code IN ('WEBSITE', 'LANDING_PAGE', 'DASHBOARD', 'DISCORD_BOT',
+                                   'TELEGRAM_BOT', 'AUTOMATION', 'SCHEDULER', 'API_GENERATION')
+                """)
+            _run_migration(migrate_creation_credit_costs)
+
 
             # Seed plan_credit_grants
             cur.execute("SELECT id, slug FROM billing_plans")
@@ -1541,14 +1560,14 @@ def init_schema():
 
             # Seed ai_operations
             seed_ops = [
-                ('WEBSITE', 'Website Creation', 'Generate a complete website', 10, 'creation', 'project_ai', 1),
-                ('LANDING_PAGE', 'Landing Page', 'Generate a landing page', 10, 'creation', 'project_ai', 2),
-                ('DASHBOARD', 'Dashboard', 'Generate a dashboard application', 8, 'creation', 'project_ai', 3),
-                ('DISCORD_BOT', 'Discord Bot', 'Generate a Discord bot', 8, 'creation', 'project_ai', 4),
-                ('TELEGRAM_BOT', 'Telegram Bot', 'Generate a Telegram bot', 8, 'creation', 'project_ai', 5),
-                ('AUTOMATION', 'Automation Project', 'Generate an automation/scheduler project', 6, 'creation', 'project_ai', 6),
-                ('SCHEDULER', 'Scheduler', 'Generate a scheduler project', 6, 'creation', 'project_ai', 7),
-                ('API_GENERATION', 'API Generation', 'Generate an API', 5, 'creation', 'project_ai', 8),
+                ('WEBSITE', 'Website Creation', 'Generate a complete website', 15, 'creation', 'project_ai', 1),
+                ('LANDING_PAGE', 'Landing Page', 'Generate a landing page', 15, 'creation', 'project_ai', 2),
+                ('DASHBOARD', 'Dashboard', 'Generate a dashboard application', 12, 'creation', 'project_ai', 3),
+                ('DISCORD_BOT', 'Discord Bot', 'Generate a Discord bot', 12, 'creation', 'project_ai', 4),
+                ('TELEGRAM_BOT', 'Telegram Bot', 'Generate a telegram bot', 12, 'creation', 'project_ai', 5),
+                ('AUTOMATION', 'Automation Project', 'Generate an automation/scheduler project', 9, 'creation', 'project_ai', 6),
+                ('SCHEDULER', 'Scheduler', 'Generate a scheduler project', 9, 'creation', 'project_ai', 7),
+                ('API_GENERATION', 'API Generation', 'Generate an API', 7, 'creation', 'project_ai', 8),
                 ('LARGE_REFACTOR', 'Large Refactor', 'Large-scale refactoring', 5, 'edit', 'project_ai', 20),
                 ('REFACTOR', 'Refactor', 'Refactor existing code', 3, 'edit', 'project_ai', 21),
                 ('ADD_FEATURE', 'Add Feature', 'Add a new feature', 2, 'edit', 'project_ai', 22),
