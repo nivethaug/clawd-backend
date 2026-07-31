@@ -136,11 +136,6 @@ def inject_scheduler_env(
             "EMAIL_TO", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
             "DISCORD_WEBHOOK_URL", "API_ENDPOINT",
         ) if any(line.startswith(k + "=") for line in lines)]
-        logger.info(
-            f"[ENV-DEBUG] inject_scheduler_env -> project_id={project_id}, "
-            f"written_path={env_path}, parent_dir={scheduler_path.name}, "
-            f"channel_keys_written={_channel_keys}, total_lines={len(lines)}"
-        )
         return True, str(env_path)
 
     except Exception as e:

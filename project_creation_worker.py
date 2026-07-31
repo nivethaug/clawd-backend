@@ -28,19 +28,12 @@ logging.basicConfig(
 logger = logging.getLogger("project_creation_worker")
 configure_sentry("project-creation-worker")
 
-# Startup diagnostic: confirm env vars are reaching the worker process and
-# whether Sentry actually enabled. Logs PRESENCE only, never values.
 try:
     from services.sentry_config import is_enabled as _sentry_is_enabled
-    if _sentry_is_enabled():
-        logger.info("[STARTUP-ENV] Sentry ENABLED for project-creation-worker")
-    else:
-        _dsn = os.getenv("SENTRY_DSN", "")
-        _why = ("INVALID (expected https://<key>@o<org>.ingest.sentry.io/<project>)"
-                if _dsn else "missing from env")
-        logger.warning("[STARTUP-ENV] Sentry DISABLED for project-creation-worker — SENTRY_DSN %s", _why)
-except Exception as _e:
-    logger.warning("[STARTUP-ENV] diagnostic failed: %s", _e)
+    if not _sentry_is_enabled():
+        logger.info("[STARTUP] Sentry not enabled for project-creation-worker")
+except Exception:
+    pass
 
 POLL_SECONDS = float(os.getenv("PROJECT_CREATION_WORKER_POLL_SECONDS", "2"))
 STALE_AFTER_MINUTES = int(os.getenv("PROJECT_CREATION_RUN_STALE_MINUTES", "20"))

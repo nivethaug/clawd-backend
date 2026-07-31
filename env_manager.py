@@ -270,22 +270,6 @@ def get_project_env_info(project_id: int) -> Tuple[str, int, Optional[str], str]
     if type_id == 5 and subdir == "":
         _migrate_legacy_scheduler_env(project_path)
 
-    # DEBUG: trace the resolved env path so we can compare it against where
-    # inject_scheduler_env / write_env_file actually write.
-    import os as _os
-    logger.info(
-        f"[ENV-DEBUG] get_project_env_info(project_id={project_id}) -> "
-        f"type_id={type_id}, subdir={subdir!r}, project_path={project_path}, "
-        f"resolved_env_path={env_path}, env_exists={_os.path.exists(env_path)}"
-    )
-    # Also log whether a .env exists at the project root (sibling of subdir),
-    # since the scheduler runtime + env_injector write to the root, not subdir.
-    _root_env = os.path.join(project_path, ".env")
-    if _root_env != env_path:
-        logger.info(
-            f"[ENV-DEBUG] get_project_env_info(project_id={project_id}) -> "
-            f"root_env_path={_root_env}, root_env_exists={_os.path.exists(_root_env)}"
-        )
     return env_path, type_id, domain, project_name
 
 

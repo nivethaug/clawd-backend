@@ -211,45 +211,10 @@ configure_sentry("backend")
 # ============================================================================
 try:
     from services.sentry_config import is_enabled as _sentry_is_enabled
-
-    _diag_vars = [
-        "SENTRY_DSN",
-        "SENTRY_ENVIRONMENT",
-        "LEMONSQUEEZY_API_KEY",
-        "LEMONSQUEEZY_STORE_ID",
-        "LEMONSQUEEZY_WEBHOOK_SECRET",
-        "WEBHOOK_DEV_BYPASS",
-        "USE_POSTGRES",
-        "DB_HOST",
-    ]
-    _present = []
-    _missing = []
-    for _v in _diag_vars:
-        (_present if os.getenv(_v) else _missing).append(_v)
-    logger.info(
-        "[STARTUP-ENV] present=%s missing=%s sentry_enabled=%s",
-        ",".join(_present) or "(none)",
-        ",".join(_missing) or "(none)",
-        _sentry_is_enabled(),
-    )
-    if _sentry_is_enabled():
-        logger.info("[STARTUP-ENV] Sentry is ENABLED for backend")
-    else:
-        _dsn = os.getenv("SENTRY_DSN", "")
-        if not _dsn:
-            _why = "missing"
-        elif not _dsn.startswith(("http://", "https://")):
-            _why = f"INVALID scheme (value_prefix={_dsn[:12]}... len={len(_dsn)}; must start with http:// or https://)"
-        else:
-            _why = f"set but failed to init (value_prefix={_dsn[:12]}... len={len(_dsn)}; check the value matches Sentry -> Settings -> Client Keys)"
-        logger.warning(
-            "[STARTUP-ENV] Sentry is DISABLED for backend — SENTRY_DSN is %s. "
-            "Add a VALID SENTRY_DSN to the PM2 env, then "
-            "`pm2 restart 1 --update-env && pm2 save`.",
-            _why,
-        )
-except Exception as _diag_err:
-    logger.warning("[STARTUP-ENV] diagnostic failed: %s", _diag_err)
+    if not _sentry_is_enabled():
+        logger.info("[STARTUP] Sentry not enabled")
+except Exception:
+    pass
 
 # ============================================================================
 # Configuration
@@ -5033,25 +4998,7 @@ async def get_project_env(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    # DEBUG: trace exactly which .env path is read and whether it exists
-    import os as _os
-    logger.info(
-        f"[ENV-DEBUG] GET /projects/{project_id}/env -> type_id={type_id}, "
-        f"env_path={env_path}, exists={_os.path.exists(env_path)}"
-    )
-
     variables = env_manager.read_env_file(env_path)
-
-    # DEBUG: log keys found, especially scheduler sender-channel keys
-    _found_keys = [v.get("key") for v in variables]
-    _channel_keys = [k for k in _found_keys if k in (
-        "EMAIL_TO", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
-        "DISCORD_WEBHOOK_URL", "API_ENDPOINT",
-    )]
-    logger.info(
-        f"[ENV-DEBUG] GET /projects/{project_id}/env -> total_keys={len(_found_keys)}, "
-        f"channel_keys={_channel_keys}, all_keys={_found_keys}"
-    )
 
     # Merge metadata from the env_variable_registry so the UI can display
     # titles, descriptions, docs links, and categories. Runtime values
@@ -5119,14 +5066,6 @@ async def update_project_env(
         env_path, type_id, domain, project_name = env_manager.get_project_env_info(project_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-
-    # DEBUG: trace exactly which .env path is written
-    import os as _os
-    logger.info(
-        f"[ENV-DEBUG] PUT /projects/{project_id}/env -> type_id={type_id}, "
-        f"env_path={env_path}, exists={_os.path.exists(env_path)}, "
-        f"update_keys={list(updates.keys())}, deleted={request.deleted}"
-    )
 
     # Write updates
     if updates:
