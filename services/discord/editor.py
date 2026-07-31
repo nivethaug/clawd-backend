@@ -155,6 +155,9 @@ class DiscordBotEditor:
 
     def _build_enhancement_prompt(self, description: str, bot_name: str) -> str:
         """Build AI prompt for Discord bot enhancement with dynamic command generation."""
+        # Derive domain from project path (e.g. .../1922_bot-name_ts/discord -> parent dir name)
+        _parent = self.project_path.parent.name
+        domain = _parent.split("_", 1)[1].rsplit("_", 1)[0] if "_" in _parent else bot_name.lower().replace(" ", "-")
         meta_block = build_workflow_meta_block(
             project_type_id=3,
             project_type="discord",
