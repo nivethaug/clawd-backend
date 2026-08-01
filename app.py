@@ -7402,17 +7402,14 @@ async def chat_stream_endpoint(
                                                 from services.billing_service import charge_token_usage
                                                 _cache_read = int(usage_data.get("cache_read_input_tokens", 0) or 0)
 
-                                                # Estimate ai_index overhead: each Read/Write of a JSON
-                                                # index file costs ~2K tokens. If the tool list includes
-                                                # Read+Write and the model updated index files, subtract
-                                                # ~10K tokens (5 files x 2K) from the billable amount.
+                                                # ai_index JSON file reads/writes are infrastructure overhead
+                                                # (not user-visible work) — subtract their estimated token cost
+                                                # so users aren't charged for index maintenance.
+                                                # Applies to any large edit session (>50K tokens).
                                                 _all_tools = usage_data.get("all_tools_used", [])
-                                                _has_index_update = (
-                                                    "Write" in _all_tools and "Read" in _all_tools
-                                                    and ("Edit" in _all_tools or "MultiEdit" in _all_tools)
-                                                )
+                                                _has_writes = bool(usage_data.get("has_writes", False))
                                                 _index_overhead = 0
-                                                if _has_index_update and _total_toks > 50000:
+                                                if _has_writes and _total_toks > 50000:
                                                     # Large session with Read+Write+Edit = likely includes
                                                     # ai_index updates. Subtract ~10K tokens as overhead.
                                                     _index_overhead = min(10000, _total_toks - _cache_read - _precharged)
