@@ -7067,6 +7067,17 @@ async def chat_stream_endpoint(
             
             # If gate handled it, return direct response
             if direct_response:
+                # Refund the pre-charge — gate handled it without Claude Code
+                if _chat_charged and _chat_user_id:
+                    try:
+                        from services.billing_service import refund_credits
+                        with get_db() as rconn:
+                            refund_credits(rconn, _chat_user_id, "ADD_FEATURE", _chat_charged)
+                            rconn.commit()
+                        logger.info(f"[BILLING] Gate response: refunded {_chat_charged}")
+                    except Exception as refund_err:
+                        logger.warning(f"[BILLING] Gate refund failed: {refund_err}")
+
                 async def gate_response():
                     """Return gate's direct response."""
                     try:
