@@ -208,6 +208,18 @@ class ACPChatHandler:
         elif self.is_discord_bot:
             self.bot_subdir = "discord"
 
+        # The actual code directory for bot projects. Discord/Telegram bots
+        # have main.py, commands/, services/ etc. inside a {bot_subdir}/
+        # folder. Website and scheduler have code at the project root.
+        # In container mode we can't check the filesystem, so we trust the
+        # subdir convention — the clone process always creates it.
+        self.bot_code_path = str(self.project_path)
+        if self.bot_subdir:
+            _code_dir = self.project_path / self.bot_subdir
+            _is_container = os.getenv("EXECUTION_MODE", "local").lower() == "container"
+            if _is_container or _code_dir.exists():
+                self.bot_code_path = str(_code_dir)
+
         # Load project metadata from database
         self._load_project_metadata()
 
@@ -2010,7 +2022,8 @@ You are a friendly AI assistant helping a user modify their **{self.project_name
 
 Project Name: **{self.project_name}**
 Project Type: Telegram Bot
-Bot Directory: `{self.project_path}`
+Bot Code Directory: `{self.bot_code_path}`
+Project Root (for .env, buildpublish.py): `{self.project_path}`
 
 ---
 
@@ -2030,7 +2043,7 @@ Bot Directory: `{self.project_path}`
 
 **CRITICAL: Before making ANY modifications, you MUST read the AI Index files:**
 
-**Location:** `{self.project_path}/agent/ai_index/`
+**Location:** `{self.bot_code_path}/agent/ai_index/`
 
 **Files to read (IN ORDER):**
 1. `summaries.json` - Understand what each file does
@@ -2069,7 +2082,7 @@ I need to understand how you want to handle external APIs for this change.
 I can use these API sources:
 
 📚 LLM API CATALOG (Intelligent Selection)
-- Location: {self.project_path}/llm/categories/index.json
+- Location: {self.bot_code_path}/llm/categories/index.json
 - Contains 19 categories with 76 real APIs
 - Examples: weather, crypto prices, news, translation, etc.
 - I'll analyze your request keywords and suggest the best API
@@ -2192,7 +2205,7 @@ If the user request needs website data:
 
 ### Publish Changes (After changes)
 ```bash
-cd {self.project_path}
+cd {self.bot_code_path}
 python3 buildpublish.py
 ```
 
@@ -2203,7 +2216,7 @@ curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
 
 ### Run Unit Tests (MANDATORY)
 ```bash
-cd {self.project_path}
+cd {self.bot_code_path}
 python -m pytest unit/ -v
 ```
 
@@ -2293,7 +2306,7 @@ After making ANY changes, update these files:
 ### Bot Not Responding
 - Check PM2 status: `pm2 status`
 - Check logs: `pm2 logs tg-bot-{self.project_id}`
-- Publish: `cd {self.project_path} && python3 buildpublish.py`
+- Publish: `cd {self.bot_code_path} && python3 buildpublish.py`
 
 ### Webhook Issues
 - Verify domain resolves: `nslookup {self.domain}`
@@ -2425,7 +2438,8 @@ You are a friendly AI assistant helping a user modify their **{self.project_name
 
 Project Name: **{self.project_name}**
 Project Type: Discord Bot
-Bot Directory: `{self.project_path}`
+Bot Code Directory: `{self.bot_code_path}`
+Project Root (for .env, buildpublish.py): `{self.project_path}`
 
 ---
 
@@ -2445,7 +2459,7 @@ Bot Directory: `{self.project_path}`
 
 **CRITICAL: Before making ANY modifications, you MUST read the AI Index files:**
 
-**Location:** `{self.project_path}/agent/ai_index/`
+**Location:** `{self.bot_code_path}/agent/ai_index/`
 
 **Files to read (IN ORDER):**
 1. `summaries.json` - Understand what each file does
@@ -2462,7 +2476,7 @@ Bot Directory: `{self.project_path}`
 ## DISCORD BOT STRUCTURE
 
 ```
-{self.project_path}/
+{self.bot_code_path}/
 ├── main.py              # Entry point - NO business logic
 ├── config.py            # Environment config (DISCORD_TOKEN, DB creds)
 ├── .env                 # Secrets (NEVER modify)
@@ -2564,7 +2578,7 @@ def process_user_input(text: str) -> str:
 
 **When adding new API integrations, use the pre-built catalog:**
 
-**Location:** `{self.project_path}/llm/categories/`
+**Location:** `{self.bot_code_path}/llm/categories/`
 
 **How to use:**
 1. Read `index.json` to find the right category for the user's request
@@ -2660,7 +2674,7 @@ If the user request requires website data:
 
 ```bash
 # Publish changes (handles PM2 restart via worker-api)
-cd {self.project_path}
+cd {self.bot_code_path}
 python3 buildpublish.py
 
 # Check if running
@@ -2681,7 +2695,7 @@ which handles PM2 restart via the worker-api.
 ### Bot Not Responding
 - Check health: `curl -s https://{self.domain}-api.{BASE_DOMAIN}/health`
 - Check logs: `pm2 logs dc-bot-{self.project_id}`
-- Publish: `cd {self.project_path} && python3 buildpublish.py`
+- Publish: `cd {self.bot_code_path} && python3 buildpublish.py`
 - Check bot token in `.env`
 
 ### Database Issues
