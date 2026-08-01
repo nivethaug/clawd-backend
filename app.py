@@ -7136,8 +7136,6 @@ async def chat_stream_endpoint(
                     _gate_project_name = handler.project_name if handler else "App"
                     _gate_project_path = str(handler.project_path) if handler else None
                     # For bot projects, ai_index may be in a subdirectory OR at root
-                    # Scheduler: ai_index at root (agent/ai_index/), code in scheduler/
-                    # Telegram/Discord: ai_index inside subdir (telegram/agent/ai_index/)
                     if handler and handler.bot_subdir:
                         _bot_code_path = handler.project_path / handler.bot_subdir
                         _root_ai = handler.project_path / "agent" / "ai_index"
@@ -7145,7 +7143,14 @@ async def chat_stream_endpoint(
                             _gate_project_path = str(handler.project_path)
                         elif _bot_code_path.exists():
                             _gate_project_path = str(_bot_code_path)
-                    direct_response = await check_message_gate(acp_user_content, _gate_project_name, _gate_project_path)
+                    # Scheduler projects: use simple gate (greetings + security only)
+                    # because scheduler questions need runtime API data that ai_index can't provide
+                    _gate_is_scheduler = handler and getattr(handler, 'is_scheduler', False)
+                    if _gate_is_scheduler:
+                        # Pass no project_path → simple mode, no ai_index tool
+                        direct_response = await check_message_gate(acp_user_content, _gate_project_name, None)
+                    else:
+                        direct_response = await check_message_gate(acp_user_content, _gate_project_name, _gate_project_path)
                 except Exception as gate_err:
                     logger.warning(f"[ACP-STREAM] Gate failed (non-fatal, fail-open): {gate_err}")
             
