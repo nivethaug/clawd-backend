@@ -901,7 +901,7 @@ class TemplateUpdateRequest(BaseModel):
 # Set to True to route read-only questions through GLM-Flash with ai_index
 # tool access. Flash reads project index files on demand to answer.
 # Set to False for current behavior (gate only handles greetings + security).
-GATE_HANDLE_READONLY = False
+GATE_HANDLE_READONLY = True
 
 _GATE_SYSTEM_PROMPT = """\
 You are a message classifier for an AI app builder called DreamAgent.
