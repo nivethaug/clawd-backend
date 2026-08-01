@@ -7127,10 +7127,6 @@ async def chat_stream_endpoint(
             direct_response = None
             if request.image:
                 logger.info("[ACP-STREAM] Skipping gate because image requires Claude Code vision")
-            elif handler and getattr(handler, 'is_scheduler', False):
-                # Scheduler questions need runtime data (jobs, schedules, logs)
-                # that ai_index can't provide. Skip gate, go straight to Claude Code.
-                logger.info("[ACP-STREAM] Scheduler project — skipping gate (needs runtime API data)")
             elif _is_stream_free_msg:
                 logger.info("[ACP-STREAM] Free message (greeting/short) — skipping gate + Claude Code")
                 _p = handler.project_name if handler else "your project"
