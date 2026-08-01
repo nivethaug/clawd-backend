@@ -2674,14 +2674,15 @@ If the user request requires website data:
 
 ```bash
 # Publish changes (handles PM2 restart via worker-api)
+# buildpublish.py REQUIRES project_path and project_id as arguments:
 cd {self.bot_code_path}
-python3 buildpublish.py
+python3 buildpublish.py . {self.project_id}
 
 # Check if running
 curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
 
 # Test changes
-python3 buildpublish.py && sleep 3 && curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
+python3 buildpublish.py . {self.project_id} && sleep 3 && curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
 ```
 
 ⛔ NEVER run `pm2 restart`, `pm2 stop`, or `sudo pm2` directly.
@@ -2695,7 +2696,7 @@ which handles PM2 restart via the worker-api.
 ### Bot Not Responding
 - Check health: `curl -s https://{self.domain}-api.{BASE_DOMAIN}/health`
 - Check logs: `pm2 logs dc-bot-{self.project_id}`
-- Publish: `cd {self.bot_code_path} && python3 buildpublish.py`
+- Publish: `cd {self.bot_code_path} && python3 buildpublish.py . {self.project_id}`
 - Check bot token in `.env`
 
 ### Database Issues
