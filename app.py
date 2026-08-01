@@ -6891,7 +6891,9 @@ async def chat_stream_endpoint(
             if request.image:
                 logger.info("[ACP-STREAM] Skipping gate because image requires Claude Code vision")
             elif _is_stream_free_msg:
-                logger.info("[ACP-STREAM] Free message (greeting/short) — skipping gate")
+                logger.info("[ACP-STREAM] Free message (greeting/short) — skipping gate + Claude Code")
+                _p = handler.project_name if handler else "your project"
+                direct_response = f"Hi! 👋 I'm here to help you build {_p}. What would you like to work on?"
             else:
                 try:
                     _gate_project_name = handler.project_name if handler else "App"
