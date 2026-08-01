@@ -198,15 +198,15 @@ class ACPChatHandler:
         self.is_scheduler = (project_type_id == 5)
         self.is_bot_project = self.is_telegram_bot or self.is_discord_bot or self.is_scheduler
 
-        # Bot projects have code in a subdirectory (telegram/, discord/, scheduler/).
-        # Used by the message gate to resolve ai_index paths for bot projects.
+        # Bot projects have code in a subdirectory (telegram/, discord/).
+        # Scheduler is different — its agent/ folder lives at the project root,
+        # not inside a scheduler/ subdir. Used by the message gate to resolve
+        # ai_index paths for bot projects.
         self.bot_subdir = None
         if self.is_telegram_bot:
             self.bot_subdir = "telegram"
         elif self.is_discord_bot:
             self.bot_subdir = "discord"
-        elif self.is_scheduler:
-            self.bot_subdir = "scheduler"
 
         # Load project metadata from database
         self._load_project_metadata()
