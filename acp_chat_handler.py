@@ -49,7 +49,7 @@ _claude_session_ids: Dict[str, str] = {}
 
 # Configuration
 ACPX_TIMEOUT = 1800  # 15 minutes for interactive chat
-USE_PREPROCESSOR = True
+USE_PREPROCESSOR = os.getenv("ACP_USE_PREPROCESSOR", "false").lower() == "true"  # DISABLED for ClaudeCodeAgent migration testing
 USE_CLAUDE_AGENT = os.getenv("ACP_USE_CLAUDE_AGENT", "true").lower() == "true" and CLAUDE_AGENT_AVAILABLE  # Prefer Claude Agent
 
 # ---------------------------------------------------------------------------
@@ -170,11 +170,6 @@ class ACPChatHandler:
         self.session_id = None  # Set via set_session_id() before each chat
         self.frontend_path = self.project_path / "frontend"
         self.frontend_src_path = self.frontend_path / "src"
-
-        # Bot projects have code in a subdirectory (telegram/, discord/, scheduler/)
-        # Website projects have code in frontend/ and backend/
-        # This is used by the gate to find ai_index files.
-        self.bot_subdir = None  # set below after type checks
         self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)
         self._active_agent = None  # Currently running agent (for cancellation)
 
@@ -203,7 +198,9 @@ class ACPChatHandler:
         self.is_scheduler = (project_type_id == 5)
         self.is_bot_project = self.is_telegram_bot or self.is_discord_bot or self.is_scheduler
 
-        # Set the bot subdirectory for path resolution
+        # Bot projects have code in a subdirectory (telegram/, discord/, scheduler/).
+        # Used by the message gate to resolve ai_index paths for bot projects.
+        self.bot_subdir = None
         if self.is_telegram_bot:
             self.bot_subdir = "telegram"
         elif self.is_discord_bot:

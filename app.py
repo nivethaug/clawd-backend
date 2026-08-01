@@ -7426,25 +7426,39 @@ async def chat_stream_endpoint(
                                         # Now deduct the ACTUAL tokens consumed from edit_token
                                         # (cascading to project_ai if needed).
                                         # ai_index JSON file reads/writes are infrastructure overhead
-                                        # (not user-visible work) — subtract their estimated token cost
+                                        # (not user-visible work) — subtract their exact token cost
                                         # so users aren't charged for index maintenance.
+                                        # The wrapper counts every Read/Write/Edit targeting an
+                                        # ai_index/*.json file per request and reports the total via
+                                        # the usage endpoint; we convert that to an exact token
+                                        # discount using the per-call estimate below.
                                         if _total_toks > 0:
                                             try:
-                                                from services.billing_service import charge_token_usage
+                                                from services.billing_service import (
+                                                    charge_token_usage,
+                                                    AI_INDEX_TOKENS_PER_CALL,
+                                                )
                                                 _cache_read = int(usage_data.get("cache_read_input_tokens", 0) or 0)
 
-                                                # ai_index JSON file reads/writes are infrastructure overhead
-                                                # (not user-visible work) — subtract their estimated token cost
-                                                # so users aren't charged for index maintenance.
-                                                # Applies to any large edit session (>50K tokens).
-                                                _all_tools = usage_data.get("all_tools_used", [])
-                                                _has_writes = bool(usage_data.get("has_writes", False))
+                                                # Exact ai_index overhead: the wrapper reports how many
+                                                # Read/Write/Edit tool calls targeted ai_index/*.json.
+                                                # Each such call carries the full JSON content in both
+                                                # the request (input) and the tool_result (input again
+                                                # next turn), so one update of N files ≈ 2N turns of
+                                                # ~2K-token payloads. We discount at the per-call rate.
+                                                _ai_index_calls = int(usage_data.get("ai_index_tool_count", 0) or 0)
                                                 _index_overhead = 0
-                                                if _has_writes and _total_toks > 50000:
-                                                    # ai_index overhead: estimated ~100K tokens spent reading/writing
-                                                    # 5 JSON index files per edit session. Discount 75% of that (75K).
-                                                    _index_overhead = 75000
-                                                    logger.info(f"[BILLING] ai_index overhead discount: -{_index_overhead} tokens (75% of ~100K index cost)")
+                                                if _ai_index_calls > 0:
+                                                    _index_overhead = _ai_index_calls * AI_INDEX_TOKENS_PER_CALL
+                                                    # Never discount more than the non-cache, non-precharged
+                                                    # portion of the bill — that would create free credits.
+                                                    _billable_cap = max(0, _total_toks - _cache_read - _precharged)
+                                                    _index_overhead = min(_index_overhead, _billable_cap)
+                                                    logger.info(
+                                                        f"[BILLING] ai_index overhead discount: -{_index_overhead} tokens "
+                                                        f"(count={_ai_index_calls} calls x {AI_INDEX_TOKENS_PER_CALL}/call, "
+                                                        f"capped at billable {_billable_cap})"
+                                                    )
                                                 charge_result = charge_token_usage(
                                                     conn=tconn,
                                                     user_id=tuid,
@@ -8211,11 +8225,25 @@ async def chat_endpoint(
 
                             # ── POST-EDIT TOKEN CHARGE ──────────────────────
                             # Non-streaming endpoint has no pre-charge, so all
-                            # tokens are charged here.
+                            # tokens are charged here. ai_index overhead is
+                            # discounted the same way as the streaming path.
                             if _total_toks > 0:
                                 try:
-                                    from services.billing_service import charge_token_usage
+                                    from services.billing_service import (
+                                        charge_token_usage,
+                                        AI_INDEX_TOKENS_PER_CALL,
+                                    )
                                     _cache_read = int(usage_data.get("cache_read_input_tokens", 0) or 0)
+                                    _ai_index_calls = int(usage_data.get("ai_index_tool_count", 0) or 0)
+                                    _index_overhead = 0
+                                    if _ai_index_calls > 0:
+                                        _index_overhead = _ai_index_calls * AI_INDEX_TOKENS_PER_CALL
+                                        _billable_cap = max(0, _total_toks - _cache_read)
+                                        _index_overhead = min(_index_overhead, _billable_cap)
+                                        logger.info(
+                                            f"[BILLING] ai_index overhead discount: -{_index_overhead} tokens "
+                                            f"(count={_ai_index_calls} calls x {AI_INDEX_TOKENS_PER_CALL}/call)"
+                                        )
                                     charge_result = charge_token_usage(
                                         conn=tconn,
                                         user_id=tuid,
@@ -8225,7 +8253,7 @@ async def chat_endpoint(
                                         session_id=session_id,
                                         model=usage_data.get("model"),
                                         precharged_amount=0,
-                                        cache_read_tokens=_cache_read,
+                                        cache_read_tokens=_cache_read + _index_overhead,
                                     )
                                     tconn.commit()
                                     logger.info(f"[BILLING] Post-edit token charge (non-streaming): {charge_result}")

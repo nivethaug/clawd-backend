@@ -34,6 +34,14 @@ logger = logging.getLogger(__name__)
 #   token usage without draining in one chat session.
 TOKENS_PER_CREDIT = 1000
 
+# ── ai_index overhead discount ──────────────────────────────────────
+# Each Read/Write/Edit of an ai_index/*.json file carries the full file
+# content (~5-8KB ≈ 2K tokens) through the request and the next turn's
+# tool_result. The wrapper counts these calls per request; the backend
+# multiplies by this rate to discount them as infrastructure overhead
+# (users are never charged for keeping the project index current).
+AI_INDEX_TOKENS_PER_CALL = 2000
+
 
 # ======================================================================
 # Balance helpers

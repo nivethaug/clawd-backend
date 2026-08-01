@@ -390,16 +390,7 @@ class ClaudeCodeAgent:
         # Auto-detect via shutil.which
         claude_path = shutil.which("claude")
         if claude_path:
-            # Log the version for debugging (which claude binary is actually running)
-            try:
-                _ver_result = subprocess.run(
-                    [claude_path, "--version"],
-                    capture_output=True, text=True, timeout=10
-                )
-                _claude_ver = (_ver_result.stdout or _ver_result.stderr or "").strip()
-                logger.info(f"[CLAUDE-AGENT] Claude CLI path: {claude_path}, version: {_claude_ver}")
-            except Exception as _ve:
-                logger.warning(f"[CLAUDE-AGENT] Could not get Claude version: {_ve}")
+            logger.debug(f"Found claude CLI via shutil.which: {claude_path}")
             return claude_path
 
         # Common fallback paths
@@ -856,6 +847,7 @@ class ClaudeCodeAgent:
                 "model": model_name,
                 "has_writes": totals.get("has_writes", False),
                 "all_tools_used": totals.get("all_tools_used", []),
+                "ai_index_tool_count": totals.get("ai_index_tool_count", 0),
             }
             logger.info(
                 f"[CLAUDE-AGENT] Wrapper usage (session={session_id}): "
@@ -865,7 +857,8 @@ class ClaudeCodeAgent:
                 f"reasoning={self._last_token_usage['reasoning_tokens']}, "
                 f"cost=${self._last_token_usage['cost_usd']:.6f}, "
                 f"requests={totals.get('request_count', 0)}, "
-                f"has_writes={self._last_token_usage['has_writes']}"
+                f"has_writes={self._last_token_usage['has_writes']}, "
+                f"ai_index_calls={self._last_token_usage['ai_index_tool_count']}"
             )
         else:
             logger.warning(f"[CLAUDE-AGENT] Wrapper usage endpoint returned no totals (endpoint={endpoint})")
