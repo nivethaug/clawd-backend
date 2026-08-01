@@ -984,7 +984,16 @@ _GATE_READ_INDEX_TOOL = {
 
 
 def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
-    """Read ai_index files.json + symbols.json from project path."""
+    """Read ai_index files.json + symbols.json + summaries.json from project path.
+
+    Searches all common locations for different project types:
+    - Website: {project_path}/frontend/agent/ai_index/
+    - Telegram: {project_path}/telegram/agent/ai_index/
+    - Discord: {project_path}/discord/agent/ai_index/
+    - Scheduler: {project_path}/scheduler/agent/ai_index/
+    - Generic: {project_path}/agent/ai_index/
+    Also tries subdirectories one level deep.
+    """
     import json as _json
     from pathlib import Path as _Path
 
@@ -997,19 +1006,47 @@ def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
         base / "scheduler" / "agent" / "ai_index",
         base / "backend" / "agent" / "ai_index",
     ]
-    for match in base.rglob("agent/ai_index/files.json"):
-        candidates.append(match.parent)
+    # Also try one-level subdirs (e.g. project_path/discord/agent/ai_index)
+    if base.is_dir():
+        for subdir in base.iterdir():
+            if subdir.is_dir():
+                candidates.append(subdir / "agent" / "ai_index")
+                candidates.append(subdir / "frontend" / "agent" / "ai_index")
+                candidates.append(subdir / "telegram" / "agent" / "ai_index")
+                candidates.append(subdir / "discord" / "agent" / "ai_index")
+                candidates.append(subdir / "scheduler" / "agent" / "ai_index")
+    # Glob as last resort
+    try:
+        for match in base.rglob("agent/ai_index/files.json"):
+            candidates.append(match.parent)
+    except Exception:
+        pass
 
+    # Find first candidate with a non-empty files.json
     ai_dir = None
+    seen = set()
     for c in candidates:
+        c_resolved = c.resolve()
+        if c_resolved in seen:
+            continue
+        seen.add(c_resolved)
         if (c / "files.json").exists():
-            ai_dir = c
-            break
+            # Check it's not empty
+            try:
+                with open(c / "files.json") as f:
+                    data = _json.load(f)
+                if data and len(str(data)) > 20:
+                    ai_dir = c
+                    break
+            except Exception:
+                pass
 
     if not ai_dir:
-        return "(no ai_index found)"
+        return "(no project index available — this project may not have been set up yet)"
 
     parts = []
+
+    # files.json — pages, commands, endpoints
     try:
         with open(ai_dir / "files.json") as f:
             data = _json.load(f)
@@ -1030,20 +1067,49 @@ def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
     except Exception:
         pass
 
+    # symbols.json — functions, components, commands
     try:
         with open(ai_dir / "symbols.json") as f:
             data = _json.load(f)
         lines = []
-        for sname, info in data.items():
-            if isinstance(info, dict):
-                desc = info.get("description", "")
-                lines.append(f"  {sname}: {desc}")
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    name = item.get("name", "")
+                    desc = item.get("description", "")
+                    if name:
+                        lines.append(f"  {name}: {desc}")
+        elif isinstance(data, dict):
+            for sname, info in data.items():
+                if isinstance(info, dict):
+                    desc = info.get("description", "")
+                    lines.append(f"  {sname}: {desc}")
         if lines:
             parts.append("Symbols:\n" + "\n".join(lines))
     except Exception:
         pass
 
-    return "\n".join(parts)[:max_chars] or "(empty index)"
+    # summaries.json — file descriptions
+    try:
+        with open(ai_dir / "summaries.json") as f:
+            data = _json.load(f)
+        lines = []
+        for fname, summary in data.items():
+            if isinstance(summary, str) and summary:
+                lines.append(f"  {fname}: {summary[:100]}")
+            elif isinstance(summary, dict):
+                desc = summary.get("summary", summary.get("description", ""))
+                if desc:
+                    lines.append(f"  {fname}: {str(desc)[:100]}")
+        if lines:
+            parts.append("Summaries:\n" + "\n".join(lines))
+    except Exception:
+        pass
+
+    result = "\n".join(parts)
+    if not result or len(result) < 20:
+        return "(project index exists but is empty)"
+    return result[:max_chars]
 
 
 async def check_message_gate(user_content: str, project_name: str, project_path: str = None) -> Optional[str]:
