@@ -1047,9 +1047,13 @@ def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
     parts = []
 
     # files.json — pages, commands, endpoints
+    # Handle both formats: {"files": {...}} (wrapped) and {"main.py": {...}} (flat)
     try:
         with open(ai_dir / "files.json") as f:
             data = _json.load(f)
+        # Unwrap if nested under "files" key
+        if isinstance(data, dict) and "files" in data and isinstance(data["files"], dict):
+            data = data["files"]
         lines = []
         for fname, info in data.items():
             if isinstance(info, dict):
@@ -1068,9 +1072,13 @@ def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
         pass
 
     # symbols.json — functions, components, commands
+    # Handle both formats: {"symbols": [...]} (wrapped list), {...} (dict), [...] (flat list)
     try:
         with open(ai_dir / "symbols.json") as f:
             data = _json.load(f)
+        # Unwrap if nested under "symbols" key
+        if isinstance(data, dict) and "symbols" in data:
+            data = data["symbols"]
         lines = []
         if isinstance(data, list):
             for item in data:
