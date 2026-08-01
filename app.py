@@ -7410,12 +7410,10 @@ async def chat_stream_endpoint(
                                                 _has_writes = bool(usage_data.get("has_writes", False))
                                                 _index_overhead = 0
                                                 if _has_writes and _total_toks > 50000:
-                                                    # ai_index overhead: ~75% of billable tokens are infrastructure
-                                                    # (system prompt, conversation history, ai_index reads/writes).
-                                                    # Discount 75% of the billable amount.
-                                                    _billable = max(0, _total_toks - _cache_read - _precharged)
-                                                    _index_overhead = int(_billable * 0.75)
-                                                    logger.info(f"[BILLING] ai_index overhead discount: -{_index_overhead} tokens (75% of {_billable} billable)")
+                                                    # ai_index overhead: estimated ~100K tokens spent reading/writing
+                                                    # 5 JSON index files per edit session. Discount 75% of that (75K).
+                                                    _index_overhead = 75000
+                                                    logger.info(f"[BILLING] ai_index overhead discount: -{_index_overhead} tokens (75% of ~100K index cost)")
                                                 charge_result = charge_token_usage(
                                                     conn=tconn,
                                                     user_id=tuid,
