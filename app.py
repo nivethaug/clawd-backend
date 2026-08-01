@@ -6881,10 +6881,15 @@ async def chat_stream_endpoint(
             # ── MESSAGE GATE (OpenRouter) ────────────────────────────────────
             # Lightweight classification before Claude Code. Handles greetings,
             # security violations, and simple questions without burning tokens.
+            _msg_clean = (acp_user_content or "").strip().lower()
+            _STREAM_GREETINGS = {"hi", "hello", "hey", "thanks", "thank you", "ok", "okay",
+                                 "cool", "nice", "great", "yes", "no", "sure", "done", "test"}
+            _is_stream_free_msg = len(_msg_clean) < 12 or _msg_clean in _STREAM_GREETINGS
+
             direct_response = None
             if request.image:
                 logger.info("[ACP-STREAM] Skipping gate because image requires Claude Code vision")
-            elif _is_free_message:
+            elif _is_stream_free_msg:
                 logger.info("[ACP-STREAM] Free message (greeting/short) — skipping gate")
             else:
                 try:
