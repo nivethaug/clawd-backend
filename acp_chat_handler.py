@@ -49,7 +49,7 @@ _claude_session_ids: Dict[str, str] = {}
 
 # Configuration
 ACPX_TIMEOUT = 1800  # 15 minutes for interactive chat
-USE_PREPROCESSOR = os.getenv("ACP_USE_PREPROCESSOR", "false").lower() == "true"  # DISABLED for ClaudeCodeAgent migration testing
+USE_PREPROCESSOR = True
 USE_CLAUDE_AGENT = os.getenv("ACP_USE_CLAUDE_AGENT", "true").lower() == "true" and CLAUDE_AGENT_AVAILABLE  # Prefer Claude Agent
 
 # ---------------------------------------------------------------------------
