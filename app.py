@@ -7351,9 +7351,11 @@ async def chat_stream_endpoint(
             error_content = f"Error: ACP chat failed - {str(e)}"
             state.content = error_content
             save_stream_to_db(state)
-            
+
+            _error_msg = str(e)  # capture before closure
+
             async def error_stream():
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                yield f"data: {json.dumps({'error': _error_msg})}\n\n"
                 yield "data: [DONE]\n\n"
             
             return StreamingResponse(
