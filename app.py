@@ -939,6 +939,7 @@ async def check_message_gate(user_content: str, project_name: str) -> Optional[s
     Model: z-ai/glm-4.7-flash (cheap, fast).
     """
     try:
+        import asyncio as _asyncio
         from services.ai.openrouter_client import get_openrouter_client
         client = get_openrouter_client()
 
@@ -947,7 +948,7 @@ async def check_message_gate(user_content: str, project_name: str) -> Optional[s
             {"role": "user", "content": user_content[:500]},  # truncate for speed
         ]
 
-        response = await asyncio.wait_for(
+        response = await _asyncio.wait_for(
             client.chat_completion(messages=messages, temperature=0.0, max_tokens=300),
             timeout=10,
         )
@@ -966,7 +967,7 @@ async def check_message_gate(user_content: str, project_name: str) -> Optional[s
         logger.info(f"[GATE] PASS — proceeding to Claude Code")
         return None
 
-    except asyncio.TimeoutError:
+    except _asyncio.TimeoutError:
         logger.warning(f"[GATE] Timeout — proceeding to Claude Code (fail-open)")
         return None
     except Exception as e:
