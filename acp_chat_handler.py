@@ -170,6 +170,11 @@ class ACPChatHandler:
         self.session_id = None  # Set via set_session_id() before each chat
         self.frontend_path = self.project_path / "frontend"
         self.frontend_src_path = self.frontend_path / "src"
+
+        # Bot projects have code in a subdirectory (telegram/, discord/, scheduler/)
+        # Website projects have code in frontend/ and backend/
+        # This is used by the gate to find ai_index files.
+        self.bot_subdir = None  # set below after type checks
         self.claude_agent = None  # ClaudeCodeAgent instance (created on demand)
         self._active_agent = None  # Currently running agent (for cancellation)
 
@@ -197,6 +202,14 @@ class ACPChatHandler:
         self.is_discord_bot = (project_type_id == 3)
         self.is_scheduler = (project_type_id == 5)
         self.is_bot_project = self.is_telegram_bot or self.is_discord_bot or self.is_scheduler
+
+        # Set the bot subdirectory for path resolution
+        if self.is_telegram_bot:
+            self.bot_subdir = "telegram"
+        elif self.is_discord_bot:
+            self.bot_subdir = "discord"
+        elif self.is_scheduler:
+            self.bot_subdir = "scheduler"
 
         # Load project metadata from database
         self._load_project_metadata()

@@ -7127,6 +7127,11 @@ async def chat_stream_endpoint(
                 try:
                     _gate_project_name = handler.project_name if handler else "App"
                     _gate_project_path = str(handler.project_path) if handler else None
+                    # For bot projects, ai_index is in a subdirectory
+                    if handler and handler.bot_subdir:
+                        _bot_code_path = handler.project_path / handler.bot_subdir
+                        if _bot_code_path.exists():
+                            _gate_project_path = str(_bot_code_path)
                     direct_response = await check_message_gate(acp_user_content, _gate_project_name, _gate_project_path)
                 except Exception as gate_err:
                     logger.warning(f"[ACP-STREAM] Gate failed (non-fatal, fail-open): {gate_err}")
