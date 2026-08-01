@@ -10913,8 +10913,9 @@ def _restart_and_rewebhook(project_id: int, project_path: str, domain: str, type
             _restart_pm2_via_worker_api(pm2_name)
             _re_register_telegram_webhook(project_id, project_path, domain)
         elif type_id == 3:
-            # Discord bot — just restart PM2
-            pm2_name = f"{domain}-bot" if domain else f"dc-bot-{project_id}"
+            # Discord bot — PM2 always uses dc-bot-{project_id} (domain is NOT
+            # part of the process name, unlike telegram). See discord/pm2_manager._get_process_name.
+            pm2_name = f"dc-bot-{project_id}"
             _restart_pm2_via_worker_api(pm2_name)
         elif type_id == 5:
             # Scheduler — restart centralized scheduler
