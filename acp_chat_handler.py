@@ -2674,7 +2674,8 @@ If the user request requires website data:
 
 ```bash
 # Publish changes (handles PM2 restart via worker-api)
-# buildpublish.py REQUIRES project_path and project_id as arguments:
+# buildpublish.py lives inside the bot code dir and needs the path to it.
+# The "." means "current directory" (the bot code dir you just cd'd into).
 cd {self.bot_code_path}
 python3 buildpublish.py . {self.project_id}
 
@@ -2688,6 +2689,8 @@ python3 buildpublish.py . {self.project_id} && sleep 3 && curl -s https://{self.
 ⛔ NEVER run `pm2 restart`, `pm2 stop`, or `sudo pm2` directly.
 These fail inside the container/sandbox. ALWAYS use `buildpublish.py`
 which handles PM2 restart via the worker-api.
+⛔ Do NOT pass the project root path to buildpublish.py — it needs the
+bot code directory (where main.py lives), not the project root.
 
 ---
 

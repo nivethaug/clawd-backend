@@ -124,12 +124,11 @@ def publish(project_path: str, project_id: str) -> bool:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python buildpublish.py <project_path> [project_id]")
-        sys.exit(1)
-
-    path = sys.argv[1]
-    pid = sys.argv[2] if len(sys.argv) > 2 else "default"
+    # Default to the script's own directory if no path is given.
+    # This lets the model run "python3 buildpublish.py" from inside the
+    # discord/ dir without memorising argument syntax.
+    path = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parent)
+    pid = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("PROJECT_ID", "default")
 
     if build(path):
         publish(path, pid)
