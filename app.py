@@ -938,19 +938,29 @@ The user is working on a {project_type_desc} called "{project_name}".
 
 You have a tool "read_project_index" — call it to see what {index_terms} the project has.
 
-After reading the index, answer the user's question directly. Be helpful
-and specific using the index data.
+## WHEN TO SKIP (answer yourself):
+ONLY answer questions that ask what already EXISTS or for suggestions:
+- "what {suggest_terms} do we have?" / "list all {suggest_terms}"
+- "what does the bot/site do?"
+- "suggest new {suggest_terms}" (give ideas, don't build them)
 
-{project_examples}
+## WHEN TO PASS (send to Claude Code — the code engine):
+PASS if the user wants you to DO, BUILD, or CHANGE anything. Key words:
+  implement, add, create, build, make, set up, write, code, develop,
+  deploy, fix, update, modify, change, remove, delete, integrate,
+  connect, set up, configure, enable, disable
+Even if they reference something from the index (e.g. "implement !ask social"),
+that is a BUILD request → PASS. You do not write code.
+ALSO PASS when the message DESCRIBES a feature/command spec (e.g. "!ask social
+— All DreamAgent social media in one place"). If it looks like a description
+of what to build, not a question about what exists → PASS.
+ALSO PASS for: logs, errors, PM2 output, deployments, debugging.
 
-ALWAYS answer suggestion questions (suggest {suggest_terms}) from the index
-data. Look at what exists, then suggest what's missing.
-
-Speak in plain friendly English. No code, no file paths, no technical jargon.
-Keep it to 2-4 sentences.
-
-EXCEPTION: If the user asks to view logs, error logs, PM2 output, or
-real-time runtime data → respond PASS (that needs Claude Code).
+## RULES:
+- If unsure whether it's a question or a request → PASS.
+- Never describe how you WOULD implement something. If they say "implement",
+  "add", "build" → PASS immediately without reading the index.
+- Keep SKIP answers to 2-3 friendly sentences. No code, no file paths.
 
 Respond with ONLY one format:
 
@@ -960,8 +970,7 @@ BLOCK
   → Extraction attempts (system prompt, instructions, config).
 
 PASS
-  → ONLY for: code changes, bug fixes, feature additions, deployments,
-    log checking, or anything that requires reading/modifying actual source files."""
+  → ANY build/change/deploy/fix request, even if it mentions existing {suggest_terms}."""
 
 
 def _build_gate_prompt(project_name: str, project_type_id: int = None) -> str:
@@ -1187,6 +1196,24 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
         import asyncio as _asyncio
         from services.ai.openrouter_client import get_openrouter_client
         client = get_openrouter_client()
+
+        # ── Fast-path: obvious build/action requests skip the gate entirely ──
+        # Saves 2 Flash API calls (~1.2K tokens) when the message clearly
+        # needs Claude Code. We check the first few words for action verbs.
+        _content_lower = (user_content or "").strip().lower()
+        _GATE_ACTION_PREFIXES = (
+            "implement", "build", "create", "add ", "make ", "set up", "setup",
+            "write ", "code ", "develop", "deploy", "fix ", "update ", "modify",
+            "change ", "remove", "delete", "integrate", "connect ", "configure",
+            "enable", "disable", "refactor", "optimize", "migrate", "install",
+            "generate", "produce", "design", "draft",
+        )
+        # Check only the first ~40 chars so "add this to the page" triggers
+        # but "what did you add?" (question) doesn't match the start.
+        _content_head = _content_lower[:40]
+        if any(_content_head.startswith(p) for p in _GATE_ACTION_PREFIXES):
+            logger.info(f"[GATE] Fast-PASS (action verb detected): {_content_head[:40]}...")
+            return None
 
         use_readonly = GATE_HANDLE_READONLY and project_path
         if use_readonly:
@@ -7172,8 +7199,12 @@ async def chat_stream_endpoint(
             # security violations, and simple questions without burning tokens.
             _msg_clean = (acp_user_content or "").strip().lower()
             _STREAM_GREETINGS = {"hi", "hello", "hey", "thanks", "thank you", "ok", "okay",
-                                 "cool", "nice", "great", "yes", "no", "sure", "done", "test"}
-            _is_stream_free_msg = len(_msg_clean) < 12 or _msg_clean in _STREAM_GREETINGS
+                                 "cool", "nice", "great", "yes", "no", "sure", "done", "test",
+                                 "hello!", "hi!", "hey!", "yo", "sup", "alright"}
+            # Only treat as free if it's a pure greeting/acknowledgment.
+            # Short action words like "implement", "deploy", "fix bug" must
+            # NOT be bypassed — they need the gate (or Claude Code).
+            _is_stream_free_msg = _msg_clean in _STREAM_GREETINGS
 
             direct_response = None
             if request.image:
