@@ -28,11 +28,8 @@ def build_website_plan_prompt(
 - `backend/agent/README.md` — Backend agent docs
 
 ### Agent ai_index Files (READ BEFORE PLANNING)
-- `frontend/agent/ai_index/symbols.json` — All functions, components, APIs with line numbers
-- `frontend/agent/ai_index/modules.json` — Logical file groupings
-- `frontend/agent/ai_index/summaries.json` — What each file does
-- `backend/agent/ai_index/symbols.json` — Backend functions/APIs
-- `backend/agent/ai_index/summaries.json` — Backend file summaries
+- `frontend/agent/ai_index/index.json` — Frontend project code index (summaries, symbols, modules, dependencies, file metadata)
+- `backend/agent/ai_index/index.json` — Backend project code index (summaries, symbols, modules, dependencies, file metadata)
 
 ### Build & Deploy
 - Run `buildpublish.py` to install + build + deploy

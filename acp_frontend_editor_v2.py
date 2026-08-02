@@ -2040,11 +2040,8 @@ That is all. Do NOT attempt to open a browser, use Chrome DevTools, Puppeteer, o
 
 ## STEP 8 — UPDATE AI INDEX
 
-After a successful build, update all four AI index files:
-- **`agent/ai_index/symbols.json`** — add new components/pages with file path, line numbers, type, module, description
-- **`agent/ai_index/files.json`** — add new file entries with line count and purpose; update routes array in App.tsx entry
-- **`agent/ai_index/dependencies.json`** — add new import relationships
-- **`agent/ai_index/summaries.json`** — add brief description for each new file
+After a successful build, update the project code index:
+- **`agent/ai_index/index.json`** — add new components/pages with file path, line numbers, type, module, description; update file entries with line count and purpose, import relationships, and routes array in App.tsx entry
 
 ---
 

@@ -24,12 +24,8 @@ def build_scheduler_plan_prompt(
 - `agent/README.md` — Agent docs
 - `agent/ai_index/` — AI index files
 
-### Agent ai_index Files (READ BEFORE PLANNING)
-- `agent/ai_index/summaries.json` — What each file does
-- `agent/ai_index/symbols.json` — Functions, APIs with line numbers
-- `agent/ai_index/modules.json` — Logical structure
-- `agent/ai_index/dependencies.json` — Import relationships
-- `agent/ai_index/files.json` — File metadata
+### Agent ai_index File (READ BEFORE PLANNING)
+- `agent/ai_index/index.json` — Project code index (summaries, symbols, modules, dependencies, file metadata)
 
 ### REST API
 - Jobs managed via REST API endpoints

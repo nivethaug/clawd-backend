@@ -141,10 +141,7 @@ class ClaudeProgressMapper:
         ("uvicorn",                 "⚡ Starting API server..."),
         
         # Agent Index Updates
-        ("symbols.json",            "🗂️ Updating project index..."),
-        ("modules.json",            "🗂️ Updating project index..."),
-        ("summaries.json",          "🗂️ Updating project index..."),
-        ("files.json",              "🗂️ Updating project index..."),
+        ("index.json",              "🗂️ Updating project index..."),
         ("database_schema.json",    "🗂️ Updating database index..."),
         
         # Success / Completion

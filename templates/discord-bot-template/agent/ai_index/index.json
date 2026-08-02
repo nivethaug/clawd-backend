@@ -1,0 +1,340 @@
+{
+  "symbols": [
+    {
+      "name": "start",
+      "type": "command",
+      "file": "commands/start.py",
+      "start_line": 12,
+      "end_line": 35,
+      "description": "!start command - Register Discord user in database"
+    },
+    {
+      "name": "help_command",
+      "type": "command",
+      "file": "commands/help.py",
+      "start_line": 10,
+      "end_line": 22,
+      "description": "!help command - Show available commands"
+    },
+    {
+      "name": "ask",
+      "type": "command",
+      "file": "commands/ask.py",
+      "start_line": 10,
+      "end_line": 26,
+      "description": "!ask <query> command - Process user query via AI logic"
+    },
+    {
+      "name": "status",
+      "type": "command",
+      "file": "commands/status.py",
+      "start_line": 10,
+      "end_line": 19,
+      "description": "!status command - Show bot status and latency"
+    },
+    {
+      "name": "process_user_input",
+      "type": "function",
+      "file": "services/ai_logic.py",
+      "start_line": 13,
+      "end_line": 52,
+      "description": "Core AI decision engine - detects intent and returns response"
+    },
+    {
+      "name": "fetch_data",
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 19,
+      "end_line": 38,
+      "description": "Fetch data from external API by name"
+    },
+    {
+      "name": "fetch_bitcoin_price",
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 41,
+      "end_line": 50,
+      "description": "Get current Bitcoin price in USD"
+    },
+    {
+      "name": "ScrapeConfig",
+      "type": "class",
+      "file": "services/web_scraper.py",
+      "start_line": 45,
+      "end_line": 57,
+      "description": "Per-site scraping configuration dataclass"
+    },
+    {
+      "name": "WebScraper",
+      "type": "class",
+      "file": "services/web_scraper.py",
+      "start_line": 267,
+      "end_line": 572,
+      "description": "Base scraper with CDP navigation, interaction, extraction, and pagination helpers"
+    },
+    {
+      "name": "scrape_url",
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 618,
+      "end_line": 656,
+      "description": "Standalone scraper entrypoint for one-off config-driven scraping"
+    },
+    {
+      "name": "register_scraper",
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 602,
+      "end_line": 604,
+      "description": "Register a custom scraper class for named lookup"
+    },
+    {
+      "name": "get_scraper",
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 607,
+      "end_line": 614,
+      "description": "Instantiate a registered scraper by name and config"
+    },
+    {
+      "name": "get_mock_response",
+      "type": "function",
+      "file": "services/mock_data.py",
+      "start_line": 17,
+      "end_line": 35,
+      "description": "Get fallback mock response by category"
+    },
+    {
+      "name": "get_or_create_discord_user",
+      "type": "function",
+      "file": "models/user.py",
+      "start_line": 10,
+      "end_line": 52,
+      "description": "Get existing user or create new Discord user in database"
+    },
+    {
+      "name": "get_user_by_discord_id",
+      "type": "function",
+      "file": "models/user.py",
+      "start_line": 55,
+      "end_line": 77,
+      "description": "Get user by Discord user ID"
+    },
+    {
+      "name": "get_db",
+      "type": "function",
+      "file": "core/database.py",
+      "start_line": 13,
+      "end_line": 23,
+      "description": "Get a PostgreSQL database connection"
+    },
+    {
+      "name": "init_db",
+      "type": "function",
+      "file": "core/database.py",
+      "start_line": 60,
+      "end_line": 83,
+      "description": "Initialize database tables on startup"
+    },
+    {
+      "name": "on_ready",
+      "type": "event",
+      "file": "main.py",
+      "start_line": 23,
+      "end_line": 27,
+      "description": "Discord bot ready event handler"
+    },
+    {
+      "name": "setup_commands",
+      "type": "function",
+      "file": "main.py",
+      "start_line": 40,
+      "end_line": 52,
+      "description": "Register all command modules with the bot"
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "file": "main.py",
+      "start_line": 55,
+      "end_line": 69,
+      "description": "Bot entry point - init DB, register commands, start bot"
+    }
+  ],
+  "summaries": {
+    "main.py": "Bot entry point. Registers commands, initializes database, starts Discord bot. NO business logic here.",
+    "config.py": "Environment configuration. Loads DISCORD_TOKEN and DB credentials from .env file.",
+    "commands/start.py": "!start command handler. Registers Discord user in database on first use.",
+    "commands/help.py": "!help command handler. Displays list of all available commands.",
+    "commands/ask.py": "!ask <query> command handler. Routes queries through AI logic engine.",
+    "commands/status.py": "!status command handler. Shows bot status, guild count, and latency.",
+    "services/ai_logic.py": "Core AI decision engine. Detects intent from user text, calls APIs, returns responses. This is the primary file to modify for bot behavior.",
+    "services/api_client.py": "External API client. All HTTP requests go here. Uses requests library with timeout.",
+    "services/web_scraper.py": "CDP web scraper using chrome-devtools-mcp. Supports config-driven extraction, custom scraper classes, pagination, auth, JS extraction, and scraper registry for LLM extensibility.",
+    "services/mock_data.py": "Fallback mock responses when API is unavailable or intent is unclear.",
+    "models/user.py": "User model with database CRUD operations. Supports Discord user auto-creation.",
+    "core/database.py": "PostgreSQL connection manager. Provides get_db() context manager and table initialization.",
+    "utils/logger.py": "Simple logging configuration with console handler.",
+    "requirements.txt": "Python dependencies: discord.py, requests, python-dotenv, psycopg2-binary.",
+    ".env.example": "Environment variable template. Copy to .env and fill in values."
+  },
+  "files": {
+    "main.py": {
+      "type": "python",
+      "lines": 69,
+      "purpose": "Bot entry point - command registration and startup",
+      "exports": [
+        "bot",
+        "main"
+      ],
+      "endpoints": []
+    },
+    "config.py": {
+      "type": "python",
+      "lines": 25,
+      "purpose": "Environment variable configuration",
+      "exports": [
+        "DISCORD_TOKEN",
+        "DB_HOST",
+        "DB_PORT",
+        "DB_NAME",
+        "DB_USER",
+        "DB_PASSWORD",
+        "DATABASE_URL",
+        "COMMAND_PREFIX"
+      ],
+      "endpoints": []
+    },
+    "commands/start.py": {
+      "type": "python",
+      "lines": 35,
+      "purpose": "!start command - user registration",
+      "exports": [
+        "start",
+        "setup"
+      ],
+      "endpoints": []
+    },
+    "commands/help.py": {
+      "type": "python",
+      "lines": 22,
+      "purpose": "!help command - show available commands",
+      "exports": [
+        "help_command",
+        "setup"
+      ],
+      "endpoints": []
+    },
+    "commands/ask.py": {
+      "type": "python",
+      "lines": 26,
+      "purpose": "!ask command - process AI queries",
+      "exports": [
+        "ask",
+        "setup"
+      ],
+      "endpoints": []
+    },
+    "commands/status.py": {
+      "type": "python",
+      "lines": 19,
+      "purpose": "!status command - bot status info",
+      "exports": [
+        "status",
+        "setup"
+      ],
+      "endpoints": []
+    },
+    "services/ai_logic.py": {
+      "type": "python",
+      "lines": 52,
+      "purpose": "Core AI decision engine",
+      "exports": [
+        "process_user_input"
+      ],
+      "endpoints": []
+    },
+    "services/api_client.py": {
+      "type": "python",
+      "lines": 80,
+      "purpose": "External API client",
+      "exports": [
+        "fetch_data",
+        "fetch_bitcoin_price",
+        "get_json",
+        "post_json"
+      ],
+      "endpoints": []
+    },
+    "services/web_scraper.py": {
+      "type": "python",
+      "lines": 700,
+      "purpose": "CDP web scraper service for dynamic website extraction",
+      "exports": [
+        "ScrapeConfig",
+        "ScrapeResult",
+        "MCPClient",
+        "WebScraper",
+        "register_scraper",
+        "get_scraper",
+        "scrape_url"
+      ],
+      "endpoints": []
+    },
+    "services/mock_data.py": {
+      "type": "python",
+      "lines": 35,
+      "purpose": "Fallback mock responses",
+      "exports": [
+        "get_mock_response",
+        "MOCK_RESPONSES"
+      ],
+      "endpoints": []
+    },
+    "models/user.py": {
+      "type": "python",
+      "lines": 77,
+      "purpose": "User model - database CRUD operations",
+      "exports": [
+        "get_or_create_discord_user",
+        "get_user_by_discord_id"
+      ],
+      "endpoints": []
+    },
+    "core/database.py": {
+      "type": "python",
+      "lines": 83,
+      "purpose": "PostgreSQL connection and table initialization",
+      "exports": [
+        "get_db",
+        "get_db_cursor",
+        "init_db"
+      ],
+      "endpoints": []
+    },
+    "utils/logger.py": {
+      "type": "python",
+      "lines": 35,
+      "purpose": "Logging configuration",
+      "exports": [
+        "setup_logger",
+        "logger"
+      ],
+      "endpoints": []
+    },
+    "requirements.txt": {
+      "type": "text",
+      "lines": 4,
+      "purpose": "Python package dependencies",
+      "exports": [],
+      "endpoints": []
+    },
+    ".env.example": {
+      "type": "text",
+      "lines": 8,
+      "purpose": "Environment variable template",
+      "exports": [],
+      "endpoints": []
+    }
+  }
+}

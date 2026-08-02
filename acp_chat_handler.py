@@ -1006,24 +1006,24 @@ FIRST list jobs to find the job ID, THEN perform the action. Always show the res
 
 ## FINAL CHECKLIST BEFORE RESPONDING
 
-- [ ] Did I read agent/ai_index files before making changes?
+- [ ] Did I read agent/ai_index/index.json before making changes?
 - [ ] Did I modify only executor.py and/or api_client.py?
 - [ ] Did I run py_compile on all edited files?
 - [ ] Did I publish changes with `python3 buildpublish.py --skip-deps`? (restarts scheduler)
 - [ ] Did I create/update the job via REST API?
 - [ ] Did I test the job (run now) if possible?
-- [ ] Did I update ai_index files after changes?
+- [ ] Did I update agent/ai_index/index.json after changes?
 
-### Agent ai_index Files to Update After Changes
+### Agent ai_index File to Update After Changes
 
-**Location:** `{self.project_path}/agent/ai_index/`
+**Location:** `{self.project_path}/agent/ai_index/index.json`
 
-After ANY code change, update the relevant ai_index files:
-- `symbols.json` — Add/update function names, handlers, registry entries
-- `summaries.json` — Update file descriptions if purpose changed
-- `dependencies.json` — Update if imports changed
-- `modules.json` — Update if new modules added
-- `files.json` — Update if files added/removed
+After ANY code change, read and update `index.json` (project code index):
+- Add/update function names, handlers, registry entries
+- Update file descriptions if purpose changed
+- Update if imports changed
+- Update if new modules added
+- Update if files added/removed
 
 ⛔ If ANY box is unchecked → STOP and complete it before responding
 
@@ -1044,7 +1044,7 @@ Before making any code changes, follow this process:
    - Keep it brief: just the steps and target files
    - Include the ai_index update checklist
 5. Then execute the plan, if you created one
-6. After execution completes, update ai_index files per the checklist
+6. After execution completes, update agent/ai_index/index.json per the checklist
 7. Delete the plan file, if you created one
 
 ---
@@ -1214,14 +1214,14 @@ You are a friendly AI assistant helping a user build their **{self.project_name}
 2. **Backend Questions?** Read `backend/agent/README.md` FIRST
 3. **Full Stack Questions?** Read BOTH agent READMEs
  
-Both agent folders have `ai_index/` with:
-- `symbols.json` - All functions, components, APIs with line numbers
-- `modules.json` - Logical file groupings
-- `summaries.json` - What each file does
-- `files.json` - File metadata
-- `dependencies.json` - Import relationships
- 
-**USE THESE before diving into raw source code!**
+Both agent folders have `ai_index/index.json` (project code index):
+- Summaries — what each file does
+- Symbols — all functions, components, APIs with line numbers
+- Modules — logical file groupings
+- Files — file metadata
+- Dependencies — import relationships
+
+**USE THIS before diving into raw source code!**
 **⛔ NEVER skip the agent READMEs and go straight to source files!**
  
 ---
@@ -1596,22 +1596,14 @@ See Agent Folder Update Checklist at the bottom.
 ---
  
 ## 📋 AGENT FOLDER UPDATE CHECKLIST
- 
+
 ### After Frontend Changes:
-- [ ] Updated `frontend/agent/ai_index/symbols.json`
-- [ ] Updated `frontend/agent/ai_index/modules.json` if new folders added
-- [ ] Updated `frontend/agent/ai_index/dependencies.json` if imports changed
-- [ ] Updated `frontend/agent/ai_index/summaries.json` if file purpose changed
-- [ ] Updated `frontend/agent/ai_index/files.json` if files added/removed
+- [ ] Updated `frontend/agent/ai_index/index.json` (project code index)
 - [ ] Published with `cd {self.project_path}/frontend && python3 buildpublish.py`
 - [ ] Tested on LIVE site via Chrome DevTools
  
 ### After Backend Changes:
-- [ ] Updated `backend/agent/ai_index/symbols.json`
-- [ ] Updated `backend/agent/ai_index/modules.json` if new modules added
-- [ ] Updated `backend/agent/ai_index/dependencies.json` if imports changed
-- [ ] Updated `backend/agent/ai_index/summaries.json` if file purpose changed
-- [ ] Updated `backend/agent/ai_index/files.json` if files added/removed
+- [ ] Updated `backend/agent/ai_index/index.json` (project code index)
 - [ ] Updated `backend/agent/ai_index/database_schema.json` if DB changed
 - [ ] Published with `cd {self.project_path}/backend && python3 buildpublish.py`
 - [ ] Tested API endpoints
@@ -1822,10 +1814,10 @@ async def get_weather(lat: float, lon: float):
  
 ```
 1.  READ agent/README.md (frontend or backend)
-2.  READ ai_index/*.json files for context
+2.  READ ai_index/index.json for context
 3.  READ source files only if needed
 4.  MAKE code changes
-5.  UPDATE agent/ai_index/*.json files (MANDATORY)
+5.  UPDATE agent/ai_index/index.json (MANDATORY)
 6.  PUBLISH with buildpublish.py (auto-handles install + build + deploy)
 7.  ⭐ TEST on LIVE site via Chrome DevTools (use appropriate Tier: 1/2/3) ⭐
 ```
@@ -1856,9 +1848,8 @@ Before sending ANY response to the user, mentally check every item:
 - [ ] Did I call close_page when done?
  
 ### Agent Folder Checklist
-- [ ] Did I update symbols.json with new/changed components?
-- [ ] Did I update other ai_index files if needed?
- 
+- [ ] Did I update `index.json` with new/changed components?
+
 ### Response Checklist
 - [ ] Am I about to say "it works" without testing? → GO TEST FIRST
 - [ ] Am I about to show file paths or code diffs? → REMOVE THEM
@@ -1958,7 +1949,7 @@ Before making any code changes, follow this process:
    Which would you like me to use?
    ```
 4. Integrate the chosen API into frontend or backend code
-5. Update agent/ai_index files to reflect the API integration
+5. Update agent/ai_index/index.json to reflect the API integration
 
 ### Step 2b: Standard Flow (for Non-API Requests)
 1. If the user's request is clear and unambiguous → proceed directly (no questions needed)
@@ -1972,7 +1963,7 @@ Before making any code changes, follow this process:
    - Keep it brief: just the steps and target files
    - Include the ai_index update checklist
 5. Then execute the plan, if you created one
-6. After execution completes, update ai_index files per the checklist
+6. After execution completes, update agent/ai_index/index.json per the checklist
 7. Delete the plan file, if you created one
 
 ### Step 3: Final Execution
@@ -2041,18 +2032,18 @@ Project Root (for .env, buildpublish.py): `{self.project_path}`
 
 ## MANDATORY STARTING POINT - AI INDEX FIRST
 
-**CRITICAL: Before making ANY modifications, you MUST read the AI Index files:**
+**CRITICAL: Before making ANY modifications, you MUST read the AI Index file:**
 
-**Location:** `{self.bot_code_path}/agent/ai_index/`
+**Location:** `{self.bot_code_path}/agent/ai_index/index.json`
 
-**Files to read (IN ORDER):**
-1. `summaries.json` - Understand what each file does
-2. `symbols.json` - Find functions, commands, handlers with line numbers
-3. `modules.json` - Understand the logical structure
-4. `dependencies.json` - See import relationships
-5. `files.json` - File metadata and endpoints
+Read `index.json` (project code index) — it contains:
+- What each file does
+- Functions, commands, handlers with line numbers
+- Logical structure
+- Import relationships
+- File metadata and endpoints
 
-**USE THESE before diving into raw source code!**
+**USE THIS before diving into raw source code!**
 **NEVER skip the AI index and go straight to files!**
 
 ---
@@ -2062,11 +2053,11 @@ Project Root (for .env, buildpublish.py): `{self.project_path}`
 **You are MODIFYING an existing bot, NOT creating a new one.**
 
 1. READ agent/README.md for Telegram bot structure
-2. READ ai_index/*.json files for context
+2. READ `agent/ai_index/index.json` for context
 3. UNDERSTAND the existing code structure
 4. CONFIRM API REQUIREMENT (ASK USER FIRST)
 5. MAKE your modifications
-6. UPDATE agent/ai_index/*.json files (MANDATORY)
+6. UPDATE `agent/ai_index/index.json` (MANDATORY)
 7. PUBLISH with buildpublish.py to apply changes
 8. RUN UNIT TESTS to verify changes
 
@@ -2178,26 +2169,26 @@ If the user request needs website data:
 ### Adding New Commands
 1. Add command handler in `handlers/commands.py`
 2. Register in `main.py` under `application.add_handler()`
-3. Update `ai_index/symbols.json` with new command
+3. Update `ai_index/index.json` with new command
 4. Test via Telegram: send the command to your bot
 
 ### Adding New Handlers
 1. Create handler in `handlers/message_handler.py` or new file
 2. Register in `main.py`
-3. Update `ai_index/symbols.json` with new handler
+3. Update `ai_index/index.json` with new handler
 4. Test via Telegram: send a message to trigger the handler
 
 ### Modifying AI Responses
 1. Find the service in `services/` that generates responses
 2. Modify the prompt or logic
-3. Update `ai_index/symbols.json` if function signature changes
+3. Update `ai_index/index.json` if function signature changes
 4. Test via Telegram: send a message to verify new responses
 
 ### Database Changes
 1. Create migration in `migrations/`
 2. Update `models/` if schema changes
 3. Run migration on the database
-4. Update `ai_index/summaries.json` and `files.json`
+4. Update `ai_index/index.json`
 
 ---
 
@@ -2279,13 +2270,9 @@ async def save_user(user_id: int, username: str):
 
 ## AGENT FOLDER UPDATE CHECKLIST
 
-After making ANY changes, update these files:
+After making ANY changes, update the project code index:
 
-- [ ] Updated `agent/ai_index/symbols.json` - Added new commands/handlers
-- [ ] Updated `agent/ai_index/summaries.json` - Updated file descriptions
-- [ ] Updated `agent/ai_index/dependencies.json` - Added import changes
-- [ ] Updated `agent/ai_index/modules.json` - Added new modules if needed
-- [ ] Updated `agent/ai_index/files.json` - Updated file metadata
+- [ ] Updated `agent/ai_index/index.json` - Added new commands/handlers, updated descriptions, imports, modules, and file metadata
 - [ ] Tested bot via Telegram to verify changes work
 
 ---
@@ -2345,9 +2332,9 @@ After making ANY changes, update these files:
 - [ ] Did I integrate the API correctly into frontend or backend code?
 
 ### Code Changes Checklist
-- [ ] Did I read agent/ai_index files before making changes?
+- [ ] Did I read `agent/ai_index/index.json` before making changes?
 - [ ] Did I modify only the correct template files?
-- [ ] Did I update all ai_index files after changes?
+- [ ] Did I update `agent/ai_index/index.json` after changes?
 - [ ] Did I restart PM2 after code changes?
 - [ ] Did PM2 restart successfully?
 
@@ -2359,9 +2346,7 @@ After making ANY changes, update these files:
 - [ ] Did I verify the new functionality works end-to-end?
 
 ### Agent Folder Checklist
-- [ ] Did I update symbols.json with new/changed functions?
-- [ ] Did I update other ai_index files if needed?
-- [ ] Did I update summaries.json if file purposes changed?
+- [ ] Did I update `index.json` with new/changed functions?
 
 ### Approval Checklist
 - [ ] Am I about to say "it works" without testing? → GO TEST FIRST
@@ -2389,7 +2374,7 @@ Before making any code changes, follow this process:
    - Keep it brief: just the steps and target files
    - Include the ai_index update checklist
 5. Then execute the plan, if you created one
-6. After execution completes, update ai_index files per the checklist
+6. After execution completes, update agent/ai_index/index.json per the checklist
 7. Delete the plan file, if you created one
 
 This ensures even Dream Mode has a lightweight plan-and-execute workflow.
@@ -2457,18 +2442,18 @@ Project Root (for .env, buildpublish.py): `{self.project_path}`
 
 ## MANDATORY STARTING POINT - AI INDEX FIRST
 
-**CRITICAL: Before making ANY modifications, you MUST read the AI Index files:**
+**CRITICAL: Before making ANY modifications, you MUST read the AI Index file:**
 
-**Location:** `{self.bot_code_path}/agent/ai_index/`
+**Location:** `{self.bot_code_path}/agent/ai_index/index.json`
 
-**Files to read (IN ORDER):**
-1. `summaries.json` - Understand what each file does
-2. `symbols.json` - Find functions, commands with line numbers
-3. `modules.json` - Understand the logical structure
-4. `dependencies.json` - See import relationships
-5. `files.json` - File metadata and endpoints
+Read `index.json` (project code index) — it contains:
+- What each file does
+- Functions, commands with line numbers
+- Logical structure
+- Import relationships
+- File metadata and endpoints
 
-**USE THESE before diving into raw source code!**
+**USE THIS before diving into raw source code!**
 **NEVER skip the AI index and go straight to files!**
 
 ---
@@ -2515,10 +2500,10 @@ Project Root (for .env, buildpublish.py): `{self.project_path}`
 **You are MODIFYING an existing bot, NOT creating a new one.**
 
 1. READ agent/README.md for Discord bot structure
-2. READ ai_index/*.json files for context
+2. READ `agent/ai_index/index.json` for context
 3. UNDERSTAND the existing code structure
 4. MAKE your modifications
-5. UPDATE agent/ai_index/*.json files (MANDATORY)
+5. UPDATE `agent/ai_index/index.json` (MANDATORY)
 6. PUBLISH with buildpublish.py to apply changes
 7. RUN UNIT TESTS to verify changes
 
@@ -2626,7 +2611,7 @@ When adding ANY new command, you MUST:
 4. ✅ Update `_handle_start()` in `services/ai_logic.py` — mention new command in welcome
 5. ✅ Update `commands/help.py` — add new command to help text
 6. ✅ If using Approach B: Register in `main.py` with `bot.load_extension()`
-7. ✅ Update `agent/ai_index/` files (symbols.json, summaries.json, etc.)
+7. ✅ Update `agent/ai_index/index.json`
 
 NEVER add a command and forget to update help + start text.
 

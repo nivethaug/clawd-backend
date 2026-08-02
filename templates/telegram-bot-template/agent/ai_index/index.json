@@ -1,0 +1,397 @@
+{
+  "symbols": {
+    "start_command": {
+      "type": "command",
+      "file": "handlers/start.py",
+      "start_line": 1,
+      "end_line": 20,
+      "module": "handlers",
+      "description": "/start command - Initialize bot and welcome user"
+    },
+    "help_command": {
+      "type": "command",
+      "file": "handlers/help.py",
+      "start_line": 1,
+      "end_line": 25,
+      "module": "handlers",
+      "description": "/help command - Display available commands and usage"
+    },
+    "message_handler": {
+      "type": "handler",
+      "file": "handlers/message.py",
+      "start_line": 1,
+      "end_line": 40,
+      "module": "handlers",
+      "description": "message_handler() - Main entry point for all text messages, routes to ai_logic"
+    },
+    "process_user_input": {
+      "type": "function",
+      "file": "services/ai_logic.py",
+      "start_line": 15,
+      "end_line": 80,
+      "module": "services",
+      "description": "process_user_input() - Core bot intelligence, parses user intent and returns responses"
+    },
+    "get_bitcoin_price": {
+      "type": "api",
+      "file": "services/api_client.py",
+      "start_line": 10,
+      "end_line": 25,
+      "module": "services",
+      "description": "get_bitcoin_price() - Fetches current BTC price from CoinGecko API"
+    },
+    "ScrapeConfig": {
+      "type": "class",
+      "file": "services/web_scraper.py",
+      "start_line": 45,
+      "end_line": 57,
+      "module": "services",
+      "description": "ScrapeConfig - Dataclass for config-driven scraping settings"
+    },
+    "WebScraper": {
+      "type": "class",
+      "file": "services/web_scraper.py",
+      "start_line": 267,
+      "end_line": 572,
+      "module": "services",
+      "description": "WebScraper - Base scraper with navigation, extraction, and pagination helpers"
+    },
+    "scrape_url": {
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 618,
+      "end_line": 656,
+      "module": "services",
+      "description": "scrape_url(url, config) - Standalone scraping entrypoint"
+    },
+    "register_scraper": {
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 602,
+      "end_line": 604,
+      "module": "services",
+      "description": "register_scraper(name, scraper_class) - Register custom scraper class"
+    },
+    "get_scraper": {
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 607,
+      "end_line": 614,
+      "module": "services",
+      "description": "get_scraper(name, config) - Instantiate registered scraper"
+    },
+    "get_or_create_user": {
+      "type": "database",
+      "file": "services/database.py",
+      "start_line": 25,
+      "end_line": 50,
+      "module": "services",
+      "description": "get_or_create_user() - Fetches existing user from DB or creates new one"
+    },
+    "User_model": {
+      "type": "model",
+      "file": "models/user.py",
+      "start_line": 1,
+      "end_line": 30,
+      "module": "models",
+      "description": "User class - SQLAlchemy model for users table (telegram + email users)"
+    },
+    "init_db": {
+      "type": "database",
+      "file": "core/database.py",
+      "start_line": 40,
+      "end_line": 55,
+      "module": "core",
+      "description": "init_db() - Creates all database tables on startup"
+    },
+    "get_session": {
+      "type": "database",
+      "file": "core/database.py",
+      "start_line": 15,
+      "end_line": 25,
+      "module": "core",
+      "description": "get_session() - Returns SQLAlchemy session for database operations"
+    },
+    "create_app": {
+      "type": "function",
+      "file": "main.py",
+      "start_line": 20,
+      "end_line": 50,
+      "module": "",
+      "description": "create_app() - Creates Telegram bot application and configures handlers"
+    },
+    "health_check": {
+      "type": "api",
+      "file": "routes/health.py",
+      "start_line": 1,
+      "end_line": 15,
+      "module": "routes",
+      "description": "GET /health - Returns bot health status for monitoring"
+    },
+    "webhook_endpoint": {
+      "type": "api",
+      "file": "routes/webhook.py",
+      "start_line": 1,
+      "end_line": 20,
+      "module": "routes",
+      "description": "POST /webhook - Receives updates from Telegram and forwards to bot app"
+    }
+  },
+  "summaries": {
+    "main.py": {
+      "summary": "Entry point for Telegram bot application. Creates bot instance, registers command and message handlers, and starts FastAPI server (if configured). Contains application lifecycle management.",
+      "key_components": [
+        "Bot application creation",
+        "Handler registration (CommandHandler, MessageHandler)",
+        "FastAPI app initialization",
+        "Health and webhook route mounting"
+      ]
+    },
+    "handlers/start.py": {
+      "summary": "Handles /start command. Retrieves or creates user in database, sends welcome message, and displays available commands. Critical for user onboarding.",
+      "key_components": [
+        "User lookup/creation",
+        "Welcome message generation",
+        "Command list display"
+      ]
+    },
+    "handlers/help.py": {
+      "summary": "Handles /help command. Provides formatted list of available commands with descriptions. Helps users discover bot capabilities.",
+      "key_components": [
+        "Command registry",
+        "Usage descriptions",
+        "Formatted response generation"
+      ]
+    },
+    "handlers/message.py": {
+      "summary": "Main message handler for all non-command text messages. Delegates user input to AI logic service. Core routing layer between Telegram and business logic.",
+      "key_components": [
+        "Text message extraction",
+        "User context retrieval",
+        "Response forwarding to AI logic"
+      ]
+    },
+    "services/ai_logic.py": {
+      "summary": "Core intelligence module that processes user input and generates responses. Contains all bot features, command parsing, and external API orchestration. This is the brain of the bot.",
+      "key_components": [
+        "Command detection and routing",
+        "Feature implementation (crypto prices, weather, etc.)",
+        "API integration (calls api_client)",
+        "Response generation"
+      ]
+    },
+    "services/api_client.py": {
+      "summary": "External API client module. Encapsulates all HTTP requests to third-party services (CoinGecko, weather, etc.). Centralizes API calls for easy modification.",
+      "key_components": [
+        "API endpoint definitions",
+        "Request/response handling",
+        "Error handling and retries",
+        "Rate limiting awareness"
+      ]
+    },
+    "services/web_scraper.py": {
+      "summary": "CDP-based web scraping module using chrome-devtools-mcp. Supports config-driven extraction, custom scraper classes, pagination, auth flows, and JS-based extraction for dynamic pages.",
+      "key_components": [
+        "ScrapeConfig and ScrapeResult dataclasses",
+        "MCPClient browser connection and tool calls",
+        "WebScraper base class with extraction helpers",
+        "register_scraper/get_scraper extensibility",
+        "scrape_url() standalone entrypoint"
+      ]
+    },
+    "services/database.py": {
+      "summary": "Database service layer. Provides high-level database operations for user management, alerts, and other persistent data. Abstracts SQLAlchemy complexity.",
+      "key_components": [
+        "User CRUD operations",
+        "Session management",
+        "Query optimization",
+        "Transaction handling"
+      ]
+    },
+    "core/database.py": {
+      "summary": "Database connection and session factory. Manages SQLAlchemy engine, connection pooling, and provides session objects. Contains init_db() for table creation.",
+      "key_components": [
+        "Engine configuration",
+        "Session factory",
+        "Connection pooling",
+        "Environment-based connection string"
+      ]
+    },
+    "models/user.py": {
+      "summary": "SQLAlchemy model for users table. Supports both Telegram users (auto-created) and email-based users (manual registration). Unifies user management.",
+      "key_components": [
+        "Table definition (__tablename__)",
+        "Column specifications",
+        "Indexes and constraints",
+        "Relationships (if any)"
+      ]
+    },
+    "config.py": {
+      "summary": "Application configuration module. Loads and validates environment variables using Pydantic settings. Provides type-safe config access.",
+      "key_components": [
+        "Environment variable loading",
+        "Validation rules",
+        "Default values",
+        "Type coercion"
+      ]
+    },
+    "utils/logger.py": {
+      "summary": "Logging configuration for the bot. Sets up structured logging with timestamps, levels, and formatting. Provides logger instance used throughout codebase.",
+      "key_components": [
+        "Log level configuration",
+        "File/console output",
+        "Timestamp formatting",
+        "Colored console output"
+      ]
+    },
+    "buildpublish.py": {
+      "summary": "Build and publish script for deploying bot changes. Installs dependencies, clears cache, restarts PM2, and re-registers webhook. Critical for development workflow.",
+      "key_components": [
+        "Dependency installation",
+        "Python cache clearing",
+        "PM2 process management",
+        "Webhook re-registration",
+        "Error handling"
+      ]
+    }
+  },
+  "files": {
+    "main.py": {
+      "path": "main.py",
+      "lines": 65,
+      "type": "entry_point",
+      "purpose": "Bot application entry point",
+      "endpoints": [
+        "/health (GET)",
+        "/webhook (POST)"
+      ],
+      "commands": [
+        "/start",
+        "/help"
+      ]
+    },
+    "handlers/start.py": {
+      "path": "handlers/start.py",
+      "lines": 20,
+      "type": "command_handler",
+      "purpose": "Handle /start command",
+      "commands": [
+        "/start"
+      ]
+    },
+    "handlers/help.py": {
+      "path": "handlers/help.py",
+      "lines": 25,
+      "type": "command_handler",
+      "purpose": "Handle /help command",
+      "commands": [
+        "/help"
+      ]
+    },
+    "handlers/message.py": {
+      "path": "handlers/message.py",
+      "lines": 40,
+      "type": "message_handler",
+      "purpose": "Handle all text messages",
+      "commands": []
+    },
+    "services/ai_logic.py": {
+      "path": "services/ai_logic.py",
+      "lines": 80,
+      "type": "business_logic",
+      "purpose": "Core bot intelligence",
+      "commands": [],
+      "functions": [
+        "process_user_input()"
+      ]
+    },
+    "services/api_client.py": {
+      "path": "services/api_client.py",
+      "lines": 60,
+      "type": "api_client",
+      "purpose": "External API integration",
+      "commands": [],
+      "functions": [
+        "get_bitcoin_price()",
+        "get_crypto_price()"
+      ]
+    },
+    "services/web_scraper.py": {
+      "path": "services/web_scraper.py",
+      "lines": 700,
+      "type": "scraper_service",
+      "purpose": "CDP web scraping for dynamic website extraction",
+      "commands": [],
+      "functions": [
+        "scrape_url()",
+        "register_scraper()",
+        "get_scraper()"
+      ]
+    },
+    "services/database.py": {
+      "path": "services/database.py",
+      "lines": 75,
+      "type": "database_service",
+      "purpose": "High-level database operations",
+      "commands": [],
+      "functions": [
+        "get_or_create_user()",
+        "get_user()",
+        "update_user()"
+      ]
+    },
+    "core/database.py": {
+      "path": "core/database.py",
+      "lines": 55,
+      "type": "database_core",
+      "purpose": "Database connection management",
+      "commands": [],
+      "functions": [
+        "get_session()",
+        "init_db()"
+      ]
+    },
+    "models/user.py": {
+      "path": "models/user.py",
+      "lines": 30,
+      "type": "model",
+      "purpose": "User database table",
+      "commands": [],
+      "functions": []
+    },
+    "config.py": {
+      "path": "config.py",
+      "lines": 35,
+      "type": "configuration",
+      "purpose": "Application settings",
+      "commands": [],
+      "functions": []
+    },
+    "utils/logger.py": {
+      "path": "utils/logger.py",
+      "lines": 25,
+      "type": "utility",
+      "purpose": "Logging configuration",
+      "commands": [],
+      "functions": [
+        "get_logger()"
+      ]
+    },
+    "buildpublish.py": {
+      "path": "buildpublish.py",
+      "lines": 200,
+      "type": "deployment_script",
+      "purpose": "Build and publish bot",
+      "commands": [
+        "buildpublish.py",
+        "buildpublish.py --skip-deps",
+        "buildpublish.py --no-restart"
+      ],
+      "functions": [
+        "install_dependencies()",
+        "restart_pm2()",
+        "re_register_webhook()"
+      ]
+    }
+  }
+}

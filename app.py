@@ -1034,7 +1034,7 @@ _GATE_READ_INDEX_TOOL = {
     "type": "function",
     "function": {
         "name": "read_project_index",
-        "description": "Read the project's ai_index (files.json + symbols.json) to see what pages, commands, functions, and files exist.",
+        "description": "Read the project's ai_index (index.json) to see what pages, commands, functions, and files exist.",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -1045,7 +1045,7 @@ _GATE_READ_INDEX_TOOL = {
 
 
 def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
-    """Read ai_index files.json + symbols.json + summaries.json from project path.
+    """Read ai_index/index.json from project path.
 
     Searches all common locations for different project types:
     - Website: {project_path}/frontend/agent/ai_index/
@@ -1067,7 +1067,7 @@ def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
         base / "scheduler" / "agent" / "ai_index",
         base / "backend" / "agent" / "ai_index",
     ]
-    # Also try one-level subdirs (e.g. project_path/discord/agent/ai_index)
+    # Also try one-level subdirs
     if base.is_dir():
         for subdir in base.iterdir():
             if subdir.is_dir():
@@ -1078,12 +1078,12 @@ def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
                 candidates.append(subdir / "scheduler" / "agent" / "ai_index")
     # Glob as last resort
     try:
-        for match in base.rglob("agent/ai_index/files.json"):
+        for match in base.rglob("agent/ai_index/index.json"):
             candidates.append(match.parent)
     except Exception:
         pass
 
-    # Find first candidate with a non-empty files.json
+    # Find first candidate with a non-empty index.json
     ai_dir = None
     seen = set()
     for c in candidates:
@@ -1091,10 +1091,9 @@ def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
         if c_resolved in seen:
             continue
         seen.add(c_resolved)
-        if (c / "files.json").exists():
-            # Check it's not empty
+        if (c / "index.json").exists():
             try:
-                with open(c / "files.json") as f:
+                with open(c / "index.json") as f:
                     data = _json.load(f)
                 if data and len(str(data)) > 20:
                     ai_dir = c
@@ -1107,73 +1106,65 @@ def _read_project_ai_index(project_path: str, max_chars: int = 3000) -> str:
 
     parts = []
 
-    # files.json — pages, commands, endpoints
-    # Handle both formats: {"files": {...}} (wrapped) and {"main.py": {...}} (flat)
+    # Read the merged index.json (contains symbols, summaries, files)
     try:
-        with open(ai_dir / "files.json") as f:
-            data = _json.load(f)
-        # Unwrap if nested under "files" key
-        if isinstance(data, dict) and "files" in data and isinstance(data["files"], dict):
-            data = data["files"]
-        lines = []
-        for fname, info in data.items():
+        with open(ai_dir / "index.json") as f:
+            index = _json.load(f)
+    except Exception:
+        return "(project index exists but is unreadable)"
+
+    # files — pages, commands, endpoints
+    files_data = index.get("files", {})
+    # Unwrap if nested under "files" key
+    if isinstance(files_data, dict) and "files" in files_data and isinstance(files_data["files"], dict):
+        files_data = files_data["files"]
+    lines = []
+    for fname, info in files_data.items():
+        if isinstance(info, dict):
+            purpose = info.get("purpose", "")
+            commands = info.get("commands", [])
+            endpoints = info.get("endpoints", [])
+            detail = purpose
+            if commands:
+                detail += f" (commands: {', '.join(commands)})"
+            if endpoints:
+                detail += f" (endpoints: {', '.join(endpoints)})"
+            lines.append(f"  {fname}: {detail}")
+    if lines:
+        parts.append("Files:\n" + "\n".join(lines))
+
+    # symbols — functions, components, commands
+    sym_data = index.get("symbols", {})
+    if isinstance(sym_data, dict) and "symbols" in sym_data:
+        sym_data = sym_data["symbols"]
+    lines = []
+    if isinstance(sym_data, list):
+        for item in sym_data:
+            if isinstance(item, dict):
+                name = item.get("name", "")
+                desc = item.get("description", "")
+                if name:
+                    lines.append(f"  {name}: {desc}")
+    elif isinstance(sym_data, dict):
+        for sname, info in sym_data.items():
             if isinstance(info, dict):
-                purpose = info.get("purpose", "")
-                commands = info.get("commands", [])
-                endpoints = info.get("endpoints", [])
-                detail = purpose
-                if commands:
-                    detail += f" (commands: {', '.join(commands)})"
-                if endpoints:
-                    detail += f" (endpoints: {', '.join(endpoints)})"
-                lines.append(f"  {fname}: {detail}")
-        if lines:
-            parts.append("Files:\n" + "\n".join(lines))
-    except Exception:
-        pass
+                desc = info.get("description", "")
+                lines.append(f"  {sname}: {desc}")
+    if lines:
+        parts.append("Symbols:\n" + "\n".join(lines))
 
-    # symbols.json — functions, components, commands
-    # Handle both formats: {"symbols": [...]} (wrapped list), {...} (dict), [...] (flat list)
-    try:
-        with open(ai_dir / "symbols.json") as f:
-            data = _json.load(f)
-        # Unwrap if nested under "symbols" key
-        if isinstance(data, dict) and "symbols" in data:
-            data = data["symbols"]
-        lines = []
-        if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict):
-                    name = item.get("name", "")
-                    desc = item.get("description", "")
-                    if name:
-                        lines.append(f"  {name}: {desc}")
-        elif isinstance(data, dict):
-            for sname, info in data.items():
-                if isinstance(info, dict):
-                    desc = info.get("description", "")
-                    lines.append(f"  {sname}: {desc}")
-        if lines:
-            parts.append("Symbols:\n" + "\n".join(lines))
-    except Exception:
-        pass
-
-    # summaries.json — file descriptions
-    try:
-        with open(ai_dir / "summaries.json") as f:
-            data = _json.load(f)
-        lines = []
-        for fname, summary in data.items():
-            if isinstance(summary, str) and summary:
-                lines.append(f"  {fname}: {summary[:100]}")
-            elif isinstance(summary, dict):
-                desc = summary.get("summary", summary.get("description", ""))
-                if desc:
-                    lines.append(f"  {fname}: {str(desc)[:100]}")
-        if lines:
-            parts.append("Summaries:\n" + "\n".join(lines))
-    except Exception:
-        pass
+    # summaries — file descriptions
+    sum_data = index.get("summaries", {})
+    lines = []
+    for fname, summary in sum_data.items():
+        if isinstance(summary, str) and summary:
+            lines.append(f"  {fname}: {summary[:100]}")
+        elif isinstance(summary, dict):
+            desc = summary.get("summary", summary.get("description", ""))
+            if desc:
+                lines.append(f"  {fname}: {str(desc)[:100]}")
+    if lines:
+        parts.append("Summaries:\n" + "\n".join(lines))
 
     result = "\n".join(parts)
     if not result or len(result) < 20:
@@ -7221,7 +7212,7 @@ async def chat_stream_endpoint(
                     if handler and handler.bot_subdir:
                         _bot_code_path = handler.project_path / handler.bot_subdir
                         _root_ai = handler.project_path / "agent" / "ai_index"
-                        if _root_ai.exists() and (_root_ai / "files.json").exists():
+                        if _root_ai.exists() and (_root_ai / "index.json").exists():
                             _gate_project_path = str(handler.project_path)
                         elif _bot_code_path.exists():
                             _gate_project_path = str(_bot_code_path)
