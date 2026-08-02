@@ -473,6 +473,10 @@ REQUIRED (when adding new APIs):
 OPTIONAL:
 - handlers/start.py (only text changes for welcome message)
 
+MANDATORY: After ALL code changes, read and update `agent/ai_index/index.json`
+to reflect new commands, functions, and file changes. The index.json contains
+"symbols", "summaries", and "files" sections — update all relevant entries.
+
 ==================================================
 """
     
