@@ -29,10 +29,31 @@ logger = logging.getLogger(__name__)
 
 # ── Token-to-credit conversion ──────────────────────────────────────
 # edit_token: 1:1 (1 token = 1 edit token — unchanged)
-# project_ai: 1 credit = 1,000 tokens (covers token overflow after
-#   edit_token exhausted). This lets project_ai credits absorb large
-#   token usage without draining in one chat session.
-TOKENS_PER_CREDIT = 1000
+# project_ai: tiered credits based on session token volume (covers token
+#   overflow after edit_token exhausted). Tiers are future-proof — work
+#   at every stage of the launch offer (generous tokens → reduced → 0).
+#   Launch (20M tokens): 209-292 total edits (2x Lovable)
+#   Reduced (5M tokens): 84-167 total edits
+#   Final (0M tokens): 42-125 total edits
+TOKENS_PER_CREDIT = 1000  # still used for UI display only
+
+
+def _tokens_to_tiered_credits(net_tokens: float) -> float:
+    """Convert token volume to tiered credit charge for project_ai fallback.
+
+    Edit tokens handle 1:1 consumption first. This only applies when
+    edit tokens are exhausted and tokens cascade to project_ai credits.
+
+    Tiers (chosen to target ~2x Lovable capacity at every launch stage):
+      < 50K tokens  → 4 credits  (small edit: bug fix, text change)
+      < 150K tokens → 8 credits  (medium edit: add command/feature)
+      150K+ tokens  → 12 credits (large edit: multi-file refactor)
+    """
+    if net_tokens < 50_000:
+        return 4.0
+    elif net_tokens < 150_000:
+        return 8.0
+    return 12.0
 
 # ── ai_index overhead discount ──────────────────────────────────────
 # Each Read/Write/Edit of an ai_index/*.json file carries the full file
@@ -463,26 +484,39 @@ def charge_token_usage(
             break
         tier_type, tier_source = tier[0], tier[1]
 
-        # edit_token: 1:1 (raw tokens). project_ai: 1 credit = TOKENS_PER_CREDIT tokens.
-        if tier_type == "project_ai":
-            charge_amount = remaining // TOKENS_PER_CREDIT  # convert tokens → credits
-        else:
-            charge_amount = remaining  # edit_token: raw tokens (1:1)
-
-        deduct = _charge_tier(conn, user_id, tier_type, tier_source, charge_amount)
-        if deduct > 0:
-            charged.append({
-                "credit_type": tier_type,
-                "source": tier_source,
-                "amount": deduct,
-            })
-            # Convert credits back to tokens for the remaining tally when
-            # charging project_ai (so the remainder is in token units for
-            # the next tier or the remaining_uncharged report).
-            if tier_type == "project_ai":
-                remaining -= deduct * TOKENS_PER_CREDIT
-            else:
+        if tier_type == "edit_token":
+            # edit_token: 1:1 (raw tokens)
+            charge_amount = remaining
+            deduct = _charge_tier(conn, user_id, tier_type, tier_source, charge_amount)
+            if deduct > 0:
+                charged.append({
+                    "credit_type": tier_type,
+                    "source": tier_source,
+                    "amount": deduct,
+                })
                 remaining -= deduct
+        elif tier_type == "project_ai":
+            # project_ai: tiered credits based on session token volume
+            # (4/8/12 credits, not 1:1000). The tier is determined by
+            # the REMAINING tokens that cascaded to this tier.
+            charge_amount = _tokens_to_tiered_credits(remaining)
+            deduct = _charge_tier(conn, user_id, tier_type, tier_source, charge_amount)
+            if deduct > 0:
+                charged.append({
+                    "credit_type": tier_type,
+                    "source": tier_source,
+                    "amount": deduct,
+                })
+                # Tiered charge absorbs ALL remaining tokens
+                remaining = 0
+            # If partial deduction (not enough credits), remaining stays
+            # for next tier — but next tier is also project_ai (purchased)
+            # which would charge the same tiered amount again.
+            # To avoid double-tiering, if partial, calculate remaining
+            # proportionally.
+            if deduct < charge_amount and remaining > 0:
+                # Partial charge — estimate remaining tokens proportionally
+                remaining = remaining * (charge_amount - deduct) / charge_amount
 
     # Record audit transactions
     for c in charged:

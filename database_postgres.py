@@ -1423,7 +1423,7 @@ def init_schema():
                  json.dumps(["Everything in Free", "10M AI Tokens",
                              "250 Monthly Project AI Credits", "Premium Models",
                              "Custom Domains", "Priority Queue"])),
-                ('dream', 'Dream', 3900, 30, 0, 0, 0, 1, 2, 2, True, 20,
+                ('dream', 'Dream', 3500, 30, 0, 0, 0, 1, 2, 2, True, 20,
                  json.dumps(["Everything in Pro", "30 Active Projects", "25M AI Tokens",
                              "1000 Monthly Project AI Credits", "Premium Support",
                              "Fastest Queue"])),
@@ -1465,6 +1465,36 @@ def init_schema():
                         WHERE slug = 'dream' AND price_monthly_cents = 9900"""
                 )
             _run_migration(migrate_correct_plan_prices)
+
+            # ── Dream plan price: $39 → $35 (2026-08-02) ──────────────────
+            def migrate_dream_price_35():
+                cur.execute(
+                    """UPDATE billing_plans
+                          SET price_monthly_cents = 3500
+                        WHERE slug = 'dream' AND price_monthly_cents = 3900"""
+                )
+            _run_migration(migrate_dream_price_35)
+
+            # ── Edit token grants: Pro 25M→20M, Dream 100M→50M (2026-08-02) ──
+            def migrate_edit_token_grants_launch():
+                # Update plan_credit_grants for existing databases
+                cur.execute(
+                    """UPDATE plan_credit_grants pg
+                          SET monthly_limit = 20000000
+                        FROM billing_plans bp
+                        WHERE pg.plan_id = bp.id
+                          AND bp.slug = 'pro' AND pg.credit_type = 'edit_token'
+                          AND pg.monthly_limit = 25000000"""
+                )
+                cur.execute(
+                    """UPDATE plan_credit_grants pg
+                          SET monthly_limit = 50000000
+                        FROM billing_plans bp
+                        WHERE pg.plan_id = bp.id
+                          AND bp.slug = 'dream' AND pg.credit_type = 'edit_token'
+                          AND pg.monthly_limit = 100000000"""
+                )
+            _run_migration(migrate_edit_token_grants_launch)
 
             # ── Float credits migration ─────────────────────────────────
             # Change credit-related columns from INTEGER/BIGINT to NUMERIC
@@ -1540,9 +1570,9 @@ def init_schema():
                 ('free', 'project_ai', 50),
                 ('free', 'edit_token', 2000000),
                 ('pro', 'project_ai', 500),
-                ('pro', 'edit_token', 25000000),
+                ('pro', 'edit_token', 20000000),
                 ('dream', 'project_ai', 1100),
-                ('dream', 'edit_token', 100000000),
+                ('dream', 'edit_token', 50000000),
                 ('enterprise', 'project_ai', 0),
                 ('enterprise', 'edit_token', 0),
             ]
