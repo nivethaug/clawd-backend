@@ -507,16 +507,13 @@ def charge_token_usage(
                     "source": tier_source,
                     "amount": deduct,
                 })
-                # Tiered charge absorbs ALL remaining tokens
-                remaining = 0
-            # If partial deduction (not enough credits), remaining stays
-            # for next tier — but next tier is also project_ai (purchased)
-            # which would charge the same tiered amount again.
-            # To avoid double-tiering, if partial, calculate remaining
-            # proportionally.
-            if deduct < charge_amount and remaining > 0:
-                # Partial charge — estimate remaining tokens proportionally
-                remaining = remaining * (charge_amount - deduct) / charge_amount
+                if deduct >= charge_amount:
+                    # Full charge — all tokens absorbed
+                    remaining = 0
+                else:
+                    # Partial charge (not enough credits in this tier) —
+                    # estimate remaining tokens proportionally for next tier
+                    remaining = remaining * (charge_amount - deduct) / charge_amount
 
     # Record audit transactions
     for c in charged:
