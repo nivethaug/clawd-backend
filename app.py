@@ -705,6 +705,7 @@ class SessionResponse(BaseModel):
     agent_id: str
     created_at: str
     last_used_at: Optional[str] = None
+    processing: bool = False
 
 class InitialEnvironmentVariable(BaseModel):
     key: str
