@@ -7445,7 +7445,18 @@ async def chat_stream_endpoint(
                                         # ai_index/*.json file per request and reports the total via
                                         # the usage endpoint; we convert that to an exact token
                                         # discount using the per-call estimate below.
-                                        if _total_toks > 0:
+
+                                        # SAFETY: If no writes happened (model only read files, no
+                                        # actual code changes), cap the charge at the 2-credit
+                                        # pre-charge. Users shouldn't pay for failed/idle sessions.
+                                        _has_writes_flag = bool(usage_data.get("has_writes", False))
+                                        if not _has_writes_flag and _precharged >= 2:
+                                            logger.info(
+                                                f"[BILLING] No writes detected (has_writes=False) — "
+                                                f"capping charge at {int(_precharged)} credit pre-charge, "
+                                                f"skipping token reconciliation"
+                                            )
+                                        elif _total_toks > 0:
                                             try:
                                                 from services.billing_service import (
                                                     charge_token_usage,
