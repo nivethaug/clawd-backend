@@ -170,8 +170,6 @@ class DiscordBotEditor:
             prompt_kind="discord_ai_enhancement",
         )
         return f"""{meta_block}
-Enhance Discord bot for: {description}
-
 Bot: {bot_name}
 
 Allowed files to modify:
@@ -540,6 +538,10 @@ to reflect new commands, functions, and file changes. The index.json contains
 "symbols", "summaries", and "files" sections — update all relevant entries.
 
 ==================================================
+
+## USER REQUEST
+
+Enhance Discord bot for: {description}
 """
 
     def _run_claude_modification(self, prompt: str) -> dict:

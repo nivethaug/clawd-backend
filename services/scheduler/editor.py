@@ -146,8 +146,6 @@ class SchedulerEditor:
         )
 
         return f"""{meta_block}
-Enhance the scheduler executor for: {description}
-
 Project: {project_name} (ID: {self.project_id})
 
 Allowed files to modify:
@@ -346,6 +344,10 @@ The log tells you EXACTLY what broke. Never guess from code — read logs first.
 10. AFTER editing ANY .py file, run: python -c "import py_compile; py_compile.compile('FILE_PATH', doraise=True)"
     This catches syntax errors BEFORE they break the scheduler.
     If compilation fails, FIX the error immediately — do not leave broken files.
+
+## USER REQUEST
+
+Enhance the scheduler executor for: {description}
 """
 
     def _run_claude(self, prompt: str) -> dict:
