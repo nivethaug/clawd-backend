@@ -1611,7 +1611,7 @@ def init_schema():
             seed_packs = [
                 ('100 AI Credits', 100, 'project_ai', 500, 1),
                 ('500 AI Credits', 500, 'project_ai', 2000, 2),
-                ('1000 AI Credits', 1000, 'project_ai', 3900, 3),
+                ('1000 AI Credits', 1000, 'project_ai', 3500, 3),
             ]
             for name, credits, ctype, price, sort in seed_packs:
                 cur.execute(
