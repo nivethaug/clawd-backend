@@ -1423,7 +1423,7 @@ def init_schema():
                  json.dumps(["Everything in Free", "10M AI Tokens",
                              "250 Monthly Project AI Credits", "Premium Models",
                              "Custom Domains", "Priority Queue"])),
-                ('dream', 'Dream', 3500, 30, 0, 0, 0, 1, 2, 2, True, 20,
+                ('dream', 'Dream', 3900, 30, 0, 0, 0, 1, 2, 2, True, 20,
                  json.dumps(["Everything in Pro", "30 Active Projects", "25M AI Tokens",
                              "1000 Monthly Project AI Credits", "Premium Support",
                              "Fastest Queue"])),
@@ -1466,14 +1466,7 @@ def init_schema():
                 )
             _run_migration(migrate_correct_plan_prices)
 
-            # ── Dream plan price: $39 → $35 (2026-08-02) ──────────────────
-            def migrate_dream_price_35():
-                cur.execute(
-                    """UPDATE billing_plans
-                          SET price_monthly_cents = 3500
-                        WHERE slug = 'dream' AND price_monthly_cents = 3900"""
-                )
-            _run_migration(migrate_dream_price_35)
+            # ── Dream plan price stays at $39 ─────────────────────────────
 
             # ── Edit token grants: Pro 25M→20M, Dream 100M→50M (2026-08-02) ──
             def migrate_edit_token_grants_launch():
@@ -1618,7 +1611,7 @@ def init_schema():
             seed_packs = [
                 ('100 AI Credits', 100, 'project_ai', 500, 1),
                 ('500 AI Credits', 500, 'project_ai', 2000, 2),
-                ('1000 AI Credits', 1000, 'project_ai', 3500, 3),
+                ('1000 AI Credits', 1000, 'project_ai', 3900, 3),
             ]
             for name, credits, ctype, price, sort in seed_packs:
                 cur.execute(
