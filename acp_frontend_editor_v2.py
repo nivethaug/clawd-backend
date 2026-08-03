@@ -1568,9 +1568,6 @@ class ACPFrontendEditorV2:
         return f"""{meta_block}
 You are editing a React + Vite + TypeScript application.
 
-Project Name: {self.project_name}
-Project Description: {goal_description}
-
 Do not assume this is a SaaS/admin/dashboard app unless the user explicitly requested it.
 Follow the product category, audience, navigation pattern, theme, and visual style in the Project Description.
 For consumer, social, lifestyle, marketplace, game, portfolio, or mobile-app prompts, build the actual
@@ -2079,6 +2076,11 @@ Your job is finished after the AI index files are written. Stop immediately.
 - [ ] HTTP verification: status 200, has JS bundle, not starter scaffold, server killed
 - [ ] Server stopped (`kill $(lsof -t -i:PORT)`)
 - [ ] AI index files updated (symbols, files, dependencies, summaries)
+
+## USER REQUEST
+
+Project Name: {self.project_name}
+Project Description: {goal_description}
 """
 
     def _build_page_templates_section(self, required_pages: List[str], goal_description: str) -> str:
