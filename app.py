@@ -1205,8 +1205,20 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
     Two modes controlled by GATE_HANDLE_READONLY:
     - False: simple classification (greetings + security only)
     - True:  classification + ai_index tool (handles read-only questions)
+
+    Scheduler projects (type_id == 5) ALWAYS use simple mode regardless of
+    GATE_HANDLE_READONLY: Flash only gates greetings + system-prompt/model-name
+    identity questions (BLOCK), and PASSes everything else to Claude Code.
+    Scheduler questions need live runtime API data the ai_index can't provide,
+    so read-only answering via Flash would just mislead the user.
     """
     try:
+        # Scheduler: never use the read-only ai_index path. Force simple mode
+        # so Flash only handles greetings + identity/model-name blocks; all
+        # real questions route to Claude Code.
+        if project_type_id == 5:
+            project_path = None
+
         import asyncio as _asyncio
         from services.ai.openrouter_client import get_openrouter_client
         client = get_openrouter_client()

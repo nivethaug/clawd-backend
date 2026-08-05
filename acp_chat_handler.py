@@ -295,6 +295,40 @@ class ACPChatHandler:
             pass
         return None
 
+    def _detect_configured_channels(self) -> dict:
+        """Detect which delivery channels are configured in the project's .env.
+
+        Read at prompt-build time and embedded in the prompt so Claude never
+        needs to read .env (which the wrapper's security guard blocks).
+        """
+        def _has(key: str) -> bool:
+            val = self._read_project_env_value(key)
+            return bool(val and val.strip() and not val.strip().startswith("YOUR_"))
+
+        return {
+            "telegram": _has("TELEGRAM_BOT_TOKEN") and _has("TELEGRAM_CHAT_ID"),
+            "discord": _has("DISCORD_WEBHOOK_URL"),
+            "email": _has("SMTP_HOST") and _has("EMAIL_TO"),
+            "api": _has("API_ENDPOINT"),
+        }
+
+    @staticmethod
+    def _format_channels_block(channels: dict) -> str:
+        """Render the channel-detection block for the prompt."""
+        active = [name for name, on in channels.items() if on]
+        if not active:
+            return (
+                "CONFIGURED CHANNELS: NONE\n"
+                "No delivery channels are configured. Build handlers that target\n"
+                "any channel; the executor imports the channel vars from config and\n"
+                "they will be empty strings when unset."
+            )
+        lines = [f"CONFIGURED CHANNELS: {', '.join(active).upper()}"]
+        for name, on in channels.items():
+            flag = "configured" if on else "not configured"
+            lines.append(f"  - {name}: {flag}")
+        return "\n".join(lines)
+
     def _load_project_metadata(self):
         """Load project domain from database to populate prompt placeholders."""
         # Set defaults first (will be overwritten if DB lookup succeeds)
@@ -617,6 +651,12 @@ class ACPChatHandler:
         )
         jobs_base = f"{backend_url}/api/scheduler/projects/{self.project_id}/jobs"
 
+        # Detect configured channels now (backend reads .env safely) and embed
+        # in the prompt. The wrapper blocks the model from reading .env, so
+        # telling it to `cat .env` causes a stall. Provide the answer instead.
+        channels = self._detect_configured_channels()
+        channels_block = self._format_channels_block(channels)
+
         context_section = ""
         if session_context:
             context_section = f"""
@@ -686,15 +726,18 @@ The executor already has these sender functions:
 
 Send to ALL configured channels unless the user specifies a particular channel.
 
+**Channel configuration (pre-computed — DO NOT read .env, it is security-blocked):**
+
+{channels_block}
+
 ---
 
 ## HOW TO ADD A NEW TASK
 
-### Step 1: Read .env to detect configured channels
+### Step 1: Channel configuration is already provided above
 
-```bash
-cat {self.project_path}/.env
-```
+Use the CONFIGURED CHANNELS list to know which senders will work. Do NOT run
+`cat .env`, `env`, or `printenv` — they are blocked by the security guard.
 
 ### Step 2: Add API helper to services/api_client.py (only if needed)
 

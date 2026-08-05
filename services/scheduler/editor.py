@@ -65,6 +65,47 @@ class SchedulerEditor:
             pass
         return None
 
+    def _detect_configured_channels(self) -> dict:
+        """Detect which delivery channels are configured in the project's .env.
+
+        Returns a dict of channel_name -> bool. This is read at prompt-build
+        time and embedded directly in the prompt so Claude never needs to read
+        .env (which the wrapper's security guard blocks) — preventing the
+        read-loop / env-grep block that previously stalled job creation.
+        """
+        def _has(key: str) -> bool:
+            val = self._read_project_env_value(key)
+            return bool(val and val.strip() and not val.strip().startswith("YOUR_"))
+
+        return {
+            "telegram": _has("TELEGRAM_BOT_TOKEN") and _has("TELEGRAM_CHAT_ID"),
+            "discord": _has("DISCORD_WEBHOOK_URL"),
+            "email": _has("SMTP_HOST") and _has("EMAIL_TO"),
+            "api": _has("API_ENDPOINT"),
+        }
+
+    @staticmethod
+    def _format_channels_block(channels: dict) -> str:
+        """Render the channel-detection block for the prompt."""
+        active = [name for name, on in channels.items() if on]
+        if not active:
+            return (
+                "CONFIGURED CHANNELS: NONE\n"
+                "No delivery channels are configured for this project.\n"
+                "Build handlers that can target any channel (the executor imports\n"
+                "TELEGRAM_BOT_TOKEN, DISCORD_WEBHOOK_URL, EMAIL_TO, API_ENDPOINT\n"
+                "from config — they will be empty strings when unset). Send to all\n"
+                "configured channels; if none are set, the job will still register\n"
+                "and the user can configure channels later in project settings."
+            )
+        lines = [f"CONFIGURED CHANNELS: {', '.join(active).upper()}"]
+        for name, on in channels.items():
+            flag = "✓ configured" if on else "✗ not configured"
+            lines.append(f"  - {name}: {flag}")
+        lines.append("")
+        lines.append("Send to ALL configured channels unless the description names a specific one.")
+        return "\n".join(lines)
+
     def enhance_executor(self, description: str, project_name: str) -> Tuple[bool, str]:
         """
         Enhance executor.py using Claude AI.
@@ -145,6 +186,13 @@ class SchedulerEditor:
             prompt_kind="scheduler_ai_enhancement",
         )
 
+        # Detect configured channels NOW (backend reads .env safely) and embed
+        # the result in the prompt. The wrapper's security guard blocks the
+        # model from reading .env or running `env`/`printenv`, so telling it
+        # to read .env causes a read-loop stall. Give it the answer instead.
+        channels = self._detect_configured_channels()
+        channels_block = self._format_channels_block(channels)
+
         return f"""{meta_block}
 Project: {project_name} (ID: {self.project_id})
 
@@ -153,7 +201,8 @@ Allowed files to modify:
 - services/api_client.py — ONLY if you need a NEW API function that doesn't exist yet
 - services/web_scraper.py — ONLY to extend the existing scraper when website data is required
 
-DO NOT modify any other files.
+DO NOT modify any other files. DO NOT read .env (it is security-blocked; the
+channel configuration you need is already provided below).
 
 IMPORTANT: api_client.py already has these functions:
 - get_crypto_price(coin_id, currency) — use it, don't recreate it
@@ -178,16 +227,19 @@ Add a utility helper for each website-based request:
 - Keep it pure: accept url + optional params, return {{success, data, errors}}.
 
 ==================================================
+CHANNEL CONFIGURATION (PRE-COMPUTED — DO NOT READ .env)
+==================================================
+
+{channels_block}
+
+==================================================
 INTENT DETECTION & API SELECTION
 ==================================================
 
 ANALYZE user description: "{description}"
 
-STEP 1: Read .env to find which channels are configured:
-- TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID → Telegram available
-- DISCORD_WEBHOOK_URL → Discord available
-- SMTP_HOST + EMAIL_TO → Email available
-- API_ENDPOINT → API available
+STEP 1: Channel configuration is already provided above (do NOT read .env).
+Use the CONFIGURED CHANNELS list to know which senders will actually work.
 
 STEP 2: Determine target channels from description:
 - "send to telegram" → Telegram only
@@ -198,14 +250,14 @@ STEP 2: Determine target channels from description:
 - If description doesn't specify a channel → send to ALL configured channels
 
 STEP 3: CHANNEL FALLBACK RULES:
-- If description requests a channel that is NOT configured in .env:
+- If description requests a channel that is NOT in the CONFIGURED CHANNELS list:
   → Use available channels instead, do NOT silently skip
   → Include a note in the message: "(Discord not configured, sent via Telegram)"
   → If NO requested channels are configured, fall back to ALL configured channels
 - Example: "send to discord" but only Telegram is configured
   → Send via Telegram with note: "(Discord not configured)"
 
-STEP 3: Build your handler to send to ALL target channels.
+STEP 4: Build your handler to send to ALL target channels.
 The executor already has these sender functions you can call:
 - _send_telegram({{"text": msg, "chat_id": "..."}})
 - _send_discord({{"content": msg}})
@@ -234,7 +286,7 @@ MULTI-CHANNEL HANDLER PATTERN:
         return ("success", f"Sent to {{len(results)}} channels")
 
 During initial creation, you have FULL AUTONOMY to:
-1. Read .env to detect configured channels
+1. Use the CONFIGURED CHANNELS list above (do NOT read .env — it is blocked)
 2. Select appropriate public APIs from api_client
 3. Add task handlers to scheduler/executor.py
 4. Register new routes in execute_task()
