@@ -723,13 +723,7 @@ Backend API: `{backend_url}/api/scheduler`
 
 ---
 
-## CHANNEL DETECTION
-
-Read `{self.project_path}/.env` to find which channels are configured:
-- TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID → Telegram available
-- DISCORD_WEBHOOK_URL → Discord available
-- SMTP_HOST + EMAIL_TO → Email available
-- API_ENDPOINT → API available
+## CHANNEL CONFIGURATION
 
 The executor already has these sender functions:
 - `_send_telegram({{"text": msg, "chat_id": "..."}})`
@@ -2358,11 +2352,11 @@ After making ANY changes, update the project code index:
 ### Webhook Issues
 - Verify domain resolves: `nslookup {self.domain}`
 - Re-register webhook: Use `buildpublish.py`
-- Check bot token is correct in `.env`
+- Bot token is managed by the platform; if it is wrong, ask the user to re-link the bot via the dashboard
 
 ### Database Issues
 - Check PostgreSQL is running
-- Verify connection string in `.env`
+- Connection string is managed by the platform; do NOT read `.env`
 - Run migrations if schema changed
 
 ---
@@ -2745,11 +2739,11 @@ bot code directory (where main.py lives), not the project root.
 - Check health: `curl -s https://{self.domain}-api.{BASE_DOMAIN}/health`
 - Check logs: `pm2 logs dc-bot-{self.project_id}`
 - Publish: `cd {self.bot_code_path} && python3 buildpublish.py . {self.project_id}`
-- Check bot token in `.env`
+- Bot token is managed by the platform; if it is wrong, ask the user to re-link the bot via the dashboard
 
 ### Database Issues
 - Check PostgreSQL is running
-- Verify connection string in `.env`
+- Connection string is managed by the platform; do NOT read `.env`
 
 ---
 
