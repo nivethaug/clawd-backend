@@ -319,6 +319,29 @@ class ACPChatHandler:
             "api": _has("API_ENDPOINT"),
         }
 
+    @staticmethod
+    def _format_channels_block(channels: dict) -> str:
+        """Render a human-readable channel-configuration block for the prompt.
+
+        Complements the machine-readable `env_config` metadata key: the JSON
+        in <DREAMPILOT_WORKFLOW_META> drives the wrapper's security-guard
+        hints, but GLM follows a plain-text block better when deciding which
+        channels to target. Keep both in sync.
+        """
+        active = [name for name, on in channels.items() if on]
+        if not active:
+            return (
+                "CONFIGURED CHANNELS: NONE\n"
+                "No delivery channels are configured. Build handlers that target\n"
+                "any channel; the executor imports the channel vars from config and\n"
+                "they will be empty strings when unset."
+            )
+        lines = [f"CONFIGURED CHANNELS: {', '.join(active).upper()}"]
+        for name, on in channels.items():
+            flag = "configured" if on else "not configured"
+            lines.append(f"  - {name}: {flag}")
+        return "\n".join(lines)
+
     def _load_project_metadata(self):
         """Load project domain from database to populate prompt placeholders."""
         # Set defaults first (will be overwritten if DB lookup succeeds)
@@ -641,6 +664,12 @@ class ACPChatHandler:
         )
         jobs_base = f"{backend_url}/api/scheduler/projects/{self.project_id}/jobs"
 
+        # Human-readable channel block for the prompt body. The machine-readable
+        # env_config metadata key is set in _workflow_meta_block(); this block
+        # is the same data in plain text so GLM follows it directly.
+        channels = self._detect_configured_channels()
+        channels_block = self._format_channels_block(channels)
+
         context_section = ""
         if session_context:
             context_section = f"""
@@ -710,19 +739,22 @@ The executor already has these sender functions:
 
 Send to ALL configured channels unless the user specifies a particular channel.
 
-**Channel config is in your `<DREAMPILOT_WORKFLOW_META>` under `env_config`**
-(e.g. `{{"telegram": true, "discord": false, "email": true, "api": false}}`).
-DO NOT read `.env` or run `env`/`printenv` — they are blocked by the security
-guard. Use the `env_config` values from the metadata above.
+**Channel configuration (pre-computed — DO NOT read .env, it is security-blocked):**
+
+{channels_block}
+
+Channel config is ALSO available as the `env_config` key in your
+`<DREAMPILOT_WORKFLOW_META>` JSON. DO NOT read `.env` or run `env`/`printenv`
+— they are blocked by the security guard. The list above is authoritative.
 
 ---
 
 ## HOW TO ADD A NEW TASK
 
-### Step 1: Check `env_config` in your workflow metadata
+### Step 1: Channel configuration is already provided above
 
-The `env_config` key in `<DREAMPILOT_WORKFLOW_META>` tells you which channels
-are configured. Send to the ones marked `true`.
+Use the CONFIGURED CHANNELS list to know which senders will work. Do NOT run
+`cat .env`, `env`, or `printenv` — they are blocked by the security guard.
 
 ### Step 2: Add API helper to services/api_client.py (only if needed)
 

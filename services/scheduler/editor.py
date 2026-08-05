@@ -84,6 +84,34 @@ class SchedulerEditor:
             "api": _has("API_ENDPOINT"),
         }
 
+    @staticmethod
+    def _format_channels_block(channels: dict) -> str:
+        """Render a human-readable channel-configuration block for the prompt.
+
+        Complements the machine-readable `env_config` metadata key: the JSON
+        in <DREAMPILOT_WORKFLOW_META> drives the wrapper's security-guard
+        hints, but GLM follows a plain-text block better when deciding which
+        channels to target. Keep both in sync.
+        """
+        active = [name for name, on in channels.items() if on]
+        if not active:
+            return (
+                "CONFIGURED CHANNELS: NONE\n"
+                "No delivery channels are configured for this project.\n"
+                "Build handlers that can target any channel (the executor imports\n"
+                "TELEGRAM_BOT_TOKEN, DISCORD_WEBHOOK_URL, EMAIL_TO, API_ENDPOINT\n"
+                "from config — they will be empty strings when unset). Send to all\n"
+                "configured channels; if none are set, the job will still register\n"
+                "and the user can configure channels later in project settings."
+            )
+        lines = [f"CONFIGURED CHANNELS: {', '.join(active).upper()}"]
+        for name, on in channels.items():
+            flag = "✓ configured" if on else "✗ not configured"
+            lines.append(f"  - {name}: {flag}")
+        lines.append("")
+        lines.append("Send to ALL configured channels unless the description names a specific one.")
+        return "\n".join(lines)
+
     def enhance_executor(self, description: str, project_name: str) -> Tuple[bool, str]:
         """
         Enhance executor.py using Claude AI.
@@ -152,10 +180,12 @@ class SchedulerEditor:
         # the project .env from SCHEDULER_BACKEND_URL (the public API URL).
         backend_url = self._read_project_env_value("BACKEND_URL") or self.backend_url
         jobs_api_url = f"{backend_url}/api/scheduler/projects/{self.project_id}/jobs"
-        # Detect configured channels and pass them through workflow metadata
-        # (env_config key) so the model has them without reading .env (which
-        # the wrapper's security guard blocks).
+        # Detect configured channels and expose them TWO ways:
+        #   1. env_config metadata key (machine-readable, drives the wrapper's
+        #      security-guard rejection hints)
+        #   2. channels_block (human-readable, GLM follows plain text better)
         env_config = self._detect_configured_channels()
+        channels_block = self._format_channels_block(env_config)
         meta_block = build_workflow_meta_block(
             project_type_id=5,
             project_type="scheduler",
@@ -203,14 +233,15 @@ Add a utility helper for each website-based request:
 - Keep it pure: accept url + optional params, return {{success, data, errors}}.
 
 ==================================================
-CHANNEL CONFIGURATION (from metadata — DO NOT READ .env)
+CHANNEL CONFIGURATION (pre-computed — DO NOT READ .env)
 ==================================================
 
-Channel config is in your `<DREAMPILOT_WORKFLOW_META>` under `env_config`
-(e.g. `{{"telegram": true, "discord": false, "email": true, "api": false}}`).
-Send to the channels marked `true`. DO NOT read `.env` or run `env`/`printenv`
-— they are blocked by the security guard. The `env_config` metadata is the
-authoritative source.
+{channels_block}
+
+Channel config is ALSO available as the `env_config` key in your
+`<DREAMPILOT_WORKFLOW_META>` JSON. DO NOT read `.env` or run `env`/`printenv`
+— they are blocked by the security guard. The list above is the authoritative
+source for which channels are configured.
 
 ==================================================
 INTENT DETECTION & API SELECTION
@@ -218,8 +249,8 @@ INTENT DETECTION & API SELECTION
 
 ANALYZE user description: "{description}"
 
-STEP 1: Read `env_config` from your `<DREAMPILOT_WORKFLOW_META>` above to see
-which channels are configured. Send to the ones marked `true`.
+STEP 1: Channel configuration is already provided above (do NOT read .env).
+Use the CONFIGURED CHANNELS list to know which senders will actually work.
 
 STEP 2: Determine target channels from description:
 - "send to telegram" → Telegram only
@@ -230,7 +261,7 @@ STEP 2: Determine target channels from description:
 - If description doesn't specify a channel → send to ALL configured channels
 
 STEP 3: CHANNEL FALLBACK RULES:
-- If description requests a channel that is NOT enabled in `env_config`:
+- If description requests a channel that is NOT in the CONFIGURED CHANNELS list:
   → Use available channels instead, do NOT silently skip
   → Include a note in the message: "(Discord not configured, sent via Telegram)"
   → If NO requested channels are configured, fall back to ALL configured channels
@@ -266,7 +297,7 @@ MULTI-CHANNEL HANDLER PATTERN:
         return ("success", f"Sent to {{len(results)}} channels")
 
 During initial creation, you have FULL AUTONOMY to:
-1. Use `env_config` from your `<DREAMPILOT_WORKFLOW_META>` (do NOT read .env)
+1. Use the CONFIGURED CHANNELS list above (do NOT read .env — it is blocked)
 2. Select appropriate public APIs from api_client
 3. Add task handlers to scheduler/executor.py
 4. Register new routes in execute_task()
