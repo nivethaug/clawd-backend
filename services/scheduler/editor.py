@@ -17,6 +17,7 @@ from utils.logger import logger  # noqa: F811 — reassign below
 logger = logging.getLogger("services.scheduler.editor")
 from workflow_prompt_meta import build_workflow_meta_block
 from services.container_storage import to_container_path
+from integration_prompt_block import build_external_integrations_block
 
 try:
     from claude_code_agent import ClaudeCodeAgent
@@ -199,9 +200,11 @@ class SchedulerEditor:
             env_config=env_config,
         )
 
+        integrations_block = build_external_integrations_block(self.project_id)
+
         return f"""{meta_block}
 Project: {project_name} (ID: {self.project_id})
-
+{integrations_block}
 Allowed files to modify:
 - scheduler/executor.py (add task handlers + routes) — PRIMARY file to modify
 - services/api_client.py — ONLY if you need a NEW API function that doesn't exist yet

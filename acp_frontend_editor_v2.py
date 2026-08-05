@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple, Any, Set
 # Page manifest system
 from page_manifest import PageManifest, create_page_manifest, scaffold_pages
 from workflow_prompt_meta import build_workflow_meta_block
+from integration_prompt_block import build_external_integrations_block
 
 # Claude Code Agent - direct Claude CLI wrapper (replaces ACPX)
 try:
@@ -1564,6 +1565,7 @@ class ACPFrontendEditorV2:
             prompt_kind="website_create",
             pages=required_pages_list,
         )
+        integrations_block = build_external_integrations_block(self.project_id)
 
         return f"""{meta_block}
 You are editing a React + Vite + TypeScript application.
@@ -1575,7 +1577,7 @@ domain experience instead of generic dashboard/table sections.
 Build a complete desktop web experience by default. Mobile responsiveness is required, but do not output
 only a narrow mobile mockup centered on an empty desktop canvas unless the user explicitly requested
 mobile-only output.
-
+{integrations_block}
 ---
 
 ## ⛔ NEVER KILL GLOBAL PROCESSES (CRITICAL — read before any `pkill`/`kill`)
