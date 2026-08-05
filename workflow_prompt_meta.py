@@ -61,6 +61,7 @@ def build_workflow_meta(
     pages: Optional[Sequence[str]] = None,
     source: str = "db",
     usage_session_id: Optional[str] = None,
+    env_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     resolved_type = (project_type or project_type_from_id(project_type_id)).strip().lower()
     resolved_operation = str(operation or "unknown").strip().lower()
@@ -80,6 +81,7 @@ def build_workflow_meta(
         "domain": domain,
         "pages": list(pages) if pages else None,
         "source": source,
+        "env_config": env_config,
     }
     meta["checksum"] = checksum_workflow_meta(meta)
     return {key: value for key, value in meta.items() if value is not None}

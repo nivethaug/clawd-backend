@@ -261,6 +261,12 @@ class ACPChatHandler:
         """Machine-readable workflow envelope consumed by context_api.py."""
         from services.container_storage import to_container_path
         project_type = self._get_project_type_str()
+        # Embed project env config (e.g. scheduler delivery channels) so the
+        # model has it without reading .env (which the wrapper blocks). Only
+        # scheduler projects need channel detection today.
+        env_config = None
+        if getattr(self, "is_scheduler", False):
+            env_config = self._detect_configured_channels()
         return build_workflow_meta_block(
             project_type_id=self.project_type_id,
             project_type=project_type,
@@ -273,6 +279,7 @@ class ACPChatHandler:
             frontend_path=to_container_path(str(self.frontend_path)) if project_type == "website" else None,
             service_path=to_container_path(str(self.project_path)) if project_type != "website" else None,
             prompt_kind=prompt_kind,
+            env_config=env_config,
         )
 
     def _read_project_env_value(self, key: str):
@@ -311,23 +318,6 @@ class ACPChatHandler:
             "email": _has("SMTP_HOST") and _has("EMAIL_TO"),
             "api": _has("API_ENDPOINT"),
         }
-
-    @staticmethod
-    def _format_channels_block(channels: dict) -> str:
-        """Render the channel-detection block for the prompt."""
-        active = [name for name, on in channels.items() if on]
-        if not active:
-            return (
-                "CONFIGURED CHANNELS: NONE\n"
-                "No delivery channels are configured. Build handlers that target\n"
-                "any channel; the executor imports the channel vars from config and\n"
-                "they will be empty strings when unset."
-            )
-        lines = [f"CONFIGURED CHANNELS: {', '.join(active).upper()}"]
-        for name, on in channels.items():
-            flag = "configured" if on else "not configured"
-            lines.append(f"  - {name}: {flag}")
-        return "\n".join(lines)
 
     def _load_project_metadata(self):
         """Load project domain from database to populate prompt placeholders."""
@@ -651,12 +641,6 @@ class ACPChatHandler:
         )
         jobs_base = f"{backend_url}/api/scheduler/projects/{self.project_id}/jobs"
 
-        # Detect configured channels now (backend reads .env safely) and embed
-        # in the prompt. The wrapper blocks the model from reading .env, so
-        # telling it to `cat .env` causes a stall. Provide the answer instead.
-        channels = self._detect_configured_channels()
-        channels_block = self._format_channels_block(channels)
-
         context_section = ""
         if session_context:
             context_section = f"""
@@ -726,18 +710,19 @@ The executor already has these sender functions:
 
 Send to ALL configured channels unless the user specifies a particular channel.
 
-**Channel configuration (pre-computed — DO NOT read .env, it is security-blocked):**
-
-{channels_block}
+**Channel config is in your `<DREAMPILOT_WORKFLOW_META>` under `env_config`**
+(e.g. `{{"telegram": true, "discord": false, "email": true, "api": false}}`).
+DO NOT read `.env` or run `env`/`printenv` — they are blocked by the security
+guard. Use the `env_config` values from the metadata above.
 
 ---
 
 ## HOW TO ADD A NEW TASK
 
-### Step 1: Channel configuration is already provided above
+### Step 1: Check `env_config` in your workflow metadata
 
-Use the CONFIGURED CHANNELS list to know which senders will work. Do NOT run
-`cat .env`, `env`, or `printenv` — they are blocked by the security guard.
+The `env_config` key in `<DREAMPILOT_WORKFLOW_META>` tells you which channels
+are configured. Send to the ones marked `true`.
 
 ### Step 2: Add API helper to services/api_client.py (only if needed)
 
