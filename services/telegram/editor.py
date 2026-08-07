@@ -478,6 +478,19 @@ to reflect new commands, functions, and file changes. The index.json contains
 "symbols", "summaries", and "files" sections — update all relevant entries.
 
 ==================================================
+PUBLISH CHANGES — MANDATORY FINAL STEP
+==================================================
+
+After ALL file edits + index.json update, you MUST publish to restart the bot.
+Run this Bash command from the bot code directory (NOT direct pm2 commands):
+
+    cd {self.project_path} && python3 buildpublish.py
+
+- buildpublish.py reads PROJECT_ID from .env and restarts the bot via PM2.
+- ⛔ NEVER run `pm2 restart`, `pm2 stop`, or `sudo pm2` directly — they fail in the sandbox.
+- If the bot doesn't respond after publish, check logs: `pm2 logs tg-bot-{self.project_id} --lines 30`
+
+==================================================
 
 ## USER REQUEST
 

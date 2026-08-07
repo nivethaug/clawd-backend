@@ -540,6 +540,20 @@ to reflect new commands, functions, and file changes. The index.json contains
 "symbols", "summaries", and "files" sections — update all relevant entries.
 
 ==================================================
+PUBLISH CHANGES — MANDATORY FINAL STEP
+==================================================
+
+After ALL file edits + index.json update, you MUST publish to restart the bot.
+Run this Bash command (NOT direct pm2 commands — they fail in the sandbox):
+
+    cd {self.project_path} && python3 buildpublish.py . {self.project_id}
+
+- buildpublish.py handles PM2 restart via the worker-api.
+- ⛔ NEVER run `pm2 restart`, `pm2 stop`, or `sudo pm2` directly.
+- ⛔ Do NOT pass the project root to buildpublish.py — it needs `.` (bot dir).
+- After publish, check logs if needed: `pm2 logs dc-bot-{self.project_id} --lines 30`
+
+==================================================
 
 ## USER REQUEST
 
