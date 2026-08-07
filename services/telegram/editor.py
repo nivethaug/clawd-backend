@@ -184,6 +184,16 @@ Allowed files to modify ONLY:
 
 DO NOT modify any other files.
 
+IMPORTANT: api_client.py already has these functions — import and use them, do NOT recreate:
+- fetch_json(url, params) — generic JSON fetcher
+- fetch_page(url, extract_js) — fast web page scraper (~200ms)
+- get_crypto_price(coin_id, currency) — crypto price
+- get_weather(latitude, longitude) — weather
+- get_news(query, page) — news headlines
+Only add a NEW function to api_client.py if you need an API NOT listed above.
+NEVER import a function name that doesn't exist (e.g. fetch_data) — if unsure,
+Read api_client.py first to confirm the exact function name.
+
 ==================================================
 🧠 INTENT DETECTION & API SELECTION
 ==================================================
