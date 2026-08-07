@@ -32,7 +32,10 @@ logger = logging.getLogger('bot')
 intents = discord.Intents.default()
 intents.message_content = True  # Requires "Message Content Intent" in Developer Portal
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+# help_command=None disables discord.py's built-in !help so the custom
+# commands/help.py can register !help without CommandRegistrationError,
+# even if an AI edit forgets to call bot.remove_command("help").
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 
 # Health server for infrastructure verification

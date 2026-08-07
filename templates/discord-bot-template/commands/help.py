@@ -21,10 +21,11 @@ async def help_command(ctx):
 
 
 def setup(bot):
-    """Register the help command with the bot."""
-    # Remove default help command FIRST to avoid CommandRegistrationError
-    bot.remove_command("help")
+    """Register the help command with the bot.
 
+    main.py uses commands.Bot(help_command=None) so discord.py's built-in
+    !help is disabled — no need to call bot.remove_command("help") here.
+    """
     @bot.command(name="help")
     async def _help(ctx):
         await help_command(ctx)

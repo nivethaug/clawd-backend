@@ -241,6 +241,13 @@ APPROACH B — Register new Discord commands:
 
 For MOST bots, use Approach A. Only use Approach B if the user explicitly
 requests direct commands like !price, !top as separate Discord commands.
+
+CRITICAL — !help command:
+- main.py disables discord.py's built-in !help (help_command=None), so
+  commands/help.py can safely register !help via bot.command(name="help").
+- If you rewrite help.py, do NOT call bot.remove_command("help") — it's
+  unnecessary now and can cause errors if the command doesn't exist.
+- Just register !help normally: @bot.command(name="help")
 ==================================================
 
 ANALYZE user description: "{description}"
