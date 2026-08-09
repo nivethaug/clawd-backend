@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 PROMPT_ASSISTANT_MODEL = os.getenv("PROMPT_ASSISTANT_MODEL", "z-ai/glm-4.7-flash")
-PROMPT_ASSISTANT_PROVIDER = os.getenv("PROMPT_ASSISTANT_PROVIDER", "balanced")
 OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
 OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "DreamAgent")
 DEFAULT_TIMEOUT = 30.0
@@ -40,7 +39,6 @@ class OpenRouterClient:
         self,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
-        provider_strategy: Optional[str] = None,
     ):
         """
         Initialize OpenRouter client.
@@ -48,12 +46,10 @@ class OpenRouterClient:
         Args:
             api_key: OpenRouter API key (defaults to OPENROUTER_API_KEY env var)
             model: Model name (defaults to PROMPT_ASSISTANT_MODEL env var)
-            provider_strategy: Routing strategy (defaults to PROMPT_ASSISTANT_PROVIDER env var)
         """
         self.api_key = api_key or OPENROUTER_API_KEY
         self.model = model or PROMPT_ASSISTANT_MODEL
         self.api_base = OPENROUTER_BASE_URL.rstrip("/")
-        self.provider_strategy = (provider_strategy or PROMPT_ASSISTANT_PROVIDER or "balanced").strip().lower()
         self._client: Optional[httpx.AsyncClient] = None
 
         if not self.api_key:
@@ -69,40 +65,6 @@ class OpenRouterClient:
         if OPENROUTER_APP_NAME:
             headers["X-Title"] = OPENROUTER_APP_NAME
         return headers
-
-    def _provider_routing(self) -> Optional[Dict[str, Any]]:
-        """
-        Build OpenRouter provider routing configuration.
-
-        Balanced uses OpenRouter's default routing and intentionally omits a
-        provider object. Exact routing is supported by setting:
-        PROMPT_ASSISTANT_PROVIDER=exact and
-        PROMPT_ASSISTANT_PROVIDER_ORDER=provider_a,provider_b
-        """
-        strategy = self.provider_strategy
-        if strategy in {"", "balanced"}:
-            return None
-
-        provider_order = (
-            os.getenv("PROMPT_ASSISTANT_PROVIDER_ORDER", "")
-            or os.getenv("OPENROUTER_PROVIDER_ORDER", "")
-        )
-
-        if strategy == "exact":
-            providers = [item.strip() for item in provider_order.split(",") if item.strip()]
-            if not providers:
-                logger.warning(
-                    "[OPENROUTER-CLIENT] PROMPT_ASSISTANT_PROVIDER=exact but no provider order configured; "
-                    "falling back to balanced routing"
-                )
-                return None
-            return {"order": providers, "allow_fallbacks": False}
-
-        logger.warning(
-            "[OPENROUTER-CLIENT] Unknown provider strategy '%s'; falling back to balanced routing",
-            self.provider_strategy,
-        )
-        return None
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -131,10 +93,10 @@ class OpenRouterClient:
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
 
-        provider = self._provider_routing()
-        if provider:
-            payload["provider"] = provider
-
+        # No provider pinning — let OpenRouter route freely across all
+        # available providers for the model. Removing the fixed provider
+        # avoids rate-limit/availability issues when a single backend is
+        # overloaded.
         return payload
 
     async def chat_completion(
@@ -173,10 +135,9 @@ class OpenRouterClient:
         )
         attempts = max(1, int(max_retries if max_retries is not None else MAX_RETRIES))
         logger.debug(
-            "[OPENROUTER-CLIENT] Calling OpenRouter with %s messages, model=%s, provider=%s, tools=%s, attempts=%s",
+            "[OPENROUTER-CLIENT] Calling OpenRouter with %s messages, model=%s, tools=%s, attempts=%s",
             len(messages),
             self.model,
-            self.provider_strategy,
             len(tools or []),
             attempts,
         )
