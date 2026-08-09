@@ -6800,11 +6800,12 @@ async def get_sessions(
     session_responses = []
     for s in sessions:
         session_dict = dict(s) if isinstance(s, dict) else dict(s)
-        # Convert datetime fields to strings
+        # Convert datetime fields to ISO-8601 UTC strings (with Z suffix)
+        # so the browser can correctly convert to local time on display.
         if "created_at" in session_dict and isinstance(session_dict.get("created_at"), (datetime,)):
-            session_dict["created_at"] = str(session_dict["created_at"])
+            session_dict["created_at"] = session_dict["created_at"].strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         if "last_used_at" in session_dict and isinstance(session_dict.get("last_used_at"), (datetime,)):
-            session_dict["last_used_at"] = str(session_dict["last_used_at"])
+            session_dict["last_used_at"] = session_dict["last_used_at"].strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         session_responses.append(SessionResponse(**session_dict))
 
     return session_responses
@@ -6832,11 +6833,11 @@ async def create_session(
         if isinstance(result, dict):
             # PostgreSQL: RealDictRow (already a dict)
             session_data = result.copy()
-            # Convert datetime fields to strings
+            # Convert datetime fields to ISO-8601 UTC strings (with Z suffix)
             if "created_at" in session_data and isinstance(session_data.get("created_at"), (datetime,)):
-                session_data["created_at"] = str(session_data["created_at"])
+                session_data["created_at"] = session_data["created_at"].strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             if "last_used_at" in session_data and isinstance(session_data.get("last_used_at"), (datetime,)):
-                session_data["last_used_at"] = str(session_data["last_used_at"])
+                session_data["last_used_at"] = session_data["last_used_at"].strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         else:
             # SQLite: Tuple-like access
             session_data = {
@@ -6851,11 +6852,11 @@ async def create_session(
                 "created_at": result[8],
                 "last_used_at": result[9]
             }
-            # Convert datetime fields to strings if they're datetime objects
+            # Convert datetime fields to ISO-8601 UTC strings (with Z suffix)
             if isinstance(session_data.get("created_at"), (datetime,)):
-                session_data["created_at"] = str(session_data["created_at"])
+                session_data["created_at"] = session_data["created_at"].strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             if isinstance(session_data.get("last_used_at"), (datetime,)):
-                session_data["last_used_at"] = str(session_data["last_used_at"])
+                session_data["last_used_at"] = session_data["last_used_at"].strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         return SessionResponse(**session_data)
 
@@ -7007,13 +7008,14 @@ async def get_session_messages(
             (session_id,)
         ).fetchall()
 
-    # Convert datetime objects to strings for PostgreSQL compatibility
+    # Convert datetime objects to ISO-8601 UTC strings (with Z suffix)
+    # so the browser can correctly convert to local time on display.
     message_responses = []
     for m in messages:
         message_dict = dict(m) if isinstance(m, dict) else dict(m)
-        # Convert created_at to string if it's a datetime object
+        # Convert created_at to ISO-8601 UTC string if it's a datetime object
         if "created_at" in message_dict and isinstance(message_dict.get("created_at"), (datetime,)):
-            message_dict["created_at"] = str(message_dict["created_at"])
+            message_dict["created_at"] = message_dict["created_at"].strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         message_responses.append(MessageResponse(**message_dict))
 
     return message_responses
@@ -8306,7 +8308,7 @@ async def chat_endpoint(
                 id=0,
                 role="assistant",
                 content=assistant_content,
-                created_at=datetime.now().isoformat()
+                created_at=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             )
 
         # Generate assistant response with error handling
@@ -8346,7 +8348,7 @@ async def chat_endpoint(
             id=0,
             role="assistant",
             content=assistant_content,
-            created_at=datetime.now().isoformat()
+            created_at=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         )
 
 # ============================================================================
