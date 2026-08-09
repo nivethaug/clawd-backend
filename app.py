@@ -10625,11 +10625,12 @@ async def completion_stream(request: CompletionRequest):
 
     return StreamingResponse(
         _stream(),
-        media_type="text/event-stream",
+        media_type="text/event-stream; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "Transfer-Encoding": "chunked",
         },
     )
 

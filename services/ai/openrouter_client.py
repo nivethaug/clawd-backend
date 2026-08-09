@@ -257,32 +257,36 @@ class OpenRouterClient:
     ) -> AsyncIterator[Dict[str, Any]]:
         """
         Stream OpenRouter Chat Completions chunks as parsed SSE JSON objects.
+
+        Uses a dedicated httpx client (not the shared singleton) so the
+        streaming connection is isolated from other requests and won't be
+        closed mid-stream by a concurrent gate/vision call.
         """
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY not configured")
 
         payload = self._build_payload(messages, temperature, max_tokens, stream=True)
-        client = await self._get_client()
 
-        async with client.stream(
-            "POST",
-            f"{self.api_base}/chat/completions",
-            headers=self._headers(),
-            json=payload,
-        ) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            async with client.stream(
+                "POST",
+                f"{self.api_base}/chat/completions",
+                headers=self._headers(),
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
 
-                data = line.removeprefix("data: ").strip()
-                if data == "[DONE]":
-                    break
+                    data = line.removeprefix("data: ").strip()
+                    if data == "[DONE]":
+                        break
 
-                try:
-                    yield json.loads(data)
-                except json.JSONDecodeError:
-                    logger.warning("[OPENROUTER-CLIENT] Failed to parse stream chunk: %s", data[:200])
+                    try:
+                        yield json.loads(data)
+                    except json.JSONDecodeError:
+                        logger.warning("[OPENROUTER-CLIENT] Failed to parse stream chunk: %s", data[:200])
 
     def get_text_response(self, response: Dict[str, Any]) -> str:
         """
