@@ -23,12 +23,13 @@ PROMPT_ASSISTANT_MODEL = os.getenv("PROMPT_ASSISTANT_MODEL", "z-ai/glm-4.7-flash
 PROMPT_ASSISTANT_PROVIDER = os.getenv("PROMPT_ASSISTANT_PROVIDER", "balanced")
 OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
 OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "DreamAgent")
-# 75s (1.25 min) per-request timeout — GLM-4.7-flash routinely takes 10-15s
-# for the Prompt Assistant's large system prompt, and OpenRouter routing adds
-# latency. The old 30s timeout caused intermittent "Unable to generate
-# response" errors.
-DEFAULT_TIMEOUT = 75.0
-MAX_RETRIES = 2
+# 45s per-request timeout — GLM-4.7-flash routinely takes 10-15s for the
+# Prompt Assistant's large system prompt. 45s gives headroom for slow
+# responses while staying under nginx's 60s proxy_read_timeout (which returns
+# a CORS-blocking 504 if exceeded). With 1 retry, worst case is ~90s — the
+# frontend client timeout is 120s.
+DEFAULT_TIMEOUT = 45.0
+MAX_RETRIES = 1
 BACKOFF_SECONDS = 1.0
 RETRYABLE_STATUSES = {408, 409, 429, 500, 502, 503, 504}
 
