@@ -6,7 +6,7 @@ specifications that can be sent directly to DreamAgent Project AI.
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, AsyncIterator
 
 from services.ai.openrouter_client import OpenRouterClient, get_openrouter_client
 
@@ -669,3 +669,69 @@ Conversation:"""
                 "success": False,
                 "error": f"Failed to generate completion: {type(e).__name__}: {e}",
             }
+
+    async def stream_complete(
+        self,
+        project_type: str,
+        mode: str,
+        messages: List[Dict[str, str]],
+        generate_prompt: bool = False,
+        project_info: Optional[Dict[str, Any]] = None,
+    ) -> AsyncIterator[str]:
+        """Stream a conversational refinement response or Project AI prompt.
+
+        Yields text deltas (content chunks) as they arrive from OpenRouter.
+        Mirrors complete() but uses stream_chat_completion() so the connection
+        stays alive and nginx never 504s.
+
+        Yields:
+            str — content text deltas
+        Raises:
+            RuntimeError — validation failure or service unavailable
+            Exception — OpenRouter API error (caller should catch and send
+                       an error chunk to the client)
+        """
+        canonical_project_type = self.normalize_project_type(project_type)
+        canonical_mode = self.normalize_mode(mode)
+
+        is_valid, error_msg = self.validate_request(
+            canonical_project_type, canonical_mode, messages
+        )
+        if not is_valid:
+            raise RuntimeError(error_msg)
+
+        sanitized_messages = []
+        for msg in messages:
+            clean = self.sanitize_message(msg)
+            if clean:
+                sanitized_messages.append(clean)
+
+        if not self.is_available():
+            raise RuntimeError(
+                "Completion service not available - OPENROUTER_API_KEY not configured"
+            )
+
+        llm_messages = self.build_llm_messages(
+            canonical_project_type,
+            canonical_mode,
+            sanitized_messages,
+            generate_prompt=generate_prompt,
+            project_info=project_info,
+        )
+
+        async for chunk in self.openrouter_client.stream_chat_completion(
+            messages=llm_messages,
+            temperature=self.COMPLETION_TEMPERATURE,
+            max_tokens=self.COMPLETION_MAX_TOKENS,
+        ):
+            try:
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    yield content
+            except (KeyError, IndexError):
+                continue
+

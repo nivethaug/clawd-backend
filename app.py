@@ -10589,6 +10589,51 @@ async def completion(request: CompletionRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@app.post("/ai/completion/stream")
+async def completion_stream(request: CompletionRequest):
+    """Streaming version of /ai/completion — yields SSE chunks.
+
+    Uses stream_chat_completion() so the connection stays alive and nginx
+    never 504s.  Same payload/semantics as /ai/completion.
+    """
+    import json as _json
+
+    async def _stream():
+        try:
+            messages_dict = [msg.dict() for msg in request.messages]
+            async for delta in completion_service.stream_complete(
+                project_type=request.projectType,
+                mode=request.mode,
+                messages=messages_dict,
+                generate_prompt=request.generatePrompt,
+                project_info=(
+                    request.projectInfo.dict(exclude_none=True)
+                    if request.projectInfo
+                    else None
+                ),
+            ):
+                _event = _json.dumps(
+                    {"choices": [{"delta": {"content": delta}}]}
+                )
+                yield f"data: {_event}\n\n"
+        except Exception as exc:
+            logger.error(f"Completion stream error: {type(exc).__name__}: {exc}")
+            _err = _json.dumps({"error": str(exc)})
+            yield f"data: {_err}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ============================================================================
 # Recent Activity Endpoints
 # ============================================================================
