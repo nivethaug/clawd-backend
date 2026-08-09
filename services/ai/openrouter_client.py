@@ -22,8 +22,12 @@ OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 PROMPT_ASSISTANT_MODEL = os.getenv("PROMPT_ASSISTANT_MODEL", "z-ai/glm-4.7-flash")
 OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
 OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "DreamAgent")
-DEFAULT_TIMEOUT = 30.0
-MAX_RETRIES = 3
+# 75s (1.25 min) per-request timeout — GLM-4.7-flash routinely takes 10-15s
+# for the Prompt Assistant's large system prompt, and OpenRouter routing adds
+# latency. The old 30s timeout caused intermittent "Unable to generate
+# response" errors.
+DEFAULT_TIMEOUT = 75.0
+MAX_RETRIES = 2
 BACKOFF_SECONDS = 1.0
 RETRYABLE_STATUSES = {408, 409, 429, 500, 502, 503, 504}
 

@@ -663,8 +663,8 @@ Conversation:"""
             }
 
         except Exception as e:
-            logger.error(f"Failed to generate completion: {e}")
+            logger.error(f"Failed to generate completion: {type(e).__name__}: {e}")
             return {
                 "success": False,
-                "error": f"Failed to generate completion: {type(e).__name__}",
+                "error": f"Failed to generate completion: {type(e).__name__}: {e}",
             }
