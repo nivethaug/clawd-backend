@@ -10611,51 +10611,76 @@ async def completion_stream(request: CompletionRequest):
     STATUS_INTERVAL = 2.5  # seconds between status pings
 
     async def _stream():
-        try:
-            messages_dict = [msg.dict() for msg in request.messages]
-            stream_gen = completion_service.stream_complete(
-                project_type=request.projectType,
-                mode=request.mode,
-                messages=messages_dict,
-                generate_prompt=request.generatePrompt,
-                project_info=(
-                    request.projectInfo.dict(exclude_none=True)
-                    if request.projectInfo
-                    else None
-                ),
-            )
+        # Run the LLM generator in a background task that feeds a queue.
+        # We cannot use asyncio.wait_for on __anext__() directly because
+        # cancelling the coroutine closes the async generator permanently.
+        queue: asyncio.Queue = asyncio.Queue()
+        _SENTINEL = object()
 
+        async def _producer():
+            try:
+                messages_dict = [msg.dict() for msg in request.messages]
+                async for delta in completion_service.stream_complete(
+                    project_type=request.projectType,
+                    mode=request.mode,
+                    messages=messages_dict,
+                    generate_prompt=request.generatePrompt,
+                    project_info=(
+                        request.projectInfo.dict(exclude_none=True)
+                        if request.projectInfo
+                        else None
+                    ),
+                ):
+                    await queue.put(delta)
+            except Exception as exc:
+                logger.error(f"Completion stream error: {type(exc).__name__}: {exc}")
+                await queue.put(exc)
+            finally:
+                await queue.put(_SENTINEL)
+
+        producer_task = asyncio.create_task(_producer())
+
+        try:
             got_content = False
             status_idx = 0
 
             while True:
                 try:
-                    delta = await asyncio.wait_for(
-                        stream_gen.__anext__(), timeout=STATUS_INTERVAL
+                    item = await asyncio.wait_for(
+                        queue.get(), timeout=STATUS_INTERVAL
                     )
-                    got_content = True
-                    _event = _json.dumps(
-                        {"choices": [{"delta": {"content": delta}}]}
-                    )
-                    yield f"data: {_event}\n\n"
                 except asyncio.TimeoutError:
-                    if got_content:
-                        continue
-                    # Send a status ping to keep the connection alive
-                    # and inform the user the AI is working.
-                    msg = ANALYZING_STATUSES[status_idx % len(ANALYZING_STATUSES)]
-                    status_idx += 1
-                    _status = _json.dumps(
-                        {"status": "analyzing", "message": msg}
-                    )
-                    yield f"data: {_status}\n\n"
-                except StopAsyncIteration:
+                    if not got_content:
+                        # Send a status ping to keep the connection alive
+                        # and inform the user the AI is working.
+                        msg = ANALYZING_STATUSES[status_idx % len(ANALYZING_STATUSES)]
+                        status_idx += 1
+                        _status = _json.dumps(
+                            {"status": "analyzing", "message": msg}
+                        )
+                        yield f"data: {_status}\n\n"
+                    continue
+
+                if item is _SENTINEL:
                     break
-        except Exception as exc:
-            logger.error(f"Completion stream error: {type(exc).__name__}: {exc}")
-            _err = _json.dumps({"error": str(exc)})
-            yield f"data: {_err}\n\n"
+
+                if isinstance(item, Exception):
+                    _err = _json.dumps({"error": str(item)})
+                    yield f"data: {_err}\n\n"
+                    break
+
+                got_content = True
+                _event = _json.dumps(
+                    {"choices": [{"delta": {"content": item}}]}
+                )
+                yield f"data: {_event}\n\n"
         finally:
+            if not producer_task.done():
+                producer_task.cancel()
+                try:
+                    await producer_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(
