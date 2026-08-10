@@ -10595,15 +10595,25 @@ async def completion(request: CompletionRequest):
 async def completion_stream(request: CompletionRequest):
     """Streaming version of /ai/completion — yields SSE chunks.
 
-    Uses stream_chat_completion() so the connection stays alive and nginx
-    never 504s.  Same payload/semantics as /ai/completion.
+    Sends periodic status chunks ("analyzing…") before the first real
+    content arrives so the connection stays alive, nginx never 504s,
+    and the user sees progress.  Once the LLM starts producing content,
+    status chunks stop and real content deltas flow.
     """
     import json as _json
+    import asyncio
+
+    ANALYZING_STATUSES = [
+        "Analyzing your request…",
+        "Considering project structure…",
+        "Crafting your prompt…",
+    ]
+    STATUS_INTERVAL = 2.5  # seconds between status pings
 
     async def _stream():
         try:
             messages_dict = [msg.dict() for msg in request.messages]
-            async for delta in completion_service.stream_complete(
+            stream_gen = completion_service.stream_complete(
                 project_type=request.projectType,
                 mode=request.mode,
                 messages=messages_dict,
@@ -10613,11 +10623,34 @@ async def completion_stream(request: CompletionRequest):
                     if request.projectInfo
                     else None
                 ),
-            ):
-                _event = _json.dumps(
-                    {"choices": [{"delta": {"content": delta}}]}
-                )
-                yield f"data: {_event}\n\n"
+            )
+
+            got_content = False
+            status_idx = 0
+
+            while True:
+                try:
+                    delta = await asyncio.wait_for(
+                        stream_gen.__anext__(), timeout=STATUS_INTERVAL
+                    )
+                    got_content = True
+                    _event = _json.dumps(
+                        {"choices": [{"delta": {"content": delta}}]}
+                    )
+                    yield f"data: {_event}\n\n"
+                except asyncio.TimeoutError:
+                    if got_content:
+                        continue
+                    # Send a status ping to keep the connection alive
+                    # and inform the user the AI is working.
+                    msg = ANALYZING_STATUSES[status_idx % len(ANALYZING_STATUSES)]
+                    status_idx += 1
+                    _status = _json.dumps(
+                        {"status": "analyzing", "message": msg}
+                    )
+                    yield f"data: {_status}\n\n"
+                except StopAsyncIteration:
+                    break
         except Exception as exc:
             logger.error(f"Completion stream error: {type(exc).__name__}: {exc}")
             _err = _json.dumps({"error": str(exc)})
