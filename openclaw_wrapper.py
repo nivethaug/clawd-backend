@@ -754,8 +754,7 @@ That's all. Execute Phase {phase} now.
         1. Log Phase 9 start
         2. Initialize ACP Frontend Editor V2 directly (no HTTP call)
         3. Generate and apply frontend customizations via acpx
-        4. Create ACP_README.md with documentation
-        5. Report success
+        4. Report success
         """
         # Debug tracing for Phase 9 execution
         print("=" * 60)
@@ -904,12 +903,9 @@ That's all. Execute Phase {phase} now.
                 logger.error(f"❌ ACP customization failed: {result.get('message', 'Unknown error')}")
                 if result.get('build_output'):
                     logger.error(f"   Build output (last 500 chars): {result['build_output'][-500:]}")
-                # Still continue to create ACP_README.md even if customization fails
-                logger.warning("⚠️ Continuing to create ACP_README.md despite customization failure")
 
-            # STEP 2: Create ACP_README.md documentation (WITHOUT build gate)
-            logger.info("📝 Step 2: Creating ACP_README.md documentation")
-            from datetime import datetime
+            # STEP 2: Run verification build (always)
+            logger.info("🔨 Step 2: Running verification build")
 
             # Build summary based on result (V2 doesn't have mutation log)
             if result.get('success'):
@@ -922,21 +918,6 @@ That's all. Execute Phase {phase} now.
                 files_modified = 0
                 files_removed = 0
                 build_status = '❌'
-
-            # Build file list for display
-            files_list = []
-            if files_added > 0:
-                files_list.append(f"**{files_added} new files**")
-            if files_modified > 0:
-                files_list.append(f"**{files_modified} modified files**")
-            if files_removed > 0:
-                files_list.append(f"**{files_removed} removed files**")
-
-            files_changed_summary = f"""
-### Changes Applied
-- {', '.join(files_list) if files_list else 'No changes detected'}
-- **Build Status:** {build_status}
-"""
 
             # STEP 3: ALWAYS run build gate (even if no changes detected)
             # This catches cases where AI modified imports/routing without creating new files
@@ -959,120 +940,18 @@ That's all. Execute Phase {phase} now.
                 logger.error(f"[Phase 9]   ❌ Verification build exception: {e}")
                 verification_build_output = str(e)
 
-            acp_readme_content = f"""# ACP Controlled Frontend Editor
-
-This project is configured for controlled frontend refinement using ACP (Agent Client Protocol).
-
-## About ACP
-
-ACP is integrated directly into the DreamPilot project creation workflow (Phase 9).
-It provides safe, validated frontend editing with the following protections:
-
-### Safety Features
-- ✅ Path validation (whitelist `frontend/src/` only)
-- ✅ Forbidden paths (backend, components/ui/ protected)
-- ✅ File limit (max 12 new files per execution)
-- ✅ Snapshot system (backup before modifications)
-- ✅ Automatic rollback (restore on validation or build failure)
-- ✅ Build gate (npm run build must succeed for code changes)
-- ✅ Hash-based filesystem diffing (accurate change detection)
-- ✅ AI edit scope limiting (reduces timeouts)
-- ✅ Verification build (always runs, even with no changes)
-- ✅ AI duration tracking (optimizes prompts)
-
-### Project Status
-- **Project Name:** {self.project_name}
-- **Project ID:** {self.project_id}
-- **Template:** {self.template_id}
-- **Phase 9 Completed:** {datetime.now().isoformat()}
-- **ACP Frontend Editor:** ✅ Integrated and Ready{files_changed_summary}
-
-### Technical Details
--ACP runs as Phase 9 of the infrastructure provisioning workflow
-- Uses direct module import (no HTTP API required)
-- Validates all paths before applying any changes
-- Creates snapshots automatically before modifications
-- Runs `npm install` and `npm run build` after code changes
-- Automatically rolls back on validation or build failure
-- Logs all mutations in `.acp_mutation_log.json`
-- Note: ACP_README.md is documentation only and does not go through build validation
-
----
-Phase 9 is complete! ACP is integrated as the final step of project creation.
-"""
-
-            # Apply ACP_README.md DIRECTLY (no build gate needed for documentation)
-            # This avoids " "package.json not found" error for README-only changes
-            readme_path = Path(frontend_src_path).parent / "ACP_README.md"
-
-            try:
-                with open(readme_path, 'w', encoding='utf-8') as f:
-                    f.write(acp_readme_content)
-                logger.info(f"✓ ACP_README.md created at {readme_path}")
-
-                readme_result = {
-                    "success": True,
-                    "files_added": 1,
-                    "files_modified": 0,
-                    "files_removed": 0
-                }
-                logger.info(f"[Phase 9-Step2] ✓ ACP_README.md result: {readme_result}")
-
-            except Exception as e:
-                logger.error(f"❌ Failed to create ACP_README.md: {e}")
-                readme_result = {
-                    "success": False,
-                    "files_added": 0,
-                    "files_modified": 0,
-                    "files_removed": 0
-                }
-
-            # Report final status
-            # Build information section
-            build_info = f"""
-
-### Build Information
-- **Primary Build:** {'✅ Success' if result.get('success') and not result.get('build_output') else '❌ Failed or N/A'}
-- **Verification Build:** {'✅ Success' if verification_build_success else '❌ Failed'}
-"""
-
-            if result["success"] and readme_result["success"]:
+            # Report final status based on ACPX customization result only
+            # (ACP_README.md is no longer generated inside projects)
+            if result["success"]:
                 logger.info(f"✅ ACP Phase 9 completed successfully!")
                 logger.info(f"   ACPX Changes: Files added={result.get('files_added', 0)}, modified={result.get('files_modified', 0)}, removed={result.get('files_removed', 0)}")
-                logger.info(f"   Documentation: ACP_README.md created")
                 logger.info(f"   Primary Build: {'✅ Success' if not result.get('build_output') else 'N/A'}")
                 logger.info(f"   Verification Build: {'✅ Success' if verification_build_success else '❌ Failed'}")
                 logger.info(f"   Rollback: {'No' if not result.get('rollback') else 'Yes'}")
 
                 self.completed_phases.append("ACP Controlled Frontend Editor (Integrated)")
                 return True
-
-            elif result["success"]:
-                # acpx customization succeeded but README creation failed
-                # This is not fatal - project is ready
-                logger.info(f"✅ ACP Phase 9 partial success: Customization worked, README creation failed")
-                logger.info(f"   Customization: Files added={result.get('files_added', 0)}, modified={result.get('files_modified', 0)}")
-                logger.info(f"   Documentation: ACP_README.md failed to create")
-                logger.info(f"   Primary Build: {'✅ Success' if not result.get('build_output') else 'N/A'}")
-                logger.info(f"   Verification Build: {'✅ Success' if verification_build_success else '❌ Failed'}")
-                logger.info(f"   Build note: acpx build gate may have failed, but infrastructure build succeeded")
-                logger.warning("⚠️ Project marked as 'ready' despite README failure - frontend is functional")
-
-                self.completed_phases.append("ACP Frontend Editor (Partial - README Failed)")
-                return True
-
-            elif readme_result["success"]:
-                # acpx customization failed but README creation succeeded
-                # This means code changes were rolled back, but docs exist
-                logger.info(f"⚠️ ACP Phase 9 partial: Customization failed, README created")
-                logger.info(f"   Documentation: ACP_README.md created")
-                logger.warning("⚠️ Project marked as 'ready' but acpx changes were rolled back")
-
-                self.completed_phases.append("ACP Frontend Editor (Partial - Changes Failed)")
-                return True
-
             else:
-                # Both failed - this is a real failure
                 logger.error(f"❌ ACP Phase 9 failed: Customization failed")
                 self.completed_phases.append("ACP Frontend Editor (Failed)")
                 return False

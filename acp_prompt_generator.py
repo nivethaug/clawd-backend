@@ -190,67 +190,9 @@ Return JSON with changes array. Focus on making it feel like a real production a
         return []
 
     def _generate_minimal_changes(self, project_name: str) -> List[Dict[str, Any]]:
-        """Generate minimal changes (just documentation)."""
-        return [{
-            "action": "write",
-            "path": "ACP_README.md",
-            "content": self._generate_acp_readme_content(project_name)
-        }]
+        """Generate minimal changes (no documentation file injected into projects)."""
+        return []
 
-    def _generate_acp_readme_content(self, project_name: str) -> str:
-        """Generate ACP README content."""
-        from datetime import datetime
-        return f"""# ACP Controlled Frontend Editor
-
-This project is configured for controlled frontend refinement using ACP (Agent Client Protocol).
-
-## About ACP
-
-ACP is integrated directly into DreamPilot project creation workflow (Phase 8).
-It provides safe, validated frontend editing with following protections:
-
-### Safety Features
-- ✅ Path validation (whitelist `frontend/src/` only)
-- ✅ Forbidden paths (backend, components/ui/ protected)
-- ✅ File limit (max 4 new files per execution)
-- ✅ Snapshot system (backup before modifications)
-- ✅ Automatic rollback (restore on validation or build failure)
-- ✅ Build gate (npm run build must succeed)
-- ✅ Mutation logging (full history tracked)
-
-### Project Status
-- **Project Name:** {project_name}
-- **Phase 8 Completed:** {datetime.now().isoformat()}
-- **ACP Frontend Editor:** ✅ Available and Ready
-
-### How to Use ACP
-
-ACP can be used for future frontend refinements via command line:
-
-```bash
-cd /root/clawd-backend
-python3 acp_direct.py <project_id> <file_path> <content>
-```
-
-Or via API (if enabled):
-
-```bash
-POST /projects/{{project_id}}/acp/apply
-Content-Type: application/json
-{{
-  "changes": [
-    {{
-      "action": "write|modify|remove",
-      "path": "src/pages/NewPage.tsx",
-      "content": "file content"
-    }}
-  ]
-}}
-```
-
----
-ACP Frontend Editor: Integrated, Safe, and Ready for Production
-"""
 
 
 def main():
