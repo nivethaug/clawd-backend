@@ -907,18 +907,6 @@ That's all. Execute Phase {phase} now.
             # STEP 2: Run verification build (always)
             logger.info("🔨 Step 2: Running verification build")
 
-            # Build summary based on result (V2 doesn't have mutation log)
-            if result.get('success'):
-                files_added = result.get('files_added', 0)
-                files_modified = result.get('files_modified', 0)
-                files_removed = result.get('files_removed', 0)
-                build_status = '✅' if not result.get('build_output') else 'N/A'
-            else:
-                files_added = 0
-                files_modified = 0
-                files_removed = 0
-                build_status = '❌'
-
             # STEP 3: ALWAYS run build gate (even if no changes detected)
             # This catches cases where AI modified imports/routing without creating new files
             logger.info("🧭 Router update: ✓ Completed in Step 2.5")
