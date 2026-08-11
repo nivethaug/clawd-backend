@@ -291,10 +291,12 @@ The log tells you EXACTLY what broke. Reading code is guessing.
 Reading logs is KNOWING. Never spend 10+ tool calls reading code when
 1 log read reveals the answer.
 
-After fixing, verify the bot starts cleanly:
+After fixing, verify the bot starts cleanly by reading logs:
 ```bash
-curl -s https://{domain}-api.dreamagent.cloud/health
+cat logs/out.log | tail -10
+cat logs/error.log | tail -5
 ```
+Do NOT curl the health URL — DNS may not be propagated yet.
 
 1. KEEP function signature EXACT:
    def process_user_input(text: str) -> str
@@ -566,9 +568,12 @@ Run this Bash command (NOT direct pm2 commands — they fail in the sandbox):
     cd {self.project_path} && python3 buildpublish.py . {self.project_id}
 
 - buildpublish.py handles PM2 restart via the worker-api.
-- ⛔ NEVER run `pm2 restart`, `pm2 stop`, or `sudo pm2` directly.
+- ⛔ NEVER run `pm2 restart`, `pm2 stop`, `pm2 logs`, or `sudo pm2` directly — pm2 is NOT in the sandbox PATH.
 - ⛔ Do NOT pass the project root to buildpublish.py — it needs `.` (bot dir).
-- After publish, check logs if needed: `pm2 logs dc-bot-{self.project_id} --lines 30`
+- After publish, verify by reading log files (NOT pm2 commands):
+    cat {self.project_path}/logs/out.log | tail -20
+    cat {self.project_path}/logs/error.log | tail -10
+- ⛔ Do NOT curl the health URL — DNS takes time to propagate for new projects.
 
 ==================================================
 
