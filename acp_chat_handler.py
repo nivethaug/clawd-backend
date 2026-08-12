@@ -2662,7 +2662,7 @@ Reading logs is KNOWING. Never guess — read the log and fix the
 specific error shown. Database errors in logs are often normal on
 first startup and handled by init_db().
 
-**After making changes, ALWAYS run tests then publish:**
+**After making changes, ALWAYS run tests then publish IMMEDIATELY:**
 
 ```bash
 # 1. Run unit tests (tests command parsing, AI logic, API calls)
@@ -2675,6 +2675,10 @@ cd {self.bot_code_path} && python3 buildpublish.py . {self.project_id}
 cat {self.bot_code_path}/logs/out.log | tail -20
 cat {self.bot_code_path}/logs/error.log | tail -10
 ```
+
+⛔ AFTER EDITING FILES, PUBLISH IMMEDIATELY.
+Do NOT re-read files to verify your edits. Trust your edits, publish,
+and read the LOGS to verify. Re-reading edited files wastes turns.
 
 ⛔ NEVER run `pm2 restart`, `pm2 stop`, `pm2 logs`, or `sudo pm2` directly.
 pm2 is NOT in the sandbox PATH. ALWAYS use `buildpublish.py`

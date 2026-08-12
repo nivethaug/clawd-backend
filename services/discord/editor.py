@@ -303,7 +303,7 @@ auth failed, table missing). Do NOT guess — read the log and fix the
 specific error shown. Common DB errors are normal on first startup
 (table doesn't exist yet) and are handled by init_db().
 
-After fixing, ALWAYS run unit tests then publish:
+After fixing, ALWAYS run unit tests then publish IMMEDIATELY:
 ```bash
 # 1. Run unit tests (tests command parsing, AI logic, API calls)
 cd {self.project_path} && python -m pytest unit/ -v 2>&1 | tail -30
@@ -315,9 +315,12 @@ cd {self.project_path} && python3 buildpublish.py . {self.project_id}
 cat {self.project_path}/logs/out.log | tail -20
 cat {self.project_path}/logs/error.log | tail -10
 ```
-cat logs/error.log | tail -5
-```
 Do NOT curl the health URL — DNS may not be propagated yet.
+
+⛔ AFTER EDITING FILES, PUBLISH IMMEDIATELY.
+Do NOT re-read files to "verify" your edits. Trust your edits, publish,
+and read the LOGS to verify. Re-reading edited files wastes turns.
+The publish step + log read is your verification — not re-reading code.
 
 SLASH COMMAND SYNC — IMPORTANT:
 "Synced 0 commands to [guild]" in the logs is NORMAL. It means Discord
