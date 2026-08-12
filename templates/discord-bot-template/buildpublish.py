@@ -63,27 +63,30 @@ def build(project_path: str) -> bool:
 
 def publish(project_path: str, project_id: str) -> bool:
     """
-    Publish the Discord bot using PM2.
+    Publish the Discord bot using PM2 via the worker-api.
 
-    Args:
-        project_path: Path to the bot project
-        project_id: Unique project identifier for PM2 process name
+    The worker-api runs on the host with direct PM2 access + shared venv.
+    This is the ONLY strategy — direct pm2 from inside the sandbox creates
+    broken processes (wrong interpreter, no venv packages).
     """
     process_name = f"dc-bot-{project_id}"
-
-    # Strategy 1: worker-api internal endpoint (container/sandbox path).
-    # The container/sandbox can't access PM2 directly — call the worker-api
-    # which runs on the same host as PM2.
     worker_api_url = os.environ.get("DREAMPILOT_WORKER_API_URL")
-    if worker_api_url:
-        import json as _json
-        import urllib.request as _urlreq
-        endpoint = f"{worker_api_url}/internal/pm2-restart"
-        payload = _json.dumps({"pm2_app_name": process_name}).encode()
-        print(f"→ Calling worker-api: POST {endpoint}")
+
+    if not worker_api_url:
+        print("✗ DREAMPILOT_WORKER_API_URL not set — cannot publish")
+        return False
+
+    import json as _json
+    import urllib.request as _urlreq
+    endpoint = f"{worker_api_url}/internal/pm2-restart"
+    payload = _json.dumps({"pm2_app_name": process_name}).encode()
+    print(f"→ Calling worker-api: POST {endpoint}")
+
+    # Retry once — the worker-api may be briefly busy installing deps.
+    for attempt in range(2):
         try:
             req = _urlreq.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-            with _urlreq.urlopen(req, timeout=60) as resp:
+            with _urlreq.urlopen(req, timeout=120) as resp:
                 result = _json.loads(resp.read().decode())
             if result.get("success"):
                 print(f"✓ Worker-api restarted PM2 app '{process_name}'")
@@ -91,38 +94,15 @@ def publish(project_path: str, project_id: str) -> bool:
                 return True
             else:
                 print(f"✗ Worker-api restart failed: {result.get('error', 'unknown')}")
+                return False
         except Exception as e:
-            print(f"⚠ Worker-api call failed: {e} — falling back to direct pm2")
+            if attempt == 0:
+                print(f"⚠ Worker-api call failed: {e} — retrying...")
+            else:
+                print(f"✗ Worker-api failed after retry: {e}")
+                return False
 
-    # Strategy 2: direct pm2 stop + start (host path, no sudo)
-    subprocess.run(["pm2", "stop", process_name], capture_output=True)
-    subprocess.run(["pm2", "delete", process_name], capture_output=True)
-
-    result = subprocess.run(
-        ["pm2", "start", "main.py",
-         "--name", process_name,
-         "--interpreter", sys.executable],
-        cwd=project_path,
-        capture_output=True,
-        text=True
-    )
-
-    if result.returncode == 0:
-        print(f"Bot published as PM2 process: {process_name}")
-        return True
-
-    # Strategy 3: sudo pm2 start (last resort — fails in sandbox/container)
-    print("⚠ bare pm2 start failed, trying with sudo")
-    result = subprocess.run(
-        f"sudo pm2 start main.py --name {process_name} --interpreter {sys.executable}",
-        shell=True, cwd=project_path, capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        print(f"PM2 start failed: {result.stderr}")
-        return False
-
-    print(f"Bot published as PM2 process: {process_name}")
-    return True
+    return False
 
 
 if __name__ == "__main__":
