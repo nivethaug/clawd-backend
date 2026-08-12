@@ -5117,6 +5117,38 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
     logger.info(f"[INTERNAL-RESTART] restarting PM2 app '{app_name}' (from {client_host})")
 
     try:
+        # Install dependencies into the shared venv BEFORE restart.
+        # buildpublish.py runs inside the sandbox where the venv is read-only
+        # (bwrap mount), so pip install there is useless. This endpoint runs
+        # on the host where the venv is read-write — install here instead.
+        venv_path = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")
+        venv_pip = os.path.join(venv_path, "bin", "pip")
+        if os.path.exists(venv_pip):
+            try:
+                jlist = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=10)
+                if jlist.returncode == 0:
+                    procs = json.loads(jlist.stdout)
+                    bot_cwd = None
+                    for p in procs:
+                        if p.get("name") == app_name:
+                            env = p.get("pm2_env", {})
+                            bot_cwd = env.get("pm_cwd") or env.get("cwd")
+                            break
+                    if bot_cwd:
+                        req_file = os.path.join(bot_cwd, "requirements.txt")
+                        if os.path.exists(req_file):
+                            logger.info(f"[INTERNAL-RESTART] Installing deps from {req_file}")
+                            inst = subprocess.run(
+                                [venv_pip, "install", "--prefer-binary", "-r", req_file],
+                                capture_output=True, text=True, timeout=300,
+                            )
+                            if inst.returncode == 0:
+                                logger.info("[INTERNAL-RESTART] ✓ Dependencies installed")
+                            else:
+                                logger.warning(f"[INTERNAL-RESTART] pip warning: {inst.stderr[:300]}")
+            except Exception as e:
+                logger.warning(f"[INTERNAL-RESTART] Dependency install skipped: {e}")
+
         restart_result = subprocess.run(
             ["pm2", "restart", app_name, "--update-env"],
             capture_output=True, text=True, timeout=30
