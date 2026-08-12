@@ -91,6 +91,10 @@ class OpenRouterClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": stream,
+            # Disable reasoning/thinking — GLM burns 500-1500 reasoning tokens
+            # (25s-2.5min) before producing content. Prompt Assistant doesn't
+            # need deep reasoning, just formatted text output.
+            "reasoning": {"enabled": False},
         }
 
         if tools is not None:
