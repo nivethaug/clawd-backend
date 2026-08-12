@@ -60,7 +60,7 @@ JOB_TIMEOUT_SECONDS = int(os.getenv("SCHEDULER_JOB_TIMEOUT", "120"))
 # engaged when EXECUTION_MODE=container (prod worker VPS). Local dev falls
 # back to in-process importlib so contributors without bwrap can still run.
 _USE_SANDBOX = (
-    os.getenv("EXECUTION_MODE", "local").lower() == "container"
+    os.getenv("EXECUTION_MODE", "container").lower() == "container"
     and os.path.exists(_SANDBOX_SCRIPT)
 )
 

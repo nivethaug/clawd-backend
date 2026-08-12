@@ -117,7 +117,7 @@ def start_bot_pm2(
             "scripts", "bot-sandbox.sh"
         )
         use_sandbox = (
-            os.getenv("EXECUTION_MODE", "local").lower() == "container"
+            os.getenv("EXECUTION_MODE", "container").lower() == "container"
             and os.path.exists(sandbox_script)
         )
 
