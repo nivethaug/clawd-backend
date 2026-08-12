@@ -2178,7 +2178,9 @@ python3 buildpublish.py
 
 ### Check Bot Status
 ```bash
-curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
+# Read log files (NOT curl health — DNS may not be propagated):
+cat {self.bot_code_path}/logs/out.log | tail -20
+cat {self.bot_code_path}/logs/error.log | tail -10
 ```
 
 ### Run Unit Tests (MANDATORY)
@@ -2203,7 +2205,9 @@ python -m pytest unit/ -v
 
 ### Check Logs (if tests fail)
 ```bash
-pm2 logs tg-bot-{self.project_id} --lines 50
+# Read log files (NOT pm2 logs — pm2 not in sandbox PATH):
+cat {self.bot_code_path}/logs/out.log | tail -20
+cat {self.bot_code_path}/logs/error.log | tail -10
 ```
 
 ---
@@ -2640,26 +2644,31 @@ If the user request requires website data:
 cd {self.bot_code_path}
 python3 buildpublish.py . {self.project_id}
 
-# Check if running
-curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
-
-# Test changes
-python3 buildpublish.py . {self.project_id} && sleep 3 && curl -s https://{self.domain}-api.{BASE_DOMAIN}/health
+# Verify by reading log files (NOT pm2 or curl — they fail in sandbox):
+cat {self.bot_code_path}/logs/out.log | tail -20
+cat {self.bot_code_path}/logs/error.log | tail -10
 ```
 
-⛔ NEVER run `pm2 restart`, `pm2 stop`, or `sudo pm2` directly.
-These fail inside the container/sandbox. ALWAYS use `buildpublish.py`
+⛔ NEVER run `pm2 restart`, `pm2 stop`, `pm2 logs`, or `sudo pm2` directly.
+pm2 is NOT in the sandbox PATH. ALWAYS use `buildpublish.py`
 which handles PM2 restart via the worker-api.
+⛔ Do NOT curl the health URL — DNS takes time to propagate.
 ⛔ Do NOT pass the project root path to buildpublish.py — it needs the
 bot code directory (where main.py lives), not the project root.
+
+SLASH COMMAND SYNC — IMPORTANT:
+"Synced 0 commands to [guild]" in the logs is NORMAL. It means Discord
+already has the commands cached. Do NOT try to fix sync logic.
+Global slash commands take up to 1 hour to propagate to all servers.
+ONLY modify sync if a genuinely NEW command was added that doesn't
+appear in Discord at all.
 
 ---
 
 ## COMMON ISSUES
 
 ### Bot Not Responding
-- Check health: `curl -s https://{self.domain}-api.{BASE_DOMAIN}/health`
-- Check logs: `pm2 logs dc-bot-{self.project_id}`
+- Read logs: `cat {self.bot_code_path}/logs/out.log | tail -20` and `cat {self.bot_code_path}/logs/error.log | tail -10`
 - Publish: `cd {self.bot_code_path} && python3 buildpublish.py . {self.project_id}`
 - Bot token is managed by the platform; if it is wrong, ask the user to re-link the bot via the dashboard
 
