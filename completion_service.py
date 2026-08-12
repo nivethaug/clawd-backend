@@ -20,8 +20,9 @@ class CompletionService:
     MAX_MESSAGES = 50
 
     # Prompt generation needs enough room for a complete but concise spec.
+    # GLM-5.2 burns tokens on reasoning, so we need extra headroom.
     COMPLETION_TEMPERATURE = 0.5
-    COMPLETION_MAX_TOKENS = 2400
+    COMPLETION_MAX_TOKENS = 4000
 
     CONVERSATION_WORKFLOW_PROMPT = """Conversation Workflow:
 - Behave like a senior Product Manager and Creative Director guiding a premium planning session.
@@ -719,19 +720,57 @@ Conversation:"""
             project_info=project_info,
         )
 
+        logger.info(
+            f"[PROMPT-ASSISTANT] stream_complete started — "
+            f"model={self.openrouter_client.model}, "
+            f"max_tokens={self.COMPLETION_MAX_TOKENS}, "
+            f"llm_messages={len(llm_messages)}"
+        )
+
+        _chunk_count = 0
+        _content_chunks = 0
+        _reasoning_chunks = 0
+        _content_total_chars = 0
+
         async for chunk in self.openrouter_client.stream_chat_completion(
             messages=llm_messages,
             temperature=self.COMPLETION_TEMPERATURE,
             max_tokens=self.COMPLETION_MAX_TOKENS,
         ):
             try:
+                _chunk_count += 1
                 choices = chunk.get("choices") or []
                 if not choices:
                     continue
                 delta = choices[0].get("delta") or {}
+
+                # Log reasoning tokens (GLM-5.2 burns these before content)
+                reasoning = delta.get("reasoning") or delta.get("reasoning_content")
+                if reasoning:
+                    _reasoning_chunks += 1
+
                 content = delta.get("content")
                 if content:
+                    _content_chunks += 1
+                    _content_total_chars += len(content)
                     yield content
+
+                # Log finish reason if present
+                finish = choices[0].get("finish_reason")
+                if finish:
+                    logger.info(
+                        f"[PROMPT-ASSISTANT] stream finish_reason={finish} — "
+                        f"chunks={_chunk_count}, content_chunks={_content_chunks}, "
+                        f"reasoning_chunks={_reasoning_chunks}, "
+                        f"content_chars={_content_total_chars}"
+                    )
             except (KeyError, IndexError):
                 continue
+
+        logger.info(
+            f"[PROMPT-ASSISTANT] stream_complete finished — "
+            f"total_chunks={_chunk_count}, content_chunks={_content_chunks}, "
+            f"reasoning_chunks={_reasoning_chunks}, "
+            f"content_chars={_content_total_chars}"
+        )
 
