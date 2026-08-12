@@ -95,34 +95,42 @@ def publish(project_path: str, project_id: str) -> bool:
             print(f"⚠ Worker-api call failed: {e} — falling back to direct pm2")
 
     # Strategy 2: direct pm2 stop + start (host path, no sudo)
+    # Use bot-sandbox.sh + shared venv to ensure correct Python interpreter.
     subprocess.run(["pm2", "stop", process_name], capture_output=True)
     subprocess.run(["pm2", "delete", process_name], capture_output=True)
 
-    result = subprocess.run(
-        ["pm2", "start", "main.py",
-         "--name", process_name,
-         "--interpreter", sys.executable],
-        cwd=project_path,
-        capture_output=True,
-        text=True
-    )
+    venv_path = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")
+    sandbox_script = "/root/clawd-backend/scripts/bot-sandbox.sh"
+
+    if os.path.exists(sandbox_script) and os.path.exists(venv_path):
+        result = subprocess.run(
+            ["pm2", "start", sandbox_script,
+             "--name", process_name,
+             "--interpreter", "none",
+             "--cwd", project_path,
+             "--", venv_path, project_path],
+            cwd=project_path,
+            capture_output=True,
+            text=True
+        )
+    else:
+        venv_python = os.path.join(venv_path, "bin", "python")
+        interpreter = venv_python if os.path.exists(venv_python) else sys.executable
+        result = subprocess.run(
+            ["pm2", "start", "main.py",
+             "--name", process_name,
+             "--interpreter", interpreter],
+            cwd=project_path,
+            capture_output=True,
+            text=True
+        )
 
     if result.returncode == 0:
         print(f"Bot published as PM2 process: {process_name}")
         return True
 
-    # Strategy 3: sudo pm2 start (last resort — fails in sandbox/container)
-    print("⚠ bare pm2 start failed, trying with sudo")
-    result = subprocess.run(
-        f"sudo pm2 start main.py --name {process_name} --interpreter {sys.executable}",
-        shell=True, cwd=project_path, capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        print(f"PM2 start failed: {result.stderr}")
-        return False
-
-    print(f"Bot published as PM2 process: {process_name}")
-    return True
+    print(f"PM2 start failed: {result.stderr}")
+    return False
 
 
 if __name__ == "__main__":

@@ -111,15 +111,13 @@ def start_bot_pm2(
         logger.info(f"Updated .env file with {len(env_vars)} variables")
 
         # Build PM2 start command
-        # Phase 5: use bubblewrap sandbox when EXECUTION_MODE=container
+        # Always use bot-sandbox.sh when available — it runs the bot with the
+        # shared venv Python via bwrap, ensuring discord.py etc. are importable.
         sandbox_script = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             "scripts", "bot-sandbox.sh"
         )
-        use_sandbox = (
-            os.getenv("EXECUTION_MODE", "local").lower() == "container"
-            and os.path.exists(sandbox_script)
-        )
+        use_sandbox = os.path.exists(sandbox_script)
 
         if use_sandbox:
             pm2_cmd = [
