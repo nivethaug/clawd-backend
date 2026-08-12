@@ -298,6 +298,18 @@ cat logs/error.log | tail -5
 ```
 Do NOT curl the health URL — DNS may not be propagated yet.
 
+SLASH COMMAND SYNC — IMPORTANT:
+"Synced 0 commands to [guild]" in the logs is NORMAL. It means Discord
+already has the commands cached from a previous sync. Discord.py returns
+0 when there are no NEW commands to register. Do NOT try to fix this by
+modifying the sync logic in main.py — it is working correctly.
+Global slash commands can take up to 1 hour to propagate to all servers.
+
+The ONLY time you should modify sync logic is if you added a genuinely
+NEW slash command (e.g. /chart) that doesn't appear in Discord at all.
+In that case, ensure the command is registered via bot.tree.command or
+tree.add_command before calling tree.sync().
+
 1. KEEP function signature EXACT:
    def process_user_input(text: str) -> str
 
