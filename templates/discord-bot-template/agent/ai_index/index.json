@@ -1,60 +1,92 @@
 {
   "symbols": [
     {
-      "name": "start",
+      "name": "start_handler",
       "type": "command",
       "file": "commands/start.py",
-      "start_line": 12,
-      "end_line": 35,
-      "description": "!start command - Register Discord user in database"
+      "start_line": 16,
+      "end_line": 42,
+      "description": "/start slash command - Register Discord user in database"
     },
     {
-      "name": "help_command",
+      "name": "help_handler",
       "type": "command",
       "file": "commands/help.py",
-      "start_line": 10,
-      "end_line": 22,
-      "description": "!help command - Show available commands"
+      "start_line": 8,
+      "end_line": 16,
+      "description": "/help slash command - Show available commands"
     },
     {
-      "name": "ask",
+      "name": "ask_handler",
       "type": "command",
       "file": "commands/ask.py",
-      "start_line": 10,
-      "end_line": 26,
-      "description": "!ask <query> command - Process user query via AI logic"
+      "start_line": 16,
+      "end_line": 31,
+      "description": "/ask <query> slash command - Routes query through process_user_input()"
     },
     {
-      "name": "status",
+      "name": "status_handler",
       "type": "command",
       "file": "commands/status.py",
-      "start_line": 10,
-      "end_line": 19,
-      "description": "!status command - Show bot status and latency"
+      "start_line": 8,
+      "end_line": 14,
+      "description": "/status slash command - Show bot status and latency"
     },
     {
       "name": "process_user_input",
       "type": "function",
       "file": "services/ai_logic.py",
-      "start_line": 13,
+      "start_line": 17,
       "end_line": 52,
-      "description": "Core AI decision engine - detects intent and returns response"
+      "description": "The /ask brain - detects intent from free-text query, calls APIs, returns response"
     },
     {
-      "name": "fetch_data",
+      "name": "fetch_json",
       "type": "function",
       "file": "services/api_client.py",
       "start_line": 19,
-      "end_line": 38,
-      "description": "Fetch data from external API by name"
+      "end_line": 40,
+      "description": "Generic JSON fetcher for public APIs"
     },
     {
-      "name": "fetch_bitcoin_price",
+      "name": "safe_get",
       "type": "function",
       "file": "services/api_client.py",
-      "start_line": 41,
-      "end_line": 50,
-      "description": "Get current Bitcoin price in USD"
+      "start_line": 43,
+      "end_line": 55,
+      "description": "Safely get nested dictionary value"
+    },
+    {
+      "name": "fetch_page",
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 58,
+      "end_line": 95,
+      "description": "Fetch and extract data from a web page via platform scraping API"
+    },
+    {
+      "name": "get_crypto_price",
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 102,
+      "end_line": 131,
+      "description": "Fetch cryptocurrency price from CoinGecko API"
+    },
+    {
+      "name": "get_weather",
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 134,
+      "end_line": 166,
+      "description": "Fetch weather data from Open-Meteo API"
+    },
+    {
+      "name": "get_news",
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 169,
+      "end_line": 194,
+      "description": "Fetch news headlines from Hacker News API"
     },
     {
       "name": "ScrapeConfig",
@@ -100,24 +132,24 @@
       "name": "get_mock_response",
       "type": "function",
       "file": "services/mock_data.py",
-      "start_line": 17,
-      "end_line": 35,
+      "start_line": 16,
+      "end_line": 31,
       "description": "Get fallback mock response by category"
     },
     {
       "name": "get_or_create_discord_user",
       "type": "function",
       "file": "models/user.py",
-      "start_line": 10,
-      "end_line": 52,
+      "start_line": 9,
+      "end_line": 60,
       "description": "Get existing user or create new Discord user in database"
     },
     {
       "name": "get_user_by_discord_id",
       "type": "function",
       "file": "models/user.py",
-      "start_line": 55,
-      "end_line": 77,
+      "start_line": 63,
+      "end_line": 90,
       "description": "Get user by Discord user ID"
     },
     {
@@ -125,55 +157,79 @@
       "type": "function",
       "file": "core/database.py",
       "start_line": 13,
-      "end_line": 23,
-      "description": "Get a PostgreSQL database connection"
+      "end_line": 24,
+      "description": "Get a raw PostgreSQL database connection"
+    },
+    {
+      "name": "get_db_cursor",
+      "type": "function",
+      "file": "core/database.py",
+      "start_line": 27,
+      "end_line": 54,
+      "description": "Context manager for DB operations with auto commit/rollback"
     },
     {
       "name": "init_db",
       "type": "function",
       "file": "core/database.py",
-      "start_line": 60,
-      "end_line": 83,
+      "start_line": 57,
+      "end_line": 93,
       "description": "Initialize database tables on startup"
     },
     {
       "name": "on_ready",
       "type": "event",
       "file": "main.py",
-      "start_line": 23,
-      "end_line": 27,
-      "description": "Discord bot ready event handler"
+      "start_line": 77,
+      "end_line": 92,
+      "description": "Bot ready event - logs guilds and syncs slash commands via bot.tree.sync()"
+    },
+    {
+      "name": "on_app_command_completion",
+      "type": "event",
+      "file": "main.py",
+      "start_line": 95,
+      "end_line": 98,
+      "description": "Logs when a slash command completes successfully"
+    },
+    {
+      "name": "on_app_command_error",
+      "type": "event",
+      "file": "main.py",
+      "start_line": 101,
+      "end_line": 109,
+      "description": "Global error handler for slash commands"
     },
     {
       "name": "setup_commands",
       "type": "function",
       "file": "main.py",
-      "start_line": 40,
-      "end_line": 52,
-      "description": "Register all command modules with the bot"
+      "start_line": 112,
+      "end_line": 143,
+      "description": "Register ALL slash commands via @bot.tree.command (start, help, ask, status)"
     },
     {
       "name": "main",
       "type": "function",
       "file": "main.py",
-      "start_line": 55,
-      "end_line": 69,
-      "description": "Bot entry point - init DB, register commands, start bot"
+      "start_line": 146,
+      "end_line": 167,
+      "description": "Bot entry point - init DB, health server, register commands, start bot"
     }
   ],
   "summaries": {
-    "main.py": "Bot entry point. Registers commands, initializes database, starts Discord bot. NO business logic here.",
-    "config.py": "Environment configuration. Loads DISCORD_TOKEN and DB credentials from .env file.",
-    "commands/start.py": "!start command handler. Registers Discord user in database on first use.",
-    "commands/help.py": "!help command handler. Displays list of all available commands.",
-    "commands/ask.py": "!ask <query> command handler. Routes queries through AI logic engine.",
-    "commands/status.py": "!status command handler. Shows bot status, guild count, and latency.",
-    "services/ai_logic.py": "Core AI decision engine. Detects intent from user text, calls APIs, returns responses. This is the primary file to modify for bot behavior.",
-    "services/api_client.py": "External API client. All HTTP requests go here. Uses requests library with timeout.",
+    "main.py": "Bot entry point (SLASH COMMANDS ONLY). Registers slash commands via @bot.tree.command in setup_commands(), syncs via bot.tree.sync() in on_ready(). No text/prefix commands. No business logic.",
+    "config.py": "Environment configuration. Loads DISCORD_TOKEN, DB credentials, PORT, PROJECT_ID, GUILD_ID from .env file.",
+    "commands/start.py": "/start slash command handler. Registers Discord user in database via interaction.user.",
+    "commands/help.py": "/help slash command handler. Displays list of available slash commands.",
+    "commands/ask.py": "/ask <query> slash command handler. Routes free-text query through process_user_input() in ai_logic.py.",
+    "commands/status.py": "/status slash command handler. Shows bot status, guild count, and latency via interaction.client.",
+    "services/ai_logic.py": "The /ask brain. process_user_input(text) detects intent from free-text query, calls APIs, returns responses. PRIMARY file to modify for bot behavior.",
+    "services/api_client.py": "External API client. All HTTP requests go here. Functions: fetch_json, safe_get, fetch_page, get_crypto_price, get_weather, get_news.",
     "services/web_scraper.py": "CDP web scraper using chrome-devtools-mcp. Supports config-driven extraction, custom scraper classes, pagination, auth, JS extraction, and scraper registry for LLM extensibility.",
     "services/mock_data.py": "Fallback mock responses when API is unavailable or intent is unclear.",
     "models/user.py": "User model with database CRUD operations. Supports Discord user auto-creation.",
-    "core/database.py": "PostgreSQL connection manager. Provides get_db() context manager and table initialization.",
+    "core/database.py": "PostgreSQL connection manager. Provides get_db() for raw connections and get_db_cursor() context manager with auto commit/rollback.",
     "utils/logger.py": "Simple logging configuration with console handler.",
     "requirements.txt": "Python dependencies: discord.py, requests, python-dotenv, psycopg2-binary.",
     ".env.example": "Environment variable template. Copy to .env and fill in values."
@@ -181,17 +237,21 @@
   "files": {
     "main.py": {
       "type": "python",
-      "lines": 69,
-      "purpose": "Bot entry point - command registration and startup",
+      "lines": 170,
+      "purpose": "Bot entry point - slash command registration and startup",
       "exports": [
         "bot",
-        "main"
+        "main",
+        "setup_commands",
+        "on_ready",
+        "on_app_command_completion",
+        "on_app_command_error"
       ],
       "endpoints": []
     },
     "config.py": {
       "type": "python",
-      "lines": 25,
+      "lines": 30,
       "purpose": "Environment variable configuration",
       "exports": [
         "DISCORD_TOKEN",
@@ -201,36 +261,38 @@
         "DB_USER",
         "DB_PASSWORD",
         "DATABASE_URL",
-        "COMMAND_PREFIX"
+        "PORT",
+        "PROJECT_ID",
+        "GUILD_ID"
       ],
       "endpoints": []
     },
     "commands/start.py": {
       "type": "python",
-      "lines": 35,
-      "purpose": "!start command - user registration",
+      "lines": 47,
+      "purpose": "/start slash command - user registration",
       "exports": [
-        "start",
+        "start_handler",
         "setup"
       ],
       "endpoints": []
     },
     "commands/help.py": {
       "type": "python",
-      "lines": 22,
-      "purpose": "!help command - show available commands",
+      "lines": 21,
+      "purpose": "/help slash command - show available commands",
       "exports": [
-        "help_command",
+        "help_handler",
         "setup"
       ],
       "endpoints": []
     },
     "commands/ask.py": {
       "type": "python",
-      "lines": 26,
-      "purpose": "!ask command - process AI queries",
+      "lines": 36,
+      "purpose": "/ask slash command - process free-text AI queries",
       "exports": [
-        "ask",
+        "ask_handler",
         "setup"
       ],
       "endpoints": []
@@ -238,17 +300,17 @@
     "commands/status.py": {
       "type": "python",
       "lines": 19,
-      "purpose": "!status command - bot status info",
+      "purpose": "/status slash command - bot status info",
       "exports": [
-        "status",
+        "status_handler",
         "setup"
       ],
       "endpoints": []
     },
     "services/ai_logic.py": {
       "type": "python",
-      "lines": 52,
-      "purpose": "Core AI decision engine",
+      "lines": 53,
+      "purpose": "The /ask brain - intent detection and API calls",
       "exports": [
         "process_user_input"
       ],
@@ -256,13 +318,15 @@
     },
     "services/api_client.py": {
       "type": "python",
-      "lines": 80,
+      "lines": 263,
       "purpose": "External API client",
       "exports": [
-        "fetch_data",
-        "fetch_bitcoin_price",
-        "get_json",
-        "post_json"
+        "fetch_json",
+        "safe_get",
+        "fetch_page",
+        "get_crypto_price",
+        "get_weather",
+        "get_news"
       ],
       "endpoints": []
     },
@@ -283,7 +347,7 @@
     },
     "services/mock_data.py": {
       "type": "python",
-      "lines": 35,
+      "lines": 32,
       "purpose": "Fallback mock responses",
       "exports": [
         "get_mock_response",
@@ -293,7 +357,7 @@
     },
     "models/user.py": {
       "type": "python",
-      "lines": 77,
+      "lines": 91,
       "purpose": "User model - database CRUD operations",
       "exports": [
         "get_or_create_discord_user",
@@ -303,7 +367,7 @@
     },
     "core/database.py": {
       "type": "python",
-      "lines": 83,
+      "lines": 93,
       "purpose": "PostgreSQL connection and table initialization",
       "exports": [
         "get_db",
