@@ -2271,8 +2271,7 @@ After making ANY changes, update the project code index:
 ## COMMON ISSUES
 
 ### Bot Not Responding
-- Check PM2 status: `pm2 status`
-- Check logs: `pm2 logs tg-bot-{self.project_id}`
+- Read logs: `cat {self.bot_code_path}/logs/out.log | tail -20` and `cat {self.bot_code_path}/logs/error.log | tail -10`
 - Publish: `cd {self.bot_code_path} && python3 buildpublish.py`
 
 ### Webhook Issues
@@ -2640,7 +2639,19 @@ If you add or modify slash commands (/price, /market, /chart, /status):
 2. Command file setup() functions MUST be SYNCHRONOUS: `def setup(bot): pass`
    NEVER use `async def setup(bot):` — it won't be awaited and commands won't register
 3. Do NOT register the same command in both main.py AND command file setup()
-4. After editing commands, ALWAYS run unit tests then publish immediately
+4. After registering commands, you MUST sync them in on_ready():
+   ```python
+   @bot.event
+   async def on_ready():
+       logger.info(f"Connected as {bot.user}")
+       try:
+           synced = await bot.tree.sync()
+           logger.info(f"Synced {len(synced)} commands")
+       except Exception as e:
+           logger.error(f"Failed to sync commands: {e}")
+   ```
+   WITHOUT bot.tree.sync(), slash commands will NOT appear in Discord.
+5. After editing commands, ALWAYS run unit tests then publish immediately
 
 ---
 

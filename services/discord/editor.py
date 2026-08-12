@@ -572,6 +572,20 @@ to prevent crashes and duplicate registration errors:
    - Command files just export the handler function
    - Do NOT mix bot.tree.command in both main.py AND command files
 
+5. After registering ALL slash commands, you MUST sync them to Discord
+   in the on_ready() event handler. Without sync, commands will NOT appear:
+
+   @bot.event
+   async def on_ready():
+       logger.info(f"Connected as {bot.user}")
+       try:
+           synced = await bot.tree.sync()
+           logger.info(f"Synced {len(synced)} commands")
+       except Exception as e:
+           logger.error(f"Failed to sync commands: {e}")
+
+   NEVER skip bot.tree.sync() - commands are invisible without it.
+
 ==================================================
 START + HELP UPDATE RULE (MANDATORY)
 ==================================================
