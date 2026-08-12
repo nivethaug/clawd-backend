@@ -335,8 +335,7 @@ Custom Project Editing Rules:
             if self.is_available():
                 logger.info(
                     "OpenRouter completion service initialized successfully "
-                    f"(model={self.openrouter_client.model}, "
-                    f"provider={self.openrouter_client.provider_strategy})"
+                    f"(model={self.openrouter_client.model})"
                 )
             else:
                 logger.warning("OPENROUTER_API_KEY not configured, completion service unavailable")
