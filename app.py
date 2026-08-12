@@ -5117,37 +5117,71 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
     logger.info(f"[INTERNAL-RESTART] restarting PM2 app '{app_name}' (from {client_host})")
 
     try:
-        # Install dependencies into the shared venv BEFORE restart.
-        # buildpublish.py runs inside the sandbox where the venv is read-only
-        # (bwrap mount), so pip install there is useless. This endpoint runs
-        # on the host where the venv is read-write — install here instead.
         venv_path = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")
         venv_pip = os.path.join(venv_path, "bin", "pip")
-        if os.path.exists(venv_pip):
-            try:
-                jlist = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=10)
-                if jlist.returncode == 0:
-                    procs = json.loads(jlist.stdout)
-                    bot_cwd = None
-                    for p in procs:
-                        if p.get("name") == app_name:
-                            env = p.get("pm2_env", {})
-                            bot_cwd = env.get("pm_cwd") or env.get("cwd")
-                            break
-                    if bot_cwd:
-                        req_file = os.path.join(bot_cwd, "requirements.txt")
-                        if os.path.exists(req_file):
-                            logger.info(f"[INTERNAL-RESTART] Installing deps from {req_file}")
-                            inst = subprocess.run(
-                                [venv_pip, "install", "--prefer-binary", "-r", req_file],
-                                capture_output=True, text=True, timeout=300,
+        sandbox_script = "/root/clawd-backend/scripts/bot-sandbox.sh"
+
+        # Inspect current PM2 process config to find bot cwd and detect
+        # misconfigured interpreter (e.g. /usr/bin/python3 instead of venv).
+        bot_cwd = None
+        needs_recreate = False
+        try:
+            jlist = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=10)
+            if jlist.returncode == 0:
+                procs = json.loads(jlist.stdout)
+                for p in procs:
+                    if p.get("name") == app_name:
+                        env = p.get("pm2_env", {})
+                        bot_cwd = env.get("pm_cwd") or env.get("cwd")
+                        interpreter = env.get("exec_interpreter", "")
+                        script = env.get("pm_exec_path", "")
+                        # Bot processes should use bot-sandbox.sh, not main.py directly.
+                        # If running main.py with /usr/bin/python3, the venv packages
+                        # (discord.py etc.) won't be found — recreate with sandbox.
+                        if "main.py" in script and interpreter and venv_path not in interpreter:
+                            needs_recreate = True
+                            logger.warning(
+                                f"[INTERNAL-RESTART] Wrong interpreter '{interpreter}' "
+                                f"(not venv). Will recreate with bot-sandbox.sh."
                             )
-                            if inst.returncode == 0:
-                                logger.info("[INTERNAL-RESTART] ✓ Dependencies installed")
-                            else:
-                                logger.warning(f"[INTERNAL-RESTART] pip warning: {inst.stderr[:300]}")
-            except Exception as e:
-                logger.warning(f"[INTERNAL-RESTART] Dependency install skipped: {e}")
+                        break
+        except Exception as e:
+            logger.warning(f"[INTERNAL-RESTART] PM2 inspect skipped: {e}")
+
+        # Install dependencies into the shared venv BEFORE restart.
+        if bot_cwd and os.path.exists(venv_pip):
+            req_file = os.path.join(bot_cwd, "requirements.txt")
+            if os.path.exists(req_file):
+                try:
+                    logger.info(f"[INTERNAL-RESTART] Installing deps from {req_file}")
+                    inst = subprocess.run(
+                        [venv_pip, "install", "--prefer-binary", "-r", req_file],
+                        capture_output=True, text=True, timeout=300,
+                    )
+                    if inst.returncode == 0:
+                        logger.info("[INTERNAL-RESTART] ✓ Dependencies installed")
+                    else:
+                        logger.warning(f"[INTERNAL-RESTART] pip warning: {inst.stderr[:300]}")
+                except Exception as e:
+                    logger.warning(f"[INTERNAL-RESTART] pip install skipped: {e}")
+
+        # If the PM2 process has the wrong interpreter, delete + recreate
+        # with bot-sandbox.sh so it uses the shared venv Python.
+        if needs_recreate and bot_cwd and os.path.exists(sandbox_script):
+            logger.info(f"[INTERNAL-RESTART] Recreating '{app_name}' with bot-sandbox.sh")
+            subprocess.run(["pm2", "delete", app_name], capture_output=True, text=True, timeout=15)
+            recreate = subprocess.run(
+                ["pm2", "start", sandbox_script, "--name", app_name,
+                 "--cwd", bot_cwd, "--", venv_path, bot_cwd],
+                capture_output=True, text=True, timeout=30,
+            )
+            if recreate.returncode == 0:
+                logger.info(f"[INTERNAL-RESTART] ✓ Recreated with bot-sandbox.sh")
+                subprocess.run(["pm2", "save"], capture_output=True, text=True, timeout=10)
+                return {"success": True, "pm2_app_name": app_name, "restarted": True, "recreated": True}
+            else:
+                logger.error(f"[INTERNAL-RESTART] Recreate failed: {recreate.stderr[:300]}")
+                # Fall through to normal restart as fallback
 
         restart_result = subprocess.run(
             ["pm2", "restart", app_name, "--update-env"],
