@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 PROMPT_ASSISTANT_MODEL = os.getenv("PROMPT_ASSISTANT_MODEL", "z-ai/glm-4.7-flash")
-PROMPT_ASSISTANT_PROVIDER = os.getenv("PROMPT_ASSISTANT_PROVIDER", "balanced")
 OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
 OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "DreamAgent")
 # 45s per-request timeout — GLM-4.7-flash routinely takes 10-15s for the
@@ -45,7 +44,6 @@ class OpenRouterClient:
         self,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
-        provider_strategy: Optional[str] = None,
     ):
         """
         Initialize OpenRouter client.
@@ -53,12 +51,10 @@ class OpenRouterClient:
         Args:
             api_key: OpenRouter API key (defaults to OPENROUTER_API_KEY env var)
             model: Model name (defaults to PROMPT_ASSISTANT_MODEL env var)
-            provider_strategy: Routing strategy (defaults to PROMPT_ASSISTANT_PROVIDER env var)
         """
         self.api_key = api_key or OPENROUTER_API_KEY
         self.model = model or PROMPT_ASSISTANT_MODEL
         self.api_base = OPENROUTER_BASE_URL.rstrip("/")
-        self.provider_strategy = (provider_strategy or PROMPT_ASSISTANT_PROVIDER or "balanced").strip().lower()
         self._client: Optional[httpx.AsyncClient] = None
 
         if not self.api_key:
@@ -74,40 +70,6 @@ class OpenRouterClient:
         if OPENROUTER_APP_NAME:
             headers["X-Title"] = OPENROUTER_APP_NAME
         return headers
-
-    def _provider_routing(self) -> Optional[Dict[str, Any]]:
-        """
-        Build OpenRouter provider routing configuration.
-
-        Balanced uses OpenRouter's default routing and intentionally omits a
-        provider object. Exact routing is supported by setting:
-        PROMPT_ASSISTANT_PROVIDER=exact and
-        PROMPT_ASSISTANT_PROVIDER_ORDER=provider_a,provider_b
-        """
-        strategy = self.provider_strategy
-        if strategy in {"", "balanced"}:
-            return None
-
-        provider_order = (
-            os.getenv("PROMPT_ASSISTANT_PROVIDER_ORDER", "")
-            or os.getenv("OPENROUTER_PROVIDER_ORDER", "")
-        )
-
-        if strategy == "exact":
-            providers = [item.strip() for item in provider_order.split(",") if item.strip()]
-            if not providers:
-                logger.warning(
-                    "[OPENROUTER-CLIENT] PROMPT_ASSISTANT_PROVIDER=exact but no provider order configured; "
-                    "falling back to balanced routing"
-                )
-                return None
-            return {"order": providers, "allow_fallbacks": False}
-
-        logger.warning(
-            "[OPENROUTER-CLIENT] Unknown provider strategy '%s'; falling back to balanced routing",
-            self.provider_strategy,
-        )
-        return None
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -135,10 +97,6 @@ class OpenRouterClient:
             payload["tools"] = tools
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
-
-        provider = self._provider_routing()
-        if provider:
-            payload["provider"] = provider
 
         return payload
 
@@ -178,10 +136,9 @@ class OpenRouterClient:
         )
         attempts = max(1, int(max_retries if max_retries is not None else MAX_RETRIES))
         logger.debug(
-            "[OPENROUTER-CLIENT] Calling OpenRouter with %s messages, model=%s, provider=%s, tools=%s, attempts=%s",
+            "[OPENROUTER-CLIENT] Calling OpenRouter with %s messages, model=%s, tools=%s, attempts=%s",
             len(messages),
             self.model,
-            self.provider_strategy,
             len(tools or []),
             attempts,
         )
@@ -262,31 +219,92 @@ class OpenRouterClient:
         streaming connection is isolated from other requests and won't be
         closed mid-stream by a concurrent gate/vision call.
         """
+        import time as _time
+
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY not configured")
 
         payload = self._build_payload(messages, temperature, max_tokens, stream=True)
+        model = payload.get("model", "?")
 
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            async with client.stream(
-                "POST",
-                f"{self.api_base}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
+        logger.info(
+            f"[OPENROUTER-STREAM] connecting — model={model}, "
+            f"messages={len(messages)}, max_tokens={max_tokens}"
+        )
+        _http_start = _time.monotonic()
 
-                    data = line.removeprefix("data: ").strip()
-                    if data == "[DONE]":
-                        break
+        try:
+            async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.api_base}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                ) as response:
+                    _connect_ms = (_time.monotonic() - _http_start) * 1000
+                    logger.info(
+                        f"[OPENROUTER-STREAM] HTTP {response.status_code} "
+                        f"after {_connect_ms:.0f}ms"
+                    )
+                    response.raise_for_status()
 
-                    try:
-                        yield json.loads(data)
-                    except json.JSONDecodeError:
-                        logger.warning("[OPENROUTER-CLIENT] Failed to parse stream chunk: %s", data[:200])
+                    _chunk_count = 0
+                    _first_chunk_logged = False
+
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+
+                        data = line.removeprefix("data: ").strip()
+                        if data == "[DONE]":
+                            logger.info(
+                                f"[OPENROUTER-STREAM] [DONE] — "
+                                f"chunks={_chunk_count}, "
+                                f"elapsed={(_time.monotonic() - _http_start) * 1000:.0f}ms"
+                            )
+                            break
+
+                        try:
+                            _chunk_count += 1
+                            if not _first_chunk_logged:
+                                _first_ms = (_time.monotonic() - _http_start) * 1000
+                                logger.info(
+                                    f"[OPENROUTER-STREAM] first chunk after "
+                                    f"{_first_ms:.0f}ms"
+                                )
+                                _first_chunk_logged = True
+                            yield json.loads(data)
+                        except json.JSONDecodeError:
+                            logger.warning(
+                                f"[OPENROUTER-STREAM] parse error: {data[:200]}"
+                            )
+
+        except httpx.TimeoutException:
+            _elapsed = (_time.monotonic() - _http_start) * 1000
+            logger.error(
+                f"[OPENROUTER-STREAM] TIMEOUT after {_elapsed:.0f}ms "
+                f"(limit={DEFAULT_TIMEOUT}s) — model={model}"
+            )
+            raise
+        except httpx.HTTPStatusError as e:
+            _elapsed = (_time.monotonic() - _http_start) * 1000
+            _body = ""
+            try:
+                _body = e.response.text[:500]
+            except Exception:
+                pass
+            logger.error(
+                f"[OPENROUTER-STREAM] HTTP {e.response.status_code} after "
+                f"{_elapsed:.0f}ms — body={_body}"
+            )
+            raise
+        except Exception as e:
+            _elapsed = (_time.monotonic() - _http_start) * 1000
+            logger.error(
+                f"[OPENROUTER-STREAM] ERROR {type(e).__name__}: {e} "
+                f"after {_elapsed:.0f}ms"
+            )
+            raise
 
     def get_text_response(self, response: Dict[str, Any]) -> str:
         """
