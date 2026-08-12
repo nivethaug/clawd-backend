@@ -278,6 +278,14 @@ NOTE: User provides title + description - AI MUST decide APIs autonomously
 CRITICAL RULES (MANDATORY)
 ==================================================
 
+🔴 DO NOT RUN THE BOT DIRECTLY IN THE SANDBOX.
+The sandbox blocks psycopg2's C library (mmap restriction). If you run
+`python3 main.py` or `python3 -c "import ..."` it will crash on psycopg2.
+This is NOT a code bug — it's a sandbox limitation. The bot runs fine
+via PM2 (outside the sandbox) after publishing.
+ALWAYS publish via buildpublish.py and verify by reading logs. Never
+try to test-import or run the bot directly.
+
 🔴 RULE ZERO: READ LOGS BEFORE FIXING ANYTHING.
 If the bot is not working (no response, crash, 502), ALWAYS read the error
 log FIRST before making any code changes:

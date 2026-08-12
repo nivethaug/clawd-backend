@@ -2635,6 +2635,12 @@ If the user request requires website data:
 
 ## PUBLISHING CHANGES
 
+🔴 DO NOT RUN THE BOT DIRECTLY IN THE SANDBOX.
+The sandbox blocks psycopg2's C library (mmap restriction). Running
+`python3 main.py` or `python3 -c "import ..."` will crash on psycopg2.
+This is NOT a code bug — it's a sandbox limitation. The bot runs fine
+via PM2 after publishing. Do NOT try to fix psycopg2 import errors.
+
 **After making changes, use buildpublish.py (NOT direct pm2 commands):**
 
 ```bash
