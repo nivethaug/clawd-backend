@@ -10611,6 +10611,16 @@ async def completion_stream(request: CompletionRequest):
     STATUS_INTERVAL = 2.5  # seconds between status pings
 
     async def _stream():
+        import time as _time
+
+        _req_start = _time.monotonic()
+        logger.info(
+            f"[PROMPT-ASSISTANT] stream request started — "
+            f"type={request.projectType}, mode={request.mode}, "
+            f"messages={len(request.messages)}, "
+            f"generate_prompt={request.generatePrompt}"
+        )
+
         # Run the LLM generator in a background task that feeds a queue.
         # We cannot use asyncio.wait_for on __anext__() directly because
         # cancelling the coroutine closes the async generator permanently.
@@ -10669,12 +10679,24 @@ async def completion_stream(request: CompletionRequest):
                     yield f"data: {_err}\n\n"
                     break
 
+                if not got_content:
+                    _first_content_ms = (_time.monotonic() - _req_start) * 1000
+                    logger.info(
+                        f"[PROMPT-ASSISTANT] first content chunk after "
+                        f"{_first_content_ms:.0f}ms"
+                    )
                 got_content = True
                 _event = _json.dumps(
                     {"choices": [{"delta": {"content": item}}]}
                 )
                 yield f"data: {_event}\n\n"
         finally:
+            _total_ms = (_time.monotonic() - _req_start) * 1000
+            logger.info(
+                f"[PROMPT-ASSISTANT] stream completed — "
+                f"total={_total_ms:.0f}ms, "
+                f"status_pings={status_idx}"
+            )
             if not producer_task.done():
                 producer_task.cancel()
                 try:
