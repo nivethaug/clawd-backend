@@ -2641,16 +2641,26 @@ The sandbox blocks psycopg2's C library (mmap restriction). Running
 This is NOT a code bug — it's a sandbox limitation. The bot runs fine
 via PM2 after publishing. Do NOT try to fix psycopg2 import errors.
 
-**After making changes, use buildpublish.py (NOT direct pm2 commands):**
+🔴 RULE ZERO: ALWAYS READ LOGS FIRST.
+Before fixing ANY issue, read logs FIRST:
+```bash
+cat {self.bot_code_path}/logs/error.log | tail -30
+cat {self.bot_code_path}/logs/out.log | tail -10
+```
+Reading logs is KNOWING. Never guess — read the log and fix the
+specific error shown. Database errors in logs are often normal on
+first startup and handled by init_db().
+
+**After making changes, ALWAYS run tests then publish:**
 
 ```bash
-# Publish changes (handles PM2 restart via worker-api)
-# buildpublish.py lives inside the bot code dir and needs the path to it.
-# The "." means "current directory" (the bot code dir you just cd'd into).
-cd {self.bot_code_path}
-python3 buildpublish.py . {self.project_id}
+# 1. Run unit tests (tests command parsing, AI logic, API calls)
+cd {self.bot_code_path} && python -m pytest unit/ -v 2>&1 | tail -30
 
-# Verify by reading log files (NOT pm2 or curl — they fail in sandbox):
+# 2. Publish (handles PM2 restart via worker-api)
+cd {self.bot_code_path} && python3 buildpublish.py . {self.project_id}
+
+# 3. Verify by reading log files (NOT pm2, NOT curl, NOT running bot directly)
 cat {self.bot_code_path}/logs/out.log | tail -20
 cat {self.bot_code_path}/logs/error.log | tail -10
 ```

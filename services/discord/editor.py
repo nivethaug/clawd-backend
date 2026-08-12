@@ -286,22 +286,35 @@ via PM2 (outside the sandbox) after publishing.
 ALWAYS publish via buildpublish.py and verify by reading logs. Never
 try to test-import or run the bot directly.
 
-🔴 RULE ZERO: READ LOGS BEFORE FIXING ANYTHING.
-If the bot is not working (no response, crash, 502), ALWAYS read the error
-log FIRST before making any code changes:
+🔴 RULE ZERO: ALWAYS READ LOGS FIRST.
+Before fixing ANY issue (crash, no response, 502, DB error), ALWAYS read
+the logs FIRST. The logs tell you EXACTLY what broke.
 
 ```bash
 cat logs/error.log | tail -30
 cat logs/out.log | tail -10
 ```
 
-The log tells you EXACTLY what broke. Reading code is guessing.
-Reading logs is KNOWING. Never spend 10+ tool calls reading code when
-1 log read reveals the answer.
+Reading logs is KNOWING. Reading code is guessing.
+Never spend 10+ tool calls reading code when 1 log read reveals the answer.
 
-After fixing, verify the bot starts cleanly by reading logs:
+Database issues? The log will show the exact DB error (connection refused,
+auth failed, table missing). Do NOT guess — read the log and fix the
+specific error shown. Common DB errors are normal on first startup
+(table doesn't exist yet) and are handled by init_db().
+
+After fixing, ALWAYS run unit tests then publish:
 ```bash
-cat logs/out.log | tail -10
+# 1. Run unit tests (tests command parsing, AI logic, API calls)
+cd {self.project_path} && python -m pytest unit/ -v 2>&1 | tail -30
+
+# 2. Publish (handles PM2 restart via worker-api)
+cd {self.project_path} && python3 buildpublish.py . {self.project_id}
+
+# 3. Verify by reading logs (NOT pm2, NOT curl, NOT running bot directly)
+cat {self.project_path}/logs/out.log | tail -20
+cat {self.project_path}/logs/error.log | tail -10
+```
 cat logs/error.log | tail -5
 ```
 Do NOT curl the health URL — DNS may not be propagated yet.
