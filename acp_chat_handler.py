@@ -2633,6 +2633,17 @@ If the user request requires website data:
 
 ---
 
+## SLASH COMMAND REGISTRATION — CRITICAL
+
+If you add or modify slash commands (/price, /market, /chart, /status):
+1. Register ALL slash commands in main.py's setup_commands() ONLY via @bot.tree.command
+2. Command file setup() functions MUST be SYNCHRONOUS: `def setup(bot): pass`
+   NEVER use `async def setup(bot):` — it won't be awaited and commands won't register
+3. Do NOT register the same command in both main.py AND command file setup()
+4. After editing commands, ALWAYS run unit tests then publish immediately
+
+---
+
 ## PUBLISHING CHANGES
 
 🔴 DO NOT RUN THE BOT DIRECTLY IN THE SANDBOX.

@@ -543,6 +543,32 @@ FEATURE RULES
 - DO NOT remove existing commands
 - DO NOT rename commands
 
+SLASH COMMAND REGISTRATION — CRITICAL:
+If you create slash commands (/price, /market, /chart), follow these rules
+to prevent crashes and duplicate registration errors:
+
+1. Register ALL slash commands in main.py's setup_commands() function ONLY.
+   Use @bot.tree.command(...) decorator inside setup_commands().
+   Do NOT also register them in command file setup() functions.
+
+2. Command files (price.py, market.py, etc.) should ONLY contain the handler
+   function (e.g., `async def price(interaction, symbol):`) and a NO-OP setup:
+   ```python
+   def setup(bot):
+       # No-op: command registered directly in main.py
+       pass
+   ```
+
+3. setup() functions MUST be SYNCHRONOUS: `def setup(bot):`
+   NEVER use `async def setup(bot):` — main.py calls setup() without await.
+   Using async setup() causes "coroutine was never awaited" warnings and
+   commands will NOT be registered.
+
+4. Pick ONE registration approach and stick with it:
+   - RECOMMENDED: Register all @bot.tree.command in main.py setup_commands()
+   - Command files just export the handler function
+   - Do NOT mix bot.tree.command in both main.py AND command files
+
 ==================================================
 START + HELP UPDATE RULE (MANDATORY)
 ==================================================
