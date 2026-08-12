@@ -18,9 +18,10 @@ def build_discord_plan_prompt(
 **Project path:** `{project_path}`
 
 ### File Structure (Key Areas)
-- `bot.py` or `main.py` — Bot entry point
-- `cogs/` — Command groups and event handlers
-- `api_client.py` — External API calls
+- `main.py` — Bot entry point + slash command registration (@bot.tree.command)
+- `commands/` — Slash command handlers (/start, /help, /ask, /status)
+- `services/ai_logic.py` — process_user_input() — the /ask brain (primary modification target)
+- `services/api_client.py` — External API calls
 - `agent/README.md` — Bot agent docs
 - `agent/ai_index/` — AI index files
 

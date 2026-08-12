@@ -971,9 +971,9 @@ PASS if the user wants you to DO, BUILD, or CHANGE anything. Key words:
   implement, add, create, build, make, set up, write, code, develop,
   deploy, fix, update, modify, change, remove, delete, integrate,
   connect, set up, configure, enable, disable
-Even if they reference something from the index (e.g. "implement !ask social"),
+Even if they reference something from the index (e.g. "implement /ask social"),
 that is a BUILD request → PASS. You do not write code.
-ALSO PASS when the message DESCRIBES a feature/command spec (e.g. "!ask social
+ALSO PASS when the message DESCRIBES a feature/command spec (e.g. "/ask social
 — All DreamAgent social media in one place"). If it looks like a description
 of what to build, not a question about what exists → PASS.
 ALSO PASS for: logs, errors, PM2 output, deployments, debugging.
@@ -1026,8 +1026,8 @@ def _build_gate_prompt(project_name: str, project_type_id: int = None) -> str:
             "type_desc": "Discord bot",
             "index_terms": "commands, handlers, functions",
             "examples": [
-                '"list all commands" → "Your bot supports: !start, !help, !ask"',
-                '"suggest new commands" → "You could add: !status, !pricing, !faq"',
+                '"list all commands" → "Your bot supports: /start, /help, /ask"',
+                '"suggest new commands" → "You could add: /status, /pricing, /faq"',
                 '"what can the bot do" → explain from symbols',
             ],
             "suggest_terms": "commands, features",

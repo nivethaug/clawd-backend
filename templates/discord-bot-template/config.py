@@ -25,9 +25,10 @@ DATABASE_URL = os.getenv(
     f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
 
-# Bot settings
-COMMAND_PREFIX = os.getenv("COMMAND_PREFIX", "!")
-
 # Server settings
 PORT = int(os.getenv("PORT", "8010"))
 PROJECT_ID = os.getenv("PROJECT_ID", "1")
+
+# Optional: Guild ID for instant slash command sync during development.
+# Leave empty for global sync (takes up to 1 hour to propagate).
+GUILD_ID = os.getenv("GUILD_ID", "")

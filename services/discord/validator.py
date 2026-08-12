@@ -13,8 +13,10 @@ logger = logging.getLogger("services.discord.validator")
 # Calculated using Discord's permission calculator
 BOT_PERMISSIONS = 277025770560  # SendMessages + ReadMessageHistory + UseApplicationCommands
 
-# Privileged intents required
-REQUIRED_INTENTS = ["MESSAGE CONTENT"]
+# Privileged intents required.
+# Slash commands need NO privileged intents. If the user adds moderation/message-reading
+# features, the AI re-enables message_content in the bot code + Developer Portal.
+REQUIRED_INTENTS = []
 
 
 def validate_discord_token(token: str) -> Tuple[bool, Dict]:

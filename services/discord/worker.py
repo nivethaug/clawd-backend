@@ -151,13 +151,11 @@ def run_discord_bot_pipeline(
         logger.info("=" * 60)
         logger.info("DISCORD BOT SETUP REQUIRED:")
         logger.info("")
-        logger.info("1. ENABLE PRIVILEGED INTENTS:")
-        logger.info("   https://discord.com/developers/applications/")
-        logger.info("   Bot -> Privileged Gateway Intents -> Enable 'Message Content Intent'")
-        logger.info("")
+        logger.info("1. INVITE BOT TO YOUR SERVER:")
         if invite_url:
-            logger.info("2. INVITE BOT TO YOUR SERVER:")
             logger.info(f"   {invite_url}")
+        logger.info("")
+        logger.info("   Slash commands work out of the box — no privileged intents needed.")
         logger.info("=" * 60)
 
         # Step 2: Copy template

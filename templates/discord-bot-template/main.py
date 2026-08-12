@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Discord Bot Template - Entry Point
-NO business logic here. Only command registration and bot startup.
+Discord Bot Template - Entry Point (SLASH COMMANDS ONLY)
+NO business logic here. Only slash command registration and bot startup.
+
+This bot uses Discord Application Commands (slash commands) exclusively.
+No text/prefix commands (!cmd) are registered.
 """
 
 import os
@@ -11,6 +14,7 @@ import logging
 import threading
 import asyncio
 import discord
+from discord import app_commands
 from discord.ext import commands
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -28,13 +32,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger('bot')
 
-# Bot setup with intents
+# Bot setup with intents.
+# Slash commands do NOT require the message_content privileged intent.
+# If you add moderation/message-reading features, uncomment the line below
+# AND enable "Message Content Intent" in the Discord Developer Portal:
+#   intents.message_content = True
 intents = discord.Intents.default()
-intents.message_content = True  # Requires "Message Content Intent" in Developer Portal
+# intents.message_content = True  # Uncomment ONLY for moderation/message-reading
 
-# help_command=None disables discord.py's built-in !help so the custom
-# commands/help.py can register !help without CommandRegistrationError,
-# even if an AI edit forgets to call bot.remove_command("help").
+# command_prefix is inert — no text commands are registered. Kept because
+# commands.Bot requires it and provides bot.tree for slash commands.
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 
@@ -81,66 +88,70 @@ async def on_ready():
     logger.info(f"Guilds: {len(bot.guilds)}")
     for guild in bot.guilds:
         logger.info(f"  - {guild.name} (ID: {guild.id}, members: {guild.member_count})")
+
+    # Sync slash commands to Discord.
+    # "Synced 0 commands" is NORMAL if commands haven't changed since last sync.
+    # Global commands take up to 1 hour to propagate to all servers.
+    try:
+        synced = await bot.tree.sync()
+        logger.info(f"Synced {len(synced)} slash commands")
+    except Exception as e:
+        logger.error(f"Failed to sync slash commands: {e}")
+
     logger.info("Bot is ready!")
 
 
 @bot.event
-async def on_message(message):
-    """Log every message the bot can see."""
-    # Ignore own messages
-    if message.author == bot.user:
-        return
-
-    guild_name = message.guild.name if message.guild else "DM"
-    channel_name = message.channel.name if hasattr(message.channel, 'name') else "DM"
-
-    logger.info(f"[MSG] {guild_name}/#{channel_name} | {message.author}: {message.content[:200]}")
-
-    # Process commands
-    await bot.process_commands(message)
+async def on_app_command_completion(interaction: discord.Interaction, command: app_commands.Command):
+    """Log when a slash command completes successfully."""
+    guild_name = interaction.guild.name if interaction.guild else "DM"
+    logger.info(f"[SLASH-DONE] /{command.name} completed for {interaction.user} in {guild_name}")
 
 
 @bot.event
-async def on_command(ctx):
-    """Log every command execution."""
-    guild_name = ctx.guild.name if ctx.guild else "DM"
-    channel_name = ctx.channel.name if hasattr(ctx.channel, 'name') else "DM"
-    logger.info(f"[CMD] !{ctx.command.name} | by {ctx.author} in {guild_name}/#{channel_name} | args: {ctx.args[2:]}")
-
-
-@bot.event
-async def on_command_completion(ctx):
-    """Log when a command completes successfully."""
-    logger.info(f"[CMD-DONE] !{ctx.command.name} completed for {ctx.author}")
-
-
-@bot.event
-async def on_command_error(ctx, error):
-    """Global error handler."""
-    if isinstance(error, commands.CommandNotFound):
-        logger.warning(f"[CMD-404] Unknown command from {ctx.author}: {ctx.message.content[:100]}")
-        await ctx.send("Unknown command. Type `!help` for available commands.")
-    elif isinstance(error, commands.MissingRequiredArgument):
-        logger.warning(f"[CMD-ERR] Missing argument for !{ctx.command.name}: {error.param.name}")
-        await ctx.send(f"Missing argument: {error.param.name}")
-    else:
-        logger.error(f"[CMD-ERR] Error in !{ctx.command.name}: {error}", exc_info=True)
-        await ctx.send("An error occurred. Please try again.")
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """Global error handler for slash commands."""
+    logger.error(f"[SLASH-ERR] Error in slash command: {error}", exc_info=True)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send("An error occurred. Please try again.", ephemeral=True)
+        else:
+            await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+    except Exception:
+        pass  # Don't crash on double-response
 
 
 def setup_commands():
-    """Register all command modules."""
-    from commands.start import setup as setup_start
-    from commands.help import setup as setup_help
-    from commands.ask import setup as setup_ask
-    from commands.status import setup as setup_status
+    """Register ALL slash commands via @bot.tree.command.
 
-    setup_start(bot)
-    setup_help(bot)
-    setup_ask(bot)
-    setup_status(bot)
+    This is the SINGLE registration point. To add a new slash command:
+    1. Write the handler function (in commands/*.py or services/ai_logic.py)
+    2. Add a @bot.tree.command block below that calls the handler
+    3. bot.tree.sync() in on_ready() will push it to Discord automatically
+    """
+    from commands.start import start_handler
+    from commands.help import help_handler
+    from commands.ask import ask_handler
+    from commands.status import status_handler
 
-    logger.info("All commands registered.")
+    @bot.tree.command(name="start", description="Register your account")
+    async def start_cmd(interaction: discord.Interaction):
+        await start_handler(interaction)
+
+    @bot.tree.command(name="help", description="Show available commands")
+    async def help_cmd(interaction: discord.Interaction):
+        await help_handler(interaction)
+
+    @bot.tree.command(name="ask", description="Ask a question or send a message")
+    @app_commands.describe(query="Your question or request")
+    async def ask_cmd(interaction: discord.Interaction, query: str):
+        await ask_handler(interaction, query)
+
+    @bot.tree.command(name="status", description="Check bot status and latency")
+    async def status_cmd(interaction: discord.Interaction):
+        await status_handler(interaction)
+
+    logger.info("All slash commands registered.")
 
 
 def main():
@@ -159,7 +170,7 @@ def main():
     health_thread.start()
     logger.info(f"Health server started on port {port}")
 
-    # Register commands
+    # Register slash commands
     setup_commands()
 
     # Start bot

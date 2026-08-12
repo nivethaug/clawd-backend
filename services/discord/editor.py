@@ -175,14 +175,13 @@ class DiscordBotEditor:
 Bot: {bot_name}
 {integrations_block}
 Allowed files to modify:
-- services/ai_logic.py (PRIMARY — all bot behavior)
+- services/ai_logic.py (PRIMARY — the /ask brain, all keyword/intent logic)
 - services/api_client.py (helper functions only)
-- commands/start.py (ONLY update welcome message text)
-- commands/ask.py (ONLY if absolutely required)
+- main.py (add new @bot.tree.command slash command registrations — see below)
 - commands/help.py (update help text when new commands added)
-- main.py (ONLY to register new command handlers — see COMMAND REGISTRATION below)
 
 DO NOT modify: config.py, core/, models/, utils/, services/web_scraper.py, services/mock_data.py
+DO NOT modify: commands/start.py, commands/ask.py, commands/status.py (already slash-ready)
 
 IMPORTANT: api_client.py already has these functions — import and use them, do NOT recreate:
 - fetch_json(url, params) — generic JSON fetcher
@@ -195,59 +194,75 @@ NEVER import a function name that doesn't exist (e.g. fetch_data) — if unsure,
 Read api_client.py first to confirm the exact function name.
 
 ==================================================
-COMMAND ROUTING ARCHITECTURE (CRITICAL — READ FIRST)
+SLASH COMMAND ARCHITECTURE (CRITICAL — READ FIRST)
 ==================================================
 
-The bot uses Discord.py commands (not on_message). This means:
+The bot uses Discord.py APPLICATION COMMANDS (slash commands) exclusively.
+There are NO text/prefix commands (!cmd). Every interaction is a slash command.
 
-1. main.py registers command handlers via bot.load_extension() or direct @bot.command()
-2. Only registered commands (!start, !help, !ask, !status) reach handlers
-3. ALL user input arrives through commands/ask.py → process_user_input()
+THE FOUR BUILT-IN SLASH COMMANDS (already registered in main.py):
+  /start  — registers user (commands/start.py → start_handler)
+  /help   — shows commands (commands/help.py → help_handler)
+  /ask    — free-text query (commands/ask.py → ask_handler → process_user_input)
+  /status — bot info (commands/status.py → status_handler)
 
-THE FLOW:
-  User types "!ask price btc" in Discord
-  → Discord.py routes to commands/ask.py (registered command)
-  → ask.py strips "!ask" prefix
-  → process_user_input() receives: "price btc" (NO ! prefix)
+THE /ask FLOW (free-text intent routing):
+  User types "/ask price btc" in Discord
+  → Discord sends an Interaction to ask_handler(interaction, query="price btc")
+  → ask_handler calls process_user_input("price btc")
+  → ai_logic parses keywords and returns a response string
+  → ask_handler sends the response via interaction.response.send_message()
 
-  User types "!price btc" in Discord
-  → Discord.py says "Command not found" (NOT registered in main.py)
-  → NEVER reaches process_user_input()
+THEREFORE: process_user_input() receives the user's free-text query directly
+(plain text, no prefix). All keyword matching works on plain text like "price btc".
 
-THEREFORE: process_user_input() receives text WITHOUT any ! prefix.
-All command matching must work on plain text like "price btc", NOT "!price btc".
+DEDICATED vs /ask — WHEN TO USE WHICH:
+  - /ask <query>: Use for free-text/natural-language input. Add keyword handlers
+    in process_user_input() (e.g., text.startswith("price")).
+  - Dedicated /command: Use for structured actions with typed parameters.
+    Register a new @bot.tree.command in main.py (see ADDING NEW COMMANDS below).
 
 ==================================================
-COMMAND REGISTRATION IN main.py
+ADDING NEW SLASH COMMANDS
 ==================================================
 
-If you add new command handlers in ai_logic.py that should be callable directly
-(e.g., !price, !top), you MUST also register them in main.py.
+To add a new slash command (e.g., /weather):
 
-Two approaches (pick ONE):
+1. Write the handler function. Either:
+   a. In services/ai_logic.py (if it's simple logic), OR
+   b. In a new commands/weather.py file:
+      ```python
+      import discord
+      async def weather_handler(interaction: discord.Interaction, city: str):
+          result = _handle_weather(city)  # call logic from ai_logic
+          await interaction.response.send_message(result)
+      def setup(bot):
+          pass  # No-op — registered in main.py
+      ```
 
-APPROACH A — Route everything through !ask (RECOMMENDED for simple bots):
-  - All input goes through process_user_input() via ask.py
-  - User types: "!ask price btc"
-  - ai_logic parses: "price btc" → calls _handle_crypto_query("btc")
-  - NO changes to main.py needed
-  - Parsing in ai_logic uses: text.startswith("price") (no ! prefix)
+2. Register the @bot.tree.command in main.py's setup_commands():
+   ```python
+   from commands.weather import weather_handler
+   @bot.tree.command(name="weather", description="Get weather for a city")
+   @app_commands.describe(city="City name")
+   async def weather_cmd(interaction: discord.Interaction, city: str):
+       await weather_handler(interaction, city)
+   ```
 
-APPROACH B — Register new Discord commands:
-  - Add new command files like commands/price.py, commands/top.py
-  - Register in main.py: bot.load_extension("commands.price")
-  - Each command file calls process_user_input() internally
-  - User types: "!price btc" directly
+3. bot.tree.sync() in on_ready() pushes it to Discord automatically.
+   ("Synced 0 commands" is normal — see SLASH COMMAND SYNC below.)
 
-For MOST bots, use Approach A. Only use Approach B if the user explicitly
-requests direct commands like !price, !top as separate Discord commands.
-
-CRITICAL — !help command:
-- main.py disables discord.py's built-in !help (help_command=None), so
-  commands/help.py can safely register !help via bot.command(name="help").
-- If you rewrite help.py, do NOT call bot.remove_command("help") — it's
-  unnecessary now and can cause errors if the command doesn't exist.
-- Just register !help normally: @bot.command(name="help")
+CRITICAL RULES:
+- Register ALL slash commands in main.py's setup_commands() ONLY via @bot.tree.command
+- Command file setup() functions MUST be SYNCHRONOUS: def setup(bot): pass
+  NEVER use async def setup(bot): — it won't be awaited.
+- Do NOT register the same command in both main.py AND a command file setup()
+- Each handler receives discord.Interaction (NOT ctx)
+- Respond via interaction.response.send_message(...) within 3 seconds.
+  If the handler is slow (API calls), defer first:
+    await interaction.response.defer()
+    ... do work ...
+    await interaction.followup.send(result)
 ==================================================
 
 ANALYZE user description: "{description}"
@@ -268,7 +283,7 @@ EXAMPLES:
 - "crypto prices" -> crypto_finance category, use CoinGecko API
 - "news aggregator" -> news category, use Hacker News API
 - "joke bot" -> entertainment category, use JokeAPI
-- "crypto price tracker" -> crypto_finance category, add !price, !market, !top commands
+- "crypto price tracker" -> crypto_finance category, add /price, /market, /top commands
 
 NOTE: User provides title + description - AI MUST decide APIs autonomously
 - NO back-and-forth with user
@@ -285,6 +300,13 @@ This is NOT a code bug — it's a sandbox limitation. The bot runs fine
 via PM2 (outside the sandbox) after publishing.
 ALWAYS publish via buildpublish.py and verify by reading logs. Never
 try to test-import or run the bot directly.
+
+🔴 PATH AWARENESS.
+You are editing files in the SANDBOX project directory (your current working
+directory: {self.project_path}). Logs may reference production runtime paths
+like /workspaces/user_*/... — those are PRODUCTION paths managed entirely by
+buildpublish.py. NEVER attempt to read, edit, or cd into production paths.
+Edit ONLY files in your current directory, then publish via buildpublish.py.
 
 🔴 RULE ZERO: ALWAYS READ LOGS FIRST.
 Before fixing ANY issue (crash, no response, 502, DB error), ALWAYS read
@@ -323,16 +345,16 @@ and read the LOGS to verify. Re-reading edited files wastes turns.
 The publish step + log read is your verification — not re-reading code.
 
 SLASH COMMAND SYNC — IMPORTANT:
-"Synced 0 commands to [guild]" in the logs is NORMAL. It means Discord
-already has the commands cached from a previous sync. Discord.py returns
-0 when there are no NEW commands to register. Do NOT try to fix this by
-modifying the sync logic in main.py — it is working correctly.
+"Synced 0 commands" in the logs is NORMAL. It means Discord already has
+the commands cached from a previous sync. Discord.py returns 0 when there
+are no NEW commands to register. Do NOT try to fix this by modifying the
+sync logic in main.py — it is working correctly.
 Global slash commands can take up to 1 hour to propagate to all servers.
 
 The ONLY time you should modify sync logic is if you added a genuinely
 NEW slash command (e.g. /chart) that doesn't appear in Discord at all.
-In that case, ensure the command is registered via bot.tree.command or
-tree.add_command before calling tree.sync().
+In that case, ensure the command is registered via @bot.tree.command in
+main.py's setup_commands() before bot.tree.sync() runs in on_ready().
 
 1. KEEP function signature EXACT:
    def process_user_input(text: str) -> str
@@ -343,24 +365,26 @@ tree.add_command before calling tree.sync().
 
 4. DO NOT add new imports (EXCEPT importing services.web_scraper in api_client.py if needed)
 
-5. DO NOT create new files
+5. DO NOT create new files (EXCEPT commands/*.py for new slash command handlers)
 
 6. ALWAYS return a string (NEVER return None)
 
 7. NEVER crash - always fallback safely
 
 ==================================================
-COMMAND PARSING RULES (STRICT)
+/ask PARSING RULES (STRICT)
 ==================================================
 
-IMPORTANT: process_user_input() receives text WITHOUT ! prefix.
-The !ask command handler strips the prefix before calling this function.
-So user types "!ask price btc" → ai_logic receives "price btc".
+process_user_input(text) is the brain behind the /ask slash command.
+The user's free-text query arrives as plain text — no prefix to strip.
+
+User types "/ask price btc" → process_user_input receives "price btc"
+User types "/ask top 5"     → process_user_input receives "top 5"
+User types "/ask market"    → process_user_input receives "market"
 
 NEVER use:
 - .replace()
 - partial string manipulation
-- ! prefix in startswith checks (text arrives without it)
 
 ALWAYS use:
 
@@ -368,7 +392,7 @@ parts = text_lower.split()
 
 RULES:
 
-1. ALL commands MUST use split()
+1. ALL keyword handlers MUST use split()
 
 2. ALWAYS validate argument length
 
@@ -380,22 +404,14 @@ RULES:
 
 --------------------------------------------------
 
-STANDARD COMMAND FORMAT (no ! prefix — text arrives plain):
-
-# User types "!ask price btc" → process_user_input receives "price btc"
-# User types "!ask top 5" → process_user_input receives "top 5"
-# User types "!ask market" → process_user_input receives "market"
-
---------------------------------------------------
-
-EXAMPLES (FOLLOW EXACTLY — NOTE: NO ! PREFIX):
+EXAMPLES (FOLLOW EXACTLY):
 
 # price
 if text_lower.startswith("price"):
     parts = text_lower.split()
 
     if len(parts) < 2:
-        return "Usage: !ask price <coin>"
+        return "Usage: /ask price <coin>"
 
     coin = parts[1]
     return _handle_crypto_query(coin)
@@ -428,34 +444,34 @@ if text_lower.startswith("convert"):
     parts = text_lower.split()
 
     if len(parts) < 4:
-        return "Usage: !ask convert <amount> <from> <to>"
+        return "Usage: /ask convert <amount> <from> <to>"
 
     return _handle_conversion(parts[1], parts[2], parts[3])
 
 ==================================================
-!ask COMMAND HANDLING (STRICT)
+/ask HANDLING (STRICT)
 ==================================================
 
-The !ask command is registered in main.py and handled by commands/ask.py.
-ask.py strips "!ask" and sends only the query text to process_user_input().
+The /ask slash command is registered in main.py and handled by commands/ask.py.
+ask_handler receives (interaction, query) and calls process_user_input(query).
 
-So if user types "!ask price btc", process_user_input() receives "price btc".
-The "ask" prefix is NEVER present in the text passed to process_user_input().
+So if user types "/ask price btc", process_user_input() receives "price btc".
+There is NO command prefix in the text — it is the raw query.
 
-THEREFORE: Do NOT add a handler for "!ask" or "ask" in process_user_input().
-All text arriving there is already the user's query without any command prefix.
+THEREFORE: Do NOT add a handler for "ask" in process_user_input().
+All text arriving there is already the user's query.
 
 Just parse the intent directly:
 
 if text_lower.startswith("price"):
     parts = text_lower.split()
     if len(parts) < 2:
-        return "Usage: !ask price <coin>"
+        return "Usage: /ask price <coin>"
     coin = parts[1]
     return _handle_crypto_query(coin)
 
 # Default fallback for unrecognized queries
-return f"I received your query: \"{{text}}\". Type !help for available commands."
+return f"I received your query: \"{{text}}\". Type /help for available commands."
 
 ==================================================
 API USAGE
@@ -547,7 +563,7 @@ FEATURE RULES
 - DO NOT rename commands
 
 SLASH COMMAND REGISTRATION — CRITICAL:
-If you create slash commands (/price, /market, /chart), follow these rules
+When adding new slash commands (/price, /market, /chart), follow these rules
 to prevent crashes and duplicate registration errors:
 
 1. Register ALL slash commands in main.py's setup_commands() function ONLY.
@@ -555,7 +571,7 @@ to prevent crashes and duplicate registration errors:
    Do NOT also register them in command file setup() functions.
 
 2. Command files (price.py, market.py, etc.) should ONLY contain the handler
-   function (e.g., `async def price(interaction, symbol):`) and a NO-OP setup:
+   function (e.g., `async def weather_handler(interaction, city):`) and a NO-OP setup:
    ```python
    def setup(bot):
        # No-op: command registered directly in main.py
@@ -572,31 +588,19 @@ to prevent crashes and duplicate registration errors:
    - Command files just export the handler function
    - Do NOT mix bot.tree.command in both main.py AND command files
 
-5. After registering ALL slash commands, you MUST sync them to Discord
-   in the on_ready() event handler. Without sync, commands will NOT appear:
-
-   @bot.event
-   async def on_ready():
-       logger.info(f"Connected as {bot.user}")
-       try:
-           synced = await bot.tree.sync()
-           logger.info(f"Synced {len(synced)} commands")
-       except Exception as e:
-           logger.error(f"Failed to sync commands: {e}")
-
-   NEVER skip bot.tree.sync() - commands are invisible without it.
+5. bot.tree.sync() is ALREADY in the template's on_ready(). It runs automatically
+   on bot startup. You do NOT need to add it — it's already there.
+   Just add your @bot.tree.command in setup_commands() and the sync handles the rest.
 
 ==================================================
-START + HELP UPDATE RULE (MANDATORY)
+HELP UPDATE RULE (MANDATORY)
 ==================================================
 
-If new commands are added, you MUST update ALL of these:
+If new slash commands are added, you MUST update:
 
-1. UPDATE _handle_start() in services/ai_logic.py — mention new command in welcome
-2. UPDATE _handle_help() in services/ai_logic.py — add new command description
-3. UPDATE commands/help.py — add new command to help text
+1. UPDATE commands/help.py — add the new command to the help text
 
-NEVER add a command and forget to update help + start text.
+NEVER add a command and forget to update the help text.
 DO NOT break formatting
 
 ==================================================
@@ -614,12 +618,15 @@ OUTPUT REQUIREMENT
 
 When using public APIs from /llm/categories/index.json:
 
-1. Generate commands in ai_logic.py that call the public API
+1. Add keyword handlers in services/ai_logic.py process_user_input() that call the public API
 2. If new API function is needed in api_client.py:
    - Add the function following the same pattern as existing helpers
    - Example: get_weather, get_news, get_crypto_price, etc.
    - Always handle errors with friendly messages
    - Return dict with success/data or error
+3. If adding a dedicated slash command (not via /ask), also:
+   - Add the handler in a commands/*.py file
+   - Register @bot.tree.command in main.py setup_commands()
 
 Return FULL updated code for:
 - services/ai_logic.py
@@ -627,8 +634,9 @@ Return FULL updated code for:
 REQUIRED (when adding new APIs):
 - services/api_client.py (add new helper functions for any APIs you use)
 
-OPTIONAL:
-- commands/start.py (only text changes for welcome message)
+OPTIONAL (when adding dedicated slash commands):
+- main.py (add @bot.tree.command registration in setup_commands())
+- commands/help.py (add new command to help text)
 
 MANDATORY: After ALL code changes, read and update `agent/ai_index/index.json`
 to reflect new commands, functions, and file changes. The index.json contains
@@ -795,8 +803,8 @@ Enhance Discord bot for: {description}
                     start_content = f.read()
                 try:
                     compile(start_content, str(self.start_cmd_path), 'exec')
-                    if 'async def start(ctx):' not in start_content:
-                        return False, "start command function signature changed or missing"
+                    if 'async def start_handler(interaction' not in start_content:
+                        return False, "start slash handler signature changed or missing"
                 except SyntaxError as e:
                     return False, f"Syntax error in start.py: {e}"
 

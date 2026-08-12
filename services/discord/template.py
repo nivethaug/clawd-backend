@@ -69,6 +69,9 @@ def copy_discord_template(project_path: str) -> Tuple[bool, str]:
             "requirements.txt",
             ".env.example",
             "commands/start.py",
+            "commands/ask.py",
+            "commands/help.py",
+            "commands/status.py",
             "services/ai_logic.py",
             "core/database.py",
             "llm/categories/index.json"

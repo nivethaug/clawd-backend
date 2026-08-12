@@ -9,7 +9,7 @@ This provides safe, predictable responses for the bot.
 MOCK_RESPONSES = {
     "bitcoin": "Bitcoin Price: $45,123.45 (mock data - API unavailable)",
     "ethereum": "Ethereum Price: $2,456.78 (mock data - API unavailable)",
-    "default": "I received your message: \"{text}\". I'm not sure how to respond to that yet. Type `!help` for available commands.",
+    "default": "I received your message: \"{text}\". I'm not sure how to respond to that yet. Type `/help` for available commands.",
 }
 
 
