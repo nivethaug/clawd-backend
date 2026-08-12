@@ -55,14 +55,8 @@ _SHARED_VENV = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")
 # executor get SIGKILLed when it fires. Old code could not kill a hung executor.
 JOB_TIMEOUT_SECONDS = int(os.getenv("SCHEDULER_JOB_TIMEOUT", "120"))
 
-# Whether to use the bwrap sandbox. Mirrors the gating in
-# infrastructure_manager.py:573-576 and pm2_manager.py:137-140 — bwrap is only
-# engaged when EXECUTION_MODE=container (prod worker VPS). Local dev falls
-# back to in-process importlib so contributors without bwrap can still run.
-_USE_SANDBOX = (
-    os.getenv("EXECUTION_MODE", "container").lower() == "container"
-    and os.path.exists(_SANDBOX_SCRIPT)
-)
+# Static: always container mode — bot-sandbox.sh uses shared venv Python
+_USE_SANDBOX = os.path.exists(_SANDBOX_SCRIPT)
 
 # Env var keys the executor is allowed to see. The project's .env (loaded by
 # config.py via load_dotenv) is the source of truth for these — we explicitly

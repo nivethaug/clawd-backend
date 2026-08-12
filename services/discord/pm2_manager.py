@@ -116,10 +116,8 @@ def start_bot_pm2(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             "scripts", "bot-sandbox.sh"
         )
-        use_sandbox = (
-            os.getenv("EXECUTION_MODE", "container").lower() == "container"
-            and os.path.exists(sandbox_script)
-        )
+        # Static: always container mode — bot-sandbox.sh uses shared venv Python
+        use_sandbox = os.path.exists(sandbox_script)
 
         if use_sandbox:
             pm2_cmd = [
