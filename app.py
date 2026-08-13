@@ -8948,9 +8948,10 @@ async def google_login(request: GoogleAuthRequest):
                 tier = row[5] if len(row) > 5 else "free"
         else:
             # Create new user with no password (OAuth-only account)
+            # Google emails are pre-verified, so set email_verified=true
             result = conn.execute(
-                "INSERT INTO users (email, name, password, role, subscription_tier) "
-                "VALUES (?, ?, NULL, 'user', 'free') RETURNING id",
+                "INSERT INTO users (email, name, password, role, subscription_tier, email_verified) "
+                "VALUES (?, ?, NULL, 'user', 'free', true) RETURNING id",
                 (google_user["email"], google_user["name"]),
             ).fetchone()
 
@@ -8958,6 +8959,13 @@ async def google_login(request: GoogleAuthRequest):
                 user_id = result["id"]
             else:
                 user_id = result[0]
+
+            # Grant free tier credits (50 project_ai + 2M edit tokens)
+            try:
+                from services.billing_service import assign_plan
+                assign_plan(conn, user_id, "free")
+            except Exception as e:
+                logger.error(f"[GOOGLE-AUTH] Failed to grant free tier to user {user_id}: {e}")
 
             conn.commit()
 
