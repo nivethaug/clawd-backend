@@ -8940,9 +8940,11 @@ async def verify_email(request: VerifyEmailRequest):
             raise HTTPException(status_code=400, detail="Invalid or expired verification token")
 
         if isinstance(user, dict):
+            user_id = user.get('id')
             if user.get('email_verified'):
                 return MessageResponseModel(message="Email already verified. You can log in now.")
         else:
+            user_id = user[0]
             if user[1]:
                 return MessageResponseModel(message="Email already verified. You can log in now.")
 
@@ -8952,6 +8954,16 @@ async def verify_email(request: VerifyEmailRequest):
             (request.token,)
         )
         conn.commit()
+
+    # Grant free tier credits (50 project_ai + 2M edit tokens monthly)
+    try:
+        with get_db() as conn:
+            from services.billing_service import assign_plan
+            assign_plan(conn, user_id, "free")
+            conn.commit()
+        logger.info(f"[VERIFY] Granted free tier credits to user {user_id}")
+    except Exception as e:
+        logger.error(f"[VERIFY] Failed to grant free tier credits to user {user_id}: {e}")
 
     return MessageResponseModel(
         message="Email verified successfully! You can now log in."
