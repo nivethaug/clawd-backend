@@ -12713,6 +12713,51 @@ async def admin_reset_user_limits(
     return {"success": True, "message": f"Rate limits reset for user {target_user_id}"}
 
 
+@app.delete("/admin/users/{target_user_id}")
+async def admin_delete_user(
+    target_user_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    """Delete a user and all their data. Admin only."""
+    admin_user_id = get_user_id_from_token(authorization)
+    require_admin(admin_user_id)
+
+    # Prevent self-deletion
+    if admin_user_id == target_user_id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+
+    with get_db() as conn:
+        # Check user exists
+        user = conn.execute(
+            "SELECT id, role FROM users WHERE id = ?", (target_user_id,)
+        ).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Prevent deleting the last admin
+        admin_count = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE role = 'admin'"
+        ).fetchone()
+        admin_count = admin_count[0] if not isinstance(admin_count, dict) else admin_count.get("count", 0)
+        user_role = user.get("role") if isinstance(user, dict) else user[1]
+        if user_role == "admin" and admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last admin account")
+
+        # Clean up non-cascading tables
+        conn.execute("DELETE FROM auth_tokens WHERE user_id = ?", (target_user_id,))
+        conn.execute("DELETE FROM session_chat_runs WHERE user_id = ?", (target_user_id,))
+        conn.execute("DELETE FROM projects WHERE user_id = ?", (target_user_id,))
+        # Null out billing_config FK if this user updated it
+        conn.execute("UPDATE billing_config SET updated_by = NULL WHERE updated_by = ?", (target_user_id,))
+
+        # Delete user (cascading tables auto-clean: projects, credit_balances, etc.)
+        conn.execute("DELETE FROM users WHERE id = ?", (target_user_id,))
+        conn.commit()
+
+    logger.info(f"[ADMIN] User {target_user_id} deleted by admin {admin_user_id}")
+    return {"success": True, "message": f"User {target_user_id} deleted"}
+
+
 @app.get("/admin/stats")
 async def admin_stats(authorization: Optional[str] = Header(None)):
     """Get platform-wide stats. Admin only."""
