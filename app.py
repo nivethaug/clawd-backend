@@ -1452,6 +1452,17 @@ app.add_middleware(
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 
+@app.on_event("startup")
+async def start_background_workers():
+    """Start background daemon threads on app boot."""
+    try:
+        from services.billing_cron import start_billing_cron
+        start_billing_cron()
+        logger.info("[STARTUP] Billing cron started — monthly credits will auto-reset")
+    except Exception as e:
+        logger.error(f"[STARTUP] Failed to start billing cron: {e}")
+
+
 @app.middleware("http")
 async def sentry_context_middleware(request: Request, call_next):
     with sentry_scoped_context(
