@@ -5190,6 +5190,70 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
         return {"success": False, "error": str(e)}
 
 
+class InternalDeleteUserDataRequest(BaseModel):
+    user_id: int
+    project_ids: list = []
+
+
+@app.post("/internal/delete-user-data")
+async def internal_delete_user_data(request: InternalDeleteUserDataRequest, request_obj: Request):
+    """Delete user's PM2 processes + workspace folder + nginx configs.
+    Internal endpoint — runs on the worker VPS where these resources live.
+    """
+    import shutil
+    client_host = request_obj.client.host if request_obj.client else ""
+    if not (client_host.startswith("127.") or client_host.startswith("172.")
+            or client_host.startswith("10.") or client_host == "::1"):
+        raise HTTPException(status_code=403, detail="Internal endpoint")
+
+    user_id = request.user_id
+    project_ids = request.project_ids
+    cleaned = []
+
+    # 1. Stop + delete PM2 processes
+    for pid in project_ids:
+        for prefix in ("dc-bot-", "tg-bot-", "sched-"):
+            proc_name = f"{prefix}{pid}"
+            r = subprocess.run(["pm2", "delete", proc_name], capture_output=True, timeout=10)
+            if r.returncode == 0:
+                cleaned.append(proc_name)
+    if cleaned:
+        subprocess.run(["pm2", "save"], capture_output=True, timeout=10)
+
+    # 2. Delete workspace folder
+    workspace_dir = f"/workspaces/user_{user_id}"
+    if os.path.isdir(workspace_dir):
+        try:
+            shutil.rmtree(workspace_dir)
+            cleaned.append(workspace_dir)
+        except Exception as e:
+            logger.warning(f"[DELETE-USER] Failed to remove {workspace_dir}: {e}")
+
+    # 3. Remove nginx configs (match by proxy_pass port pattern for this user's projects)
+    nginx_sites_enabled = "/etc/nginx/sites-enabled"
+    nginx_sites_available = "/etc/nginx/sites-available"
+    for nginx_dir in (nginx_sites_enabled, nginx_sites_available):
+        if not os.path.isdir(nginx_dir):
+            continue
+        for fname in os.listdir(nginx_dir):
+            fpath = os.path.join(nginx_dir, fname)
+            try:
+                with open(fpath, 'r') as f:
+                    content = f.read()
+                # Match configs that reference this user's workspace path
+                if f"user_{user_id}" in content or f"/workspaces/user_{user_id}" in content:
+                    os.remove(fpath)
+                    cleaned.append(f"nginx:{fname}")
+            except Exception:
+                pass
+    # Reload nginx if we removed any configs
+    if any("nginx:" in c for c in cleaned):
+        subprocess.run(["nginx", "-s", "reload"], capture_output=True, timeout=10)
+
+    logger.info(f"[DELETE-USER] Cleaned for user {user_id}: {cleaned}")
+    return {"success": True, "details": f"{len(cleaned)} items removed"}
+
+
 # ---------------------------------------------------------------------------
 # Internal scrape endpoint — server-side Chrome DevTools scraping
 # ---------------------------------------------------------------------------
@@ -12719,7 +12783,6 @@ async def admin_delete_user(
     authorization: Optional[str] = Header(None)
 ):
     """Delete a user and all their data. Admin only."""
-    import shutil
     admin_user_id = get_user_id_from_token(authorization)
     require_admin(admin_user_id)
 
@@ -12744,61 +12807,46 @@ async def admin_delete_user(
         if user_role == "admin" and admin_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot delete the last admin account")
 
-        # Get project IDs for PM2 cleanup BEFORE deleting DB records
+        # Get project IDs BEFORE deleting DB records (needed for worker cleanup)
         projects = conn.execute(
             "SELECT id FROM projects WHERE user_id = ?", (target_user_id,)
         ).fetchall()
-        project_ids = []
-        for p in projects:
-            pid = p.get("id") if isinstance(p, dict) else p[0]
-            project_ids.append(pid)
+        project_ids = [p.get("id") if isinstance(p, dict) else p[0] for p in projects]
 
         # Clean up non-cascading tables
         conn.execute("DELETE FROM auth_tokens WHERE user_id = ?", (target_user_id,))
         conn.execute("DELETE FROM session_chat_runs WHERE user_id = ?", (target_user_id,))
         conn.execute("DELETE FROM projects WHERE user_id = ?", (target_user_id,))
-        # Null out billing_config FK if this user updated it
         conn.execute("UPDATE billing_config SET updated_by = NULL WHERE updated_by = ?", (target_user_id,))
 
-        # Delete user (cascading tables auto-clean: credit_balances, credit_transactions, etc.)
+        # Delete user (cascading tables auto-clean)
         conn.execute("DELETE FROM users WHERE id = ?", (target_user_id,))
         conn.commit()
 
-    # --- Disk + PM2 cleanup (outside DB transaction) ---
-
-    # Stop + delete PM2 processes for all user's bots
-    for pid in project_ids:
-        for prefix in ("dc-bot-", "tg-bot-", "sched-"):
-            proc_name = f"{prefix}{pid}"
-            subprocess.run(["pm2", "delete", proc_name], capture_output=True, timeout=10)
-    if project_ids:
-        subprocess.run(["pm2", "save"], capture_output=True, timeout=10)
-
-    # Delete user's workspace folder (/workspaces/user_{id}/)
-    workspace_dir = f"/workspaces/user_{target_user_id}"
-    if os.path.isdir(workspace_dir):
+    # Call worker API to clean PM2 processes + workspace folder + nginx
+    # (these live on the worker VPS, not accessible from the backend container)
+    worker_api_url = os.getenv("DREAMPILOT_WORKER_API_URL")
+    if worker_api_url:
+        import urllib.request as _urlreq
+        import json as _json
         try:
-            shutil.rmtree(workspace_dir)
-            logger.info(f"[ADMIN] Deleted workspace {workspace_dir}")
+            endpoint = f"{worker_api_url}/internal/delete-user-data"
+            payload = _json.dumps({
+                "user_id": target_user_id,
+                "project_ids": project_ids,
+            }).encode()
+            req = _urlreq.Request(endpoint, data=payload,
+                                  headers={"Content-Type": "application/json"}, method="POST")
+            with _urlreq.urlopen(req, timeout=30) as resp:
+                result = _json.loads(resp.read().decode())
+            if result.get("success"):
+                logger.info(f"[ADMIN] Worker cleaned {result.get('details', '')} for user {target_user_id}")
+            else:
+                logger.warning(f"[ADMIN] Worker cleanup partial: {result.get('error', '')}")
         except Exception as e:
-            logger.warning(f"[ADMIN] Failed to delete {workspace_dir}: {e}")
+            logger.warning(f"[ADMIN] Worker cleanup failed for user {target_user_id}: {e}")
 
-    # Remove nginx configs for user's domains
-    nginx_enabled = "/etc/nginx/sites-enabled"
-    nginx_available = "/etc/nginx/sites-available"
-    if os.path.isdir(nginx_available):
-        for fname in os.listdir(nginx_available):
-            fpath = os.path.join(nginx_available, fname)
-            try:
-                with open(fpath, 'r') as f:
-                    content = f.read()
-                if f"user_{target_user_id}" in content or f"127.0.0.1:{8}" in content:
-                    pass  # heuristic skip — domain-based cleanup is complex
-            except Exception:
-                pass
-
-    logger.info(f"[ADMIN] User {target_user_id} deleted by admin {admin_user_id} "
-                f"(cleaned {len(project_ids)} PM2 processes, workspace dir)")
+    logger.info(f"[ADMIN] User {target_user_id} deleted by admin {admin_user_id}")
     return {"success": True, "message": f"User {target_user_id} deleted"}
 
 
