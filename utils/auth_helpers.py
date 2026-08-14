@@ -45,10 +45,29 @@ def get_user_id_from_token(authorization: Optional[str] = None) -> int:
     from app import AUTH_TOKENS
 
     user_id = AUTH_TOKENS.get(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if user_id:
+        return user_id
 
-    return user_id
+    # 3) Personal API key (da_...) for MCP / ChatGPT connectors — hashed lookup
+    if token.startswith("da_"):
+        try:
+            import hashlib
+            from database_postgres import get_db
+
+            key_hash = hashlib.sha256(token.encode()).hexdigest()
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT user_id, revoked_at FROM api_keys WHERE key_hash = ?",
+                    (key_hash,)
+                ).fetchone()
+            if row:
+                uid, revoked = (row.get("user_id"), row.get("revoked_at")) if isinstance(row, dict) else (row[0], row[1])
+                if not revoked:
+                    return uid
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 def get_optional_user_id(authorization: Optional[str] = None) -> Optional[int]:

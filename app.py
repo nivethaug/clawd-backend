@@ -8627,6 +8627,7 @@ async def save_file_content(
 
 import bcrypt
 import hmac
+import hashlib
 import secrets
 
 # In-memory token store (token -> user_id)
@@ -8739,6 +8740,36 @@ def get_user_id_from_token(authorization: Optional[str] = None) -> int:
             return uid
     except Exception:
         pass
+
+    # 4) Personal API key (da_...) for MCP / ChatGPT connectors — hashed lookup
+    if token.startswith("da_"):
+        try:
+            key_hash = hashlib.sha256(token.encode()).hexdigest()
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT id, user_id, revoked_at FROM api_keys WHERE key_hash = ?",
+                    (key_hash,)
+                ).fetchone()
+            if row:
+                if isinstance(row, dict):
+                    key_id, uid, revoked = row.get("id"), row.get("user_id"), row.get("revoked_at")
+                else:
+                    key_id, uid, revoked = row[0], row[1], row[2]
+                if not revoked:
+                    # Throttled last_used_at update (at most once a minute)
+                    try:
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE api_keys SET last_used_at = NOW() "
+                                "WHERE id = ? AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '1 minute')",
+                                (key_id,)
+                            )
+                            conn.commit()
+                    except Exception:
+                        pass
+                    return uid
+        except Exception:
+            pass
 
     raise HTTPException(status_code=401, detail="Invalid or expired token")
 
@@ -8883,6 +8914,103 @@ async def logout(authorization: Optional[str] = Header(None)):
             pass
     
     return {"message": "Logged out"}
+
+
+# ---------------------------------------------------------------------------
+# API Keys — personal tokens for MCP / ChatGPT connectors
+# ---------------------------------------------------------------------------
+
+class CreateApiKeyRequest(BaseModel):
+    name: str = Field("ChatGPT", max_length=100)
+
+
+class ApiKeyResponse(BaseModel):
+    id: int
+    name: str
+    key_prefix: str
+    created_at: Optional[str] = None
+    last_used_at: Optional[str] = None
+    revoked: bool = False
+
+
+@app.post("/api/keys", status_code=201)
+async def create_api_key(request: CreateApiKeyRequest, authorization: Optional[str] = Header(None)):
+    """Create a personal API key (for ChatGPT/MCP connectors).
+
+    Returns the FULL key exactly once — store it immediately.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    raw_key = f"da_{secrets.token_hex(24)}"
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    key_prefix = raw_key[:10] + "…"
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO api_keys (user_id, name, key_hash, key_prefix) VALUES (?, ?, ?, ?) RETURNING id, created_at",
+            (user_id, request.name.strip() or "ChatGPT", key_hash, key_prefix)
+        )
+        row = conn.fetchone()
+        conn.commit()
+
+    if isinstance(row, dict):
+        key_id, created = row.get("id"), row.get("created_at")
+    else:
+        key_id, created = row[0], row[1]
+
+    logger.info(f"[API-KEYS] User {user_id} created key {key_prefix} ('{request.name}')")
+
+    return {
+        "id": key_id,
+        "name": request.name.strip() or "ChatGPT",
+        "key_prefix": key_prefix,
+        "created_at": str(created) if created else None,
+        "key": raw_key,  # full key — returned exactly once
+    }
+
+
+@app.get("/api/keys", response_model=list[ApiKeyResponse])
+async def list_api_keys(authorization: Optional[str] = Header(None)):
+    """List the user's API keys (masked)."""
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, name, key_prefix, created_at, last_used_at, revoked_at "
+            "FROM api_keys WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,)
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r) if not isinstance(r, dict) else r
+        out.append(ApiKeyResponse(
+            id=d.get("id"),
+            name=d.get("name"),
+            key_prefix=d.get("key_prefix"),
+            created_at=str(d.get("created_at")) if d.get("created_at") else None,
+            last_used_at=str(d.get("last_used_at")) if d.get("last_used_at") else None,
+            revoked=bool(d.get("revoked_at")),
+        ))
+    return out
+
+
+@app.delete("/api/keys/{key_id}")
+async def revoke_api_key(key_id: int, authorization: Optional[str] = Header(None)):
+    """Revoke an API key. It stops working immediately."""
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM api_keys WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+            (key_id, user_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="API key not found")
+        conn.execute(
+            "UPDATE api_keys SET revoked_at = NOW() WHERE id = ?",
+            (key_id,)
+        )
+        conn.commit()
+    logger.info(f"[API-KEYS] User {user_id} revoked key {key_id}")
+    return {"success": True, "message": f"API key {key_id} revoked"}
 
 
 class GoogleAuthRequest(BaseModel):
