@@ -39,30 +39,46 @@ def run(cmd: str, cwd: str = None, env: dict = None) -> bool:
 
 
 def install_dependencies(venv_path: str = None):
-    """Install Python dependencies using shared venv with caching"""
+    """Install Python dependencies using shared venv with caching.
+
+    NON-FATAL: inside the sandbox the shared venv is mounted read-only
+    (bwrap) — stat() on the pip path can raise PermissionError and pip
+    cannot write anyway. The worker-api /internal/pm2-restart endpoint
+    installs deps into the shared venv on the host before restarting
+    PM2, so a failed/skipped sandbox install is harmless.
+    """
     print("\n" + "="*50)
     print("PIP INSTALL")
     print("="*50)
-    
+
     # Check for requirements.txt
     if not Path("requirements.txt").exists():
         print("⚠ No requirements.txt found, skipping")
         return True
-    
+
     # Determine venv path
     venv = venv_path or SHARED_VENV_PATH
     pip_path = Path(venv) / "bin" / "pip"
-    
-    # Check if venv exists
-    if pip_path.exists():
+
+    # Check venv exists — guarded: stat() itself can raise in the sandbox
+    try:
+        venv_available = pip_path.exists()
+    except (PermissionError, OSError) as e:
+        print(f"⚠ Venv not accessible in sandbox ({e.__class__.__name__}) — deps installed on restart")
+        return True
+
+    if venv_available:
         print(f"📦 Using shared venv: {venv}")
         pip_cmd = str(pip_path)
     else:
         print("⚠ Shared venv not found, using system pip")
         pip_cmd = "pip"
-    
-    # Install with caching options
-    return run(f"{pip_cmd} install --prefer-binary -r requirements.txt")
+
+    # Install with caching options — failure is a warning, not a build failure
+    ok = run(f"{pip_cmd} install --prefer-binary -r requirements.txt")
+    if not ok:
+        print("⚠ Install warning — deps are reinstalled into the shared venv by the worker-api on restart")
+    return True
 
 
 def verify_main():

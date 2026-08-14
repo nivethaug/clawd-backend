@@ -89,8 +89,10 @@ def init_bot():
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # Register handlers
-    # All commands route through ai_logic.py for AI customization
-    bot_app.add_handler(MessageHandler(filters.ALL, handle_message))
+    # All commands route through ai_logic.py for AI customization.
+    # filters.TEXT (not ALL): photos/stickers/voice have message.text=None
+    # which would crash process_user_input — ignore non-text updates.
+    bot_app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
 
     logger.info("✅ Bot application built successfully")

@@ -56,12 +56,15 @@ RUN python3 --version && pip3 --version
 # Pre-install common Python dependencies that bots/projects need.
 # These are used by telegram/discord bot templates (requests, chardet)
 # and website backends (sqlalchemy, psycopg2, pydantic, fastapi, uvicorn).
+# pytest: bot templates ship unit/ test suites and the AI prompts mandate
+# running them before publish — without pytest in the image the step fails.
 # Installing them in the image avoids pip install failures inside the
 # read-only container (tmpfs /tmp is too small for compilation).
 RUN pip3 install --no-cache-dir --break-system-packages \
         requests chardet charset-normalizer \
         sqlalchemy psycopg2-binary pydantic \
-        fastapi uvicorn python-dotenv python-telegram-bot discord.py
+        fastapi uvicorn python-dotenv python-telegram-bot discord.py \
+        pytest
 
 # ─────────────────────────────────────────────────────────────────────
 # Node.js (via NodeSource — matches docs/worker_vps_setup.md §1.3).
