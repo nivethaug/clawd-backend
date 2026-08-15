@@ -951,22 +951,40 @@ def _run_website_pipeline(
     # as idle (last_used_at is stale) and stops it → build fails (exit 137).
     _mark_container_active(user_id)
 
-    openclaw_code = _run_logged_subprocess(
-        run_id,
-        [
-            python_exe,
-            "-u",
-            str(BACKEND_DIR / "openclaw_wrapper.py"),
-            str(project_id),
-            str(project_path),
-            str(name),
-            str(description or ""),
-            str(template_id or ""),
-        ],
-        env=env,
-        timeout=int(os.getenv("PROJECT_CREATION_OPENCLAW_TIMEOUT", "1800")),
-        prefix="[OPENCLAW] ",
-    )
+    # 45-minute budget for the AI build/enhancement phase. On timeout the
+    # process is killed but the AI-edited files are KEPT (no revert to the
+    # blank template) — the pipeline continues so a fix edit can complete
+    # the project from its current state.
+    try:
+        openclaw_code = _run_logged_subprocess(
+            run_id,
+            [
+                python_exe,
+                "-u",
+                str(BACKEND_DIR / "openclaw_wrapper.py"),
+                str(project_id),
+                str(project_path),
+                str(name),
+                str(description or ""),
+                str(template_id or ""),
+            ],
+            env=env,
+            timeout=int(os.getenv("PROJECT_CREATION_OPENCLAW_TIMEOUT", "2700")),
+            prefix="[OPENCLAW] ",
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "[PROJECT-RUN] openclaw AI phase timed out after %ss for project %s — "
+            "keeping AI-edited files (no template revert); continuing so a fix "
+            "edit can complete the project",
+            os.getenv("PROJECT_CREATION_OPENCLAW_TIMEOUT", "2700"), project_id,
+        )
+        append_chunk(
+            run_id, "warning",
+            "AI build phase timed out after 45 min — AI-edited files kept as-is "
+            "(not reverted); run a fix edit to check and complete the project.",
+        )
+        openclaw_code = 0  # don't fail the run — files are preserved
 
     # Re-touch the sentinel to keep it fresh for the NEXT project in the queue.
     # Don't remove it — removing creates a race window where the parallel
