@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import env_manager
 import env_registry_service
 
-MAX_INITIAL_ENV_VARS = 10  # manual + imported Global Integrations combined
+MAX_INITIAL_ENV_VARS = 2  # manual + imported Global Integrations combined at creation
 
 
 def normalize_initial_environment_variables(items: Any) -> List[Dict[str, str]]:
