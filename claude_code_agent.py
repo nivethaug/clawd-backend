@@ -682,7 +682,10 @@ class ClaudeCodeAgent:
         # wrapper sees it in every API call Claude CLI makes. The wrapper
         # tags usage records with this ID, and we fetch them after the query.
         # This is concurrency-safe: each query gets a unique ID.
-        _session_id = f"qry_{uuid.uuid4().hex[:16]}"
+        # If the prompt ALREADY carries one (handler-level injection for the
+        # chat-edit path), reuse it — the wrapper tags records with the id in
+        # the prompt, so fetching a fresh id would return nothing.
+        _session_id = self._find_usage_session(prompt) or f"qry_{uuid.uuid4().hex[:16]}"
         _injected_prompt = self._inject_usage_session(prompt, _session_id)
 
         try:
@@ -774,6 +777,19 @@ class ClaudeCodeAgent:
         except Exception as e:
             logger.warning(f"[CLAUDE-AGENT] git status check failed for {self.repo_path}: {e}")
             return False
+
+    @staticmethod
+    def _find_usage_session(prompt: str) -> Optional[str]:
+        """Return the usage_session_id already present in the prompt's meta
+        block, if any. Used so query() fetches usage for the SAME id the
+        wrapper is tagging (handler-level injection pre-dates query())."""
+        meta_start = "<DREAMPILOT_WORKFLOW_META>"
+        meta_end = "</DREAMPILOT_WORKFLOW_META>"
+        if meta_start not in prompt:
+            return None
+        block = prompt[prompt.index(meta_start):prompt.find(meta_end)]
+        m = re.search(r'"usage_session_id"\s*:\s*"(qry_[0-9a-f]+)"', block)
+        return m.group(1) if m else None
 
     @staticmethod
     def _inject_usage_session(prompt: str, session_id: str) -> str:

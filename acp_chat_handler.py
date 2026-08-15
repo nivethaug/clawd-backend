@@ -3064,6 +3064,12 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         logger.info(f"[ACP-CHAT] Conversation history: {'Included (' + str(len(session_context)) + ' chars)' if session_context else 'None'}")
         logger.info(f"[ACP-CHAT] User message: {len(user_message)} chars")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars")
+
+        # Attribute wrapper usage records to THIS query (ACPX path has no
+        # agent.query() to do it). Idempotent — safe if an id is present.
+        self._last_usage_session_id = f"qry_{uuid.uuid4().hex[:16]}"
+        if CLAUDE_AGENT_AVAILABLE:
+            prompt = ClaudeCodeAgent._inject_usage_session(prompt, self._last_usage_session_id)
         
         # Log full prompt for debugging (split into multiple lines for readability)
         prompt_lines = prompt.split('\n')
@@ -3692,6 +3698,13 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 prompt = self._build_chat_prompt_scheduler(user_message, session_context)
             else:
                 prompt = self._build_chat_prompt(user_message, session_context)
+
+        # Attribute wrapper usage records to THIS query (ACPX path has no
+        # agent.query() to do it). Idempotent — safe if an id is present.
+        self._last_usage_session_id = f"qry_{uuid.uuid4().hex[:16]}"
+        if CLAUDE_AGENT_AVAILABLE:
+            prompt = ClaudeCodeAgent._inject_usage_session(prompt, self._last_usage_session_id)
+
         logger.info(f"[ACP-CHAT] === STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars, timeout: {ACPX_TIMEOUT}s")
 
