@@ -733,6 +733,9 @@ class CreateProjectRequest(BaseModel):
     environment_variables: Optional[List[InitialEnvironmentVariable]] = None
     # Global Integrations to import (server-side resolve; values never transit the client)
     global_integration_ids: Optional[List[int]] = None
+    # Bind the bot token from a saved Global Integration (type 2/3) — server-side
+    # decrypt; already verified at save time, no client re-verify needed.
+    bot_token_integration_id: Optional[int] = None
 
 
 PROJECT_CREATION_IN_PROGRESS_STATUSES = (
@@ -1752,6 +1755,29 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             status_code=400,
             detail="Initial environment variables are supported for Website, Telegram Bot, Discord Bot, and Scheduler projects.",
         )
+
+    # ── Bot token bound from a Global Integration (type 2/3) ──────────────
+    # Server-side decrypt; already verified at save time. Mutating the request
+    # keeps every downstream consumer (validation, enqueue, legacy workers)
+    # unchanged.
+    if request.bot_token_integration_id and type_id in (2, 3):
+        from secure_value import decrypt_value
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT user_id, value_encrypted FROM global_integrations WHERE id = ?",
+                (request.bot_token_integration_id,)
+            ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Bot token integration not found")
+        d = dict(row) if not isinstance(row, dict) else row
+        if str(d.get("user_id")) != str(user_id):
+            raise HTTPException(status_code=403, detail="No access to that integration")
+        try:
+            request.bot_token = decrypt_value(d.get("value_encrypted"))
+        except ValueError:
+            raise HTTPException(status_code=500, detail="Could not decrypt the saved bot token")
+        logger.info("[GI] user %s bound bot token from integration %s for new project",
+                    user_id, request.bot_token_integration_id)
 
     if type_id == 2 and not request.bot_token:
         raise HTTPException(
