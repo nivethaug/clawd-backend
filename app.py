@@ -731,6 +731,8 @@ class CreateProjectRequest(BaseModel):
     email_to: Optional[str] = None  # Default email recipient (SMTP is shared)
     api_endpoint: Optional[str] = None  # Default API endpoint URL
     environment_variables: Optional[List[InitialEnvironmentVariable]] = None
+    # Global Integrations to import (server-side resolve; values never transit the client)
+    global_integration_ids: Optional[List[int]] = None
 
 
 PROJECT_CREATION_IN_PROGRESS_STATUSES = (
@@ -1628,6 +1630,41 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         item.model_dump() if hasattr(item, "model_dump") else item
         for item in (request.environment_variables or [])
     ]
+
+    # ── Global Integrations import (server-side; values never transit client) ──
+    if request.global_integration_ids:
+        from secure_value import decrypt_value
+        with get_db() as conn:
+            placeholders = ", ".join("?" for _ in request.global_integration_ids)
+            gi_rows = conn.execute(
+                f"SELECT id, user_id, key_name, value_encrypted, docs_url, description "
+                f"FROM global_integrations WHERE id IN ({placeholders})",
+                tuple(request.global_integration_ids)
+            ).fetchall()
+        found = {r["id"] if isinstance(r, dict) else r[0]: r for r in gi_rows}
+        imported = []
+        for gi_id in request.global_integration_ids:
+            row = found.get(gi_id)
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Global integration {gi_id} not found")
+            owner = row["user_id"] if isinstance(row, dict) else row[1]
+            if str(owner) != str(user_id):
+                raise HTTPException(status_code=403, detail=f"No access to global integration {gi_id}")
+            d = dict(row) if not isinstance(row, dict) else row
+            try:
+                value = decrypt_value(d["value_encrypted"])
+            except ValueError as exc:
+                raise HTTPException(status_code=500, detail=f"Could not decrypt integration {gi_id}")
+            imported.append({
+                "key": d["key_name"],
+                "value": value,
+                "docs_url": d.get("docs_url") or "",
+                "description": d.get("description"),
+            })
+        # Explicit payload entries win on key collision; global fills the rest
+        explicit_keys = {(i.get("key") or "").upper() for i in raw_initial_env}
+        raw_initial_env.extend(i for i in imported if i["key"] not in explicit_keys)
+
     try:
         initial_environment_variables = normalize_initial_environment_variables(raw_initial_env)
     except (ValueError, env_manager.EnvValidationError) as exc:
@@ -9011,6 +9048,302 @@ async def revoke_api_key(key_id: int, authorization: Optional[str] = Header(None
         conn.commit()
     logger.info(f"[API-KEYS] User {user_id} revoked key {key_id}")
     return {"success": True, "message": f"API key {key_id} revoked"}
+
+
+# ---------------------------------------------------------------------------
+# Global Integrations — user-level reusable credentials (encrypted at rest)
+# ---------------------------------------------------------------------------
+
+# Known token types: code constant is the single source of truth.
+# Validators reuse the SAME functions the project-create flow uses.
+GLOBAL_INTEGRATION_TYPES: dict = {
+    "telegram": {"key": "TELEGRAM_BOT_TOKEN", "label": "Telegram Bot"},
+    "discord": {"key": "DISCORD_TOKEN", "label": "Discord Bot"},
+    "email": {"key": "EMAIL_TO", "label": "Email"},
+    "other": {"key": None, "label": "Other"},
+}
+
+
+class GlobalIntegrationResponse(BaseModel):
+    id: int
+    token_type: str
+    key_name: str
+    verified: bool
+    title: Optional[str] = None
+    description: Optional[str] = None
+    docs_url: Optional[str] = None
+    category: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    # NOTE: no value field — secrets are never included in listings
+
+
+class GlobalIntegrationCreateRequest(BaseModel):
+    token_type: str = "other"
+    key_name: Optional[str] = None      # ignored for known types (mapped key used)
+    value: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    docs_url: Optional[str] = None
+    verified: bool = False              # only honored for known types
+
+
+class GlobalIntegrationUpdateRequest(BaseModel):
+    value: Optional[str] = None         # omit = keep current
+    title: Optional[str] = None
+    description: Optional[str] = None
+    docs_url: Optional[str] = None
+
+
+class GlobalIntegrationValidateRequest(BaseModel):
+    kind: str                          # telegram | discord | email
+    value: str
+
+
+def _gi_enrich_with_registry(rows: list) -> list:
+    """Join env_variable_registry metadata onto integration rows (title/docs/category)."""
+    from env_registry_service import lookup_many
+    keys = [r["key_name"] for r in rows if r.get("key_name")]
+    meta = lookup_many(keys) if keys else {}
+    for r in rows:
+        m = meta.get(r["key_name"]) or {}
+        if not r.get("title") and m.get("title"):
+            r["title"] = m["title"]
+        if not r.get("description") and m.get("description"):
+            r["description"] = m["description"]
+        if not r.get("docs_url") and m.get("docs_url"):
+            r["docs_url"] = m["docs_url"]
+        if m.get("category"):
+            r["category"] = m["category"]
+    return rows
+
+
+def _gi_row_to_response(row) -> GlobalIntegrationResponse:
+    d = dict(row) if not isinstance(row, dict) else row
+    return GlobalIntegrationResponse(
+        id=d.get("id"),
+        token_type=d.get("token_type") or "other",
+        key_name=d.get("key_name"),
+        verified=bool(d.get("verified")),
+        title=d.get("title"),
+        description=d.get("description"),
+        docs_url=d.get("docs_url"),
+        category=d.get("category"),
+        created_at=str(d.get("created_at")) if d.get("created_at") else None,
+        updated_at=str(d.get("updated_at")) if d.get("updated_at") else None,
+    )
+
+
+@app.get("/api/global-integrations", response_model=list[GlobalIntegrationResponse])
+async def list_global_integrations(authorization: Optional[str] = Header(None)):
+    """List the user's global integrations. Values are NEVER included."""
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, token_type, key_name, verified, title, description, "
+            "docs_url, category, created_at, updated_at "
+            "FROM global_integrations WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,)
+        ).fetchall()
+    out = [_gi_row_to_response(_gi_enrich_with_registry([dict(r) if not isinstance(r, dict) else r])[0])
+           for r in rows]
+    return out
+
+
+@app.post("/api/global-integrations")
+async def create_global_integration(request: GlobalIntegrationCreateRequest,
+                                    authorization: Optional[str] = Header(None)):
+    """Create or update (upsert) a global integration. Never returns the value."""
+    from secure_value import encrypt_value
+
+    user_id = get_user_id_from_token(authorization)
+    ttype = (request.token_type or "other").lower()
+    if ttype not in GLOBAL_INTEGRATION_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown token_type '{request.token_type}'")
+
+    known = GLOBAL_INTEGRATION_TYPES[ttype]
+    if known["key"]:
+        key_name = known["key"]
+        verified = request.verified  # trusted only for known types (client validated first)
+    else:
+        key_name = (request.key_name or "").strip().upper()
+        if not key_name:
+            raise HTTPException(status_code=400, detail="key_name is required for custom integrations")
+        try:
+            env_manager.validate_keys([{ "key": key_name }])
+        except env_manager.EnvValidationError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        verified = False  # custom keys are never 'verified'
+
+    if not request.value or not request.value.strip():
+        raise HTTPException(status_code=400, detail="value is required")
+
+    value_encrypted = encrypt_value(request.value.strip())
+    title = request.title or key_name.replace("_", " ").title()
+    category = request.title and "Custom" or "Custom"  # registry enriches on read
+
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM global_integrations WHERE user_id = ? AND key_name = ?",
+            (user_id, key_name)
+        ).fetchone()
+        if existing:
+            gi_id = existing["id"] if isinstance(existing, dict) else existing[0]
+            conn.execute(
+                "UPDATE global_integrations SET value_encrypted = ?, verified = ?, "
+                "title = ?, description = ?, docs_url = ?, updated_at = NOW() WHERE id = ?",
+                (value_encrypted, verified, title, request.description,
+                 request.docs_url, gi_id)
+            )
+            status_code = 200
+        else:
+            conn.execute(
+                "INSERT INTO global_integrations "
+                "(user_id, token_type, key_name, value_encrypted, verified, title, description, docs_url) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (user_id, ttype, key_name, value_encrypted, verified, title,
+                 request.description, request.docs_url)
+            )
+            row = conn.fetchone()
+            gi_id = row["id"] if isinstance(row, dict) else row[0]
+            status_code = 201
+        conn.commit()
+
+    logger.info("[GI] user %s saved %s integration %s (verified=%s)",
+                user_id, ttype, key_name, verified)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, token_type, key_name, verified, title, description, docs_url, "
+            "category, created_at, updated_at FROM global_integrations WHERE id = ?",
+            (gi_id,)
+        ).fetchone()
+    return _gi_row_to_response(_gi_enrich_with_registry([dict(row) if not isinstance(row, dict) else row])[0])
+
+
+@app.put("/api/global-integrations/{gi_id}")
+async def update_global_integration(gi_id: int, request: GlobalIntegrationUpdateRequest,
+                                    authorization: Optional[str] = Header(None)):
+    """Update value (re-encrypted; resets verified) and/or metadata."""
+    from secure_value import encrypt_value
+
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, token_type FROM global_integrations WHERE id = ? AND user_id = ?",
+            (gi_id, user_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Integration not found")
+        ttype = row["token_type"] if isinstance(row, dict) else row[1]
+
+        sets, params = [], []
+        if request.value is not None and request.value.strip():
+            sets.append("value_encrypted = ?")
+            params.append(encrypt_value(request.value.strip()))
+            # A changed value must be re-verified for known types
+            if ttype in ("telegram", "discord", "email"):
+                sets.append("verified = FALSE")
+        for field in ("title", "description", "docs_url"):
+            v = getattr(request, field)
+            if v is not None:
+                sets.append(f"{field} = ?")
+                params.append(v)
+        if not sets:
+            raise HTTPException(status_code=400, detail="Nothing to update")
+        sets.append("updated_at = NOW()")
+        params.append(gi_id)
+        conn.execute(f"UPDATE global_integrations SET {', '.join(sets)} WHERE id = ?", tuple(params))
+        conn.commit()
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, token_type, key_name, verified, title, description, docs_url, "
+            "category, created_at, updated_at FROM global_integrations WHERE id = ?",
+            (gi_id,)
+        ).fetchone()
+    return _gi_row_to_response(_gi_enrich_with_registry([dict(row) if not isinstance(row, dict) else row])[0])
+
+
+@app.post("/api/global-integrations/{gi_id}/reveal")
+async def reveal_global_integration(gi_id: int, authorization: Optional[str] = Header(None)):
+    """Reveal a stored value (owner-only, audit-logged)."""
+    from secure_value import decrypt_value
+
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT key_name, value_encrypted FROM global_integrations WHERE id = ? AND user_id = ?",
+            (gi_id, user_id)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    key_name = row["key_name"] if isinstance(row, dict) else row[0]
+    stored = row["value_encrypted"] if isinstance(row, dict) else row[1]
+    try:
+        value = decrypt_value(stored)
+    except ValueError as e:
+        logger.error("[GI-AUDIT] user %s reveal of %s FAILED decrypt: %s", user_id, key_name, e)
+        raise HTTPException(status_code=500, detail="Stored value could not be decrypted")
+    logger.info("[GI-AUDIT] user %s revealed %s", user_id, key_name)
+    return {"success": True, "key": key_name, "value": value}
+
+
+@app.delete("/api/global-integrations/{gi_id}")
+async def delete_global_integration(gi_id: int, authorization: Optional[str] = Header(None)):
+    """Delete a global integration. Does NOT touch values already imported into projects."""
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, key_name FROM global_integrations WHERE id = ? AND user_id = ?",
+            (gi_id, user_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Integration not found")
+        conn.execute("DELETE FROM global_integrations WHERE id = ?", (gi_id,))
+        conn.commit()
+    key_name = row["key_name"] if isinstance(row, dict) else row[1]
+    logger.info("[GI] user %s deleted integration %s", user_id, key_name)
+    return {"success": True, "message": f"Integration {key_name} deleted"}
+
+
+@app.post("/api/global-integrations/validate")
+async def validate_global_integration(request: GlobalIntegrationValidateRequest,
+                                      authorization: Optional[str] = Header(None)):
+    """Validate a credential using the SAME validators as project creation.
+
+    kind=telegram → Telegram getMe; kind=discord → Discord users/@me;
+    kind=email → test email via the platform's shared SMTP.
+    """
+    user_id = get_user_id_from_token(authorization)
+    kind = (request.kind or "").lower()
+    value = (request.value or "").strip()
+    if not value:
+        return {"valid": False, "error": "value is required"}
+
+    try:
+        if kind == "telegram":
+            from services.telegram.validator import validate_telegram_token
+            is_valid, info = validate_telegram_token(value)
+            return {"valid": bool(is_valid), "info": info if is_valid else None,
+                    "error": None if is_valid else (info or {}).get("error", "Invalid token")}
+        elif kind == "discord":
+            from services.discord.validator import validate_discord_token
+            is_valid, info = validate_discord_token(value)
+            return {"valid": bool(is_valid), "info": info if is_valid else None,
+                    "error": None if is_valid else (info or {}).get("error", "Invalid token")}
+        elif kind == "email":
+            from services.scheduler.validator import validate_scheduler_channels
+            result = validate_scheduler_channels(email_to=value)
+            ch = (result.get("channels") or {}).get("email") or {}
+            return {"valid": bool(ch.get("valid")), "info": {"to": value} if ch.get("valid") else None,
+                    "error": None if ch.get("valid") else ch.get("error", "Email test failed")}
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown kind '{request.kind}'")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[GI] validate %s error: %s", kind, e)
+        return {"valid": False, "error": str(e)}
 
 
 class GoogleAuthRequest(BaseModel):

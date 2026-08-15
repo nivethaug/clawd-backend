@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import env_manager
 import env_registry_service
 
-MAX_INITIAL_ENV_VARS = 2
+MAX_INITIAL_ENV_VARS = 10  # manual + imported Global Integrations combined
 
 
 def normalize_initial_environment_variables(items: Any) -> List[Dict[str, str]]:
@@ -40,12 +40,10 @@ def normalize_initial_environment_variables(items: Any) -> List[Dict[str, str]]:
             raise ValueError(f"Duplicate environment variable key: {key}")
         if not value:
             raise ValueError(f"environment_variables[{index}].value is required")
-        if not docs_url:
-            raise ValueError(f"environment_variables[{index}].docs_url is required")
-
-        parsed = urlparse(docs_url)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError(f"environment_variables[{index}].docs_url must be a valid http(s) URL")
+        if docs_url:
+            parsed = urlparse(docs_url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError(f"environment_variables[{index}].docs_url must be a valid http(s) URL")
 
         env_manager.validate_keys({key: value})
 

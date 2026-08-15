@@ -1225,6 +1225,26 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added api_keys table")
 
+            # --- global_integrations (user-level reusable credentials) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS global_integrations (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_type VARCHAR(20) NOT NULL DEFAULT 'other',
+                key_name TEXT NOT NULL,
+                value_encrypted TEXT NOT NULL,
+                verified BOOLEAN NOT NULL DEFAULT FALSE,
+                title TEXT,
+                description TEXT,
+                docs_url TEXT,
+                category VARCHAR(50) NOT NULL DEFAULT 'Custom',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(user_id, key_name)
+            )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_global_integrations_user ON global_integrations(user_id)")
+            conn.commit()
+            logger.info("✓ Added global_integrations table")
+
             # --- credit_transactions (audit ledger) ---
             cur.execute("""CREATE TABLE IF NOT EXISTS credit_transactions (
                 id SERIAL PRIMARY KEY,
