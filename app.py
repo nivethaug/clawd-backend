@@ -9169,7 +9169,7 @@ async def create_global_integration(request: GlobalIntegrationCreateRequest,
     if not key_name:
         raise HTTPException(status_code=400, detail="key_name is required")
     try:
-        env_manager.validate_keys([{ "key": key_name }])
+        env_manager.validate_keys({key_name: "x"})
     except env_manager.EnvValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # verified is trusted only for known types (client ran the validator first)
