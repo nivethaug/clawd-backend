@@ -165,6 +165,18 @@ class SchedulerEditor:
                     self._rollback()
                     return False, f"Validation failed: {msg}"
             else:
+                if result.get("timed_out"):
+                    # Timeout: KEEP the AI-edited files (no rollback to the
+                    # blank template) — a later fix edit can complete them.
+                    logger.warning(
+                        "Scheduler modification timed out — keeping AI-edited "
+                        "files on disk (no rollback); a fix edit can complete them"
+                    )
+                    return False, (
+                        "AI modification timed out after 45 min — AI-edited "
+                        "files kept as-is (not reverted); run a fix edit to "
+                        "check and complete them"
+                    )
                 self._rollback()
                 return False, f"AI modification failed: {result.get('error')}"
 
@@ -427,6 +439,9 @@ Enhance the scheduler executor for: {description}
                 return result
             finally:
                 loop.close()
+        except asyncio.TimeoutError:
+            logger.error("Scheduler modification timeout after 2700s (45 min)")
+            return {"success": False, "error": "Modification timeout", "timed_out": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -439,7 +454,7 @@ Enhance the scheduler executor for: {description}
             str(self.project_path),
             user_id=_user_id,
         ) as agent:
-            result = await agent.query(prompt, timeout=1800)
+            result = await agent.query(prompt, timeout=2700)
             # Capture token usage
             self._last_token_usage = agent.last_token_usage
             if self._last_token_usage:

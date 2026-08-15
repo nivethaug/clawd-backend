@@ -143,6 +143,19 @@ class TelegramBotEditor:
                     self._rollback()
                     return False, f"Validation failed: {validation_msg}"
             else:
+                if result.get("timed_out"):
+                    # Timeout: KEEP the AI-edited files (no rollback to the
+                    # blank template). The edits are substantial work — a
+                    # later fix edit can check and complete them.
+                    logger.warning(
+                        "⏱️ Claude modification timed out — keeping AI-edited "
+                        "files on disk (no rollback); a fix edit can complete them"
+                    )
+                    return False, (
+                        "AI modification timed out after 45 min — AI-edited "
+                        "files kept as-is (not reverted); run a fix edit to "
+                        "check and complete them"
+                    )
                 # Claude failed - rollback
                 logger.error(f"❌ Claude modification failed: {result.get('error')}")
                 self._rollback()
@@ -530,7 +543,7 @@ Enhance Telegram bot for: {description}
                 ) as agent:
                     result = await agent.query(
                         prompt=prompt,
-                        timeout=1800  # 30 minutes (bot/scheduler)
+                        timeout=2700  # 45 minutes (bot/scheduler)
                     )
                     # Capture token usage
                     self._last_token_usage = agent.last_token_usage
@@ -548,12 +561,12 @@ Enhance Telegram bot for: {description}
                 else:
                     # Use existing loop with timeout
                     result = loop.run_until_complete(
-                        asyncio.wait_for(run_claude(), timeout=1800)
+                        asyncio.wait_for(run_claude(), timeout=2700)
                     )
             except RuntimeError:
                 # No event loop, create new one
                 result = asyncio.run(
-                    asyncio.wait_for(run_claude(), timeout=1800)
+                    asyncio.wait_for(run_claude(), timeout=2700)
                 )
             
             # Handle result - can be string (success) or dict
@@ -570,10 +583,11 @@ Enhance Telegram bot for: {description}
                 return {"success": False, "error": "Empty or invalid response"}
         
         except asyncio.TimeoutError:
-            logger.error("❌ Claude modification timeout after 1800s (30 min)")
+            logger.error("❌ Claude modification timeout after 2700s (45 min)")
             return {
                 "success": False,
-                "error": "Modification timeout"
+                "error": "Modification timeout",
+                "timed_out": True,
             }
         except Exception as e:
             logger.error(f"❌ Claude modification error: {e}")
