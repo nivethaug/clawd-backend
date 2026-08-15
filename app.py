@@ -9162,18 +9162,18 @@ async def create_global_integration(request: GlobalIntegrationCreateRequest,
         raise HTTPException(status_code=400, detail=f"Unknown token_type '{request.token_type}'")
 
     known = GLOBAL_INTEGRATION_TYPES[ttype]
-    if known["key"]:
-        key_name = known["key"]
-        verified = request.verified  # trusted only for known types (client validated first)
-    else:
-        key_name = (request.key_name or "").strip().upper()
-        if not key_name:
-            raise HTTPException(status_code=400, detail="key_name is required for custom integrations")
-        try:
-            env_manager.validate_keys([{ "key": key_name }])
-        except env_manager.EnvValidationError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        verified = False  # custom keys are never 'verified'
+    # Key is editable for ALL types (users may save multiple tokens of the
+    # same type, e.g. TELEGRAM_BOT_TOKEN_2); known types default to the
+    # mapped key when the client doesn't provide one.
+    key_name = (request.key_name or "").strip().upper() or (known["key"] or "")
+    if not key_name:
+        raise HTTPException(status_code=400, detail="key_name is required")
+    try:
+        env_manager.validate_keys([{ "key": key_name }])
+    except env_manager.EnvValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # verified is trusted only for known types (client ran the validator first)
+    verified = bool(request.verified) if ttype != "other" else False
 
     if not request.value or not request.value.strip():
         raise HTTPException(status_code=400, detail="value is required")
