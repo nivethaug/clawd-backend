@@ -8,3 +8,5 @@ python-jose==3.3.0
 fastapi==0.109.0
 uvicorn==0.27.0
 pydantic==2.5.0
+pytest==9.1.1
+pytest-asyncio==1.4.0

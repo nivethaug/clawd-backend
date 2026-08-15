@@ -793,6 +793,11 @@ class ClaudeCodeAgent:
         meta_end = "</DREAMPILOT_WORKFLOW_META>"
         if meta_start not in prompt:
             return prompt
+        # Idempotent: if a caller already injected a session id (e.g. the
+        # chat-edit handler injects before choosing a backend), keep it.
+        end_idx = prompt.index(meta_end)
+        if f'"{tag}"' in prompt[prompt.index(meta_start):end_idx]:
+            return prompt
         # Try JSON insertion: find the last closing brace before META_END and
         # inject our field. This handles both indented and compact JSON.
         end_idx = prompt.index(meta_end)

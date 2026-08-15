@@ -13,6 +13,7 @@ import signal
 import threading
 import logging
 import asyncio
+import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, Generator
 from pathlib import Path
@@ -280,6 +281,34 @@ class ACPChatHandler:
             prompt_kind=prompt_kind,
             env_config=env_config,
         )
+
+    def _env_rules_block(self) -> str:
+        """Environment constraints every edit agent must know.
+
+        Derived from live incidents: an edit agent hit a missing pytest,
+        ran `pip3 install` (minutes of background stalls), then polled the
+        install with `sleep N; cat output` — every sleep-prefixed command
+        is auto-backgrounded and returns a task ID instead of output,
+        creating a check-of-check spiral that stalled the edit.
+        """
+        return """## ENVIRONMENT & COMMAND RULES (MANDATORY)
+
+- pytest may NOT be installed in this container. NEVER run `pip install` /
+  `pip3 install` to get it — installs run for minutes in the background and
+  stall the whole edit. If `python3 -m pytest` is unavailable, validate with
+  the alternatives below instead.
+- Validate every edited .py file with:
+  `python3 -c "import py_compile; py_compile.compile('FILE', doraise=True)"`
+- For behavior checks, write a direct `python3 -c` script that imports and
+  calls the changed functions. When mocking Telegram/Discord objects, patch
+  at the CLASS level — the libraries freeze instances, so setting instance
+  attributes raises.
+- NEVER use `sleep N; <command>` to wait for anything — commands containing
+  sleep are auto-backgrounded and their output is never returned. Run the
+  check command directly.
+
+---
+"""
 
     def _read_project_env_value(self, key: str):
         """Read a single key from the project's .env file.
@@ -681,6 +710,7 @@ class ACPChatHandler:
         integrations_section = build_external_integrations_block(self.project_id)
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="scheduler_chat_edit")}
+{self._env_rules_block()}
 You are a friendly AI assistant helping a user with their **{self.project_name}** scheduler project.
 
 ---
@@ -1147,6 +1177,7 @@ Before making any code changes, follow this process:
         integrations_section = build_external_integrations_block(self.project_id)
         
         return  f"""{self._workflow_meta_block(operation="edit", prompt_kind="website_chat_edit")}
+{self._env_rules_block()}
 You are a friendly AI assistant helping a user build their **{self.project_name}** web application.
  
 ---
@@ -1981,6 +2012,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow, with m
         integrations_section = build_external_integrations_block(self.project_id)
         
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="telegram_chat_edit")}
+{self._env_rules_block()}
 You are a friendly AI assistant helping a user modify their **{self.project_name}** Telegram bot.
 
 ---
@@ -2394,6 +2426,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
         integrations_section = build_external_integrations_block(self.project_id)
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="discord_chat_edit")}
+{self._env_rules_block()}
 You are a friendly AI assistant helping a user modify their **{self.project_name}** Discord bot.
 
 ---
@@ -3321,6 +3354,17 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 prompt = self._build_chat_prompt_scheduler(user_message, session_context)
             else:
                 prompt = self._build_chat_prompt(user_message, session_context)
+
+        # Attribute wrapper usage records to THIS query. agent.query() also
+        # injects an id, but some paths (ACPX fallback) reach the wrapper
+        # without it — inject here so every backend carries one. The
+        # injection is idempotent, so query()'s own pass becomes a no-op.
+        self._last_usage_session_id = f"qry_{uuid.uuid4().hex[:16]}"
+        if CLAUDE_AGENT_AVAILABLE:
+            prompt = ClaudeCodeAgent._inject_usage_session(prompt, self._last_usage_session_id)
+            logger.info(f"[ACP-CHAT] usage session id: {self._last_usage_session_id}")
+        else:
+            logger.warning("[ACP-CHAT] ClaudeCodeAgent unavailable — usage session id not injected")
 
         logger.info(f"[ACP-CHAT] === CLAUDE STREAMING MODE ===")
         logger.info(f"[ACP-CHAT] Total prompt: {len(prompt)} chars")
