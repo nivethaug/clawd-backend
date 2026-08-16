@@ -13213,6 +13213,48 @@ class AdminUpdateUserRequest(BaseModel):
     subscription_tier: Optional[str] = None
 
 
+@app.get("/admin/users/{target_user_id}/projects")
+async def admin_list_user_projects(
+    target_user_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    """List a user's projects for the admin panel support view (read-only)."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT p.id, p.name, p.description, p.type_id, p.status, p.domain,
+                      p.repo_url, p.created_at, pt.display_name AS type_name
+                 FROM projects p
+                 LEFT JOIN project_types pt ON pt.id = p.type_id
+                WHERE p.user_id = %s
+                ORDER BY p.created_at DESC""",
+            (target_user_id,)
+        ).fetchall()
+
+    def gv(row, key, idx):
+        return row[key] if isinstance(row, dict) else row[idx]
+
+    return {
+        "user_id": target_user_id,
+        "projects": [
+            {
+                "id": gv(p, "id", 0),
+                "name": gv(p, "name", 1),
+                "description": gv(p, "description", 2),
+                "type_id": gv(p, "type_id", 3),
+                "type_name": gv(p, "type_name", 8),
+                "status": gv(p, "status", 4),
+                "domain": gv(p, "domain", 5),
+                "repo_url": gv(p, "repo_url", 6),
+                "created_at": str(gv(p, "created_at", 7)),
+            }
+            for p in rows
+        ],
+    }
+
+
 @app.put("/admin/users/{target_user_id}")
 async def admin_update_user(
     target_user_id: int,
