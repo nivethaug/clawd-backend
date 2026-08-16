@@ -2067,7 +2067,7 @@ Read `index.json` (project code index) — it contains:
 5. MAKE your modifications
 6. UPDATE `agent/ai_index/index.json` (MANDATORY)
 7. PUBLISH with buildpublish.py to apply changes
-8. RUN UNIT TESTS to verify changes
+8. RUN UNIT TESTS to verify changes (only if pytest is available — otherwise py_compile + direct python3 -c scripts; never pip install)
 
 ---
 
@@ -2215,11 +2215,15 @@ cat {self.bot_code_path}/logs/out.log | tail -20
 cat {self.bot_code_path}/logs/error.log | tail -10
 ```
 
-### Run Unit Tests (MANDATORY)
+### Run Unit Tests
+If pytest is available (`python3 -m pytest --version` succeeds):
 ```bash
 cd {self.bot_code_path}
-python -m pytest unit/ -v
+python3 -m pytest unit/ -v
 ```
+If pytest is NOT installed, do NOT install it — validate with
+py_compile on every edited file plus direct python3 -c scripts that
+import and call the changed functions (see ENVIRONMENT & COMMAND RULES).
 
 **Unit Test Requirements:**
 - Tests MUST verify real API calls (not mocks)
@@ -2292,8 +2296,8 @@ After making ANY changes, update the project code index:
 ## BEST PRACTICES
 
 1. **Always test via Telegram** - Don't assume code works
-2. **Check PM2 logs** - If bot doesn't respond
-3. **Restart PM2** - After any code changes
+2. **Read the bot log files** - If bot doesn't respond (pm2 is not in the sandbox PATH)
+3. **Publish via buildpublish.py** - It restarts PM2 for you; never run pm2 directly
 4. **Update AI Index** - Every time you modify code
 5. **Use async/await** - For all Telegram bot handlers
 6. **Handle errors** - Wrap database calls in try/except
@@ -2307,8 +2311,15 @@ After making ANY changes, update the project code index:
 - Publish: `cd {self.bot_code_path} && python3 buildpublish.py`
 
 ### Webhook Issues
-- Verify domain resolves: `nslookup {self.domain}`
-- Re-register webhook: Use `buildpublish.py`
+- Webhooks and DNS are PLATFORM-MANAGED. If the bot doesn't respond,
+  check logs first; if the webhook looks suspect, verify with
+  getWebhookInfo — url set + pending_updates=0 + last_error=none means
+  it is healthy. Report findings, never fix it yourself.
+- Do NOT run nslookup from inside the sandbox (DNS here is unreliable)
+  and NEVER call setWebhook manually — repeated calls trip Telegram
+  flood control. buildpublish.py re-registers on publish as best-effort;
+  a 400 "Failed to resolve host" from it is expected sandbox noise and
+  the previously registered webhook stays active.
 - Bot token is managed by the platform; if it is wrong, ask the user to re-link the bot via the dashboard
 
 ### Database Issues
@@ -2517,7 +2528,7 @@ Read `index.json` (project code index) — it contains:
 4. MAKE your modifications
 5. UPDATE `agent/ai_index/index.json` (MANDATORY)
 6. PUBLISH with buildpublish.py to apply changes
-7. RUN UNIT TESTS to verify changes
+7. RUN UNIT TESTS to verify changes (only if pytest is available — otherwise py_compile + direct python3 -c scripts; never pip install)
 
 ---
 
@@ -2679,7 +2690,7 @@ When adding or modifying slash commands (/price, /market, /chart):
 3. Do NOT register the same command in both main.py AND command file setup()
 4. bot.tree.sync() is ALREADY in the template's on_ready(). It runs on every startup.
    You do NOT need to add it — just register your @bot.tree.command and sync handles the rest.
-5. After editing commands, ALWAYS run unit tests then publish immediately
+5. After editing commands, validate (pytest if available, else py_compile + direct scripts) then publish immediately
 
 ---
 

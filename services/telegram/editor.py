@@ -252,10 +252,25 @@ The log tells you EXACTLY what broke (import error, syntax error, missing
 dependency). Reading code files is guessing. Reading logs is KNOWING.
 Never spend 10+ tool calls reading code when 1 log read reveals the answer.
 
-After fixing, ALWAYS verify the bot starts cleanly:
+After fixing, verify the bot starts cleanly by reading the logs:
 ```bash
-curl -s https://{domain}-api.dreamagent.cloud/health
+cat logs/out.log | tail -20 && cat logs/error.log | tail -10
 ```
+("Application startup complete" + no traceback = healthy)
+
+WEBHOOK & PUBLIC HEALTH (PLATFORM-MANAGED — READ ONCE, THEN IGNORE):
+- Webhook registration is handled by the platform (host-side, with
+  retries) and by buildpublish.py. It is NOT your job.
+- buildpublish.py may print "Webhook registration failed: 400 — Failed
+  to resolve host". This is EXPECTED and SAFE: the bot's public
+  hostname doesn't resolve inside the sandbox, and the previously
+  registered webhook stays active. Do NOT retry, do NOT call
+  setWebhook yourself (retries trip Telegram flood control).
+- Do NOT curl or nslookup the bot's public https://<domain>-api...
+  URL from your shell — same sandbox DNS limitation.
+- Only if the user later reports the bot silent: check state with
+  getWebhookInfo (url set + pending_updates=0 + last_error=none =
+  healthy) and report findings — never fix it yourself.
 
 1. KEEP function signature EXACT:
    def process_user_input(text: str, user: Optional[User] = None) -> str
