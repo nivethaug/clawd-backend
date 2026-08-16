@@ -2719,11 +2719,13 @@ are PRODUCTION paths managed entirely by buildpublish.py. NEVER attempt to read,
 edit, or cd into production paths. Edit ONLY files in your current directory,
 then publish via buildpublish.py.
 
-**After making changes, ALWAYS run tests then publish IMMEDIATELY:**
+**After making changes, ALWAYS validate then publish IMMEDIATELY:**
 
 ```bash
-# 1. Run unit tests (tests command parsing, AI logic, API calls)
-cd {self.bot_code_path} && python -m pytest unit/ -v 2>&1 | tail -30
+# 1. Run unit tests IF pytest is available (tests command parsing, AI logic, API calls).
+#    If pytest is NOT installed, do NOT install it — validate with py_compile on
+#    every edited file plus direct python3 -c scripts (see ENVIRONMENT & COMMAND RULES).
+cd {self.bot_code_path} && python3 -m pytest unit/ -v 2>&1 | tail -30
 
 # 2. Publish (handles PM2 restart via worker-api)
 cd {self.bot_code_path} && python3 buildpublish.py . {self.project_id}
