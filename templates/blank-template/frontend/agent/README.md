@@ -2,15 +2,16 @@
 
 This folder helps AI assistants understand and modify the React/Vite frontend efficiently.
 
-## AI Index Files
+## AI Index
 
-| File | Purpose | When to Update |
-|------|---------|----------------|
-| `ai_index/symbols.json` | Components, hooks, functions with line numbers | After adding/editing/removing any code |
-| `ai_index/modules.json` | Logical module groupings | After adding new files/folders |
-| `ai_index/dependencies.json` | Import relationships | After changing imports |
-| `ai_index/summaries.json` | Semantic descriptions per file | After significant changes |
-| `ai_index/files.json` | File metadata (lines, routes) | After adding/removing files |
+**File:** `ai_index/index.json` — the single project code index. It has three
+sections: `symbols` (components, hooks, functions with file + line numbers),
+`summaries` (per-file semantic descriptions, key components), and `files`
+(file metadata: lines, purpose, routes).
+
+Update it after ANY code change — add/edit/remove symbol entries, keep line
+numbers current, and keep the summaries/files sections in sync. Read it FIRST
+when looking for code; it tells you file path + start_line + end_line.
 
 ## Frontend Structure
 
@@ -140,7 +141,7 @@ const productService = createCrudService<Product>("products");
 
 ### 1. Read existing pattern
 ```
-Read: ai_index/symbols.json → Find "Welcome" component as reference
+Read: ai_index/index.json → find a "Welcome" or page symbol in `symbols` as reference
 ```
 
 ### 2. Create page component
@@ -164,7 +165,7 @@ import Dashboard from "./pages/Dashboard";
 ```
 
 ### 4. Update AI Index
-Add to `ai_index/symbols.json`:
+Add to the `symbols` section of `ai_index/index.json`:
 ```json
 "Dashboard": {
   "type": "component",
@@ -175,6 +176,7 @@ Add to `ai_index/symbols.json`:
   "description": "Dashboard page component"
 }
 ```
+And add a `files` entry for the new page if not present.
 
 ---
 
@@ -204,7 +206,7 @@ import UserCard from "@/components/UserCard";
 ```
 
 ### 3. Update AI Index
-Add to `ai_index/symbols.json`
+Add the symbol to `ai_index/index.json`
 
 ---
 
@@ -212,12 +214,12 @@ Add to `ai_index/symbols.json`
 
 ### 1. Find the component
 ```
-Read: ai_index/symbols.json → Search for component name
+Read: ai_index/index.json → search the `symbols` section for the component name
 ```
 
 ### 2. Navigate to file and lines
 ```
-symbols.json gives you: file path + start_line + end_line
+The symbol gives you: file path + start_line + end_line
 ```
 
 ### 3. Make changes
@@ -229,28 +231,26 @@ Update line numbers if they changed.
 
 ## How to Remove Page/Component
 
-### 1. Find in `ai_index/symbols.json`
+### 1. Find it in the `symbols` section of `ai_index/index.json`
 
 ### 2. Delete the file
 
 ### 3. Remove import and route from App.tsx (if page)
 
 ### 4. Update AI Index
-- Remove entry from `ai_index/symbols.json`
-- Remove from `ai_index/files.json`
-- Update `ai_index/dependencies.json`
+Remove the symbol entry and its `files` entry from `ai_index/index.json`
 
 ---
 
 ## Quick Reference: AI Index Update Checklist
 
-| Action | symbols | modules | dependencies | summaries | files |
-|--------|:-------:|:-------:|:------------:|:---------:|:-----:|
-| Add page/component | ✅ | - | - | - | - |
-| Edit page/component | ✅ | - | - | - | - |
-| Remove page/component | ✅ | - | - | - | - |
-| Add new folder | ✅ | ✅ | - | ✅ | ✅ |
-| Change imports | - | - | ✅ | - | - |
+| Action | index.json update |
+|--------|-------------------|
+| Add page/component | add symbol + files entry |
+| Edit page/component | update line numbers |
+| Remove page/component | remove symbol + files entry |
+| Add new folder | add files entry (+ symbols) |
+| Change imports | update the files/summaries entries if descriptions change |
 
 ---
 

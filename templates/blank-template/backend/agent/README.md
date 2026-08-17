@@ -376,11 +376,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{project_user}
 
 | File | Purpose | When to Update |
 |------|---------|----------------|
-| `ai_index/symbols.json` | Functions, classes, APIs with line numbers | After adding/editing/removing any code |
-| `ai_index/modules.json` | Logical module groupings | After adding new files/modules |
-| `ai_index/dependencies.json` | Import relationships between files | After changing imports |
-| `ai_index/summaries.json` | Semantic descriptions per file | After significant file changes |
-| `ai_index/files.json` | File metadata (lines, endpoints) | After adding/removing files |
+| `ai_index/index.json` | THE project code index — `symbols` (functions, classes, APIs with file + line numbers), `summaries` (per-file descriptions), `files` (metadata, endpoints). Single source of truth. | After ANY code change |
+| `ai_index/database_schema.json` | Database table reference | After schema changes |
 
 ---
 
@@ -388,7 +385,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{project_user}
 
 ### 1. Read existing pattern
 ```
-Read: ai_index/symbols.json → Find similar endpoint (e.g., "login", "register")
+Read: ai_index/index.json → search the `symbols` section for a similar endpoint (e.g., "login", "register")
 ```
 
 ### 2. Create route file (if new module) or add to existing
@@ -416,7 +413,7 @@ app.include_router(products_router)
 ```
 
 ### 4. Update AI Index
-Add to `ai_index/symbols.json`:
+Add to the `symbols` section of `ai_index/index.json`:
 ```json
 "create_product": {
   "type": "api",
@@ -434,33 +431,31 @@ Add to `ai_index/symbols.json`:
 
 ### 1. Find the endpoint
 ```
-Read: ai_index/symbols.json → Search for endpoint name
+Read: ai_index/index.json → search the `symbols` section for the endpoint name
 ```
 
 ### 2. Navigate to file and lines
 ```
-symbols.json gives you: file path + start_line + end_line
+The symbol gives you: file path + start_line + end_line
 ```
 
 ### 3. Make changes
 
 ### 4. Update AI Index
-Update line numbers in `ai_index/symbols.json` if they changed.
+Update line numbers in `ai_index/index.json` if they changed.
 
 ---
 
 ## How to Remove Endpoint
 
-### 1. Find the endpoint in `ai_index/symbols.json`
+### 1. Find the endpoint in the `symbols` section of `ai_index/index.json`
 
 ### 2. Delete the code from the route file
 
 ### 3. Remove router from `main.py` if entire file removed
 
 ### 4. Update AI Index
-- Remove entry from `ai_index/symbols.json`
-- Remove from `ai_index/files.json` if file deleted
-- Update `ai_index/dependencies.json` if imports changed
+- Remove the symbol entry (and its `files` entry if the file is deleted) from `ai_index/index.json`
 
 ---
 
@@ -539,8 +534,8 @@ endpoints:
 
 ### Option 2: Via AI Index
 
-1. Update `ai_index/symbols.json` with new line numbers
-2. Update `ai_index/summaries.json` with new description
+1. Update line numbers in `ai_index/index.json` (`symbols`)
+2. Update the file's `summaries` entry if the description changed
 3. The AI assistant uses these for context
 
 ---
@@ -549,10 +544,8 @@ endpoints:
 
 The `ai_index/` folder helps AI assistants understand the codebase:
 
-- **modules.json**: Logical grouping of files
-- **symbols.json**: All functions, classes, APIs with locations
-- **dependencies.json**: How files relate to each other
-- **summaries.json**: Semantic descriptions
+- **index.json**: single code index — symbols, summaries, files
+- **database_schema.json**: database table reference
 
 ### Generating AI Index
 
