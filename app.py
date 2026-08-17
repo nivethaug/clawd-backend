@@ -1439,10 +1439,17 @@ completion_service = CompletionService()
 # API Routes
 # ============================================================================
 
+# Public API docs/OpenAPI are DISABLED in production (recon-aid hardening
+# from the security review). Set ENABLE_API_DOCS=true locally if needed.
+_DOCS_ENABLED = os.getenv("ENABLE_API_DOCS", "false").lower() in {"1", "true", "yes"}
+
 app = FastAPI(
     title="DreamAgent API",
     description="DreamAgent platform API",
     version="1.0.0",
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
 )
 
 app.add_middleware(
