@@ -971,11 +971,11 @@ def _run_website_pipeline(
             ],
             env=env,
             timeout=int(os.getenv("PROJECT_CREATION_OPENCLAW_TIMEOUT", "2700")),
-            prefix="[OPENCLAW] ",
+            prefix="[DREAMAGENT] ",
         )
     except subprocess.TimeoutExpired:
         logger.warning(
-            "[PROJECT-RUN] openclaw AI phase timed out after %ss for project %s — "
+            "[PROJECT-RUN] DreamAgent AI phase timed out after %ss for project %s — "
             "keeping AI-edited files (no template revert); continuing so a fix "
             "edit can complete the project",
             os.getenv("PROJECT_CREATION_OPENCLAW_TIMEOUT", "2700"), project_id,

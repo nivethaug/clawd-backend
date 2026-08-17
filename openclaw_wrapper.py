@@ -32,7 +32,7 @@ def _safe_stdout_flush():
         pass
 
 print = _safe_print
-print("OPENCLAW_WRAPPER_BOOT", flush=True)
+print("DREAMAGENT_WRAPPER_BOOT", flush=True)
 _safe_stdout_flush()
 
 import signal
@@ -69,7 +69,7 @@ from pipeline_status import PipelineStatusTracker, PipelinePhase, PhaseStatus, E
 BACKEND_DIR = Path(__file__).parent.resolve()
 
 # DIAGNOSTIC: Track which file is actually loaded
-print(f"OPENCLAW_WRAPPER_LOADED: {__file__}", flush=True)
+print(f"DREAMAGENT_WRAPPER_LOADED: {__file__}", flush=True)
 print(f"BACKEND_DIR: {BACKEND_DIR}", flush=True)
 print(f"PID: {os.getpid()}", flush=True)
 print(f"FILE_MODIFIED: {datetime.fromtimestamp(os.path.getmtime(__file__))}", flush=True)
@@ -1574,7 +1574,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 logger.info(f"✅ All {total_phases} infrastructure provisioning phases completed successfully!")
 
                 if acpx_warning_only:
-                    logger.warning("OPENCLAW_FINAL_SUCCESS_WITH_WARNINGS: ACPX failed/rolled back, deployment succeeded")
+                    logger.warning("DREAMAGENT_FINAL_SUCCESS_WITH_WARNINGS: ACPX failed/rolled back, deployment succeeded")
 
                 # Get domain for final logging
                 domain = self.get_project_domain()
@@ -1597,7 +1597,7 @@ Execute the refinement now and make this template production-ready for: {self.pr
                 logger.error(f"❌ Initialization incomplete. Succeeded: {phases_succeeded}/{total_phases}, Failed: {', '.join(self.failed_phases)}")
                 self.update_status("failed")
                 logger.error(
-                    "OPENCLAW_FINAL_FAILURE: current_phase=%s completed=%s failed=%s",
+                    "DREAMAGENT_FINAL_FAILURE: current_phase=%s completed=%s failed=%s",
                     self.current_phase,
                     self.completed_phases,
                     self.failed_phases,
@@ -1654,13 +1654,13 @@ def main():
     wrapper.run_all_phases()
     if not wrapper.pipeline_success:
         print(
-            "OPENCLAW_WRAPPER_FAILED_STATE "
+            "DREAMAGENT_WRAPPER_FAILED_STATE "
             f"current_phase={wrapper.current_phase} "
             f"completed={wrapper.completed_phases} "
             f"failed={wrapper.failed_phases}",
             flush=True,
         )
-        print("OPENCLAW_WRAPPER_FAILED", flush=True)
+        print("DREAMAGENT_WRAPPER_FAILED", flush=True)
         sys.exit(1)
 
 
