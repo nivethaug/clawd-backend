@@ -40,12 +40,16 @@ class BotInfoResponse(BaseModel):
 # Load environment variables
 load_dotenv()
 
-# Initialize FastAPI app with Swagger/OpenAPI support
+# Initialize FastAPI app — docs/OpenAPI DISABLED (public bots must not
+# expose their API spec; set ENABLE_DOCS=true locally to develop against).
+_DOCS = os.getenv("ENABLE_DOCS", "false").lower() in {"1", "true", "yes"}
 app = FastAPI(
     title="Telegram Bot API",
     description="Telegram Bot Webhook and API Endpoints. Handles incoming Telegram updates and provides health/status endpoints.",
     version="1.0.0",
-    redoc_url="/redoc",
+    docs_url="/docs" if _DOCS else None,
+    redoc_url="/redoc" if _DOCS else None,
+    openapi_url="/openapi.json" if _DOCS else None,
     openapi_tags=[
         {
             "name": "webhook",
@@ -142,28 +146,6 @@ async def startup():
         logger.info("ℹ️ Set WEBHOOK_URL or WEBHOOK_DOMAIN environment variable to enable webhook")
 
 
-@app.get("/docs")
-async def get_openapi_docs():
-    """
-    Redirect to Swagger UI (default /docs).
-    FastAPI automatically provides this route.
-    """
-    return {
-        "message": "Interactive API documentation",
-        "swagger_ui": "/docs",
-        "redoc": "/redoc",
-        "openapi_json": "/openapi.json"
-    }
-
-
-@app.get("/openapi.json")
-async def get_openapi_json():
-    """
-    Return OpenAPI specification as JSON.
-    """
-    return app.openapi()
-
-
 @app.on_event("shutdown")
 async def shutdown():
     """Shutdown event - cleanup (v20 lifecycle).
@@ -205,31 +187,9 @@ async def root() -> BotInfoResponse:
     """Root endpoint with Pydantic model for Swagger."""
     return BotInfoResponse(
         message="Telegram Bot API",
-        docs="/docs",
+        docs="",
         version="1.0.0"
     )
-
-
-@app.get("/docs")
-async def get_openapi_docs():
-    """
-    Redirect to Swagger UI (default /docs).
-    FastAPI automatically provides this route.
-    """
-    return {
-        "message": "Interactive API documentation",
-        "swagger_ui": "/docs",
-        "redoc": "/redoc",
-        "openapi_json": "/openapi.json"
-    }
-
-
-@app.get("/openapi.json")
-async def get_openapi_json():
-    """
-    Return OpenAPI specification as JSON.
-    """
-    return app.openapi()
 
 
 @app.get("/health")
@@ -246,7 +206,7 @@ async def root() -> BotInfoResponse:
     """Root endpoint with Pydantic model for Swagger."""
     return BotInfoResponse(
         message="Telegram Bot API",
-        docs="/docs",
+        docs="",
         version="1.0.0"
     )
 
