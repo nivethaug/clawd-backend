@@ -1,4 +1,5 @@
 import os
+import secrets
 import uuid
 import json
 import shutil
@@ -1460,6 +1461,49 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# /internal/* deny-by-default guard (security review P0).
+#
+# Legitimate internal callers reach these routes DIRECTLY (container →
+# host.docker.internal:8003, main VPS → worker:8003, localhost self-calls)
+# and never carry an X-Forwarded-For header. Anything arriving through the
+# PUBLIC nginx proxy does carry XFF (nginx sets it on every proxied
+# request) — including requests that appear as 127.0.0.1 to uvicorn when
+# proxy-headers are not configured. Deny those.
+#
+# A shared secret is also supported for defense-in-depth / explicit
+# auth: set INTERNAL_API_SECRET on both VPSes and send
+# X-Internal-Secret on internal calls (nginx can inject it for the
+# worker-to-worker paths). Spoofing XFF only makes a direct caller look
+# proxied — which is the DENY direction, so it cannot bypass the guard.
+# ---------------------------------------------------------------------------
+INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "").strip()
+
+
+@app.middleware("http")
+async def internal_routes_guard(request: Request, call_next):
+    path = request.url.path
+    if path == "/internal" or path.startswith("/internal/"):
+        secret = request.headers.get("x-internal-secret", "")
+        if INTERNAL_API_SECRET and secret and secrets.compare_digest(secret, INTERNAL_API_SECRET):
+            return await call_next(request)
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if not forwarded:
+            # Direct internal call (docker bridge / main VPS / localhost)
+            client_host = request.client.host if request.client else "unknown"
+            logger.info(
+                "[INTERNAL-GUARD] allowed %s from %s (direct)",
+                path, client_host,
+            )
+            return await call_next(request)
+        client_host = request.client.host if request.client else "unknown"
+        logger.warning(
+            "[INTERNAL-GUARD] BLOCKED %s from %s via proxy (xff=%s)",
+            path, client_host, forwarded[:80],
+        )
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return await call_next(request)
 
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
@@ -8698,7 +8742,6 @@ async def save_file_content(
 import bcrypt
 import hmac
 import hashlib
-import secrets
 
 # In-memory token store (token -> user_id)
 AUTH_TOKENS: Dict[str, int] = {}
