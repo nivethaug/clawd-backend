@@ -1264,9 +1264,12 @@ class ACPFrontendEditorV2:
         Returns:
             List of required page names
         """
-        print("\n" + "="*60, flush=True)
-        print("🔍 PAGE INFERENCE START", flush=True)
-        print("="*60, flush=True)
+        import time
+
+        _goal_excerpt = re.sub(r"\s+", " ", goal_description).strip()[:200]
+        _start = time.monotonic()
+        decision = "DEFAULT"  # Which path produced the final pages
+        logger.info("[PAGE-INFERENCE] start goal=%r", _goal_excerpt)
 
         required_pages = []
         explicit_pages = []
@@ -1287,39 +1290,65 @@ class ACPFrontendEditorV2:
                 explicit_pages.append("".join(part.capitalize() for part in label.split()) + "page")
         if len(set(explicit_pages)) >= 2:
             required_pages = list(dict.fromkeys(explicit_pages))
-            print(f"PLANNER-EXPLICIT-PAGES: Using pages from prompt: {required_pages}", flush=True)
+            decision = "EXPLICIT"
+            logger.info("[PAGE-INFERENCE] explicit pages from prompt: %s", required_pages)
+        elif pages_match:
+            logger.info(
+                "[PAGE-INFERENCE] 'pages:' section found but %d explicit matches (need >= 2) — section=%r",
+                len(explicit_pages), re.sub(r"\s+", " ", pages_section).strip()[:150],
+            )
 
         # Step 1: Try Groq AI inference
+        groq_status = None
+        groq_latency_ms = None
         try:
             if required_pages:
                 inferred_pages = []
+                logger.info("[PAGE-INFERENCE] explicit pages present — skipping Groq call")
             else:
                 from groq_service import GroqService
                 groq = GroqService()
+                _groq_start = time.monotonic()
                 inferred_pages = await groq.infer_pages(goal_description)
-                    
+                groq_latency_ms = (time.monotonic() - _groq_start) * 1000
+                groq_status = getattr(groq, "last_infer_status", None)
+
             if not required_pages and inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
-                print(f"✅ PLANNER-GROQ-SUCCESS: Using {len(inferred_pages)} pages: {inferred_pages}", flush=True)
+                decision = "GROQ"
+                logger.info(
+                    "[PAGE-INFERENCE] groq result accepted status=%s count=%d pages=%s (%.0fms)",
+                    groq_status, len(inferred_pages), inferred_pages, groq_latency_ms or -1,
+                )
             elif not required_pages:
-                print(f"⚠️  PLANNER-GROQ-INSUFFICIENT: Got {len(inferred_pages) if inferred_pages else 0} pages, need >= 3", flush=True)
+                logger.warning(
+                    "[PAGE-INFERENCE] groq result rejected: got %s pages (need >= 3) status=%s pages=%s (%.0fms)",
+                    len(inferred_pages) if inferred_pages else 0, groq_status,
+                    inferred_pages, groq_latency_ms or -1,
+                )
         except Exception as e:
-            logger.warning(f"[Planner] Groq inference failed: {e}")
-            print(f"❌ PLANNER-GROQ-ERROR: {type(e).__name__}: {str(e)}", flush=True)
+            groq_status = f"raised:{type(e).__name__}"
+            logger.warning(
+                "[PAGE-INFERENCE] groq call failed before response: %s: %s",
+                type(e).__name__, e,
+            )
 
         # Step 2: Fallback to default pages
         if len(required_pages) < 3:
             required_pages = ["Dashboard", "Settings", "Overview"]
-            print(f"⚠️  PLANNER-DEFAULT: Using default pages = {required_pages}", flush=True)
+            decision = "DEFAULT"
+            logger.warning(
+                "[PAGE-INFERENCE] falling back to default pages %s (groq_status=%s) — inference did not produce >= 3 usable pages",
+                required_pages, groq_status,
+            )
 
         # Remove duplicates while preserving order
         required_pages = list(dict.fromkeys(required_pages))
 
-        print(f"🎯 PLANNER-FINAL: Pages = {required_pages}", flush=True)
-        print(f"📊 PLANNER-COUNT: {len(required_pages)} pages detected", flush=True)
-        print("="*60, flush=True)
-        print("🔍 PAGE INFERENCE COMPLETE", flush=True)
-        print("="*60 + "\n", flush=True)
+        logger.info(
+            "[PAGE-INFERENCE] final decision=%s pages=%s count=%d total_elapsed=%.0fms",
+            decision, required_pages, len(required_pages), (time.monotonic() - _start) * 1000,
+        )
 
         # Phase 9: Store allowed pages whitelist for guardrails
         self.allowed_pages = set(required_pages)
