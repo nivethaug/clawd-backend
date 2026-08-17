@@ -1252,11 +1252,135 @@ class ACPFrontendEditorV2:
         logger.warning("[DEPRECATED] apply_changes_via_acpx() is deprecated, use apply_changes()")
         return await self.apply_changes(goal_description, execution_id)
 
+    # Maximum pages accepted from LLM page inference
+    MAX_INFERRED_PAGES = 4
+
+    async def _infer_pages_via_openrouter(self, description: str) -> Tuple[List[str], str]:
+        """
+        Infer page names using the Prompt Assistant's OpenRouter stack
+        (GLM-4.7-flash, reasoning disabled for fast formatted output).
+
+        Args:
+            description: Product/project description
+
+        Returns:
+            (pages, status) — status is ok | ok_trimmed | json_fallback | error_fallback
+        """
+        import json
+
+        prompt = f"""You are extracting page names from a SaaS application description.
+
+Product description:
+{description}
+
+CRITICAL: You MUST respond with ONLY a JSON object. NO explanations. NO text before or after.
+
+Output format (STRICT - nothing else):
+{{"pages": ["PageOne","PageTwo","PageThree","PageFour"]}}
+
+Step 1 — Extract Explicit Pages
+Look for phrases like: "main pages:", "pages:", "sections:", "modules:"
+If found, extract them EXACTLY as written.
+
+Step 2 — Contextual Inference (if no explicit pages)
+Identify the product type and generate 4-8 realistic pages:
+- Analytics platform → ActivityMonitor, DataExplorer, Metrics, Reports, Alerts, Integrations
+- CRM → Contacts, Leads, Deals, Accounts, Reports, Settings
+- E-commerce → Products, Orders, Customers, Inventory, Analytics, StoreSettings
+- Document system → Documents, Folders, Search, Sharing, Settings
+- Project management → Projects, Tasks, Team, Timeline, Reports, Settings
+
+RULES:
+1. Return ONLY JSON - no markdown, no explanation, no text
+2. Exactly 4 pages, PascalCase, 1-3 words each
+3. Never empty array
+4. Match product type contextually
+5. Pick the 4 MOST IMPORTANT pages only — do not list every section"""
+
+        try:
+            from services.ai.openrouter_client import get_openrouter_client
+
+            client = get_openrouter_client()
+            logger.info(
+                "[PAGE-INFERENCE:LLM] invoke model=%s desc=%r",
+                client.model, description[:200],
+            )
+
+            response = await client.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200,
+            )
+            raw = client.get_text_response(response)
+            logger.info(
+                "[PAGE-INFERENCE:LLM] response usage=%s raw=%.300s",
+                client.get_usage(response), raw,
+            )
+
+            # Parse JSON response - handle multiple formats
+            text = raw.strip()
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            else:
+                # Find JSON object embedded in surrounding text
+                json_match = re.search(r'\{[^{}]*"pages"\s*:\s*\[[^\]]*\][^{}]*\}', text, re.DOTALL)
+                if json_match:
+                    text = json_match.group(0)
+
+            data = json.loads(text)
+            pages = data.get("pages", [])
+            logger.info("[PAGE-INFERENCE:LLM] parsed pages=%s", pages)
+
+            # Validate and clean page names
+            cleaned = []
+            for page in pages:
+                clean = "".join(c for c in str(page) if c.isalnum() or c.isspace())
+                clean = "".join(word.capitalize() for word in clean.split())
+                if clean and len(clean) < 30:  # Skip absurdly long names
+                    cleaned.append(clean)
+
+            if len(cleaned) > self.MAX_INFERRED_PAGES:
+                logger.warning(
+                    "[PAGE-INFERENCE:LLM] trimmed %d -> %d pages (MAX_INFERRED_PAGES)",
+                    len(cleaned), self.MAX_INFERRED_PAGES,
+                )
+                cleaned = cleaned[:self.MAX_INFERRED_PAGES]
+                status = "ok_trimmed"
+            else:
+                status = "ok"
+
+            if not cleaned:
+                logger.warning(
+                    "[PAGE-INFERENCE:LLM] cleaning produced 0 valid pages (raw=%s)",
+                    pages,
+                )
+                return [], "json_fallback"
+
+            logger.info(
+                "[PAGE-INFERENCE:LLM] done status=%s pages=%s", status, cleaned,
+            )
+            return cleaned, status
+
+        except json.JSONDecodeError as e:
+            logger.error(
+                "[PAGE-INFERENCE:LLM] JSON parse failed (%s: %s) raw=%.500s",
+                type(e).__name__, e, raw if isinstance(raw, str) else "<no response>",
+            )
+            return [], "json_fallback"
+        except Exception as e:
+            logger.error(
+                "[PAGE-INFERENCE:LLM] inference failed (%s: %s) — falling back",
+                type(e).__name__, e,
+            )
+            return [], f"error_fallback:{type(e).__name__}"
+
     async def _extract_required_pages_from_prompt(self, goal_description: str) -> List[str]:
         """
         Extract required pages from goal description using AI inference.
 
-        Detection priority: Groq AI → Default pages
+        Detection priority: LLM inference (OpenRouter GLM-4.7-flash) → Default pages
 
         Args:
             goal_description: Goal for changes
@@ -1298,38 +1422,35 @@ class ACPFrontendEditorV2:
                 len(explicit_pages), re.sub(r"\s+", " ", pages_section).strip()[:150],
             )
 
-        # Step 1: Try Groq AI inference
-        groq_status = None
-        groq_latency_ms = None
+        # Step 1: LLM page inference (OpenRouter GLM-4.7-flash, no reasoning)
+        llm_status = None
+        llm_latency_ms = None
         try:
             if required_pages:
                 inferred_pages = []
-                logger.info("[PAGE-INFERENCE] explicit pages present — skipping Groq call")
+                logger.info("[PAGE-INFERENCE] explicit pages present — skipping LLM inference")
             else:
-                from groq_service import GroqService
-                groq = GroqService()
-                _groq_start = time.monotonic()
-                inferred_pages = await groq.infer_pages(goal_description)
-                groq_latency_ms = (time.monotonic() - _groq_start) * 1000
-                groq_status = getattr(groq, "last_infer_status", None)
+                _llm_start = time.monotonic()
+                inferred_pages, llm_status = await self._infer_pages_via_openrouter(goal_description)
+                llm_latency_ms = (time.monotonic() - _llm_start) * 1000
 
             if not required_pages and inferred_pages and len(inferred_pages) >= 3:
                 required_pages = inferred_pages
-                decision = "GROQ"
+                decision = "LLM"
                 logger.info(
-                    "[PAGE-INFERENCE] groq result accepted status=%s count=%d pages=%s (%.0fms)",
-                    groq_status, len(inferred_pages), inferred_pages, groq_latency_ms or -1,
+                    "[PAGE-INFERENCE] llm result accepted status=%s count=%d pages=%s (%.0fms)",
+                    llm_status, len(inferred_pages), inferred_pages, llm_latency_ms or -1,
                 )
             elif not required_pages:
                 logger.warning(
-                    "[PAGE-INFERENCE] groq result rejected: got %s pages (need >= 3) status=%s pages=%s (%.0fms)",
-                    len(inferred_pages) if inferred_pages else 0, groq_status,
-                    inferred_pages, groq_latency_ms or -1,
+                    "[PAGE-INFERENCE] llm result rejected: got %s pages (need >= 3) status=%s pages=%s (%.0fms)",
+                    len(inferred_pages) if inferred_pages else 0, llm_status,
+                    inferred_pages, llm_latency_ms or -1,
                 )
         except Exception as e:
-            groq_status = f"raised:{type(e).__name__}"
+            llm_status = f"raised:{type(e).__name__}"
             logger.warning(
-                "[PAGE-INFERENCE] groq call failed before response: %s: %s",
+                "[PAGE-INFERENCE] llm call failed before response: %s: %s",
                 type(e).__name__, e,
             )
 
@@ -1338,8 +1459,8 @@ class ACPFrontendEditorV2:
             required_pages = ["Dashboard", "Settings", "Overview"]
             decision = "DEFAULT"
             logger.warning(
-                "[PAGE-INFERENCE] falling back to default pages %s (groq_status=%s) — inference did not produce >= 3 usable pages",
-                required_pages, groq_status,
+                "[PAGE-INFERENCE] falling back to default pages %s (llm_status=%s) — inference did not produce >= 3 usable pages",
+                required_pages, llm_status,
             )
 
         # Remove duplicates while preserving order

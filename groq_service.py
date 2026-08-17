@@ -25,7 +25,6 @@ class GroqService:
     DEFAULT_TEMPERATURE = 0.4
     DEFAULT_MAX_TOKENS = 2000
     TIMEOUT_SECONDS = 30
-    MAX_PAGES = 4  # Maximum pages to return from inference
 
     def __init__(self):
         """Initialize Groq service with environment configuration."""
@@ -43,11 +42,6 @@ class GroqService:
 
         # Initialize Groq client
         self.client = Groq(api_key=self.api_key, timeout=self.TIMEOUT_SECONDS)
-
-        # Last infer_pages outcome — lets callers distinguish real inference
-        # from the internal fallback defaults (observability only)
-        self.last_infer_status: Optional[str] = None  # ok | ok_trimmed | json_fallback | error_fallback
-        self.last_infer_latency_ms: Optional[float] = None
 
     async def generate_chat_completion(
         self,
@@ -113,135 +107,3 @@ class GroqService:
             True if API key is set and not the placeholder
         """
         return bool(self.api_key and self.api_key != "your_key_here")
-
-    async def infer_pages(self, description: str) -> List[str]:
-        """
-        Use LLM to infer page names from a product description.
-
-        Args:
-            description: Product/project description
-
-        Returns:
-            List of page names (e.g., ["Dashboard", "Documents", "Settings"])
-        """
-        import json
-
-        prompt = f"""You are extracting page names from a SaaS application description.
-
-Product description:
-{description}
-
-CRITICAL: You MUST respond with ONLY a JSON object. NO explanations. NO text before or after.
-
-Output format (STRICT - nothing else):
-{{"pages": ["PageOne","PageTwo","PageThree","PageFour"]}}
-
-Step 1 — Extract Explicit Pages
-Look for phrases like: "main pages:", "pages:", "sections:", "modules:"
-If found, extract them EXACTLY as written.
-
-Step 2 — Contextual Inference (if no explicit pages)
-Identify the product type and generate 4-8 realistic pages:
-- Analytics platform → ActivityMonitor, DataExplorer, Metrics, Reports, Alerts, Integrations
-- CRM → Contacts, Leads, Deals, Accounts, Reports, Settings
-- E-commerce → Products, Orders, Customers, Inventory, Analytics, StoreSettings
-- Document system → Documents, Folders, Search, Sharing, Settings
-- Project management → Projects, Tasks, Team, Timeline, Reports, Settings
-
-RULES:
-1. Return ONLY JSON - no markdown, no explanation, no text
-2. Exactly 4 pages, PascalCase, 1-3 words each
-3. Never empty array
-4. Match product type contextually
-5. Pick the 4 MOST IMPORTANT pages only — do not list every section"""
-
-        messages = [{"role": "user", "content": prompt}]
-
-        # Reset per-call outcome tracking
-        self.last_infer_status = None
-        self.last_infer_latency_ms = None
-
-        try:
-            logger.info("[PAGE-INFERENCE:GROQ] invoke model=%s desc=%r", self.model, description[:200])
-            _start = asyncio.get_event_loop().time()
-
-            # Call async method with await
-            response = await self.generate_chat_completion(messages, max_tokens=200)
-
-            self.last_infer_latency_ms = (asyncio.get_event_loop().time() - _start) * 1000
-            logger.info(
-                "[PAGE-INFERENCE:GROQ] raw response in %.0fms: %.300s",
-                self.last_infer_latency_ms, response,
-            )
-
-            # Parse JSON response - handle multiple formats
-            response = response.strip()
-            
-            # Method 1: Extract from markdown code blocks
-            if "```json" in response:
-                response = response.split("```json")[1].split("```")[0].strip()
-            elif "```" in response:
-                response = response.split("```")[1].split("```")[0].strip()
-            else:
-                # Method 2: Find JSON object using regex (handles embedded JSON in text)
-                import re
-                # Match {"pages": [...]} pattern
-                json_match = re.search(r'\{[^{}]*"pages"\s*:\s*\[[^\]]*\][^{}]*\}', response, re.DOTALL)
-                if json_match:
-                    response = json_match.group(0)
-                    logger.info(f"[Groq] Extracted JSON from response: {response[:200]}")
-
-            data = json.loads(response)
-            pages = data.get("pages", [])
-            logger.info("[PAGE-INFERENCE:GROQ] parsed pages=%s", pages)
-
-            # Validate and clean page names
-            cleaned = []
-            for page in pages:
-                # Remove special characters, ensure PascalCase
-                clean = "".join(c for c in str(page) if c.isalnum() or c.isspace())
-                clean = "".join(word.capitalize() for word in clean.split())
-                if clean and len(clean) < 30:  # Skip absurdly long names
-                    cleaned.append(clean)
-
-            # Enforce max pages limit
-            if len(cleaned) > self.MAX_PAGES:
-                logger.warning(
-                    "[PAGE-INFERENCE:GROQ] trimmed %d -> %d pages (MAX_PAGES)",
-                    len(cleaned), self.MAX_PAGES,
-                )
-                cleaned = cleaned[:self.MAX_PAGES]
-                self.last_infer_status = "ok_trimmed"
-            else:
-                self.last_infer_status = "ok"
-
-            if not cleaned:
-                logger.warning(
-                    "[PAGE-INFERENCE:GROQ] cleaning produced 0 valid pages (raw=%s) — internal fallback",
-                    pages,
-                )
-
-            logger.info(
-                "[PAGE-INFERENCE:GROQ] done status=%s pages=%s (%.0fms)",
-                self.last_infer_status, cleaned, self.last_infer_latency_ms or -1,
-            )
-            return cleaned
-
-        except json.JSONDecodeError as e:
-            self.last_infer_status = "json_fallback"
-            logger.error(
-                "[PAGE-INFERENCE:GROQ] JSON parse failed (%s: %s) raw=%.500s — internal fallback",
-                type(e).__name__, e, response if isinstance(response, str) else "<no response>",
-            )
-            return ["Dashboard", "Analytics", "Settings"]
-        except Exception as e:
-            # generate_chat_completion raises RuntimeError with the mapped cause
-            # (invalid key / timeout / rate limit / request failed)
-            self.last_infer_status = "error_fallback"
-            logger.error(
-                "[PAGE-INFERENCE:GROQ] inference failed (%s: %s) latency=%sms — internal fallback",
-                type(e).__name__, e,
-                f"{self.last_infer_latency_ms:.0f}" if self.last_infer_latency_ms is not None else "<none>",
-            )
-            # Return sensible defaults
-            return ["Dashboard", "Analytics", "Settings"]
