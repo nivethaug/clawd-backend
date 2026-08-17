@@ -647,6 +647,7 @@ def _run_logged_subprocess(
                 # Log important milestones to PM2 only
                 _is_important = (
                     "PHASE_" in text
+                    or "PAGE-INFERENCE" in text  # page-inference decision chain (planner + LLM)
                     or "✅" in text
                     or "❌" in text
                     or "⚠️" in text
