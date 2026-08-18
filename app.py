@@ -1239,12 +1239,22 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
             "change ", "remove", "delete", "integrate", "connect ", "configure",
             "enable", "disable", "refactor", "optimize", "migrate", "install",
             "generate", "produce", "design", "draft",
+            # UX/polish verbs — a spec starting with these is a work order
+            "improve", "polish", "enhance", "refine", "restyle", "redesign",
+            "adjust", "tweak", "animate", "apply", "increase", "decrease",
+            "align", "center", "rename", "reorder",
         )
         # Check only the first ~40 chars so "add this to the page" triggers
         # but "what did you add?" (question) doesn't match the start.
         _content_head = _content_lower[:40]
         if any(_content_head.startswith(p) for p in _GATE_ACTION_PREFIXES):
             logger.info(f"[GATE] Fast-PASS (action verb detected): {_content_head[:40]}...")
+            return None
+        # Long messages are work orders, never greetings/short questions —
+        # don't spend a Flash call truncating a spec to 500 chars and
+        # risking a misclassification that bypasses Claude Code.
+        if len(_content_lower) > 400:
+            logger.info(f"[GATE] Fast-PASS (long message, {len(_content_lower)} chars)")
             return None
 
         use_readonly = GATE_HANDLE_READONLY and project_path
@@ -1304,6 +1314,24 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
 
             if text.startswith("SKIP:"):
                 response_text = text[5:].strip()
+                # A SKIP answer that talks about its own limitations is a
+                # misclassification, not a real direct answer — Flash has no
+                # tools here, so detailed requests get hallucinated refusals
+                # like "I can't make changes to the code, pass this to Claude
+                # Code". Route those to Claude Code instead of showing them.
+                _rt_lower = response_text.lower()
+                _SKIP_REFUSAL_MARKERS = (
+                    "can't make changes", "cannot make changes", "can't modify",
+                    "cannot modify", "unable to make", "not able to make",
+                    "pass this to", "pass it to", "claude", "don't have access",
+                    "do not have access", "i can't edit", "i cannot edit",
+                )
+                if any(m in _rt_lower for m in _SKIP_REFUSAL_MARKERS):
+                    logger.warning(
+                        "[GATE] SKIP response contains refusal language — overriding to PASS: %.80s",
+                        response_text,
+                    )
+                    return None
                 if response_text:
                     logger.info(f"[GATE] Handled directly: {response_text[:60]}...")
                     return response_text
