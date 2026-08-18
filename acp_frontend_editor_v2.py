@@ -1731,55 +1731,39 @@ mobile-only output.
 {integrations_block}
 ---
 
-## V1 SCOPE — UI-ONLY MINIMAL BUILD (~25 MINUTE TARGET)
+## V1 SCOPE — UI-ONLY MINIMAL BUILD (~25 MIN)
 
-This initial creation build is **UI-ONLY**. The user completes real feature
-integration afterward via edit sessions, one feature at a time. Do not try
-to deliver the entire Project Description in this run.
+This build delivers the **UI shell only**. Real feature integration happens
+in later edit sessions, one feature at a time — do NOT attempt the full
+Project Description in this run.
 
-**Build now:**
-- All required pages, fully rendered, with realistic inline sample data
-  (typed interfaces + representative mock objects in the page or `src/features/`)
-- Complete navigation, layout, theme, responsive design
-- Auth UI (forms, validation, protected-route wrapper) wired through the
-  EXISTING template service layer `src/services/database.ts` — those
-  endpoints already exist in the template backend
+**Build (priority order):**
+1. Required pages — complete UI driven by mock data: typed interfaces plus
+   3-5 representative sample objects per feature, inline or in `src/features/`
+2. Navigation, layout, theme, responsive behavior
+3. Auth UI through the EXISTING `src/services/database.ts` service layer —
+   those template endpoints already work
 
-**Do NOT build now (defer to edit sessions):**
-- Any new backend endpoint, service, model, or migration — the backend
-  template ships as-is and is out of scope for this run
-- Frontend calls to API paths that have no existing backend route (AI
-  generation, external API integrations, uploads, payments). For such
-  features build the complete UI driven by mock/sample responses and mark
-  the feature PENDING in the status file
-- Storage infrastructure, teams, subscriptions, marketplace, multi-item
-  management beyond the single core loop
+**Defer — each becomes one PENDING line in the status file:**
+- Any new backend endpoint, service, model, or migration (backend ships as-is)
+- Features whose API has no backend route (AI generation, external APIs,
+  uploads, payments): build the full UI on mock responses, mark PENDING
+- Storage infrastructure, teams, subscriptions, marketplace, bulk management
 
-**Time budget:** target finishing all steps in about 25 minutes of work.
-Running long? Cut visual polish — NEVER cut the build verification and
-NEVER cut the status file.
+**Time rule:** ~25 minutes total. Over budget → cut visual polish. NEVER cut
+the build verification. NEVER cut the status file.
 
 **Required artifact — `{status_file_path}`**
-Create it as soon as the required pages are built, keep it current, and
-finalize it before the AI index update. Exact format:
+Write it immediately after the required pages exist (a timeout must never
+lose the handoff), keep DONE current as you go, finalize before the AI
+index update. Use exactly these section names:
 
-```
 # Project Creation Status
-
-## DONE
-- (each delivered item: pages, navigation, auth UI, mock data, verification result)
-
-## PENDING — needs edit session
-- (each deferred feature from the Project Description, one line each,
-  phrased as an actionable edit request, e.g. "Wire video generation to a
-  backend endpoint using the user's OpenRouter key")
-
-## KNOWN ISSUES
-- (build warnings, mock behaviors, TODOs)
-
-## NEXT STEPS
-- (suggested first edit — the most important pending feature)
-```
+## DONE — delivered items (pages, nav, auth UI, mock data, verification result)
+## PENDING — needs edit session — one actionable line per deferred feature,
+   e.g. "Wire video generation to a backend endpoint with the user's OpenRouter key"
+## KNOWN ISSUES — build warnings, mock behaviors, TODOs
+## NEXT STEPS — the single most important pending edit
 
 ---
 
