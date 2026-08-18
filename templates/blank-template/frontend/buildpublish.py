@@ -151,7 +151,6 @@ def npm_build(cwd: str = None):
     print("\n" + "="*50)
     print("NPM RUN BUILD")
     print("="*50)
-    
     result = subprocess.run(
         ["npm", "run", "build"],
         capture_output=True,
@@ -220,7 +219,10 @@ def fix_permissions():
 
 
 def cleanup_node_modules():
-    """Remove node_modules to save space after build"""
+    """Remove node_modules to save space after build (NOT called by default —
+    see main(); deleting node_modules guaranteed that every later
+    --skip-install build failed with 'vite: Permission denied' and forced a
+    full reinstall cycle each session). Kept for manual --cleanup use."""
     print("\n" + "="*50)
     print("CLEANUP NODE_MODULES")
     print("="*50)
@@ -244,6 +246,35 @@ def cleanup_node_modules():
         print(f"⚠ Could not remove node_modules: {e}")
     
     return True
+
+
+def ensure_vite_ready(frontend_dir: Path = None) -> bool:
+    """Self-heal before build: node_modules/.bin/vite must exist and be
+    executable. Partial npm state or an old post-build cleanup leaves the
+    binary missing or without exec bits ('sh: 1: vite: Permission denied'),
+    which previously cost agents multiple diagnosis round-trips per session.
+    Fast path: chmod the binary. Slow path: one clean npm ci."""
+    vite_bin = Path("node_modules") / ".bin" / "vite"
+    if vite_bin.exists() and os.access(vite_bin, os.X_OK):
+        return True
+
+    print("⚠ vite binary missing or not executable — self-healing")
+    try:
+        target = vite_bin.resolve()
+        if target.exists():
+            os.chmod(target, 0o755)
+        if vite_bin.exists():
+            os.chmod(vite_bin, 0o755)
+    except Exception as e:
+        print(f"⚠ chmod fix failed: {e}")
+
+    if vite_bin.exists() and os.access(vite_bin, os.X_OK):
+        print("✓ vite binary repaired via chmod")
+        return True
+
+    print("→ chmod insufficient — running one clean npm ci")
+    remove_node_modules()
+    return npm_install(cwd=str(frontend_dir) if frontend_dir else None)
 
 
 def restart_pm2(project_name: str = None):
@@ -353,6 +384,7 @@ def main():
     parser.add_argument("--skip-build", action="store_true", help="Skip npm build")
     parser.add_argument("--install-only", action="store_true", help="Run only npm ci (skip build, restart, cleanup)")
     parser.add_argument("--no-restart", action="store_true", help="Skip PM2 and nginx restart (restart is default)")
+    parser.add_argument("--cleanup", action="store_true", help="Remove node_modules after a successful build (manual disk-pressure relief)")
     args = parser.parse_args()
     
     # Determine frontend directory
@@ -406,6 +438,13 @@ def main():
     if success and not args.skip_build:
         remove_old_dist()
 
+    # Step 4.5: Self-heal the vite binary before building. A broken or
+    # missing node_modules/.bin/vite previously failed every --skip-install
+    # build with 'sh: 1: vite: Permission denied'.
+    if success and not args.skip_build:
+        if not ensure_vite_ready(frontend_dir):
+            success = False
+
     # Step 5: npm run build (with NODE_ENV=development)
     if not args.skip_build and success:
         if not npm_build(cwd=str(frontend_dir)):
@@ -429,8 +468,12 @@ def main():
         reload_nginx()
         print("✅ Frontend updated (nginx serves new dist/ files)")
 
-    # Step 9: Cleanup node_modules (after restart so nothing is needed anymore)
-    if success:
+    # Step 9 (optional, --cleanup): Remove node_modules after a successful
+    # build. NOT default — deleting node_modules guaranteed that every later
+    # --skip-install build broke ('vite: Permission denied' / missing binary),
+    # forcing a full npm ci on every subsequent edit session. Disk pressure
+    # is the reaper's job, not the build's.
+    if success and args.cleanup:
         cleanup_node_modules()
     
     print("\n" + "="*50)
