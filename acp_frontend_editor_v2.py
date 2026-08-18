@@ -1754,6 +1754,16 @@ Project Description in this run.
   uploads, payments): build the full UI on mock responses, mark PENDING
 - Storage infrastructure, teams, subscriptions, marketplace, bulk management
 
+**Image rule (mandatory):** never ship an unverified external image. Before
+building, extract every image URL you used and curl-check them ALL in ONE
+batched command:
+```bash
+for u in $(grep -rhoE 'https://images[^"'"'"' )]+' src/ | sort -u); do
+  echo "$(curl -s -o /dev/null --max-time 5 -w '%{{http_code}}' "$u") $u"; done
+```
+Any URL not returning 200 → replace it with a verified image or a CSS
+gradient placeholder. A 404 image is a broken page.
+
 **Time rule:** ~25 minutes total. Over budget → cut visual polish. NEVER cut
 the build verification. NEVER cut the status file.
 
