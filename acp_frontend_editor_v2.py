@@ -1717,6 +1717,10 @@ RULES:
         )
         integrations_block = build_external_integrations_block(self.project_id)
         status_file_path = f"{to_container_path(str(self.project_path))}/projectcreationstatus.md"
+        # Absolute dist path for serve — the shell cwd resets to frontend/src
+        # between commands, so a relative `serve -s dist` binds to src/dist
+        # and serves its own 404 forever (observed death loop).
+        serve_dist_path = f"{to_container_path(str(self.frontend_path))}/dist"
 
         return f"""{meta_block}
 You are editing a React + Vite + TypeScript application.
@@ -1797,7 +1801,9 @@ gets reaped at session end. **Never escalate to pkill.**
 1. Build: `npm run build` — wait for the literal `✓ built` line before doing
    anything else. If you don't see it, the build is still running or failed;
    do NOT serve.
-2. Serve: `npx serve -s dist -l 3004` in the background, then `sleep 3` before
+2. Serve: `npx serve -s {serve_dist_path} -l 3004` in the background (ABSOLUTE path —
+   the shell cwd resets to frontend/src between commands; a relative dist serves 404),
+   then `sleep 3` before
    any curl/browser check — serve needs a moment to bind. Verifying before the
    bind shows a connection error that looks identical to a build failure.
 3. Verify the build you just ran, not a previous one. If you killed/restarted
@@ -1816,6 +1822,12 @@ build is fine. Do NOT rebuild.
 - In the browser, ALWAYS use `$CHROME_VERIFY_URL:3004/` (e.g.
   `http://172.18.0.2:3004/`). NEVER hand-type `localhost:3004` or
   `127.0.0.1:3004`.
+- **STALE SERVE RECOVERY:** if the browser keeps showing serve's own 404 even
+  at the correct `$CHROME_VERIFY_URL:3004/` after ONE restart, port 3004 is
+  held by a stale serve you cannot kill (fuser/lsof are often missing in the
+  container — kill attempts fail silently). Do NOT restart again. Switch
+  ports: `npx serve -s {serve_dist_path} -l 3005` and verify at
+  `$CHROME_VERIFY_URL:3005/`. One switch, then continue normally.
 - In your shell (curl), `localhost:3004` IS correct (the shell shares the
   container with serve). So `curl http://localhost:3004/` → 200, but
   `new_page(url: "http://localhost:3004/")` → serve 404. This asymmetry is
@@ -1832,7 +1844,7 @@ build is fine. Do NOT rebuild.
 3. Create domain-appropriate navigation in `src/layout/Navbar.tsx`
 4. Integrate navigation into `Layout.tsx`
 5. Run `npm run build` only after router validation passes
-6. Serve dist: `npx serve -s dist -l 3004` in the background, then `sleep 3`.
+6. Serve dist: `npx serve -s {serve_dist_path} -l 3004` in the background, then `sleep 3`.
    (serve binds to 0.0.0.0 by default, so it's reachable via the container's
    bridge IP — which is what the browser must use.)
 7. **BROWSER VERIFICATION (PRIMARY — runs first).** Use `$CHROME_VERIFY_URL`
@@ -2196,7 +2208,7 @@ else:
     print(3004)
 PY
 )
-npx serve -s dist -l "$PORT" > /tmp/context-serve.log 2>&1 & echo "SERVE_STARTED on port $PORT"
+npx serve -s {serve_dist_path} -l "$PORT" > /tmp/context-serve.log 2>&1 & echo "SERVE_STARTED on port $PORT"
 ```
 
 Note the port you end up using — you need it in the next step.
