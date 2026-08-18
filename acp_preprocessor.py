@@ -168,6 +168,36 @@ Examples:
             
             # Parse JSON response
             result = self._parse_response(response, user_message)
+
+            # Guards against the classifier answering in place of the editor.
+            # A misclassified direct response is returned to the user verbatim,
+            # bypassing the code editor entirely — the classifier model has no
+            # tools, so detailed work orders get hallucinated refusals like
+            # "I can't make changes to the code, pass this to Claude Code".
+            if not result.should_call_acpx and result.direct_response:
+                _dr = result.direct_response.lower()
+                _refusal_markers = (
+                    "i can't", "i cannot", "can't make changes", "cannot make changes",
+                    "unable to make", "not able to make", "pass this to", "pass it to",
+                    "claude code", "don't have access", "do not have access",
+                )
+                _has_refusal = any(m in _dr for m in _refusal_markers)
+                # Long messages are work orders, never greetings/simple FAQs
+                _long_message = len(user_message) > 400
+                _low_confidence = (result.confidence or 0.0) < 0.8
+                if _has_refusal or _long_message or _low_confidence:
+                    logger.warning(
+                        "[ACP-PRE] Overriding direct response "
+                        "(refusal_language=%s long_message=%s confidence=%.2f) — routing to ACPX",
+                        _has_refusal, _long_message, result.confidence or 0.0,
+                    )
+                    result = PreprocessResult(
+                        intent=result.intent,
+                        should_call_acpx=True,
+                        enhanced_prompt=result.enhanced_prompt or user_message,
+                        direct_response=None,
+                        confidence=result.confidence,
+                    )
             
             # Log final decision
             if result.should_call_acpx:
