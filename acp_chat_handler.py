@@ -1205,6 +1205,16 @@ You are a friendly AI assistant helping a user build their **{self.project_name}
    For bots: logs/error.log shows EXACTLY what crashed (import error, syntax error).
    Reading code is guessing. Reading logs is KNOWING.
 
+0.5 🔵 **PROJECT STATUS FILE.** If `projectcreationstatus.md` exists in the
+   project root, READ IT FIRST — before the agent READMEs, before any code.
+   Initial creation builds are UI-only: real feature integration is
+   completed here, one feature per session. Continue from its
+   "PENDING — needs edit session" list (most important first, unless the
+   user asks for something specific). After your changes are verified,
+   update the file: move finished items to DONE, add anything new to
+   KNOWN ISSUES, refresh NEXT STEPS. If the file does not exist, ignore
+   this step.
+
 1. READ agent README
 2. MAKE code changes
 3. UPDATE agent folder

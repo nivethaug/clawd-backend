@@ -1716,6 +1716,7 @@ RULES:
             pages=required_pages_list,
         )
         integrations_block = build_external_integrations_block(self.project_id)
+        status_file_path = f"{to_container_path(str(self.project_path))}/projectcreationstatus.md"
 
         return f"""{meta_block}
 You are editing a React + Vite + TypeScript application.
@@ -1728,6 +1729,58 @@ Build a complete desktop web experience by default. Mobile responsiveness is req
 only a narrow mobile mockup centered on an empty desktop canvas unless the user explicitly requested
 mobile-only output.
 {integrations_block}
+---
+
+## V1 SCOPE — UI-ONLY MINIMAL BUILD (~25 MINUTE TARGET)
+
+This initial creation build is **UI-ONLY**. The user completes real feature
+integration afterward via edit sessions, one feature at a time. Do not try
+to deliver the entire Project Description in this run.
+
+**Build now:**
+- All required pages, fully rendered, with realistic inline sample data
+  (typed interfaces + representative mock objects in the page or `src/features/`)
+- Complete navigation, layout, theme, responsive design
+- Auth UI (forms, validation, protected-route wrapper) wired through the
+  EXISTING template service layer `src/services/database.ts` — those
+  endpoints already exist in the template backend
+
+**Do NOT build now (defer to edit sessions):**
+- Any new backend endpoint, service, model, or migration — the backend
+  template ships as-is and is out of scope for this run
+- Frontend calls to API paths that have no existing backend route (AI
+  generation, external API integrations, uploads, payments). For such
+  features build the complete UI driven by mock/sample responses and mark
+  the feature PENDING in the status file
+- Storage infrastructure, teams, subscriptions, marketplace, multi-item
+  management beyond the single core loop
+
+**Time budget:** target finishing all steps in about 25 minutes of work.
+Running long? Cut visual polish — NEVER cut the build verification and
+NEVER cut the status file.
+
+**Required artifact — `{status_file_path}`**
+Create it as soon as the required pages are built, keep it current, and
+finalize it before the AI index update. Exact format:
+
+```
+# Project Creation Status
+
+## DONE
+- (each delivered item: pages, navigation, auth UI, mock data, verification result)
+
+## PENDING — needs edit session
+- (each deferred feature from the Project Description, one line each,
+  phrased as an actionable edit request, e.g. "Wire video generation to a
+  backend endpoint using the user's OpenRouter key")
+
+## KNOWN ISSUES
+- (build warnings, mock behaviors, TODOs)
+
+## NEXT STEPS
+- (suggested first edit — the most important pending feature)
+```
+
 ---
 
 ## ⛔ NEVER KILL GLOBAL PROCESSES (CRITICAL — read before any `pkill`/`kill`)
@@ -1788,7 +1841,9 @@ build is fine. Do NOT rebuild.
 
 ## EXECUTION ORDER — FOLLOW THIS EXACTLY
 
-1. Create each required non-Welcome page (fully implemented, 800+ chars)
+1. Create each required non-Welcome page (fully implemented, 800+ chars), then
+   create the initial `{status_file_path}` with DONE/PENDING filled in so far
+   (see V1 SCOPE above)
 2. Fix and validate routing before build (remove Welcome route, set `{default_page}` at `"/"`)
 3. Create domain-appropriate navigation in `src/layout/Navbar.tsx`
 4. Integrate navigation into `Layout.tsx`
@@ -1838,7 +1893,9 @@ build is fine. Do NOT rebuild.
   browser — localhost inside the container is NOT reachable from host Chrome.
 9. Free the serve port ONLY (never `pkill` by name — see the ⛔ NEVER block):
    `fuser -k 3004/tcp 2>/dev/null || kill $(lsof -t -i:3004) 2>/dev/null`
-10. Update AI index files (symbols, files, dependencies, summaries)
+10. Finalize `{status_file_path}` — DONE/PENDING/KNOWN ISSUES/NEXT STEPS must
+    reflect the final verified state (every deferred feature listed as PENDING)
+11. Update AI index files (symbols, files, dependencies, summaries)
 
 Wrapper compatibility: if required page files already exist as one-line scaffolds, overwrite all non-Welcome required page files with complete implementations first. Do not edit `src/pages/Welcome.tsx`.
 
@@ -1853,6 +1910,8 @@ Wrapper compatibility: if required page files already exist as one-line scaffold
 - Run `npm install`, `npm add`, or `npm update`
 - Modify files in `src/components/ui/` (use them, don't change them)
 - Modify `vite.config.*`, `tsconfig.json`, or any backend/env files
+- Invent or call API endpoints that do not exist in the template backend —
+  mock the data instead and list the feature as PENDING in the status file
 - Create pages not in the required list
 - Leave any page as a stub, placeholder, or under 800 characters
 - Change project architecture
@@ -1864,6 +1923,7 @@ Wrapper compatibility: if required page files already exist as one-line scaffold
 - `src/layout/`
 - `src/features/`
 - `agent/` (AI index files and agent configuration)
+- `{status_file_path}` (the ONLY file allowed outside the frontend tree)
 
 **Do NOT scan:** `node_modules/`, `dist/`, `build/`, `.git/`
 
