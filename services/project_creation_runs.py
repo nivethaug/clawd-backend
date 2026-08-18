@@ -267,8 +267,11 @@ def mark_failed(run_id: int, status: str, error: str, project_id: Optional[int] 
             (final_status, error[:2000], run_id),
         )
         if project_id:
+            # Cover intermediate statuses too (ai_provisioning/building/deploying/
+            # verifying), not just "creating" — a failure mid-phase must not leave
+            # the project stuck. Never override an already-terminal status.
             conn.execute(
-                "UPDATE projects SET status = %s, error_code = %s WHERE id = %s AND status = 'creating'",
+                "UPDATE projects SET status = %s, error_code = %s WHERE id = %s AND status NOT IN ('ready', 'failed')",
                 ("failed", "creation_worker_failed", project_id),
             )
         conn.commit()
@@ -1196,7 +1199,12 @@ def execute_run(run_id: int) -> Dict[str, Any]:
                 user_id=user_id,
             )
             project = _get_project(project_id)
-            if project and project.get("status") == "creating":
+            # Promote ANY non-terminal status to ready. The strict "== creating"
+            # check left projects stuck in intermediate statuses (ai_provisioning,
+            # building, deploying, verifying) whenever openclaw was killed — most
+            # commonly by the 45-min AI-phase timeout, whose handler intentionally
+            # continues the run with the AI-edited files kept.
+            if project and project.get("status") not in ("ready", "failed"):
                 _set_project_status(project_id, "ready")
         else:
             success, result = _run_bot_or_scheduler_pipeline(run_id, project_id, project_path, payload, type_id)
@@ -1285,7 +1293,7 @@ def recover_stale_runs(stale_after_minutes: int = 20) -> int:
                 (message, run_id),
             )
             conn.execute(
-                "UPDATE projects SET status = 'failed', error_code = 'creation_worker_interrupted' WHERE id = %s AND status = 'creating'",
+                "UPDATE projects SET status = 'failed', error_code = 'creation_worker_interrupted' WHERE id = %s AND status NOT IN ('ready', 'failed')",
                 (project_id,),
             )
             recovered += 1
