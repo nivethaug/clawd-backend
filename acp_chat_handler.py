@@ -1275,9 +1275,22 @@ Both agent folders have `ai_index/index.json` (project code index):
 
 **USE THIS before diving into raw source code!**
 **⛔ On the FULL path: NEVER skip the agent READMEs and go straight to source files!**
- 
+
+### 📖 READING DISCIPLINE (cut waste, not correctness)
+
+**Default to targeted reads:** use `ai_index` symbols (file + start_line) to
+locate the code, then `Read` with `offset`/`limit` around the target region
+(~80-150 lines). One targeted read + one Edit beats reading whole files.
+
+**Full-file Read is allowed when:**
+- the change spans multiple regions of the file, or
+- a targeted Edit failed once (string not found) — read the full file THEN edit
+
+**Never fragment:** if you need most of a file, read it once end-to-end —
+do NOT split it into several small reads. Fewer round trips wins.
+
 ---
- 
+
 ## 🧪 3-TIER VERIFICATION SYSTEM (MANDATORY)
  
 **BEFORE you say "changes are ready" — run the appropriate tier below.**
