@@ -1215,17 +1215,52 @@ You are a friendly AI assistant helping a user build their **{self.project_name}
    KNOWN ISSUES, refresh NEXT STEPS. If the file does not exist, ignore
    this step.
 
-1. READ agent README
-2. MAKE code changes
-3. UPDATE agent folder
-4. RUN buildpublish.py (handles install + build + deploy automatically)
-5. ⭐ TEST with Chrome DevTools on LIVE site ⭐
+1. 🟢 **SIZE CHECK — SMALL EDIT OR FULL TASK?** Classify the request BEFORE
+   touching anything:
+
+   **SMALL — ALL of these are true:**
+   - One component / text / color / spacing / label / copy change
+   - No new page, no route changes, no auth/API/data-flow changes
+   - Touches at most 2 files
+
+   **FULL — anything else:** new page, navigation/routing, forms with
+   validation, auth flows, API calls, data fetching, multi-file changes,
+   feature work. **When unsure → FULL.**
+
+   Then follow exactly ONE of the two paths below.
+
+### SMALL PATH (target: under 10 minutes total)
+
+1. Read the `files` + `summaries` sections of `frontend/agent/ai_index/index.json`
+   ONLY — skip the full agent READMEs, the index is enough to locate the code
+2. Locate the target in the index, then Read ONLY the relevant region of the
+   file (use offset/limit around the symbol — never the whole file if over
+   ~300 lines)
+3. Make the change
+4. Run ONE `python3 buildpublish.py --skip-install` — wait for its success line
+5. Verify with curl ONLY (no Chrome DevTools for small edits):
+   ```
+   curl -s https://{self.frontend_domain}/ | grep -E '<title>|<div id="root">'
+   ```
+   Title + root div present → done.
+6. If `projectcreationstatus.md` exists, add one line under DONE. Stop. Report
+   what changed.
+
+### FULL PATH (the complete discipline — steps 2-5 below plus the sections
+that follow: MANDATORY STARTING POINT, 3-TIER VERIFICATION)
+
+2. READ agent README
+3. MAKE code changes
+4. UPDATE agent folder
+5. RUN buildpublish.py (handles install + build + deploy automatically)
+6. ⭐ TEST with Chrome DevTools on LIVE site ⭐
  
 ---
  
-## 🚨 MANDATORY STARTING POINT - AGENT FOLDER FIRST
+## 🚨 MANDATORY STARTING POINT - AGENT FOLDER FIRST (FULL PATH ONLY)
  
-**CRITICAL: Before doing ANY work, you MUST read the agent READMEs:**
+**CRITICAL: Before doing ANY FULL-path work, you MUST read the agent READMEs**
+(SMALL-path edits already read the ai_index and must NOT re-read these):
  
 1. **Frontend Questions?** Read `frontend/agent/README.md` FIRST
 2. **Backend Questions?** Read `backend/agent/README.md` FIRST
@@ -1239,7 +1274,7 @@ Both agent folders have `ai_index/index.json` (project code index):
 - Dependencies — import relationships
 
 **USE THIS before diving into raw source code!**
-**⛔ NEVER skip the agent READMEs and go straight to source files!**
+**⛔ On the FULL path: NEVER skip the agent READMEs and go straight to source files!**
  
 ---
  
