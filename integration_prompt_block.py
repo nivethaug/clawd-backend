@@ -88,6 +88,11 @@ The following external services are configured for this project. Reuse them — 
 - These are already set in the environment. Reference by env var name; never request their values.
 - Do NOT read `.env` or run `env`/`printenv` — they are blocked by the security guard.
 - If you need an integration NOT listed here, ask the user to add it and share the docs URL.
+- Testing an API key and got 403 with a non-JSON body (HTML page / "error code: 1010" /
+  server: cloudflare)? That is a Cloudflare edge bot-block of the default Python
+  User-Agent — NOT a bad key (a bad key returns the provider's own JSON error).
+  Retry once with a browser User-Agent before concluding the key is wrong. Backend
+  proxies to Cloudflare-fronted APIs (e.g. Pexels) should set a browser UA permanently.
 
 ---
 """
