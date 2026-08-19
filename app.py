@@ -5689,20 +5689,32 @@ async def get_project_env(
     enriched: List[EnvVar] = []
     for v in variables:
         meta = registry_lookup.get(v["key"])
+        # Safe-by-default masking: registry metadata wins when the key is
+        # known; UNKNOWN/custom keys are masked too. The old name heuristic
+        # (TOKEN/SECRET/KEY/...) missed credentials like PIXEL (Pexels) and
+        # returned their real values in the list response. The reveal
+        # endpoint (owner-only) serves the true value on demand.
+        effective_masked = bool(meta.get("is_sensitive")) if meta else True
+        value = "********" if effective_masked else v["value"]
         if meta:
             enriched.append(EnvVar(
                 key=v["key"],
-                value=v["value"],
-                masked=v["masked"],
+                value=value,
+                masked=effective_masked,
                 title=meta.get("title"),
                 description=meta.get("description"),
                 docs_url=meta.get("docs_url"),
                 category=meta.get("category"),
-                is_sensitive=meta.get("is_sensitive", v["masked"]),
+                is_sensitive=effective_masked,
                 has_metadata=True,
             ))
         else:
-            enriched.append(EnvVar(**v))
+            enriched.append(EnvVar(
+                key=v["key"],
+                value=value,
+                masked=effective_masked,
+                is_sensitive=effective_masked,
+            ))
 
     return EnvVarResponse(
         project_id=project_id,
