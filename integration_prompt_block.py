@@ -88,6 +88,14 @@ The following external services are configured for this project. Reuse them — 
 - These are already set in the environment. Reference by env var name; never request their values.
 - Do NOT read `.env` or run `env`/`printenv` — they are blocked by the security guard.
 - If you need an integration NOT listed here, ask the user to add it and share the docs URL.
+- **This is where integrations go live.** When a task involves a listed service, wire it into
+  the app AND verify it with a real API call in THIS session (creation defers live testing
+  here). To test one key without exposing it: extract ONLY that variable (e.g. a one-off
+  python one-liner reading just that key), report its LENGTH only, and make the test call
+  from the backend side — never echo, log, or hardcode the value, and never dump the
+  whole file or environment.
+- In code, always reference by NAME (`os.getenv("KEY")` / `process.env.KEY`) — the value
+  loads at runtime; secrets live only in backend/.env.
 - Testing an API key and got 403 with a non-JSON body (HTML page / "error code: 1010" /
   server: cloudflare)? That is a Cloudflare edge bot-block of the default Python
   User-Agent — NOT a bad key (a bad key returns the provider's own JSON error).
