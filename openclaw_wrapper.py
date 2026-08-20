@@ -931,6 +931,30 @@ That's all. Execute Phase {phase} now.
             # Report final status based on ACPX customization result only
             # (ACP_README.md is no longer generated inside projects)
             if result["success"]:
+                # HOLLOW-BUILD GUARD: ACPX can report success while having
+                # written NOTHING (observed on project 2004: the agent hit the
+                # env security guard, echoed its rejection text as the final
+                # response, and quit — 0 files, 58s). The template's prebuilt
+                # dist/ makes the verification build pass anyway, so written
+                # files are the only reliable truth. Fail loudly instead of
+                # deploying a blank site as "success".
+                _pages_dir = Path(frontend_src_path) / "pages"
+                _real_pages = [
+                    p.stem for p in (_pages_dir.glob("*.tsx") if _pages_dir.exists() else [])
+                    if p.stem not in ("NotFound", "Welcome", "Error", "Loading")
+                ]
+                _files_touched = (
+                    int(result.get("files_added", 0) or 0)
+                    + int(result.get("files_modified", 0) or 0)
+                    + int(result.get("files_removed", 0) or 0)
+                )
+                if not _real_pages and _files_touched == 0:
+                    logger.error(
+                        "❌ ACP Phase 9 HOLLOW BUILD: reported success but no pages "
+                        f"and 0 files changed. Response head: {str(result.get('message', ''))[:200]}"
+                    )
+                    self.completed_phases.append("ACP Frontend Editor (Failed - hollow build)")
+                    return False
                 logger.info(f"✅ ACP Phase 9 completed successfully!")
                 logger.info(f"   ACPX Changes: Files added={result.get('files_added', 0)}, modified={result.get('files_modified', 0)}, removed={result.get('files_removed', 0)}")
                 logger.info(f"   Primary Build: {'✅ Success' if not result.get('build_output') else 'N/A'}")
