@@ -153,6 +153,16 @@ async def _org_from(r: "httpx.Response") -> Optional[str]:
     return "key valid"  # keep response body out of logs
 
 
+async def _v_youtube(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
+    # Cheapest quota-wise call (1 unit) that still proves the key works.
+    r = await _get(
+        "https://www.googleapis.com/youtube/v3/videoCategories"
+        "?part=snippet&regionCode=US"
+        f"&key={values['YOUTUBE_API_KEY']}"
+    )
+    return (r.status_code == 200), ("key valid (public data)" if r.status_code == 200 else None)
+
+
 _VALIDATORS = {
     "openai": _v_openai,
     "openrouter": _v_openrouter,
@@ -165,6 +175,7 @@ _VALIDATORS = {
     "slack_webhook": _v_slack_webhook,
     "coingecko": _v_coingecko,
     "serper": _v_serper,
+    "youtube": _v_youtube,
 }
 
 CATALOG: Dict[str, IntegrationDef] = {
@@ -246,6 +257,13 @@ CATALOG: Dict[str, IntegrationDef] = {
             docs_url="https://serper.dev/api-key",
             description="Google search API for news and web results.",
             validator="serper", icon_hint="serper",
+        ),
+        IntegrationDef(
+            type="youtube", title="YouTube", category="Integrations",
+            key_names=["YOUTUBE_API_KEY"],
+            docs_url="https://console.cloud.google.com/apis/credentials",
+            description="YouTube Data API — search, videos and channel stats (public data).",
+            validator="youtube", icon_hint="youtube",
         ),
     ]
 }

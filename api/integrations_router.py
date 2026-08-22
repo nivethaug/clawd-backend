@@ -41,6 +41,8 @@ _ERROR_STATUS = {
     "single_credential": 400,
     "key_mismatch": 400,
     "invalid_keys": 400,
+    "missing_values": 400,
+    "validation_failed": 400,
     "decrypt_failed": 500,
 }
 
@@ -48,6 +50,12 @@ _ERROR_STATUS = {
 class ValidateRequest(BaseModel):
     type: str
     values: Dict[str, str]
+
+
+class SaveCredentialRequest(BaseModel):
+    type: str
+    values: Dict[str, str]
+    label: Optional[str] = None
 
 
 class ConnectRequest(BaseModel):
@@ -96,6 +104,26 @@ async def validate(request: ValidateRequest, authorization: Optional[str] = Head
     else:
         logger.info("[INTEGRATIONS] user %s %s credential invalid", user_id, request.type)
     return result
+
+
+@router.post("/api/integrations/save")
+async def save_credential(request: SaveCredentialRequest,
+                          authorization: Optional[str] = Header(None)):
+    """Validate-then-save in one server-side call. verified is computed by
+    the server (the generic GI endpoint forces verified=False for 'other'
+    types). Value is encrypted immediately; never returned or logged."""
+    user_id = get_user_id_from_token(authorization)
+    if not get_def(request.type):
+        raise HTTPException(status_code=404, detail="Unknown integration type")
+    try:
+        from services.rate_limiter import rate_limit, RateLimitExceeded
+        rate_limit(user_id, "general_api")
+    except RateLimitExceeded:
+        raise HTTPException(status_code=429, detail="Too many attempts — slow down.")
+    except Exception:
+        pass
+    return _run(await service.save_catalog_credential(
+        user_id, request.type, request.values, request.label))
 
 
 # ======================================================================

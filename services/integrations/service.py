@@ -150,6 +150,60 @@ def list_project_integrations(project_id: int, user_id: int) -> Dict[str, Any]:
     }
 
 
+async def save_catalog_credential(
+    user_id: int,
+    integration_type: str,
+    values: Dict[str, str],
+    label: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Validate a catalog credential server-side and save it to the user's
+    Global Integrations vault — verified is SERVER-computed (the generic GI
+    create endpoint forces verified=False for token_type 'other', which
+    all catalog types use). One vault row per key; multi-key defs loop.
+
+    Async (awaits the provider validation call). Never returns or logs the
+    value.
+    """
+    from services.integrations.catalog import get_def, validate_credentials
+    from secure_value import encrypt_value
+
+    d = get_def(integration_type)
+    if not d:
+        return {"error": "unknown_integration"}
+    missing = [k for k in d.key_names if not (values or {}).get(k, "").strip()]
+    if missing:
+        return {"error": "missing_values", "detail": f"missing: {', '.join(missing)}"}
+
+    pairs = [(key, values[key].strip()) for key in d.key_names]
+    result = await validate_credentials(integration_type, dict(pairs))
+    if not result.get("valid"):
+        return {"error": "validation_failed", "detail": result.get("error")}
+
+    title_base = (label or "").strip() or d.title
+    with get_db() as conn:
+        for key, plain in pairs:
+            title = f"{title_base} — {key}" if d.multi_key else title_base
+            conn.execute(
+                """INSERT INTO global_integrations
+                   (user_id, token_type, key_name, value_encrypted, verified,
+                    title, docs_url, category, created_at, updated_at)
+                   VALUES (?, 'other', ?, ?, TRUE, ?, ?, ?, NOW(), NOW())
+                   ON CONFLICT (user_id, key_name) DO UPDATE SET
+                     value_encrypted = EXCLUDED.value_encrypted,
+                     verified = TRUE,
+                     title = EXCLUDED.title,
+                     docs_url = EXCLUDED.docs_url,
+                     updated_at = NOW()""",
+                (user_id, key, encrypt_value(plain), title, d.docs_url, d.category),
+            )
+        conn.commit()
+
+    logger.info("[INTEGRATIONS] user %s saved %s credential (%d key/s, verified)",
+                user_id, integration_type, len(pairs))
+    return {"saved": True, "verified": True, "key_names": [k for k, _ in pairs],
+            "info": result.get("info")}
+
+
 # ----------------------------------------------------------------------
 # Connect / disconnect / swap
 # ----------------------------------------------------------------------
