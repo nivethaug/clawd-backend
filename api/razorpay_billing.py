@@ -369,7 +369,12 @@ async def verify_razorpay_subscription(
 
     status = entity.get("status")
     notes = entity.get("notes") or {}
-    if notes.get("user_id") and int(notes["user_id"]) != user_id:
+    notes_user = notes.get("user_id")
+    try:
+        notes_user_id = int(notes_user) if notes_user else None
+    except (TypeError, ValueError):
+        notes_user_id = None
+    if notes_user_id is not None and notes_user_id != user_id:
         raise HTTPException(status_code=403, detail="Subscription does not belong to user")
 
     if status in ("active", "authenticated"):

@@ -49,17 +49,22 @@ def _process_event(event: dict) -> dict:
     order = (payload.get("order") or {}).get("entity") or {}
     subscription = (payload.get("subscription") or {}).get("entity") or {}
 
+    # One-time-payment webhooks always expose order_id on the payment entity,
+    # but not all include a nested order entity — prefer the entity, fall
+    # back to payment.order_id.
+    gateway_order_id = order.get("id") or payment.get("order_id") or ""
+
     if event_name == "payment.captured":
-        if not order.get("id"):
+        if not gateway_order_id:
             return {"handled": False, "reason": "no order in payload"}
         return razorpay_service.fulfill_razorpay_payment(
-            provider_order_id=order["id"],
+            provider_order_id=gateway_order_id,
             provider_payment_id=payment.get("id", ""),
             raw_event={"payment": payment, "order": order},
         )
 
     if event_name == "payment.failed":
-        order_id = order.get("id") or payment.get("order_id")
+        order_id = gateway_order_id
         if order_id:
             with get_db() as conn:
                 conn.execute(
@@ -82,10 +87,10 @@ def _process_event(event: dict) -> dict:
     if event_name == "order.paid":
         # Reconcile path — payment.captured is the primary fulfiller; this
         # catches captures whose payment.captured webhook was missed.
-        if not payment.get("id"):
-            return {"handled": False, "reason": "no payment in payload"}
+        if not payment.get("id") or not gateway_order_id:
+            return {"handled": False, "reason": "no payment/order in payload"}
         return razorpay_service.fulfill_razorpay_payment(
-            provider_order_id=order.get("id", ""),
+            provider_order_id=gateway_order_id,
             provider_payment_id=payment["id"],
             raw_event={"payment": payment, "order": order},
         )

@@ -394,6 +394,22 @@ def fulfill_razorpay_payment(
             )
             return {"fulfilled": False, "reason": "unexpected_kind"}
 
+        # Validate the pack BEFORE claiming the paid transition — if the pack
+        # vanished, we leave the row retryable ('created'), not stuck 'paid'.
+        pack = conn.execute(
+            "SELECT credits, credit_type FROM credit_packs WHERE id = %s",
+            (int(p["item_id"]),),
+        ).fetchone()
+        if not pack:
+            capture_payment_failure(
+                provider="razorpay", event="payment_captured",
+                reason="no_matching_credit_pack", user_id=user_id,
+                order_id=provider_order_id,
+            )
+            return {"fulfilled": False, "reason": "no_matching_credit_pack"}
+        d = dict(pack) if not isinstance(pack, dict) else pack
+        credits = int(d["credits"])
+
         # Bind payment id + claim the paid transition atomically. If this
         # returns no row, a concurrent webhook/handler already fulfilled.
         claimed = conn.execute(
@@ -408,20 +424,6 @@ def fulfill_razorpay_payment(
         ).fetchone()
         if not claimed:
             return {"already_fulfilled": True, "payments_id": p["id"]}
-
-        pack = conn.execute(
-            "SELECT credits, credit_type FROM credit_packs WHERE id = %s",
-            (int(p["item_id"]),),
-        ).fetchone()
-        if not pack:
-            capture_payment_failure(
-                provider="razorpay", event="payment_captured",
-                reason="no_matching_credit_pack", user_id=user_id,
-                order_id=provider_order_id,
-            )
-            return {"fulfilled": False, "reason": "no_matching_credit_pack"}
-        d = dict(pack) if not isinstance(pack, dict) else pack
-        credits = int(d["credits"])
 
         add_purchased_credits(conn, user_id, d["credit_type"], credits)
         conn.execute(
@@ -474,7 +476,16 @@ def fulfill_razorpay_subscription(
         return {"fulfilled": False, "reason": "missing_notes"}
 
     user_id = int(user_id_str)
+    # Razorpay returns current_end/current_start as UNIX epoch seconds (int),
+    # not ISO strings — convert before writing to the TIMESTAMP column.
     current_end = subscription_entity.get("current_end")
+    period_end = None
+    if isinstance(current_end, (int, float)) and current_end > 0:
+        from datetime import datetime
+        period_end = datetime.fromtimestamp(int(current_end))
+    elif isinstance(current_end, str) and current_end:
+        period_end = current_end  # ISO string passthrough
+
     with get_db() as conn:
         conn.execute(
             """INSERT INTO subscriptions
@@ -488,11 +499,18 @@ def fulfill_razorpay_subscription(
                    current_period_end = EXCLUDED.current_period_end,
                    updated_at = NOW()""",
             (user_id, plan_slug,
-             current_end, sub_id),
+             period_end, sub_id),
         )
         conn.execute(
             "UPDATE users SET subscription_tier = %s WHERE id = %s",
             (plan_slug, user_id),
+        )
+        # Complete the payments intent row created at /subscription time.
+        conn.execute(
+            """UPDATE payments SET status = 'completed', updated_at = NOW()
+               WHERE provider_subscription_id = %s AND provider = 'razorpay'
+                 AND status = 'created'""",
+            (sub_id,),
         )
         conn.commit()
         assign_plan(conn, user_id, plan_slug)
