@@ -110,8 +110,13 @@ async def put_currency_preference(
 # ============================================================================
 
 @router.get("/pricing")
-async def get_inr_pricing(authorization: Optional[str] = Header(None)):
-    _get_user_id(authorization)  # auth required; result unused
+async def get_inr_pricing():
+    """Public INR pricing view (landing + /pricing pages use this pre-login).
+
+    Same sensitivity as the already-public GET /api/billing/plans and
+    /credit-packs: plan names/prices/features only. Still 503 when Razorpay
+    env keys are unset, so nothing leaks when the feature is off.
+    """
     _require_configured()
 
     from services.plan_cache import get_all_plans
