@@ -72,7 +72,9 @@ _SCHEDULER_ENV_KEYS = {
     'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY',
     'GITHUB_TOKEN', 'STRIPE_SECRET_KEY', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET',
     'RESEND_API_KEY', 'SLACK_WEBHOOK_URL', 'COINGECKO_API_KEY', 'SERPER_API_KEY',
-    'YOUTUBE_API_KEY',
+    # Nango OAuth access tokens (short-lived, minted fresh per job run by
+    # _inject_oauth_tokens; see services/integrations/nango_client.py).
+    'YOUTUBE_ACCESS_TOKEN',
     # Path/Home are required for the venv python + ssl to resolve correctly.
     'PATH', 'HOME', 'LANG', 'LC_ALL',
 }
@@ -107,6 +109,45 @@ def execute_job(project: dict, job: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Sandbox path (prod) — subprocess + bwrap
 # ---------------------------------------------------------------------------
+
+def _inject_oauth_tokens(project_id: int, env: dict) -> None:
+    """Add fresh OAuth access tokens for the project owner's Nango
+    connections (services/integrations/nango_client.py ENABLED_PROVIDERS
+    defines the env-key mapping, e.g. youtube → YOUTUBE_ACCESS_TOKEN).
+
+    Tokens are short-lived Google/provider access tokens minted server-side;
+    refresh tokens never leave Nango. No-op when Nango is unconfigured.
+    """
+    from services.integrations import nango_client
+
+    if not nango_client.is_configured():
+        return
+    from database_adapter import get_db
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+    if not row:
+        return
+    owner_id = (dict(row) if not isinstance(row, dict) else row)["user_id"]
+
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT provider_config_key, connection_id FROM nango_connections "
+            "WHERE user_id = ?",
+            (owner_id,),
+        ).fetchall()
+    for r in rows:
+        d = dict(r) if not isinstance(r, dict) else r
+        key = d.get("provider_config_key")
+        meta = nango_client.ENABLED_PROVIDERS.get(key)
+        if not meta or not d.get("connection_id"):
+            continue
+        token = nango_client.get_access_token(d["connection_id"], key)
+        if token:
+            env[meta["env_token_key"]] = token
+            logger.info("[EXEC-ENGINE] injected %s for project %s", meta["env_token_key"], project_id)
+
 
 def _sync_from_container(project_id: int, project_path: str) -> bool:
     """Sync project files from Docker container to host if missing.
@@ -221,6 +262,15 @@ def _execute_in_sandbox(project_id: int, project_path: str, job: dict) -> dict:
     clean_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
     clean_env.setdefault("HOME", "/tmp")
     clean_env.setdefault("PYTHONUNBUFFERED", "1")
+
+    # Nango OAuth connections of the project owner: mint fresh short-lived
+    # access tokens so scheduler jobs can call connected providers (YouTube
+    # etc.) with ZERO user configuration. Failure-tolerant — a broken Nango
+    # must never stop jobs that don't need OAuth.
+    try:
+        _inject_oauth_tokens(project_id, clean_env)
+    except Exception as e:
+        logger.debug("[EXEC-ENGINE] oauth token injection skipped: %s", e)
 
     # Invoke via bash explicitly so we don't depend on the +x bit being set
     # at the OS level (defense-in-depth alongside the chmod above).

@@ -1645,6 +1645,11 @@ app.include_router(support_admin_router, prefix="/api/support/admin", tags=["sup
 from api.integrations_router import router as integrations_router
 app.include_router(integrations_router, tags=["integrations"])
 
+# Nango OAuth integrations (YouTube first) — isolated client + router;
+# see services/integrations/nango_client.py + scripts/nango-spike/.
+from api.integrations_nango_router import router as integrations_nango_router
+app.include_router(integrations_nango_router, prefix="/api/integrations/nango", tags=["integrations-nango"])
+
 # Register Telegram bot routers
 from api.bot_link import router as bot_link_router
 app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])

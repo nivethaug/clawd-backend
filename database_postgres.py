@@ -1526,6 +1526,30 @@ def init_schema():
             logger.info("✓ Added project_integration_links table (managed integrations)")
 
             # ----------------------------------------------------------------
+            # NANGO OAUTH CONNECTIONS — account-level OAuth links managed by
+            # the self-hosted Nango instance (see scripts/nango-spike/).
+            # The OAuth tokens themselves live ONLY in Nango (encrypted);
+            # this table maps DreamAgent users to their Nango connections.
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS nango_connections (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                provider_config_key TEXT NOT NULL,
+                connection_id TEXT NOT NULL,
+                end_user_id TEXT NOT NULL,
+                metadata JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP DEFAULT NOW(),
+                last_checked_at TIMESTAMP,
+                UNIQUE(user_id, provider_config_key)
+            )""")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nango_conns_user "
+                "ON nango_connections(user_id)"
+            )
+            conn.commit()
+            logger.info("✓ Added nango_connections table (OAuth integrations)")
+
+            # ----------------------------------------------------------------
             # BILLING: migrations on existing tables
             # ----------------------------------------------------------------
 

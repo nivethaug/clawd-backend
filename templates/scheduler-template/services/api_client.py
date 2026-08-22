@@ -7,6 +7,8 @@ Easy to modify by AI agents.
 AI agents can add helper functions here for dynamic integrations.
 """
 
+import os
+
 import requests
 
 REQUEST_TIMEOUT = 10
@@ -260,3 +262,80 @@ def get_news(query: str = "technology", page: int = 1) -> dict:
 # - NewsScraperExample
 # - EcommerceScraperExample
 # (at the bottom of web_scraper.py)
+
+
+# =========================================================================
+# YouTube (OAuth) — uses the DreamAgent-connected YouTube account.
+# The platform injects a fresh YOUTUBE_ACCESS_TOKEN automatically when the
+# project owner has connected YouTube (Settings → Integrations). NO API
+# key, channel ID, or environment variable configuration is needed.
+# =========================================================================
+
+YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
+YOUTUBE_ANALYTICS_API = "https://youtubeanalytics.googleapis.com/v2"
+
+
+def _youtube_headers() -> dict:
+    """Authorization headers from the platform-injected OAuth token."""
+    token = os.environ.get("YOUTUBE_ACCESS_TOKEN", "")
+    if not token:
+        raise RuntimeError(
+            "YouTube not connected: the project owner must connect YouTube "
+            "in DreamAgent → Settings → Integrations (no API key needed)."
+        )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def get_youtube_channel() -> dict:
+    """The connected user's own channel (id, title, stats)."""
+    return _yt_get("/channels", {"part": "snippet,statistics", "mine": "true"})
+
+
+def _yt_get(path: str, params: dict, base: str = YOUTUBE_API) -> dict:
+    resp = requests.get(f"{base}{path}", params=params,
+                        headers=_youtube_headers(), timeout=REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_youtube_latest_videos(max_results: int = 10) -> dict:
+    """Latest published videos of the connected channel."""
+    channel = _yt_get("/channels", {"part": "contentDetails", "mine": "true"})
+    uploads_playlist = (
+        channel.get("items", [{}])[0]
+        .get("contentDetails", {})
+        .get("relatedPlaylists", {})
+        .get("uploads")
+    )
+    if not uploads_playlist:
+        return {"items": []}
+    return _yt_get("/playlistItems", {
+        "part": "snippet,contentDetails",
+        "playlistId": uploads_playlist,
+        "maxResults": min(max_results, 50),
+    })
+
+
+def get_youtube_video_stats(video_ids: list) -> dict:
+    """Views/likes/comments for specific video ids."""
+    if not video_ids:
+        return {"items": []}
+    return _yt_get("/videos", {
+        "part": "statistics,snippet",
+        "id": ",".join(video_ids[:50]),
+    })
+
+
+def get_youtube_analytics_summary(start_date: str, end_date: str) -> dict:
+    """Authorized YouTube Analytics report for the connected channel
+    (views, watch time, subscribers gained, average view duration)."""
+    return _yt_get(
+        "/reports",
+        {
+            "ids": "mine",
+            "startDate": start_date,
+            "endDate": end_date,
+            "metrics": "views,estimatedMinutesWatched,subscribersGained,averageViewDuration",
+        },
+        base=YOUTUBE_ANALYTICS_API,
+    )
