@@ -1622,6 +1622,15 @@ app.include_router(billing_router, prefix="/api/billing", tags=["billing"])
 from api.lemonsqueezy_webhook import router as lemonsqueezy_webhook_router
 app.include_router(lemonsqueezy_webhook_router, prefix="/webhooks", tags=["webhooks"])
 
+# Razorpay INR billing (Indian customers) — additive router, fully isolated
+# from the LemonSqueezy USD flow above. All endpoints 503 when RAZORPAY_*
+# env vars are unset. See services/razorpay_service.py.
+from api.razorpay_billing import router as razorpay_billing_router
+app.include_router(razorpay_billing_router, prefix="/api/billing/razorpay", tags=["billing-razorpay"])
+
+from api.razorpay_webhook import router as razorpay_webhook_router
+app.include_router(razorpay_webhook_router, prefix="/webhooks", tags=["webhooks"])
+
 # Register Telegram bot routers
 from api.bot_link import router as bot_link_router
 app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])

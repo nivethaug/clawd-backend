@@ -282,6 +282,13 @@ def init_schema():
                 cur.execute("ALTER TABLE users ADD COLUMN slack_link_expires_at TIMESTAMP")
             _run_migration(migrate_slack_link_expires)
 
+            # Billing currency preference (Razorpay INR). NULL = auto — the
+            # frontend detects India via timezone/locale and offers a toggle.
+            # Purely additive: existing users keep NULL and today's USD flow.
+            def migrate_currency_preference():
+                cur.execute("ALTER TABLE users ADD COLUMN currency_preference VARCHAR(3)")
+            _run_migration(migrate_currency_preference)
+
             try:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_users_slack_identity ON users(slack_team_id, slack_user_id)")
@@ -1328,6 +1335,74 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added subscriptions table with index")
 
+            # Multi-provider subscription columns (Razorpay INR).
+            # Additive only: DEFAULT 'lemonsqueezy' preserves existing rows'
+            # semantics; the LemonSqueezy flow never reads these columns.
+            def migrate_subs_provider():
+                cur.execute(
+                    "ALTER TABLE subscriptions ADD COLUMN provider VARCHAR(20) "
+                    "NOT NULL DEFAULT 'lemonsqueezy'"
+                )
+            _run_migration(migrate_subs_provider)
+
+            def migrate_subs_external_id():
+                cur.execute(
+                    "ALTER TABLE subscriptions ADD COLUMN external_subscription_id VARCHAR(100)"
+                )
+            _run_migration(migrate_subs_external_id)
+
+            # Partial unique index (NULLs excluded) so Razorpay subscription
+            # upserts can use ON CONFLICT without touching LS rows (all NULL).
+            try:
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_subs_external_id "
+                    "ON subscriptions(external_subscription_id) "
+                    "WHERE external_subscription_id IS NOT NULL"
+                )
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.debug(f"subs external_subscription_id index skipped: {e}")
+
+            # --- payments (multi-provider payment ledger — Razorpay INR) ---
+            # NEW table: nothing in the LemonSqueezy flow reads or writes it.
+            # UNIQUE(provider, provider_payment_id) makes webhook + client-side
+            # handler fulfillment races idempotent (credits granted once).
+            cur.execute("""CREATE TABLE IF NOT EXISTS payments (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                provider VARCHAR(20) NOT NULL,
+                kind VARCHAR(20) NOT NULL,
+                item_id INTEGER,
+                item_ref VARCHAR(50),
+                currency VARCHAR(3) NOT NULL,
+                amount_minor INTEGER NOT NULL,
+                provider_order_id VARCHAR(100),
+                provider_payment_id VARCHAR(100),
+                provider_subscription_id VARCHAR(100),
+                status VARCHAR(20) NOT NULL DEFAULT 'created',
+                credits_granted NUMERIC(10,2),
+                raw_event JSONB,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(provider, provider_payment_id)
+            )""")
+            conn.commit()
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_payments_user "
+                "ON payments(user_id, created_at DESC)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_payments_order "
+                "ON payments(provider_order_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_payments_subscription "
+                "ON payments(provider_subscription_id)"
+            )
+            conn.commit()
+            logger.info("✓ Added payments table (multi-provider ledger) with indexes")
+
             # --- billing_config (EARLY_ACCESS_MODE etc.) ---
             cur.execute("""CREATE TABLE IF NOT EXISTS billing_config (
                 key VARCHAR(50) PRIMARY KEY,
@@ -1668,6 +1743,17 @@ def init_schema():
             )
             conn.commit()
             logger.info("✓ Seeded billing_config (EARLY_ACCESS_MODE)")
+
+            # INR/USD reference rate for derived INR pricing (Razorpay).
+            # Admin-editable via the existing billing Config tab. New key only —
+            # no existing consumer of billing_config is affected.
+            cur.execute(
+                """INSERT INTO billing_config (key, value)
+                   VALUES ('INR_PER_USD', '88'::jsonb)
+                   ON CONFLICT (key) DO NOTHING"""
+            )
+            conn.commit()
+            logger.info("✓ Seeded billing_config (INR_PER_USD)")
 
             # Backfill project_types.ai_operation_id
             type_to_op = {
