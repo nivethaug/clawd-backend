@@ -13463,6 +13463,8 @@ async def admin_send_user_email(
         raise HTTPException(status_code=400, detail="Subject and message are required")
     if len(subject) > 200:
         raise HTTPException(status_code=400, detail="Subject too long (max 200 chars)")
+    if len(message) > 20000:
+        raise HTTPException(status_code=400, detail="Message too long (max 20000 chars)")
 
     with get_db() as conn:
         row = conn.execute(

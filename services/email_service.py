@@ -123,8 +123,10 @@ def send_admin_email(to_email: str, subject: str, message: str,
     Send an admin-composed support email to a user (Admin Users grid → Mail).
 
     Uses the exact same SMTP relay/credentials and branded wrapper as the
-    signup verification email. The admin's message is rendered as simple
-    paragraphs; minimal HTML escaping prevents injection into the template.
+    signup verification email. `message` may be plain text (blank-line
+    paragraphs) or HTML from the admin rich text editor — HTML is sanitized
+    to a strict allowlist (b/strong/i/em/u/s/ul/ol/li/a, http(s)/mailto
+    links only) before it reaches the template.
 
     Returns True if sent successfully, False otherwise.
     """
@@ -132,10 +134,16 @@ def send_admin_email(to_email: str, subject: str, message: str,
 
     display_name = user_name or to_email.split("@")[0]
     safe_subject = _html.escape(subject.strip())[:200]
-    paragraphs = "".join(
-        f"<p style='color: #4b5563; font-size: 15px; line-height: 1.6;'>{_html.escape(p)}</p>"
-        for p in message.strip().split("\n\n") if p.strip()
-    )
+
+    if "<" in message and ">" in message:
+        content_html = _sanitize_admin_html(message)
+        text_content = _html_to_text(message)
+    else:
+        content_html = "".join(
+            f"<p style='color: #4b5563; font-size: 15px; line-height: 1.6;'>{_html.escape(p)}</p>"
+            for p in message.strip().split("\n\n") if p.strip()
+        )
+        text_content = message.strip()
 
     html_body = f"""\
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
@@ -145,7 +153,7 @@ def send_admin_email(to_email: str, subject: str, message: str,
   </div>
   <div style="background: #ffffff; border-radius: 16px; padding: 32px; border: 1px solid #e5e7eb;">
     <p style="color: #4b5563; font-size: 15px; line-height: 1.6;">Hi {display_name},</p>
-    {paragraphs}
+    {content_html}
     <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
     <p style="color: #9ca3af; font-size: 12px; margin: 0;">
       This is a message from the DreamAgent team. Reply to this email to reach us.
@@ -161,7 +169,7 @@ def send_admin_email(to_email: str, subject: str, message: str,
         msg["Subject"] = f"{safe_subject} - DreamAgent"
         msg["From"] = SMTP_FROM
         msg["To"] = to_email
-        msg.attach(MIMEText(message.strip(), "plain"))
+        msg.attach(MIMEText(text_content, "plain"))
         msg.attach(MIMEText(html_body, "html"))
 
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15) as server:
@@ -181,3 +189,112 @@ def send_admin_email(to_email: str, subject: str, message: str,
     except Exception as e:
         logger.error(f"Failed to send admin email to {to_email}: {e}")
         return False
+
+
+# ----------------------------------------------------------------------
+# Admin-message HTML sanitizer (stdlib only — no extra dependency)
+# ----------------------------------------------------------------------
+
+import html as _html_mod
+from html.parser import HTMLParser
+
+_ADMIN_ALLOWED_TAGS = {"p", "br", "b", "strong", "i", "em", "u", "s", "strike", "ul", "ol", "li", "a"}
+_ADMIN_LINK_SCHEMES = ("http://", "https://", "mailto:")
+_ADMIN_DROP_WITH_CONTENT = {"script", "style", "title", "head"}
+
+
+class _AdminHtmlSanitizer(HTMLParser):
+    """Rebuilds HTML keeping only allowlisted tags; escapes everything else.
+
+    <script>/<style> content is dropped entirely, disallowed tags are
+    unwrapped (their text survives, the tag does not), and links are
+    re-emitted with only a scheme-checked href plus target=_blank
+    rel="noopener noreferrer".
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out: list = []
+        self.stack: list = []
+        self.drop_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if self.drop_depth:
+            if tag in _ADMIN_DROP_WITH_CONTENT:
+                self.drop_depth += 1
+            return
+        if tag in _ADMIN_DROP_WITH_CONTENT:
+            self.drop_depth = 1
+            return
+        if tag not in _ADMIN_ALLOWED_TAGS:
+            return  # unwrap: keep the children, drop the tag
+        if tag == "br":
+            self.out.append("<br/>")
+            return
+        if tag == "a":
+            href = ""
+            for key, val in attrs:
+                if key == "href" and val:
+                    href = val.strip()
+                    break
+            if href.lower().startswith(_ADMIN_LINK_SCHEMES):
+                self.out.append(
+                    f'<a href="{_html_mod.escape(href, quote=True)}" '
+                    f'target="_blank" rel="noopener noreferrer">'
+                )
+                self.stack.append("a")
+            return
+        self.out.append(f"<{tag}>")
+        self.stack.append(tag)
+
+    def handle_endtag(self, tag):
+        if self.drop_depth:
+            if tag in _ADMIN_DROP_WITH_CONTENT:
+                self.drop_depth -= 1
+            return
+        if tag not in _ADMIN_ALLOWED_TAGS or tag == "br":
+            return
+        if tag in self.stack:
+            # Close intermediates so emitted tags stay balanced.
+            while self.stack:
+                open_tag = self.stack.pop()
+                self.out.append(f"</{open_tag}>")
+                if open_tag == tag:
+                    break
+
+    def handle_data(self, data):
+        if not self.drop_depth:
+            self.out.append(_html_mod.escape(data))
+
+
+def _sanitize_admin_html(raw: str) -> str:
+    parser = _AdminHtmlSanitizer()
+    parser.feed(raw)
+    parser.close()
+    while parser.stack:
+        parser.out.append(f"</{parser.stack.pop()}>")
+    return "".join(parser.out)
+
+
+class _AdminHtmlToText(HTMLParser):
+    """Crude HTML → plain-text fallback for the text/plain MIME part."""
+
+    _BLOCKISH = {"br", "p", "li", "ul", "ol", "div"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._BLOCKISH:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def _html_to_text(raw: str) -> str:
+    parser = _AdminHtmlToText()
+    parser.feed(raw)
+    parser.close()
+    return "".join(parser.parts).strip()
