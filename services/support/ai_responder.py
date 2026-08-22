@@ -41,6 +41,7 @@ _ESCALATION_PATTERNS = [
     r"\b(talk|speak|chat|contact|reach|message|discuss|consult)\b[^.?!]{0,30}\b(human|person|support|someone|admin|agent|team|owner|manager)\b",
     r"\b(with|to) (a |an )?(human|admin|agent|real person|live agent|support)\b",
     r"\b(connect|transfer|escalate|hand ?off)\s+me\b",
+    r"\b(get|give|put|find)\s+me\b[^.?!]{0,20}\b(human|person|admin|agent|support|someone|team|one)\b",
     r"\bneed (a |an )?(human|real person|admin|agent|support)\b",
     r"\b(want|need|wanna|would like|like) to (talk|speak|chat|discuss)\b(?!\s+(about|regarding))",
     r"\b(human|real person|support team|customer support|live agent|admin)\b[^.?!]{0,40}\b(help|assist|take over|respond|reply|look into)\b",
