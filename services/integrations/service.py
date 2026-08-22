@@ -255,6 +255,9 @@ def connect(
 
     with get_db() as conn:
         for gi in gis:
+            # Per-GI materialization: a multi-key def (razorpay) creates one
+            # link per credential, each owning ONLY its own key — so
+            # disconnecting one credential never removes another's key.
             conn.execute(
                 """INSERT INTO project_integration_links
                    (project_id, global_integration_id, integration_type,
@@ -265,7 +268,7 @@ def connect(
                      materialized_keys = EXCLUDED.materialized_keys,
                      integration_type = EXCLUDED.integration_type,
                      last_synced_at = NOW()""",
-                (project_id, gi["id"], integration_type, ",".join(d.key_names)),
+                (project_id, gi["id"], integration_type, gi["key_name"]),
             )
         conn.commit()
 

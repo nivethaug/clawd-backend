@@ -82,6 +82,14 @@ async def validate(request: ValidateRequest, authorization: Optional[str] = Head
     user_id = get_user_id_from_token(authorization)
     if not get_def(request.type):
         raise HTTPException(status_code=404, detail="Unknown integration type")
+    # Rate-limit: this endpoint proxies a provider call per attempt.
+    try:
+        from services.rate_limiter import rate_limit, RateLimitExceeded
+        rate_limit(user_id, "general_api")
+    except RateLimitExceeded:
+        raise HTTPException(status_code=429, detail="Too many validation attempts — slow down.")
+    except Exception:
+        pass  # limiter unavailable must not block validation
     result = await validate_credentials(request.type, request.values)
     if result.get("valid"):
         logger.info("[INTEGRATIONS] user %s validated %s credential", user_id, request.type)
