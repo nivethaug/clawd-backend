@@ -19,6 +19,7 @@ require_admin; nothing existing is modified beyond the router mount.
 
 import json
 import logging
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -39,8 +40,16 @@ router = APIRouter()
 MAX_MESSAGE_CHARS = 4000
 
 
+def _json_default(o):
+    """psycopg2 returns datetime/date objects — FastAPI's JSONResponse
+    handles them automatically, but our manual json.dumps here doesn't."""
+    if isinstance(o, (datetime, date)):
+        return o.isoformat()
+    raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
+
+
 def _sse(payload: dict) -> str:
-    return f"data: {json.dumps(payload)}\n\n"
+    return f"data: {json.dumps(payload, default=_json_default)}\n\n"
 
 
 def _own_conversation(conversation_id: int, user_id: int) -> dict:
