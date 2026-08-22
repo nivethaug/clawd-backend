@@ -26,6 +26,11 @@ SMTP_USER = os.getenv("SMTP_USER", DEFAULT_SUPPORT_EMAIL)
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 SMTP_FROM = os.getenv("SMTP_FROM", DEFAULT_FROM_EMAIL)
 
+# Admin support emails (Admin Users grid → Mail) go out from this alias.
+# Overridable via ADMIN_EMAIL_FROM; the SMTP account must be allowed to
+# send as this alias (Hostinger: any alias on the authenticated mailbox).
+ADMIN_EMAIL_FROM = os.getenv("ADMIN_EMAIL_FROM", "help@dreamagent.cloud")
+
 # Frontend URL for verification links (static — always dreamagent.cloud)
 FRONTEND_URL = "https://dreamagent.cloud"
 
@@ -167,7 +172,7 @@ def send_admin_email(to_email: str, subject: str, message: str,
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"{safe_subject} - DreamAgent"
-        msg["From"] = SMTP_FROM
+        msg["From"] = ADMIN_EMAIL_FROM
         msg["To"] = to_email
         msg.attach(MIMEText(text_content, "plain"))
         msg.attach(MIMEText(html_body, "html"))
@@ -175,7 +180,7 @@ def send_admin_email(to_email: str, subject: str, message: str,
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15) as server:
             if SMTP_PASS:
                 server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_FROM, to_email, msg.as_string())
+            server.sendmail(ADMIN_EMAIL_FROM, to_email, msg.as_string())
 
         logger.info(f"Admin email sent to {to_email} (subject: {safe_subject[:60]})")
         return True
