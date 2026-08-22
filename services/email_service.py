@@ -34,8 +34,11 @@ ADMIN_EMAIL_FROM = os.getenv("ADMIN_EMAIL_FROM", "help@dreamagent.cloud")
 # Frontend URL for verification links (static — always dreamagent.cloud)
 FRONTEND_URL = "https://dreamagent.cloud"
 
-# Official light wordmark (480×95) — hosted on the site root.
-LOGO_URL = f"{FRONTEND_URL}/dreamagent-cloud-logo-light.png"
+# Official white wordmark (480×95, exact shape of the brand logo with a
+# pure-white recolor for maximum contrast on the dark header) — hosted on
+# the site root.
+LOGO_URL = f"{FRONTEND_URL}/dreamagent-cloud-logo-white.png"
+LOGO_WIDTH = 275  # 480×95 ratio → 275×54; retina-sharp
 
 
 def _branded_email_html(body_html: str) -> str:
@@ -46,21 +49,21 @@ def _branded_email_html(body_html: str) -> str:
     generous padding, rounded top corners. Solid navy fallback where
     gradients aren't supported (Outlook); radius degrades to square
     corners there. Body: white card with rounded bottom corners.
-    Mobile-safe: fluid 100% width capped at 480px.
+    Mobile-safe: fluid 100% width capped at 600px.
     """
     return f"""\
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; width: 100%; max-width: 480px; margin: 0 auto; padding: 24px 16px 32px;">
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px 20px 32px;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; border-collapse: separate; border: 1px solid #e5e7eb; border-radius: 16px;">
     <tr>
-      <td align="center" style="padding: 46px 24px 42px; background-color: #0b1026; background-image: radial-gradient(140px 140px at 16% 22%, rgba(124, 111, 255, 0.30) 0%, rgba(124, 111, 255, 0) 70%), radial-gradient(180px 180px at 86% 8%, rgba(56, 116, 248, 0.22) 0%, rgba(56, 116, 248, 0) 75%), linear-gradient(160deg, #0b1026 0%, #131a4a 48%, #2b1b5e 100%); border-radius: 15px 15px 0 0;">
-        <img src="{LOGO_URL}" width="220" height="44" alt="DreamAgent" style="display: block; margin: 0 auto; border: 0; outline: none; text-decoration: none; width: 220px; max-width: 78%; height: auto;">
-        <p style="color: rgba(255, 255, 255, 0.72); font-size: 13px; letter-spacing: 0.05em; line-height: 1.5; margin: 16px 0 0;">
+      <td align="center" style="padding: 50px 28px 46px; background-color: #0b1026; background-image: radial-gradient(150px 150px at 16% 22%, rgba(124, 111, 255, 0.30) 0%, rgba(124, 111, 255, 0) 70%), radial-gradient(190px 190px at 86% 8%, rgba(56, 116, 248, 0.22) 0%, rgba(56, 116, 248, 0) 75%), linear-gradient(160deg, #0b1026 0%, #131a4a 48%, #2b1b5e 100%); border-radius: 15px 15px 0 0;">
+        <img src="{LOGO_URL}" width="{LOGO_WIDTH}" height="54" alt="DreamAgent" style="display: block; margin: 0 auto; border: 0; outline: none; text-decoration: none; width: {LOGO_WIDTH}px; max-width: 78%; height: auto;">
+        <p style="color: rgba(255, 255, 255, 0.72); font-size: 13px; letter-spacing: 0.05em; line-height: 1.5; margin: 18px 0 0;">
           Build, Deploy &amp; Own Software With AI
         </p>
       </td>
     </tr>
     <tr>
-      <td style="padding: 34px 32px 32px; background-color: #ffffff; border-radius: 0 0 15px 15px;">
+      <td style="padding: 36px 36px 34px; background-color: #ffffff; border-radius: 0 0 15px 15px;">
         {body_html}
       </td>
     </tr>
