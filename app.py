@@ -13437,6 +13437,57 @@ async def admin_reset_user_limits(
     return {"success": True, "message": f"Rate limits reset for user {target_user_id}"}
 
 
+class AdminEmailRequest(BaseModel):
+    subject: str
+    message: str
+
+
+@app.post("/admin/users/{target_user_id}/email")
+async def admin_send_user_email(
+    target_user_id: int,
+    request: AdminEmailRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Send a support email to a user from the Admin Users grid. Admin only.
+
+    Recipient is resolved server-side from the user id — the client never
+    supplies the address. Uses the same SMTP relay as the signup
+    verification email.
+    """
+    admin_user_id = get_user_id_from_token(authorization)
+    require_admin(admin_user_id)
+
+    subject = (request.subject or "").strip()
+    message = (request.message or "").strip()
+    if not subject or not message:
+        raise HTTPException(status_code=400, detail="Subject and message are required")
+    if len(subject) > 200:
+        raise HTTPException(status_code=400, detail="Subject too long (max 200 chars)")
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT email, name FROM users WHERE id = %s", (target_user_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    user = dict(row) if not isinstance(row, dict) else row
+    if not user.get("email"):
+        raise HTTPException(status_code=400, detail="User has no email address")
+
+    from services.email_service import send_admin_email
+    sent = send_admin_email(
+        to_email=user["email"],
+        subject=subject,
+        message=message,
+        user_name=user.get("name"),
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail="Failed to send email — check SMTP configuration")
+
+    logger.info(f"[ADMIN] User {admin_user_id} sent support email to user {target_user_id}")
+    return {"success": True, "message": f"Email sent to {user['email']}"}
+
+
 @app.delete("/admin/users/{target_user_id}")
 async def admin_delete_user(
     target_user_id: int,
