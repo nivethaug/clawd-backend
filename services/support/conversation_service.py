@@ -275,6 +275,24 @@ def set_summary(conversation_id: int, summary: str) -> None:
 # Admin inbox views
 # ----------------------------------------------------------------------
 
+def delete_conversation(conversation_id: int, user_id: int) -> bool:
+    """Delete a user's OWN conversation (+ messages/notes via CASCADE).
+
+    Ownership is enforced in the WHERE clause — a mismatched id affects
+    zero rows. Returns True when a row was actually deleted.
+    """
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM support_conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        )
+        conn.commit()
+        deleted = getattr(cur, "rowcount", 0) or 0
+    if deleted:
+        logger.info("[SUPPORT] user %s deleted conversation %s", user_id, conversation_id)
+    return bool(deleted)
+
+
 def admin_inbox(status: Optional[str] = None, page: int = 0, page_size: int = 30,
                 ) -> List[Dict[str, Any]]:
     """Admin inbox rows: user info, last message, unread, project, admin."""

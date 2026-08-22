@@ -263,3 +263,18 @@ async def mark_read(conversation_id: int, authorization: Optional[str] = Header(
     _own_conversation(conversation_id, user_id)
     n = conversation_service.mark_read(conversation_id, reader="user")
     return {"success": True, "marked": n}
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: int, authorization: Optional[str] = Header(None)):
+    """Delete the user's own conversation (messages + notes cascade).
+
+    Ownership enforced in the DELETE itself — deletes nothing when the
+    conversation belongs to someone else (404 first via ownership check).
+    """
+    user_id = get_user_id_from_token(authorization)
+    _own_conversation(conversation_id, user_id)
+    deleted = conversation_service.delete_conversation(conversation_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"success": True}
