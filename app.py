@@ -10285,8 +10285,17 @@ async def update_gallery_listing(
         if not row:
             raise HTTPException(status_code=404, detail="Gallery listing not found")
         owner_id = dict(row).get("user_id") if row else None
+        # Owner may edit their own listing; admins retain the edit access the
+        # gallery UI already shows them (previously a non-owner admin pencil
+        # hit this 403).
         if owner_id != user_id:
-            raise HTTPException(status_code=403, detail="Only the publisher can edit this listing")
+            try:
+                require_admin(user_id)
+            except HTTPException:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the publisher or an admin can edit this listing",
+                )
 
         # Build dynamic UPDATE — only set provided fields
         updates = []
