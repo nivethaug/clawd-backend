@@ -34,9 +34,14 @@ ESCALATION_TAG = "[ESCALATE]"
 MAX_HISTORY_MESSAGES = 24
 
 # Deterministic escalation triggers (case-insensitive). These ALWAYS win.
+# Deliberately wide on human-request verbs: a user asking for a human and
+# being answered by the AI instead is the worst failure mode of this
+# feature — over-escalating an ambiguous product question is cheap.
 _ESCALATION_PATTERNS = [
-    r"\b(talk|speak|chat) (to|with) (a )?(human|person|support|someone|admin|agent)\b",
-    r"\b(human|real person|support team|customer support)\b.*\b(help|assist|take over)\b",
+    r"\b(talk|speak|chat|contact|reach|message)\b[^.?!]{0,30}\b(human|person|support|someone|admin|agent|team|owner|manager)\b",
+    r"\b(connect|transfer|escalate|hand ?off)\s+me\b",
+    r"\bneed (a |an )?(human|real person|admin|agent|support)\b",
+    r"\b(human|real person|support team|customer support|live agent|admin)\b[^.?!]{0,40}\b(help|assist|take over|respond|reply|look into)\b",
     r"\b(billing|refund|charge|charged|invoice|payment|subscription cancel|money back)\b",
     r"\b(that|this) (didn'?t|did not|doesn'?t|does not) (work|help|solve|answer)\b",
     r"\b(you (didn'?t|did not|don'?t|do not) (help|answer|understand|solve))\b",
