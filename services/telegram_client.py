@@ -15,7 +15,16 @@ logger = logging.getLogger(__name__)
 # ── Config ──────────────────────────────────────────────────
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
-WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "dreamagent-tg-whhook-2026")
+# Webhook secret is env-required — no committed default. Unset → empty,
+# and the webhook handler rejects requests (fail-closed). Set
+# TELEGRAM_WEBHOOK_SECRET in the backend .env (must match the bot's
+# webhook secret_token set via setWebhook).
+WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+if not WEBHOOK_SECRET:
+    logger.warning(
+        "[TELEGRAM-CLIENT] TELEGRAM_WEBHOOK_SECRET not set — control-bot "
+        "webhook verification will fail closed until it is configured"
+    )
 
 
 async def send_message(

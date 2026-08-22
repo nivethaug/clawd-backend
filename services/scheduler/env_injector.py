@@ -81,11 +81,13 @@ def inject_scheduler_env(
     if not backend_url:
         backend_url = os.getenv("SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud")
 
-    # SMTP from backend .env (shared - Hostinger)
+    # SMTP from backend .env (shared - Hostinger). No hardcoded fallback:
+    # if the relay password is missing, email stays unconfigured rather than
+    # shipping a shared secret into every project's .env.
     smtp_host = os.getenv("SMTP_HOST", "smtp.hostinger.com")
     smtp_port = os.getenv("SMTP_PORT", "465")
     smtp_user = os.getenv("SMTP_USER", DEFAULT_SUPPORT_EMAIL)
-    smtp_pass = os.getenv("SMTP_PASS", "Nivetha@3117")
+    smtp_pass = os.getenv("SMTP_PASS", "")
     smtp_from = os.getenv("SMTP_FROM", DEFAULT_FROM_EMAIL)  # From alias
 
     # Build env content

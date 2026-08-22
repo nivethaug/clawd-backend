@@ -1639,6 +1639,12 @@ app.include_router(support_chat_router, prefix="/api/support", tags=["support"])
 from api.support.admin_router import router as support_admin_router
 app.include_router(support_admin_router, prefix="/api/support/admin", tags=["support-admin"])
 
+# Managed integrations (project ↔ global-integration links) — isolated
+# package: api/integrations_router.py + services/integrations/. See
+# INTEGRATIONS_PLAN.md. Absolute paths, no prefix.
+from api.integrations_router import router as integrations_router
+app.include_router(integrations_router, tags=["integrations"])
+
 # Register Telegram bot routers
 from api.bot_link import router as bot_link_router
 app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])
@@ -9437,6 +9443,10 @@ async def delete_global_integration(gi_id: int, authorization: Optional[str] = H
         if not row:
             raise HTTPException(status_code=404, detail="Integration not found")
         conn.execute("DELETE FROM global_integrations WHERE id = ?", (gi_id,))
+        # Managed-integration links: keep (status=revoked) so projects can
+        # reconcile stale keys lazily. See services/integrations/.
+        from services.integrations.service import on_global_integration_deleted
+        on_global_integration_deleted(gi_id)
         conn.commit()
     key_name = row["key_name"] if isinstance(row, dict) else row[1]
     logger.info("[GI] user %s deleted integration %s", user_id, key_name)

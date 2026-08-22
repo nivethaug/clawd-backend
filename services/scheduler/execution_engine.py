@@ -67,6 +67,11 @@ _SCHEDULER_ENV_KEYS = {
     'DISCORD_WEBHOOK_URL',
     'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'EMAIL_TO',
     'API_ENDPOINT',
+    # Managed-integration keys (services/integrations/catalog.py) — without
+    # an entry here the sandbox silently drops the key.
+    'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY',
+    'GITHUB_TOKEN', 'STRIPE_SECRET_KEY', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET',
+    'RESEND_API_KEY', 'SLACK_WEBHOOK_URL', 'COINGECKO_API_KEY', 'SERPER_API_KEY',
     # Path/Home are required for the venv python + ssl to resolve correctly.
     'PATH', 'HOME', 'LANG', 'LC_ALL',
 }

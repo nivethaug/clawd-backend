@@ -1497,6 +1497,35 @@ def init_schema():
             logger.info("✓ Added support system tables (conversations/messages/notes)")
 
             # ----------------------------------------------------------------
+            # MANAGED INTEGRATIONS — project ↔ global-integration links.
+            # Fully isolated: one NEW table; nothing existing is altered.
+            # Links are the RELATIONSHIP source of truth; the project .env
+            # remains the RUNTIME source of truth (reference + materialize).
+            # See services/integrations/ + INTEGRATIONS_PLAN.md.
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS project_integration_links (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                global_integration_id INTEGER REFERENCES global_integrations(id) ON DELETE SET NULL,
+                integration_type TEXT NOT NULL,
+                materialized_keys TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'linked',
+                linked_at TIMESTAMP DEFAULT NOW(),
+                last_synced_at TIMESTAMP,
+                UNIQUE(project_id, global_integration_id)
+            )""")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pil_project "
+                "ON project_integration_links(project_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pil_gi "
+                "ON project_integration_links(global_integration_id)"
+            )
+            conn.commit()
+            logger.info("✓ Added project_integration_links table (managed integrations)")
+
+            # ----------------------------------------------------------------
             # BILLING: migrations on existing tables
             # ----------------------------------------------------------------
 
