@@ -151,18 +151,27 @@ def get_messages(conversation_id: int, after_id: int = 0,
 
 def mark_read(conversation_id: int, *, reader: str) -> int:
     """Mark messages read. reader='user' clears admin/system messages;
-    reader='admin' clears user messages."""
+    reader='admin' clears user messages. Returns how many were marked."""
     sender_types = ("admin", "system") if reader == "user" else ("user",)
     placeholders = ", ".join("?" for _ in sender_types)
     with get_db() as conn:
-        cur = conn.execute(
-            f"""UPDATE support_messages SET read_at = NOW()
+        # Count first — the DB wrapper does not expose cursor.rowcount.
+        count_row = conn.execute(
+            f"""SELECT COUNT(*) AS n FROM support_messages
                 WHERE conversation_id = ? AND read_at IS NULL
                   AND sender_type IN ({placeholders})""",
             (conversation_id, *sender_types),
-        )
-        conn.commit()
-        return cur.rowcount if hasattr(cur, "rowcount") else 0
+        ).fetchone()
+        marked = int((count_row if isinstance(count_row, dict) else dict(count_row or {})).get("n", 0))
+        if marked:
+            conn.execute(
+                f"""UPDATE support_messages SET read_at = NOW()
+                    WHERE conversation_id = ? AND read_at IS NULL
+                      AND sender_type IN ({placeholders})""",
+                (conversation_id, *sender_types),
+            )
+            conn.commit()
+        return marked
 
 
 # ----------------------------------------------------------------------
@@ -278,19 +287,24 @@ def set_summary(conversation_id: int, summary: str) -> None:
 def delete_conversation(conversation_id: int, user_id: int) -> bool:
     """Delete a user's OWN conversation (+ messages/notes via CASCADE).
 
-    Ownership is enforced in the WHERE clause — a mismatched id affects
-    zero rows. Returns True when a row was actually deleted.
+    Ownership is enforced in the WHERE clauses. NOTE: the DB wrapper does
+    not expose cursor.rowcount (it is always missing → 0), so existence is
+    checked with an ownership-scoped SELECT before the DELETE instead.
     """
     with get_db() as conn:
-        cur = conn.execute(
+        row = conn.execute(
+            "SELECT 1 FROM support_conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute(
             "DELETE FROM support_conversations WHERE id = ? AND user_id = ?",
             (conversation_id, user_id),
         )
         conn.commit()
-        deleted = getattr(cur, "rowcount", 0) or 0
-    if deleted:
-        logger.info("[SUPPORT] user %s deleted conversation %s", user_id, conversation_id)
-    return bool(deleted)
+    logger.info("[SUPPORT] user %s deleted conversation %s", user_id, conversation_id)
+    return True
 
 
 def admin_inbox(status: Optional[str] = None, page: int = 0, page_size: int = 30,
