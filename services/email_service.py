@@ -34,6 +34,42 @@ ADMIN_EMAIL_FROM = os.getenv("ADMIN_EMAIL_FROM", "help@dreamagent.cloud")
 # Frontend URL for verification links (static — always dreamagent.cloud)
 FRONTEND_URL = "https://dreamagent.cloud"
 
+# Official light wordmark (480×95) — hosted on the site root.
+LOGO_URL = f"{FRONTEND_URL}/dreamagent-cloud-logo-light.png"
+
+
+def _branded_email_html(body_html: str) -> str:
+    """Shared premium shell for all DreamAgent emails.
+
+    Header: dark navy→deep-purple gradient with two subtle radial glows
+    (indigo top-left, blue top-right), centered white logo, tagline,
+    generous padding, rounded top corners. Solid navy fallback where
+    gradients aren't supported (Outlook); radius degrades to square
+    corners there. Body: white card with rounded bottom corners.
+    Mobile-safe: fluid 100% width capped at 480px.
+    """
+    return f"""\
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; width: 100%; max-width: 480px; margin: 0 auto; padding: 24px 16px 32px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; border-collapse: separate; border: 1px solid #e5e7eb; border-radius: 16px;">
+    <tr>
+      <td align="center" style="padding: 46px 24px 42px; background-color: #0b1026; background-image: radial-gradient(140px 140px at 16% 22%, rgba(124, 111, 255, 0.30) 0%, rgba(124, 111, 255, 0) 70%), radial-gradient(180px 180px at 86% 8%, rgba(56, 116, 248, 0.22) 0%, rgba(56, 116, 248, 0) 75%), linear-gradient(160deg, #0b1026 0%, #131a4a 48%, #2b1b5e 100%); border-radius: 15px 15px 0 0;">
+        <img src="{LOGO_URL}" width="220" height="44" alt="DreamAgent" style="display: block; margin: 0 auto; border: 0; outline: none; text-decoration: none; width: 220px; max-width: 78%; height: auto;">
+        <p style="color: rgba(255, 255, 255, 0.72); font-size: 13px; letter-spacing: 0.05em; line-height: 1.5; margin: 16px 0 0;">
+          Build, Deploy &amp; Own Software With AI
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 34px 32px 32px; background-color: #ffffff; border-radius: 0 0 15px 15px;">
+        {body_html}
+      </td>
+    </tr>
+  </table>
+  <p style="text-align: center; color: #9ca3af; font-size: 12px; margin-top: 24px;">
+    © 2026 DreamAgent. All rights reserved.
+  </p>
+</div>"""
+
 
 def send_verification_email(to_email: str, token: str, user_name: Optional[str] = None) -> bool:
     """
@@ -50,36 +86,25 @@ def send_verification_email(to_email: str, token: str, user_name: Optional[str] 
     verify_url = f"{FRONTEND_URL}/verify-email?token={token}"
     display_name = user_name or to_email.split("@")[0]
 
-    html_body = f"""\
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
-  <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 28px; font-weight: bold; margin: 0; background: linear-gradient(135deg, #6366f1, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">DreamAgent</h1>
-    <p style="color: #6b7280; margin-top: 8px;">Your friendly VPS assistant</p>
-  </div>
-  <div style="background: #ffffff; border-radius: 16px; padding: 32px; border: 1px solid #e5e7eb;">
-    <h2 style="font-size: 20px; margin: 0 0 16px;">Verify your email ✅</h2>
-    <p style="color: #4b5563; font-size: 15px; line-height: 1.6;">
-      Hi {display_name},<br><br>
-      Welcome to DreamAgent! Please verify your email address to activate your account and start building.
-    </p>
-    <div style="text-align: center; margin: 28px 0;">
-      <a href="{verify_url}" style="display: inline-block; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #ffffff; font-size: 15px; font-weight: 600; padding: 14px 32px; border-radius: 12px; text-decoration: none;">
-        Verify Email
-      </a>
-    </div>
-    <p style="color: #9ca3af; font-size: 13px; line-height: 1.5;">
-      Or paste this link into your browser:<br>
-      <a href="{verify_url}" style="color: #6366f1; word-break: break-all;">{verify_url}</a>
-    </p>
-    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
-    <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-      If you didn't create an account, you can safely ignore this email.
-    </p>
-  </div>
-  <p style="text-align: center; color: #9ca3af; font-size: 12px; margin-top: 24px;">
-    © 2026 DreamAgent. All rights reserved.
-  </p>
-</div>"""
+    html_body = _branded_email_html(f"""\
+<h2 style="font-size: 20px; margin: 0 0 16px; color: #111827;">Verify your email ✅</h2>
+<p style="color: #4b5563; font-size: 15px; line-height: 1.6;">
+  Hi {display_name},<br><br>
+  Welcome to DreamAgent! Please verify your email address to activate your account and start building.
+</p>
+<div style="text-align: center; margin: 28px 0;">
+  <a href="{verify_url}" style="display: inline-block; background: linear-gradient(135deg, #6366f1, #8b5cf6); background-color: #6366f1; color: #ffffff; font-size: 15px; font-weight: 600; padding: 14px 32px; border-radius: 12px; text-decoration: none;">
+    Verify Email
+  </a>
+</div>
+<p style="color: #9ca3af; font-size: 13px; line-height: 1.5;">
+  Or paste this link into your browser:<br>
+  <a href="{verify_url}" style="color: #6366f1; word-break: break-all;">{verify_url}</a>
+</p>
+<hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+<p style="color: #9ca3af; font-size: 12px; margin: 0;">
+  If you didn't create an account, you can safely ignore this email.
+</p>""")
 
     text_body = f"""DreamAgent - Verify Your Email
 
@@ -150,24 +175,13 @@ def send_admin_email(to_email: str, subject: str, message: str,
         )
         text_content = message.strip()
 
-    html_body = f"""\
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
-  <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 28px; font-weight: bold; margin: 0; background: linear-gradient(135deg, #6366f1, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">DreamAgent</h1>
-    <p style="color: #6b7280; margin-top: 8px;">Your friendly VPS assistant</p>
-  </div>
-  <div style="background: #ffffff; border-radius: 16px; padding: 32px; border: 1px solid #e5e7eb;">
-    <p style="color: #4b5563; font-size: 15px; line-height: 1.6;">Hi {display_name},</p>
-    {content_html}
-    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
-    <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-      This is a message from the DreamAgent team. Reply to this email to reach us.
-    </p>
-  </div>
-  <p style="text-align: center; color: #9ca3af; font-size: 12px; margin-top: 24px;">
-    © 2026 DreamAgent. All rights reserved.
-  </p>
-</div>"""
+    html_body = _branded_email_html(f"""\
+<p style="color: #4b5563; font-size: 15px; line-height: 1.6; margin-top: 0;">Hi {display_name},</p>
+{content_html}
+<hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+<p style="color: #9ca3af; font-size: 12px; margin: 0;">
+  This is a message from the DreamAgent team. Reply to this email to reach us.
+</p>""")
 
     try:
         msg = MIMEMultipart("alternative")
