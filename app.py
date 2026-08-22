@@ -1631,6 +1631,14 @@ app.include_router(razorpay_billing_router, prefix="/api/billing/razorpay", tags
 from api.razorpay_webhook import router as razorpay_webhook_router
 app.include_router(razorpay_webhook_router, prefix="/webhooks", tags=["webhooks"])
 
+# Live support system (AI assistant + admin escalation) — isolated package:
+# api/support/ + services/support/, support_* tables only. See api/support/.
+from api.support.router import router as support_chat_router
+app.include_router(support_chat_router, prefix="/api/support", tags=["support"])
+
+from api.support.admin_router import router as support_admin_router
+app.include_router(support_admin_router, prefix="/api/support/admin", tags=["support-admin"])
+
 # Register Telegram bot routers
 from api.bot_link import router as bot_link_router
 app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])

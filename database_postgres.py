@@ -1437,6 +1437,66 @@ def init_schema():
             logger.info("✓ Added user_containers table (Phase 3)")
 
             # ----------------------------------------------------------------
+            # LIVE SUPPORT SYSTEM — AI assistant + admin escalation.
+            # Fully isolated feature: three NEW tables, nothing existing is
+            # altered or referenced. See api/support/ + services/support/.
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS support_conversations (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                responder_mode TEXT NOT NULL DEFAULT 'ai',
+                assigned_admin_id INTEGER REFERENCES users(id),
+                priority TEXT NOT NULL DEFAULT 'normal',
+                category TEXT,
+                summary TEXT,
+                user_typing_at TIMESTAMP,
+                admin_typing_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                resolved_at TIMESTAMP
+            )""")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_support_conv_user "
+                "ON support_conversations(user_id, status)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_support_conv_status "
+                "ON support_conversations(status, updated_at DESC)"
+            )
+            conn.commit()
+
+            cur.execute("""CREATE TABLE IF NOT EXISTS support_messages (
+                id SERIAL PRIMARY KEY,
+                conversation_id INTEGER NOT NULL REFERENCES support_conversations(id) ON DELETE CASCADE,
+                sender_type TEXT NOT NULL,
+                sender_id INTEGER,
+                message TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                read_at TIMESTAMP
+            )""")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_support_msg_conv "
+                "ON support_messages(conversation_id, id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_support_msg_unread "
+                "ON support_messages(conversation_id) WHERE read_at IS NULL"
+            )
+            conn.commit()
+
+            cur.execute("""CREATE TABLE IF NOT EXISTS support_internal_notes (
+                id SERIAL PRIMARY KEY,
+                conversation_id INTEGER NOT NULL REFERENCES support_conversations(id) ON DELETE CASCADE,
+                admin_id INTEGER NOT NULL REFERENCES users(id),
+                note TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+            logger.info("✓ Added support system tables (conversations/messages/notes)")
+
+            # ----------------------------------------------------------------
             # BILLING: migrations on existing tables
             # ----------------------------------------------------------------
 
