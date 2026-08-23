@@ -2808,14 +2808,30 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             backend_port = self.ports.get("backend", 8000)
             
             # Required variables for new template
+            _project_secret = secrets.token_urlsafe(32)
             updates = {
                 'DATABASE_URL': self.database_info["database_url"],
                 'HOST': '0.0.0.0',
                 'PORT': str(backend_port),
                 'PROJECT_NAME': self.project_name,
-                'SECRET_KEY': secrets.token_urlsafe(32),
+                'SECRET_KEY': _project_secret,
                 'DEBUG': 'false'
             }
+
+            # Store the SECRET_KEY in the DB so the internal integrations
+            # proxy can verify it from the MAIN VPS (the .env only exists on
+            # the worker). Never logged, never returned by any API.
+            try:
+                from database_adapter import get_db
+                with get_db() as _conn:
+                    _conn.execute(
+                        "UPDATE projects SET secret_key = %s WHERE id = %s",
+                        (_project_secret, self.project_id),
+                    )
+                    _conn.commit()
+                logger.info("✓ Project secret stored in DB for cross-VPS proxy auth")
+            except Exception as _e:
+                logger.warning("Could not store project secret in DB (proxy auth will fall back to .env): %s", _e)
 
             # Merge with existing (our updates take precedence)
             existing_vars.update(updates)

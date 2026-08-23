@@ -45,12 +45,27 @@ class ProxyRequest(BaseModel):
 
 
 def _project_env_secret(project_id: int) -> Optional[str]:
-    """Read the project's SECRET_KEY from its .env — server-side only.
+    """Get the project's SECRET_KEY.
 
-    NOTE: env_manager.read_env_file STRIPS system keys (SECRET_KEY is one)
-    and masks sensitive values, so it is useless here. Parse the file
-    directly — this is the same file the project itself reads at runtime.
+    Cross-VPS reality: the .env file only exists on the WORKER VPS, but this
+    proxy runs on the MAIN VPS. Priority:
+      1. projects.secret_key column (stored at creation by infrastructure_manager)
+      2. .env file on disk (same-server fallback for dev/local)
     """
+    # 1) DB first — works from any VPS
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT secret_key FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+        if row:
+            d = dict(row) if not isinstance(row, dict) else row
+            if d.get("secret_key"):
+                return d["secret_key"]
+    except Exception as e:
+        logger.warning("[INTEGRATIONS-INTERNAL] DB secret lookup failed for %s: %s", project_id, e)
+
+    # 2) Filesystem fallback (same-server / dev)
     try:
         from env_manager import get_project_env_info
         env_path, _type, _domain, _name = get_project_env_info(project_id)

@@ -239,6 +239,12 @@ def init_schema():
                 logger.info("✓ Added active_project_session_id column to users")
             _run_migration(migrate_active_project_session)
 
+            # Projects: per-project secret for cross-VPS integrations proxy auth
+            # (the .env file only exists on the worker VPS; the proxy runs on main)
+            def migrate_projects_secret_key():
+                cur.execute("ALTER TABLE projects ADD COLUMN secret_key TEXT")
+            _run_migration(migrate_projects_secret_key)
+
             # Telegram account linking columns
             def migrate_telegram_chat_id():
                 cur.execute("ALTER TABLE users ADD COLUMN telegram_chat_id BIGINT")
