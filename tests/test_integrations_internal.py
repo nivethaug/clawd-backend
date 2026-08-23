@@ -200,7 +200,41 @@ def test_prompt_block():
     print("PASS 4: no owner connections / no project -> empty block (chat never breaks)")
 
 
+def test_real_env_secret_parser():
+    """The REAL _project_env_secret against a temp .env — proves the
+    read_env_file-strips-system-keys trap is fixed (SECRET_KEY is a
+    SYSTEM_KEY and never appears in read_env_file output)."""
+    import tempfile
+    import starlette.routing as _sr  # noqa: F401 (shim already applied)
+    from api.integrations_internal import _project_env_secret
+    import env_manager
+
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, ".env")
+    open(p, "w").write(
+        "# comment\n"
+        "SECRET_KEY=\"real-secret-abc\"\n"
+        "OPENAI_API_KEY=sk-x\n"
+    )
+
+    # sanity: read_env_file hides SECRET_KEY (the trap)
+    rows = {r["key"] for r in env_manager.read_env_file(p)}
+    assert "SECRET_KEY" not in rows, "trap regressed: read_env_file exposed SECRET_KEY"
+
+    # the fixed parser finds it (quotes stripped)
+    with patch("env_manager.get_project_env_info", return_value=(p, 1, None, "t")):
+        assert _project_env_secret(1) == "real-secret-abc"
+        assert _project_env_secret(999) == "real-secret-abc"  # path-based, id unused
+
+    # missing key -> None
+    open(p, "w").write("OPENAI_API_KEY=sk-x\n")
+    with patch("env_manager.get_project_env_info", return_value=(p, 1, None, "t")):
+        assert _project_env_secret(1) is None
+    print("PASS 5: real SECRET_KEY parser (read_env_file trap confirmed + fixed)")
+
+
 if __name__ == "__main__":
     test_chain()
     test_prompt_block()
+    test_real_env_secret_parser()
     print("\nALL N2 FIXTURES OK")

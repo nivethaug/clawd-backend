@@ -20,7 +20,9 @@ project, the prompt, or logs. A project can only ever reach the OAuth
 accounts of ITS OWNER (ownership validated on every call).
 """
 
+import hmac
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -43,17 +45,25 @@ class ProxyRequest(BaseModel):
 
 
 def _project_env_secret(project_id: int) -> Optional[str]:
-    """Read the project's SECRET_KEY (or INTEGRATION_PROXY_TOKEN) from its
-    .env — server-side only. This is the shared secret the project was
-    deployed with."""
+    """Read the project's SECRET_KEY from its .env — server-side only.
+
+    NOTE: env_manager.read_env_file STRIPS system keys (SECRET_KEY is one)
+    and masks sensitive values, so it is useless here. Parse the file
+    directly — this is the same file the project itself reads at runtime.
+    """
     try:
-        from env_manager import get_project_env_info, read_env_file
+        from env_manager import get_project_env_info
         env_path, _type, _domain, _name = get_project_env_info(project_id)
-        if not env_path:
+        if not env_path or not os.path.isfile(env_path):
             return None
-        for v in read_env_file(env_path):
-            if v.get("key") == "SECRET_KEY":
-                return v.get("value") or None
+        with open(env_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                if key.strip() == "SECRET_KEY":
+                    return value.strip().strip("'\"") or None
         return None
     except Exception as e:
         logger.warning("[INTEGRATIONS-INTERNAL] env secret read failed for %s: %s", project_id, e)
@@ -74,8 +84,7 @@ def _resolve_project(project_id: int, bearer: str) -> int:
     secret = _project_env_secret(project_id)
     if not secret:
         raise HTTPException(status_code=401, detail="Project has no integration secret")
-    import hmac as _hmac
-    if not _hmac.compare_digest(secret, bearer or ""):
+    if not hmac.compare_digest(secret, bearer or ""):
         logger.warning("[INTEGRATIONS-INTERNAL] auth failed for project %s", project_id)
         raise HTTPException(status_code=401, detail="Invalid project secret")
 
