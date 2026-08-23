@@ -76,6 +76,8 @@ _SCHEDULER_ENV_KEYS = {
     # Nango OAuth access tokens (short-lived, minted fresh per job run by
     # _inject_oauth_tokens; see services/integrations/nango_client.py).
     'YOUTUBE_ACCESS_TOKEN', 'GITHUB_ACCESS_TOKEN', 'DISCORD_ACCESS_TOKEN',
+    'NOTION_ACCESS_TOKEN', 'TWITTER_ACCESS_TOKEN', 'GOOGLE_SHEETS_ACCESS_TOKEN',
+    'SLACK_ACCESS_TOKEN', 'STRIPE_ACCESS_TOKEN',
     # Path/Home are required for the venv python + ssl to resolve correctly.
     'PATH', 'HOME', 'LANG', 'LC_ALL',
 }

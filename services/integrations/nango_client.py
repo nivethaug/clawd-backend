@@ -54,6 +54,42 @@ ENABLED_PROVIDERS: Dict[str, Dict[str, Any]] = {
                        "one-click Discord authorization.",
         "env_token_key": "DISCORD_ACCESS_TOKEN",
     },
+    "notion": {
+        "title": "Notion",
+        "category": "Integrations",
+        "description": "Read and update your Notion pages and databases — "
+                       "one-click Notion authorization.",
+        "env_token_key": "NOTION_ACCESS_TOKEN",
+    },
+    "twitter": {
+        "title": "X (Twitter)",
+        "category": "Integrations",
+        "description": "Post to X and read your own profile — one-click "
+                       "authorization (free tier: posting only).",
+        "env_token_key": "TWITTER_ACCESS_TOKEN",
+    },
+    # Nango slug is singular: "google-sheet".
+    "google-sheet": {
+        "title": "Google Sheets",
+        "category": "Integrations",
+        "description": "Read and write rows in your Google spreadsheets — "
+                       "one-click Google authorization.",
+        "env_token_key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+    },
+    "slack": {
+        "title": "Slack",
+        "category": "Integrations",
+        "description": "Access your Slack workspaces, channels and messages — "
+                       "one-click Slack authorization.",
+        "env_token_key": "SLACK_ACCESS_TOKEN",
+    },
+    "stripe": {
+        "title": "Stripe",
+        "category": "Integrations",
+        "description": "Read your Stripe balance, payments and customers "
+                       "(read-only) — one-click Stripe authorization.",
+        "env_token_key": "STRIPE_ACCESS_TOKEN",
+    },
 }
 
 _TIMEOUT = 15.0
