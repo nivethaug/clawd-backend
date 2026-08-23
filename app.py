@@ -3121,11 +3121,14 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             # Update .env with new project metadata + bot-specific credentials
             env_path = os.path.join(clone_path, ".env")
             if os.path.exists(env_path):
+                import secrets as _secrets
+                _clone_secret = _secrets.token_urlsafe(32)
                 env_updates = {
                     "PROJECT_ID": str(project_id),
                     "PROJECT_NAME": clone_name,
                     "DOMAIN": clone_domain,
                     "PORT": str(8000 + (project_id % 1000)),
+                    "SECRET_KEY": _clone_secret,  # fresh per clone (never share source secret)
                 }
                 # Overwrite source bot token with the new one (if provided)
                 if bot_token:
@@ -3136,6 +3139,16 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                         env_updates["DISCORD_BOT_TOKEN"] = bot_token
                         env_updates["BOT_TOKEN"] = bot_token
                 _update_env_file(env_path, env_updates)
+                # Store in DB for cross-VPS proxy auth
+                try:
+                    with get_db() as _conn:
+                        _conn.execute(
+                            "UPDATE projects SET secret_key = %s WHERE id = %s",
+                            (_clone_secret, project_id),
+                        )
+                        _conn.commit()
+                except Exception as _e:
+                    logger.warning("[CLONE] Could not store project secret in DB: %s", _e)
                 logger.info(f"[CLONE] Updated .env for {bot_type_label} project {project_id} (token {'provided' if bot_token else 'inherited from source'})")
 
             # Start bot via PM2 — point to the bot subdirectory (where main.py lives)
@@ -3186,10 +3199,13 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             # Update .env with new project metadata + scheduler-specific inputs
             env_path = os.path.join(clone_path, ".env")
             if os.path.exists(env_path):
+                import secrets as _secrets
+                _clone_secret = _secrets.token_urlsafe(32)
                 env_updates = {
                     "PROJECT_ID": str(project_id),
                     "PROJECT_NAME": clone_name,
                     "DOMAIN": clone_domain,
+                    "SECRET_KEY": _clone_secret,  # fresh per clone
                 }
                 # Overwrite scheduler sender channels with new values (if provided)
                 if telegram_bot_token:
@@ -3203,6 +3219,15 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 if api_endpoint:
                     env_updates["API_ENDPOINT"] = api_endpoint
                 _update_env_file(env_path, env_updates)
+                try:
+                    with get_db() as _conn:
+                        _conn.execute(
+                            "UPDATE projects SET secret_key = %s WHERE id = %s",
+                            (_clone_secret, project_id),
+                        )
+                        _conn.commit()
+                except Exception as _e:
+                    logger.warning("[CLONE] Could not store project secret in DB: %s", _e)
                 logger.info(f"[CLONE] Updated .env for scheduler project {project_id}")
 
             # Patch config.py to use load_dotenv(override=True) so centralized

@@ -1295,8 +1295,9 @@ Execute the refinement now and make this template production-ready for: {self.pr
             # Import InfrastructureManager here to avoid circular imports
             from infrastructure_manager import InfrastructureManager
             
-            # Create InfrastructureManager instance
-            infra = InfrastructureManager(self.project_name, self.project_path)
+            # Create InfrastructureManager instance (project_id needed for
+            # cross-VPS SECRET_KEY storage in the projects table)
+            infra = InfrastructureManager(self.project_name, self.project_path, project_id=self.project_id)
             
             # Call enhanced build_frontend method with Vite cache cleanup
             logger.info("Calling InfrastructureManager.build_frontend()...")
