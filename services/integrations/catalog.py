@@ -92,6 +92,32 @@ async def _v_github(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
     return ok, info
 
 
+async def _v_telegram_bot(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
+    r = await _get(f"https://api.telegram.org/bot{values['TELEGRAM_BOT_TOKEN']}/getMe")
+    ok = r.status_code == 200
+    info = None
+    if ok:
+        try:
+            result = r.json().get("result", {})
+            info = f"@{result.get('username', 'bot')}"
+        except Exception:
+            pass
+    return ok, info
+
+
+async def _v_discord_bot(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
+    r = await _get("https://discord.com/api/users/@me",
+                   headers={"Authorization": f"Bot {values['DISCORD_TOKEN']}"})
+    ok = r.status_code == 200
+    info = None
+    if ok:
+        try:
+            info = r.json().get("username")
+        except Exception:
+            pass
+    return ok, info
+
+
 async def _v_stripe(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
     r = await _get("https://api.stripe.com/v1/balance",
                    headers=_hdr_bearer(values["STRIPE_SECRET_KEY"]))
@@ -169,6 +195,8 @@ _VALIDATORS = {
     "anthropic": _v_anthropic,
     "gemini": _v_gemini,
     "github": _v_github,
+    "telegram-bot": _v_telegram_bot,
+    "discord-bot": _v_discord_bot,
     "stripe": _v_stripe,
     "razorpay": _v_razorpay,
     "resend": _v_resend,
@@ -215,6 +243,20 @@ CATALOG: Dict[str, IntegrationDef] = {
             docs_url="https://github.com/settings/tokens",
             description="Repo access, commits and automation (fine-grained or classic PAT).",
             validator="github", icon_hint="github",
+        ),
+        IntegrationDef(
+            type="telegram-bot", title="Telegram Bot", category="Bots",
+            key_names=["TELEGRAM_BOT_TOKEN"],
+            docs_url="https://t.me/BotFather",
+            description="Telegram bot token from @BotFather — for building bots and sending messages.",
+            validator="telegram-bot", icon_hint="telegram",
+        ),
+        IntegrationDef(
+            type="discord-bot", title="Discord Bot", category="Bots",
+            key_names=["DISCORD_TOKEN"],
+            docs_url="https://discord.com/developers/applications",
+            description="Discord bot token from the Developer Portal — for building bots.",
+            validator="discord-bot", icon_hint="discord",
         ),
         IntegrationDef(
             type="stripe", title="Stripe", category="Payments",

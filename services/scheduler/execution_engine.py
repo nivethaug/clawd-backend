@@ -72,6 +72,7 @@ _SCHEDULER_ENV_KEYS = {
     'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY',
     'GITHUB_TOKEN', 'STRIPE_SECRET_KEY', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET',
     'RESEND_API_KEY', 'SLACK_WEBHOOK_URL', 'COINGECKO_API_KEY', 'SERPER_API_KEY',
+    'TELEGRAM_BOT_TOKEN', 'DISCORD_TOKEN',
     # Nango OAuth access tokens (short-lived, minted fresh per job run by
     # _inject_oauth_tokens; see services/integrations/nango_client.py).
     'YOUTUBE_ACCESS_TOKEN',
