@@ -83,13 +83,7 @@ ENABLED_PROVIDERS: Dict[str, Dict[str, Any]] = {
                        "one-click Slack authorization.",
         "env_token_key": "SLACK_ACCESS_TOKEN",
     },
-    "stripe": {
-        "title": "Stripe",
-        "category": "Integrations",
-        "description": "Read your Stripe balance, payments and customers "
-                       "(read-only) — one-click Stripe authorization.",
-        "env_token_key": "STRIPE_ACCESS_TOKEN",
-    },
+    # Stripe OAuth: parked — use the API-key vault entry (STRIPE_SECRET_KEY) meanwhile.
 }
 
 _TIMEOUT = 15.0
