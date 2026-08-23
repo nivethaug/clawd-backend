@@ -40,6 +40,20 @@ ENABLED_PROVIDERS: Dict[str, Dict[str, Any]] = {
                        "connects with Google in one click, no API key needed.",
         "env_token_key": "YOUTUBE_ACCESS_TOKEN",
     },
+    "github": {
+        "title": "GitHub",
+        "category": "Integrations",
+        "description": "Access your repositories, commits, issues and pull requests — "
+                       "one-click GitHub authorization.",
+        "env_token_key": "GITHUB_ACCESS_TOKEN",
+    },
+    "discord": {
+        "title": "Discord",
+        "category": "Integrations",
+        "description": "Access your Discord servers, channels and messages — "
+                       "one-click Discord authorization.",
+        "env_token_key": "DISCORD_ACCESS_TOKEN",
+    },
 }
 
 _TIMEOUT = 15.0

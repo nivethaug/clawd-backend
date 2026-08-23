@@ -75,7 +75,7 @@ _SCHEDULER_ENV_KEYS = {
     'TELEGRAM_BOT_TOKEN', 'DISCORD_TOKEN',
     # Nango OAuth access tokens (short-lived, minted fresh per job run by
     # _inject_oauth_tokens; see services/integrations/nango_client.py).
-    'YOUTUBE_ACCESS_TOKEN',
+    'YOUTUBE_ACCESS_TOKEN', 'GITHUB_ACCESS_TOKEN', 'DISCORD_ACCESS_TOKEN',
     # Path/Home are required for the venv python + ssl to resolve correctly.
     'PATH', 'HOME', 'LANG', 'LC_ALL',
 }
