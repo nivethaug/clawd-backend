@@ -1650,6 +1650,11 @@ app.include_router(integrations_router, tags=["integrations"])
 from api.integrations_nango_router import router as integrations_nango_router
 app.include_router(integrations_nango_router, prefix="/api/integrations/nango", tags=["integrations-nango"])
 
+# Internal integrations proxy — deployed projects call their owner's connected
+# OAuth accounts (Nango) via SECRET_KEY auth. See api/integrations_internal.py.
+from api.integrations_internal import router as integrations_internal_router
+app.include_router(integrations_internal_router, prefix="/internal/integrations", tags=["integrations-internal"])
+
 # Register Telegram bot routers
 from api.bot_link import router as bot_link_router
 app.include_router(bot_link_router, prefix="/api/bot", tags=["bot-link"])

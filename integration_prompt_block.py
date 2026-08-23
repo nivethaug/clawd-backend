@@ -27,6 +27,82 @@ _EXCLUDE_PREFIXES = ("INTERNAL_", "SYSTEM_")
 
 def build_external_integrations_block(project_id: Optional[int]) -> str:
     """Return a markdown section listing the project's configured external
+    integrations (env-key based) plus the owner's connected OAuth accounts."""
+    return _env_key_block(project_id) + _oauth_block(project_id)
+
+
+def _oauth_block(project_id: Optional[int]) -> str:
+    """Additive section: OAuth integrations connected by the project OWNER
+    (Settings → Integrations, Nango-backed). No keys exist in .env — the
+    model must call the platform proxy instead. Returns "" when none."""
+    if not project_id:
+        return ""
+    try:
+        from database_adapter import get_db
+        with get_db() as conn:
+            proj = conn.execute(
+                "SELECT user_id FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+        if not proj:
+            return ""
+        owner_id = (dict(proj) if not isinstance(proj, dict) else proj)["user_id"]
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT provider_config_key FROM nango_connections WHERE user_id = ?",
+                (owner_id,),
+            ).fetchall()
+        connected = sorted({
+            (dict(r) if not isinstance(r, dict) else r)["provider_config_key"]
+            for r in rows
+        })
+        if not connected:
+            return ""
+
+        from services.integrations import nango_client
+        titles = []
+        for p in connected:
+            meta = nango_client.ENABLED_PROVIDERS.get(p)
+            titles.append(meta["title"] if meta else p)
+
+        import os as _os
+        _BASE = _os.getenv("SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud")
+        providers_list = ", ".join(titles)
+        return f"""
+## 🔑 CONNECTED OAUTH INTEGRATIONS (owner's account — NO env keys)
+
+The project owner has connected: **{providers_list}**. No API keys exist in `.env` for these —
+the account authorization lives on the platform. Call them through the platform proxy from the
+project's backend (works for website backends, bots and scheduler jobs alike):
+
+```python
+# Python example (any project backend; SECRET_KEY is already in the project .env)
+import os, requests
+r = requests.post(
+    "{_BASE}/internal/integrations/proxy",
+    headers={{"Authorization": f"Bearer {{os.environ['SECRET_KEY']}}",
+              "X-Project-Id": "{project_id}",
+              "Content-Type": "application/json"}},
+    json={{"provider": "{connected[0]}", "method": "GET",
+           "endpoint": "youtube/v3/channels?part=snippet&mine=true"}},
+    timeout=30,
+)
+data = r.json()
+```
+
+**Rules:**
+- NEVER ask the user for an API key / token / channel ID for the connected services above —
+  the account is already authorized.
+- All provider calls go through the proxy (server-side). No tokens ever appear in code or .env.
+- If the proxy returns 409 "not connected", tell the user to connect it in
+  Settings → Integrations (one click).
+"""
+    except Exception as e:
+        logger.warning("Failed to build OAuth integrations block: %s", e)
+        return ""
+
+
+def _env_key_block(project_id: Optional[int]) -> str:
+    """Return a markdown section listing the project's configured external
     integrations, enriched with registry metadata.
 
     Args:
