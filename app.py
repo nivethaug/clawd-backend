@@ -12,7 +12,7 @@ import base64
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncGenerator, Any, Optional, Dict, List, Tuple
+from typing import AsyncGenerator, Any, Optional, Dict, List, Tuple, Union
 from contextlib import contextmanager
 from dotenv import load_dotenv
 from urllib.parse import quote
@@ -688,7 +688,10 @@ class ProjectResponse(BaseModel):
     claude_code_session_name: Optional[str] = None
     template_id: Optional[str] = None  # Selected frontend template ID
     frontend: Optional[dict] = None  # Frontend template details
-    created_at: str
+    # Postgres returns datetime objects for TIMESTAMP columns while some
+    # call sites pass pre-serialized strings — accept both (wire format
+    # unchanged: FastAPI serializes datetime to ISO on the way out).
+    created_at: Union[str, datetime]
 
 class ProjectTypeResponse(BaseModel):
     id: int
