@@ -2738,14 +2738,26 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             logger.info("[SERVICE] Waiting for PM2 backend to stabilize...")
             time.sleep(5)
 
+            # Use jlist (JSON) — pm2 list TRUNCATES long process names in its
+            # table output, causing false negatives for domains > ~20 chars.
             pm2_check = subprocess.run(
-                ["pm2", "list"],
+                ["pm2", "jlist"],
                 capture_output=True,
                 text=True
             )
 
             # Frontend is served by nginx (no PM2 process) — skip frontend check
-            if self.service_name not in pm2_check.stdout:
+            try:
+                import json as _json
+                _pm2_procs = _json.loads(pm2_check.stdout or "[]")
+                _running = any(
+                    p.get("name") == self.service_name and p.get("pm2_env", {}).get("status") == "online"
+                    for p in _pm2_procs
+                )
+            except Exception:
+                _running = self.service_name in pm2_check.stdout  # fallback
+
+            if not _running:
                 raise RuntimeError(f"Backend service {self.service_name} not running")
 
             logger.info(f"[SERVICE] ✓ Backend PM2 running: {self.service_name}")
