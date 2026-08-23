@@ -67,6 +67,9 @@ ENABLED_PROVIDERS: Dict[str, Dict[str, Any]] = {
         "description": "Post to X and read your own profile — one-click "
                        "authorization (free tier: posting only).",
         "env_token_key": "TWITTER_ACCESS_TOKEN",
+        # Registered in Nango under the twitter-v2 OAuth2 template but keyed
+        # "twitter" — the legacy twitter slug is OAuth 1.0a.
+        "nango_provider": "twitter-v2",
     },
     # Nango slug is singular: "google-sheet".
     "google-sheet": {
@@ -84,6 +87,64 @@ ENABLED_PROVIDERS: Dict[str, Dict[str, Any]] = {
         "env_token_key": "SLACK_ACCESS_TOKEN",
     },
     # Stripe OAuth: parked — use the API-key vault entry (STRIPE_SECRET_KEY) meanwhile.
+}
+
+# Per-provider prompt extras layered on top of Nango's own /providers
+# metadata (base_url + docs) — Nango can't know example calls or gotchas.
+# Keys here are our provider_config_keys (ENABLED_PROVIDERS).
+PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
+    "youtube": {
+        "examples": [
+            "GET youtube/v3/channels?part=snippet&mine=true",
+            "GET youtube/v3/search?part=snippet&channelId={CHANNEL_ID}&order=date&maxResults=10",
+            "GET youtube/v3/videos?part=statistics&id={VIDEO_IDS}",
+        ],
+        "gotchas": [
+            "Analytics API is a different base URL — not reachable via this proxy; "
+            "compute stats from video data instead.",
+        ],
+    },
+    "github": {
+        "examples": [
+            "GET user",
+            "GET user/repos?per_page=100",
+            "GET repos/{owner}/{repo}/issues?state=open",
+        ],
+    },
+    "discord": {
+        "examples": ["GET users/@me", "GET users/@me/guilds"],
+        "gotchas": [
+            "User OAuth cannot read or send channel messages — that needs a "
+            "Bot token (API-key catalog: discord-bot).",
+        ],
+    },
+    "notion": {
+        "examples": [
+            "GET v1/pages/{page_id}",
+            "POST v1/databases/{database_id}/query",
+            "PATCH v1/pages/{page_id}",
+        ],
+        "gotchas": ["Pagination cursor param is start_cursor (not page)."],
+    },
+    "twitter": {
+        "examples": ["GET 2/users/me", "POST 2/tweets"],
+        "gotchas": ["Free tier allows posting + own profile only (~500 posts/mo)."],
+    },
+    "google-sheet": {
+        "examples": [
+            "GET v4/spreadsheets/{sheet_id}/values/{range}",
+            "PUT v4/spreadsheets/{sheet_id}/values/{range}?valueInputOption=RAW",
+        ],
+        "gotchas": ["Range format is Sheet1!A1:D1; read the sheetId from the URL."],
+    },
+    "slack": {
+        "examples": [
+            "POST chat.postMessage",
+            "GET conversations.list",
+            "GET conversations.history?channel={id}",
+        ],
+        "gotchas": ["Bot must be invited to a channel before it can post or read there."],
+    },
 }
 
 _TIMEOUT = 15.0
@@ -137,6 +198,49 @@ def integration_exists(provider: str) -> bool:
     if r.status_code != 200:
         return False
     return any(i.get("unique_key") == provider for i in (r.json() or []))
+
+
+# ----------------------------------------------------------------------
+# Provider metadata (Nango's own catalog — base URLs + doc links)
+# ----------------------------------------------------------------------
+
+_PROVIDER_META_CACHE: Dict[str, Any] = {"at": 0.0, "by_name": {}}
+_META_TTL_SECONDS = 3600.0
+
+
+def get_provider_metadata(nango_provider_name: str) -> Optional[Dict[str, Any]]:
+    """{display_name, base_url, docs} for a provider from Nango's catalog
+    (GET /providers — 981 entries, cached 1h). This keeps proxy base URLs
+    and doc links accurate without hardcoding; returns None when Nango is
+    unconfigured/unreachable (callers fall back to static titles)."""
+    if not is_configured():
+        return None
+    import time as _time
+    now = _time.time()
+    cache = _PROVIDER_META_CACHE
+    if not cache["by_name"] or (now - float(cache["at"])) > _META_TTL_SECONDS:
+        try:
+            r = httpx.get(f"{_base_url()}/providers", headers=_headers(), timeout=_TIMEOUT)
+            if r.status_code == 200:
+                payload = r.json()
+                items = payload.get("data") if isinstance(payload, dict) else payload
+                items = items or []
+                cache["by_name"] = {
+                    i.get("name"): i for i in items
+                    if isinstance(i, dict) and i.get("name")
+                }
+                cache["at"] = now
+        except Exception as e:  # never break prompt building on metadata
+            logger.warning("[NANGO] provider metadata fetch failed: %s", e)
+    entry = cache["by_name"].get(nango_provider_name)
+    if not entry:
+        return None
+    proxy = entry.get("proxy") or {}
+    return {
+        "display_name": entry.get("display_name") or nango_provider_name,
+        "base_url": str(proxy.get("base_url") or "").rstrip("/"),
+        "docs": entry.get("docs") or "",
+    }
 
 
 # ----------------------------------------------------------------------
