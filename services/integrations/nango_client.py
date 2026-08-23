@@ -127,8 +127,17 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
         "gotchas": ["Pagination cursor param is start_cursor (not page)."],
     },
     "twitter": {
-        "examples": ["GET 2/users/me", "POST 2/tweets"],
-        "gotchas": ["Free tier allows posting + own profile only (~500 posts/mo)."],
+        "examples": [
+            "GET 2/users/me?user.fields=public_metrics",
+            "POST 2/tweets",
+        ],
+        "gotchas": [
+            "Free tier: posting + own profile ONLY (~500 posts/mo); "
+            "public_metrics gives follower/following/tweet_count.",
+            "Timeline reads (users/{id}/tweets, mentions, search) are PAID "
+            "tier — never call them; track tweets you post by saving the "
+            "returned tweet ids (e.g. to a Google Sheet).",
+        ],
     },
     "google-sheet": {
         "examples": [
