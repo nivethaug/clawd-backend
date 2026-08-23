@@ -1654,6 +1654,7 @@ app.include_router(integrations_nango_router, prefix="/api/integrations/nango", 
 # OAuth accounts (Nango) via SECRET_KEY auth. See api/integrations_internal.py.
 from api.integrations_internal import router as integrations_internal_router
 app.include_router(integrations_internal_router, prefix="/api/integrations", tags=["integrations-internal"])
+# → POST /api/integrations/proxy (project SECRET_KEY auth, rides /api/ nginx route)
 
 # Register Telegram bot routers
 from api.bot_link import router as bot_link_router

@@ -4,7 +4,7 @@ Internal Integrations Proxy — lets deployed projects call their owner's
 connected OAuth integrations (Nango) without any credentials in the
 project environment.
 
-Mounted at: /internal/integrations (prefix added in app.py).
+Mounted at: /api/integrations (prefix added in app.py → /api/integrations/proxy).
 
 Auth chain (fixture-tested):
     project sends: Authorization: Bearer <SECRET_KEY from its .env>
