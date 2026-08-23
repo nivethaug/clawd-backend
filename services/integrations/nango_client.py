@@ -120,13 +120,16 @@ def mint_connect_session(user_id: int, user_email: str,
 # ----------------------------------------------------------------------
 
 def list_connections_for_user(user_id: int) -> List[Dict[str, Any]]:
-    r = httpx.get(f"{_base_url()}/connection",
-                  params={"end_user_id": str(user_id)},
-                  headers=_headers(), timeout=_TIMEOUT)
+    """All Nango connections for this end user. 0.71's list endpoint has no
+    end_user filter param, so we list the environment and filter our side
+    (this DreamAgent environment is single-tenant to us)."""
+    r = httpx.get(f"{_base_url()}/connection", headers=_headers(), timeout=_TIMEOUT)
     if r.status_code >= 400:
         _log_error("list connections", r.status_code, r.text)
         return []
-    return (r.json() or {}).get("connections") or []
+    conns = (r.json() or {}).get("connections") or []
+    return [c for c in conns
+            if (c.get("end_user") or {}).get("id") == str(user_id)]
 
 
 def get_connection(connection_id: str, provider_config_key: str) -> Optional[Dict[str, Any]]:
