@@ -75,7 +75,7 @@ through the platform proxy:
 # Python example (project backend; SECRET_KEY will be in the project .env)
 import os, requests
 r = requests.post(
-    "{_BASE}/internal/integrations/proxy",
+    "{_BASE}/api/integrations/proxy",
     headers={{"Authorization": f"Bearer {{os.environ['SECRET_KEY']}}",
               "X-Project-Id": "{pid_hint}",
               "Content-Type": "application/json"}},
@@ -148,7 +148,7 @@ project's backend (works for website backends, bots and scheduler jobs alike):
 # Python example (any project backend; SECRET_KEY is already in the project .env)
 import os, requests
 r = requests.post(
-    "{_BASE}/internal/integrations/proxy",
+    "{_BASE}/api/integrations/proxy",
     headers={{"Authorization": f"Bearer {{os.environ['SECRET_KEY']}}",
               "X-Project-Id": "{project_id}",
               "Content-Type": "application/json"}},

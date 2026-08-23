@@ -183,7 +183,7 @@ def test_prompt_block():
             block = ipb._oauth_block(101)
     assert "CONNECTED OAUTH INTEGRATIONS" in block
     assert "YouTube" in block
-    assert "/internal/integrations/proxy" in block
+    assert "/api/integrations/proxy" in block
     assert "SECRET_KEY" in block
     assert '"provider": "youtube"' in block
     assert "X-Project-Id" in block and "101" in block
