@@ -31,6 +31,76 @@ def build_external_integrations_block(project_id: Optional[int]) -> str:
     return _env_key_block(project_id) + _oauth_block(project_id)
 
 
+def build_oauth_block_for_user(user_id: Optional[int], project_id_for_snippet: Optional[int] = None) -> str:
+    """OAuth block for a user who is CREATING a project (no project row yet).
+
+    Same content as _oauth_block but keyed on user_id directly; the
+    copy-paste snippet uses a placeholder project id that the agent will
+    replace once the project exists. Returns "" when the user has no
+    connected OAuth integrations.
+    """
+    if not user_id:
+        return ""
+    try:
+        from database_adapter import get_db
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT provider_config_key FROM nango_connections WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+        connected = sorted({
+            (dict(r) if not isinstance(r, dict) else r)["provider_config_key"]
+            for r in rows
+        })
+        if not connected:
+            return ""
+
+        from services.integrations import nango_client
+        import os as _os
+        _BASE = _os.getenv("SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud")
+        titles = ", ".join(
+            nango_client.ENABLED_PROVIDERS.get(p, {}).get("title", p) for p in connected
+        )
+        provider_example = connected[0]
+        pid_hint = str(project_id_for_snippet) if project_id_for_snippet else "<PROJECT_ID>"
+
+        return f"""
+## 🔑 CONNECTED OAUTH INTEGRATIONS (your account — NO env keys)
+
+You have connected: **{titles}**. No API keys exist in `.env` for these —
+the account authorization lives on the platform. Wire the project to call them
+through the platform proxy:
+
+```python
+# Python example (project backend; SECRET_KEY will be in the project .env)
+import os, requests
+r = requests.post(
+    "{_BASE}/internal/integrations/proxy",
+    headers={{"Authorization": f"Bearer {{os.environ['SECRET_KEY']}}",
+              "X-Project-Id": "{pid_hint}",
+              "Content-Type": "application/json"}},
+    json={{"provider": "{provider_example}", "method": "GET",
+           "endpoint": "youtube/v3/channels?part=snippet&mine=true"}},
+    timeout=30,
+)
+data = r.json()
+```
+
+**Rules:**
+- NEVER ask the user for an API key / token / channel ID for the connected services above —
+  the account is already authorized.
+- The X-Project-Id above is `{pid_hint}` — after the project is created, use the real
+  project id from PROJECT_ID in .env (or hardcode it once known).
+- All provider calls go through the proxy (server-side). No tokens in code or .env.
+- If the proxy returns 409 "not connected", tell the user to connect it in
+  Settings → Integrations (one click).
+- If the task involves the connected services, wire them into the app NOW.
+"""
+    except Exception as e:
+        logger.warning("Failed to build OAuth block for user %s: %s", user_id, e)
+        return ""
+
+
 def _oauth_block(project_id: Optional[int]) -> str:
     """Additive section: OAuth integrations connected by the project OWNER
     (Settings → Integrations, Nango-backed). No keys exist in .env — the

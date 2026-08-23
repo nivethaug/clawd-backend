@@ -1794,6 +1794,14 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
     if initial_integrations_block:
         description_for_worker = f"{description_for_worker}\n\n{initial_integrations_block}".strip()
 
+    # OAuth block: if the CREATOR has connected OAuth integrations (YouTube etc.),
+    # the build agent learns to wire the platform proxy from line 1.
+    from integration_prompt_block import build_oauth_block_for_user
+    oauth_creation_block = build_oauth_block_for_user(user_id)
+    if oauth_creation_block:
+        description_for_worker = f"{description_for_worker}\n\n{oauth_creation_block}".strip()
+        logger.info("[CREATE] OAuth block injected for user %s (connected providers)", user_id)
+
     # Get GitHub service for repo name sanitization
     github = get_github_service()
     
