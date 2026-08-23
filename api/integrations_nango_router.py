@@ -76,9 +76,10 @@ async def list_providers(authorization: Optional[str] = Header(None)):
         for r in rows
     }
 
-    # Remove stale local rows (disconnected elsewhere)
+    # Remove stale local rows (disconnected elsewhere, or provider since
+    # disabled on our side — only ENABLED_PROVIDERS may keep a mapping row)
     for key, row in local.items():
-        if key not in live:
+        if key not in live or key not in nango_client.ENABLED_PROVIDERS:
             with get_db() as conn:
                 conn.execute("DELETE FROM nango_connections WHERE id = ?", (row["id"],))
                 conn.commit()

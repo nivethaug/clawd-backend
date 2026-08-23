@@ -52,6 +52,10 @@ def build_oauth_block_for_user(user_id: Optional[int], project_id_for_snippet: O
             (dict(r) if not isinstance(r, dict) else r)["provider_config_key"]
             for r in rows
         })
+        # Only providers DreamAgent enables reach the model — a stale row for
+        # anything else must never leak into the prompt.
+        from services.integrations import nango_client as _nc
+        connected = [p for p in connected if p in _nc.ENABLED_PROVIDERS]
         if not connected:
             return ""
         pid_hint = str(project_id_for_snippet) if project_id_for_snippet else "<PROJECT_ID>"
@@ -95,6 +99,10 @@ def _oauth_block(project_id: Optional[int]) -> str:
             (dict(r) if not isinstance(r, dict) else r)["provider_config_key"]
             for r in rows
         })
+        # Only providers DreamAgent enables reach the model — a stale row for
+        # anything else must never leak into the prompt.
+        from services.integrations import nango_client as _nc
+        connected = [p for p in connected if p in _nc.ENABLED_PROVIDERS]
         if not connected:
             return ""
         return _render_oauth_section(
