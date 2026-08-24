@@ -178,9 +178,11 @@ async def integrations_proxy(
 
     if result["status"] >= 500:
         raise HTTPException(status_code=502, detail="Provider call failed")
-    # Pass the provider's status + body through untouched
+    # Pass the provider's status + body through untouched, plus filtered
+    # provider headers (e.g. YouTube resumable-upload Location).
     return Response(
         content=result["body"],
         status_code=result["status"],
         media_type="application/json",
+        headers=result.get("headers") or {},
     )

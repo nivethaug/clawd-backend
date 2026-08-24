@@ -103,9 +103,10 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
             "Analytics API is a different base URL — not reachable via this proxy; "
             "compute stats from video data instead.",
             "Uploads (youtube.upload): two-step — POST upload/youtube/v3/videos?"
-            "uploadType=resumable returns a Location header, then PUT the video "
-            "bytes straight to that URL (that hop bypasses the proxy; scheduler "
-            "jobs get YOUTUBE_ACCESS_TOKEN directly and can do both steps).",
+            "uploadType=resumable returns the upload-session URL in the "
+            "response 'Location' header (the proxy forwards it); then PUT "
+            "the video bytes straight to that URL — direct, no proxy (the "
+            "session URL itself authorizes the hop).",
         ],
     },
     "github": {
@@ -349,10 +350,20 @@ def get_connection_metadata(connection: Dict[str, Any]) -> Dict[str, Any]:
 # Proxy (server-side authenticated provider calls)
 # ----------------------------------------------------------------------
 
+# Provider response headers worth forwarding to project backends — e.g.
+# YouTube resumable uploads return the upload-session URL in Location,
+# without which the caller cannot complete the second PUT hop.
+_FORWARD_RESPONSE_HEADERS = frozenset({
+    "location", "content-type", "content-length", "etag", "retry-after",
+    "range", "x-goog-upload-url", "x-goog-upload-status",
+})
+
+
 def proxy_request(provider_config_key: str, connection_id: str, method: str,
                   endpoint: str, **kwargs: Any) -> Dict[str, Any]:
     """Authenticated provider call through Nango with credential injection.
-    Returns {status, body} — body is the raw provider JSON."""
+    Returns {status, body, headers} — body is the raw provider JSON; headers
+    is a filtered subset (upload session URLs etc.), never set-cookie."""
     r = httpx.request(
         method.upper(),
         f"{_base_url()}/proxy/{endpoint.lstrip('/')}",
@@ -364,4 +375,9 @@ def proxy_request(provider_config_key: str, connection_id: str, method: str,
         timeout=30.0,
         **kwargs,
     )
-    return {"status": r.status_code, "body": r.text[:5000]}
+    resp_headers = {
+        k: v for k, v in r.headers.items()
+        if k.lower() in _FORWARD_RESPONSE_HEADERS
+    }
+    return {"status": r.status_code, "body": r.text[:5000],
+            "headers": resp_headers}
