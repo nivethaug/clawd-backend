@@ -102,6 +102,10 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
         "gotchas": [
             "Analytics API is a different base URL — not reachable via this proxy; "
             "compute stats from video data instead.",
+            "Uploads (youtube.upload): two-step — POST upload/youtube/v3/videos?"
+            "uploadType=resumable returns a Location header, then PUT the video "
+            "bytes straight to that URL (that hop bypasses the proxy; scheduler "
+            "jobs get YOUTUBE_ACCESS_TOKEN directly and can do both steps).",
         ],
     },
     "github": {
