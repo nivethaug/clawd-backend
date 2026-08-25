@@ -1068,6 +1068,37 @@ def _run_bot_or_scheduler_pipeline(
             initial_environment_variables=initial_env_vars,
         )
 
+    # Agent — slug-keyed (type ids are SERIAL, never hardcoded)
+    try:
+        from database_adapter import get_db as _get_db
+        with _get_db() as _conn:
+            _trow = _conn.execute(
+                "SELECT type FROM project_types WHERE id = %s", (type_id,)
+            ).fetchone()
+        _slug = ""
+        if _trow:
+            _d = dict(_trow) if not isinstance(_trow, dict) else _trow
+            _slug = _d.get("type") or ""
+    except Exception:
+        _slug = ""
+    if _slug == "agent":
+        from services.agent import run_agent_pipeline
+
+        append_chunk(run_id, "log", "Starting agent creation pipeline")
+        return run_agent_pipeline(
+            project_id=project_id,
+            project_name=name,
+            description=description,
+            project_path=project_path,
+            backend_url=None,
+            telegram_bot_token=payload.get("telegram_bot_token"),
+            telegram_chat_id=payload.get("telegram_chat_id"),
+            discord_webhook_url=payload.get("discord_webhook_url"),
+            email_to=payload.get("email_to"),
+            api_endpoint=payload.get("api_endpoint"),
+            initial_environment_variables=initial_env_vars,
+        )
+
     return False, {"errors": [f"Unsupported project type: {type_id}"]}
 
 

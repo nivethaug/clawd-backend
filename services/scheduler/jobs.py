@@ -201,7 +201,9 @@ def get_due_jobs() -> List[Dict]:
             JOIN projects p ON p.id = j.project_id
             WHERE j.status = 'active'
               AND j.next_run <= NOW()
-              AND p.type_id = 5
+              AND p.type_id IN (
+                  SELECT id FROM project_types WHERE type IN ('scheduler', 'agent')
+              )
             ORDER BY j.next_run ASC
         """)
         rows = cur.fetchall()
