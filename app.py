@@ -3184,6 +3184,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 template_id=template_id,
                 project_id=project_id,
                 is_clone=True,
+                clone_source_domain=source_domain or None,
             )
             _set_clone_status(project_id, "deploying", f"Provisioning database, backend, nginx, DNS")
             success = infra.provision_all()

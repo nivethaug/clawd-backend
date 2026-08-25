@@ -1903,10 +1903,13 @@ class DNSProvisioner:
 class InfrastructureManager:
     """Main infrastructure manager orchestrating all components."""
 
-    def __init__(self, project_name: str, project_path: Path, domain: str = None, description: str = None, template_id: str = None, project_id: int = None, is_clone: bool = False):
+    def __init__(self, project_name: str, project_path: Path, domain: str = None, description: str = None, template_id: str = None, project_id: int = None, is_clone: bool = False, clone_source_domain: str = None):
         self.project_name = project_name
         self.project_path = project_path
         self.domain = domain or project_name  # Use domain if provided, otherwise fall back to project_name
+        # Clone database copy: when set, the source project's DB (schema +
+        # data) is pg_dump'ed into the freshly created clone DB after Phase 2.
+        self.clone_source_domain = clone_source_domain
         self.description = description  # Store project description for Phase 9
         self.template_id = template_id  # Store template for metadata
         self.project_id = project_id  # Database project ID for port persistence
@@ -1964,6 +1967,44 @@ class InfrastructureManager:
         except Exception as e:
             logger.error(f"❌ Failed to save ports to database: {type(e).__name__}: {e}")
 
+    def _copy_clone_database(self, source_domain: str, target_db: str) -> None:
+        """Copy the source project's database (schema + data) into the clone.
+
+        Clones used to boot with an EMPTY database, betting on the app's
+        own create_all at import time — AI-written backends with fragile
+        import order (module-level create_all with FKs to not-yet-created
+        tables) crash on a fresh DB (live case: project 2019). Copying the
+        source DB makes clones faithful (content included) and sidesteps
+        boot-time schema init entirely. Best-effort: on any failure the
+        clone proceeds with an empty DB as before."""
+        try:
+            source_db = f"{self.db_provisioner._sanitize_db_name(source_domain)}_db"
+            logger.info(f"[CLONE-DB] Copying {source_db} -> {target_db}")
+            dump_pipe = (
+                f"pg_dump -U {POSTGRES_USER} --no-owner --no-privileges {source_db} "
+                f"| psql -U {POSTGRES_USER} -d {target_db} -q"
+            )
+            result = subprocess.run(
+                ["docker", "exec", self.db_provisioner.container, "sh", "-c", dump_pipe],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode != 0:
+                logger.warning(f"[CLONE-DB] Copy failed (clone proceeds with empty DB): {result.stderr[:300]}")
+                return
+            # The app user got DB+schema grants in Phase 2, but tables restored
+            # by the superuser need explicit table-level grants.
+            username = self.database_info.get("username")
+            if username:
+                for grant_sql in (
+                    f'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "{username}";',
+                    f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "{username}";',
+                ):
+                    self.db_provisioner._execute_sql(grant_sql, database_name=target_db)
+            logger.info(f"✓ [CLONE-DB] {source_db} copied into {target_db} (grants applied)")
+
+        except Exception as e:
+            logger.warning(f"[CLONE-DB] Copy error (clone proceeds with empty DB): {e}")
+
     def provision_all(self) -> bool:
         """
         Provision all infrastructure for project.
@@ -2018,6 +2059,12 @@ class InfrastructureManager:
                 self.database_info.get("database_name"),
                 self.database_info.get("username"),
             )
+
+            # Clone DB copy: source schema + data into the fresh clone DB,
+            # BEFORE the backend boots (import-time create_all must not be
+            # the only thing standing between a clone and its schema).
+            if self.clone_source_domain and self.database_info.get("database_name"):
+                self._copy_clone_database(self.clone_source_domain, self.database_info["database_name"])
             # logger.info(f"✓ Database created: {self.database_info['database_name']}")  # Commented for cleaner logs
 
             # Phase 3: Configure backend environment
