@@ -22,7 +22,7 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S',
 )
 
-from services.scheduler.jobs import get_due_jobs, update_job_run
+from services.scheduler.jobs import get_due_jobs, update_job_run, claim_job
 from services.scheduler.parser import calculate_next_run
 from services.scheduler.logger import log_job
 from services.scheduler.execution_engine import execute_job, JOB_TIMEOUT_SECONDS
@@ -52,6 +52,14 @@ def _execute_single_job(job: dict):
     task_type = job.get('task_type', 'unknown')
 
     try:
+        # Poll-race guard: atomically claim the firing. If another poll
+        # thread (or a second daemon) already claimed it, skip — without
+        # this, a run lasting longer than SCHEDULER_INTERVAL gets picked
+        # up again mid-execution and double-fires.
+        if not claim_job(job_id):
+            logger.info(f"Job {job_id} already claimed by another worker — skipping")
+            return
+
         result = execute_job(
             project={"id": project_id, "path": project_path},
             job=job

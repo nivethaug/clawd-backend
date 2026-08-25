@@ -286,6 +286,26 @@ def run_job_now(job_id: int) -> dict:
         return dict(job) if not isinstance(job, dict) else job
 
 
+def claim_job(job_id: int) -> bool:
+    """Atomically claim a due job for execution (poll-race guard).
+
+    Sets next_run=NULL only if it was still due; returns True when THIS
+    caller won the claim. A second poll/thread/poller seeing the same due
+    job gets False and skips — execution can never double-fire, even if the
+    first run outlives the poll interval or a second daemon appears."""
+    with get_db() as cur:
+        cur.execute("""
+            UPDATE scheduler_jobs
+            SET next_run = NULL
+            WHERE id = %s AND next_run IS NOT NULL
+            RETURNING id
+        """, (job_id,))
+        conn = cur._connection
+        conn.commit()
+        row = cur.fetchone()
+        return bool(row)
+
+
 def trigger_event_jobs(project_id: int) -> int:
     """Re-arm ALL of a project's event jobs for immediate execution.
 

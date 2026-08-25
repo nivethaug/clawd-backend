@@ -225,6 +225,9 @@ def _attach_pending_event(project_id: int, job: dict) -> None:
     (see services/scheduler/events.py — TTL-based delivery, every job in
     the window sees it). No-op on any failure — a broken event pickup must
     never block job execution."""
+    if job.get("job_type") != "event":
+        return  # time-based jobs never consume webhook events (10-min TTL
+                # would otherwise echo one event across interval runs)
     try:
         from services.scheduler import events as _events
         pending = _events.take_pending_event(project_id)
