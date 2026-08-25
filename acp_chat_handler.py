@@ -1183,6 +1183,17 @@ Before making any code changes, follow this process:
         channels = self._detect_configured_channels()
         channels_block = self._format_channels_block(channels)
 
+        # Webhook trigger URL (lazy-generates the token for legacy projects)
+        trigger_url = ""
+        try:
+            from api.triggers_router import _ensure_trigger_token
+            import os as _os
+            _tok = _ensure_trigger_token(self.project_id)
+            _base = _os.getenv("SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud").rstrip("/")
+            trigger_url = f"{_base}/api/triggers/{_tok}"
+        except Exception as e:
+            trigger_url = f"(unavailable — get it via: curl -s {backend_url}/api/triggers/info/{self.project_id})"
+
         context_section = ""
         if session_context:
             context_section = f"""
@@ -1242,6 +1253,43 @@ Built-in helpers in api_client.py:
 - fetch_json(url, params), fetch_page(url, extract_js) — fast scraping
 - proxy_call(...) — Surface 1
 - state_get() / state_set(dict) — cross-run memory
+
+---
+
+## EVENT TRIGGERS (webhook → run)
+
+This agent has a webhook URL — any external service POSTing to it fires
+the agent's `job_type: "event"` jobs within ~10 seconds:
+
+**{trigger_url}**
+
+Setup:
+1. Write an event handler in executor.py that reads `payload["event"]`:
+   `{{"headers": {{...safe subset...}}, "body": "<raw>", "body_json": {{...}}}}`
+2. Create the event job (schedule-less — it only runs when triggered):
+```bash
+curl -s -X POST {jobs_base}   -H "Content-Type: application/json"   -d '{{"job_type": "event", "schedule_value": "event", "task_type": "on_webhook", "payload": {{}}}}'
+```
+3. Tell the user to paste the trigger URL into the external service's
+   webhook settings (GitHub/Stripe/Stripe-style — plain POST, no auth
+   header needed; the URL itself is the credential).
+
+Example handler:
+```python
+def _on_webhook(payload: dict):
+    ev = payload.get("event") or {{}}
+    kind = (ev.get("headers") or {{}}).get("x-github-event", "unknown")
+    data = ev.get("body_json") or {{}}
+    msg = f"Webhook: {{kind}}
+{{str(data)[:500]}}"
+    if TELEGRAM_BOT_TOKEN:
+        return _send_telegram({{"text": msg}})
+    return ("success", f"received {{kind}}")
+```
+
+Trigger behavior: EVERY event job of this project fires on each webhook;
+handlers filter by event content. GET on the URL is a browser-verifiable
+ping. Bodies cap at 64KB.
 
 ---
 

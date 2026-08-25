@@ -22,7 +22,8 @@ logger = logging.getLogger('scheduler.jobs')
 MAX_JOBS_PER_PROJECT = 100
 
 # Valid job types (schedule types). task_type is free-form — executor validates.
-VALID_JOB_TYPES = ('interval', 'daily', 'once')
+# 'event' jobs are dormant (next_run NULL) until a webhook trigger re-arms them.
+VALID_JOB_TYPES = ('interval', 'daily', 'once', 'event')
 
 
 def create_job(project_id: int, job_data: dict) -> dict:
@@ -277,6 +278,31 @@ def run_job_now(job_id: int) -> dict:
             raise ValueError(f"Job {job_id} not found")
         logger.info(f"Job {job_id} triggered for immediate execution")
         return dict(job) if not isinstance(job, dict) else job
+
+
+def trigger_event_jobs(project_id: int) -> int:
+    """Re-arm ALL of a project's event jobs for immediate execution.
+
+    Called by the public webhook endpoint (POST /api/triggers/{token}) —
+    mirrors run_job_now's mechanism (next_run = NOW() so the next scheduler
+    poll picks them up), applied to every active job_type='event' job.
+
+    Returns the number of jobs armed."""
+    with get_db() as cur:
+        cur.execute("""
+            UPDATE scheduler_jobs
+            SET next_run = NOW(), status = 'active'
+            WHERE project_id = %s
+              AND job_type = 'event'
+              AND status = 'active'
+            RETURNING id
+        """, (project_id,))
+        conn = cur._connection
+        conn.commit()
+        rows = cur.fetchall()
+        n = len(rows) if rows else 0
+        logger.info("Triggered %d event job(s) for project %s", n, project_id)
+        return n
 
 
 def clear_jobs(project_id: int = None) -> int:

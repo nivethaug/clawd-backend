@@ -220,6 +220,21 @@ def _sync_from_container(project_id: int, project_path: str) -> bool:
     return False
 
 
+def _attach_pending_event(project_id: int, job: dict) -> None:
+    """Attach the project's newest unconsumed webhook event as job["event"]
+    (see services/scheduler/events.py). Latest-wins; marks the backlog
+    consumed so replays never storm. No-op on any failure — a broken event
+    pickup must never block job execution."""
+    try:
+        from services.scheduler import events as _events
+        pending = _events.take_pending_event(project_id)
+        if pending:
+            job.setdefault("event", pending)
+            logger.info("[EXEC-ENGINE] attached pending event to job %s", job.get("id"))
+    except Exception as e:
+        logger.warning("[EXEC-ENGINE] event attach skipped: %s", e)
+
+
 def _execute_in_sandbox(project_id: int, project_path: str, job: dict) -> dict:
     """Run execute_task inside scripts/scheduler-sandbox.sh via subprocess.
 
@@ -278,6 +293,7 @@ def _execute_in_sandbox(project_id: int, project_path: str, job: dict) -> dict:
     # Invoke via bash explicitly so we don't depend on the +x bit being set
     # at the OS level (defense-in-depth alongside the chmod above).
     cmd = ["bash", _SANDBOX_SCRIPT, _SHARED_VENV, project_path]
+    _attach_pending_event(project_id, job)
     job_json = json.dumps(job, default=str)
 
     try:
@@ -367,6 +383,7 @@ def _execute_in_process(project_id: int, project_path: str, job: dict) -> dict:
         return {"status": "failed", "message": f"Executor not found at {project_path}"}
 
     try:
+        _attach_pending_event(project_id, job)
         result = executor.execute_task(job)
         if not isinstance(result, dict) or "status" not in result:
             return {"status": "failed", "message": f"Invalid executor result shape: {type(result).__name__}"}

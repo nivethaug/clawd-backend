@@ -812,7 +812,7 @@ def init_schema():
             cur.execute("""CREATE TABLE IF NOT EXISTS scheduler_jobs (
                 id SERIAL PRIMARY KEY,
                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                job_type VARCHAR(20) CHECK (job_type IN ('interval', 'daily', 'once')),
+                job_type VARCHAR(20) CHECK (job_type IN ('interval', 'daily', 'once', 'event')),
                 schedule_value VARCHAR(100) NOT NULL,
                 task_type VARCHAR(50) NOT NULL,
                 payload JSONB DEFAULT '{}',
@@ -861,7 +861,44 @@ def init_schema():
             )""")
             conn.commit()
 
-            logger.info("✓ Added scheduler_jobs, scheduler_logs and scheduler_state tables")
+            # Webhook event triggers: inbound events awaiting pickup by the
+            # execution engine (attached to the job as job["event"]).
+            cur.execute("""CREATE TABLE IF NOT EXISTS scheduler_events (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                headers JSONB DEFAULT '{}',
+                body TEXT,
+                consumed BOOLEAN DEFAULT false,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_scheduler_events_pending
+                ON scheduler_events (project_id, consumed, id DESC)
+            """)
+            conn.commit()
+
+            # Per-project webhook trigger token (public /api/triggers/{token}).
+            def migrate_projects_trigger_token():
+                cur.execute("ALTER TABLE projects ADD COLUMN trigger_token TEXT")
+            _run_migration(migrate_projects_trigger_token)
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_trigger_token
+                ON projects (trigger_token) WHERE trigger_token IS NOT NULL
+            """)
+            conn.commit()
+
+            # Event-triggered jobs: extend the job_type CHECK.
+            def migrate_scheduler_jobs_event_check():
+                cur.execute(
+                    "ALTER TABLE scheduler_jobs DROP CONSTRAINT IF EXISTS scheduler_jobs_job_type_check"
+                )
+                cur.execute(
+                    "ALTER TABLE scheduler_jobs ADD CONSTRAINT scheduler_jobs_job_type_check "
+                    "CHECK (job_type IN ('interval', 'daily', 'once', 'event'))"
+                )
+            _run_migration(migrate_scheduler_jobs_event_check)
+
+            logger.info("✓ Added scheduler_jobs, scheduler_logs, scheduler_state, scheduler_events + trigger tokens")
 
             # Token Usage table — tracks AI token consumption per user/project
             cur.execute("""CREATE TABLE IF NOT EXISTS token_usage (

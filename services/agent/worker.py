@@ -116,8 +116,14 @@ def run_agent_pipeline(
             return False, result_info
         result_info["steps_completed"].append("env_injection")
 
-        # Step 3: Per-project SECRET_KEY (proxy auth for OAuth actions)
+        # Step 3: Per-project SECRET_KEY (proxy auth for OAuth actions) +
+        # webhook trigger token (public /api/triggers/{token} ingress)
         _ensure_project_secret(project_id, project_path)
+        try:
+            from api.triggers_router import _ensure_trigger_token
+            _ensure_trigger_token(project_id)
+        except Exception as e:
+            logger.warning("[AGENT] trigger token generation deferred: %s", e)
         result_info["steps_completed"].append("secret_key")
 
         # Step 4: Initial env vars (vault imports / custom keys)

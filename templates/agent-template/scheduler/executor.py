@@ -12,6 +12,10 @@ AI agents can:
 1. Add new fetch_data_* functions below
 2. Add new task_type handlers
 3. Add new template variables to FETCH_DATA_REGISTRY
+4. Add webhook event handlers (job_type="event" jobs): the platform
+   attaches the inbound webhook payload as job["event"] =
+   {"headers": {safe subset}, "body": "<raw>", "body_json": {...}} —
+   read it in your handler via payload.get("event")
 
 Required interface:
     execute_task(job: dict) -> dict

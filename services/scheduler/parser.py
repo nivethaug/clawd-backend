@@ -30,6 +30,10 @@ def calculate_next_run(job_type: str, schedule_value: str) -> Optional[datetime]
         return _parse_daily(schedule_value)
     elif job_type == "once":
         return None
+    elif job_type == "event":
+        # Webhook-triggered jobs never run on a schedule — dormant until a
+        # trigger (or run-now) sets next_run = NOW().
+        return None
     else:
         raise ValueError(f"Unknown job_type: {job_type}")
 

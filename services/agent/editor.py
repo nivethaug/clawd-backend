@@ -64,6 +64,16 @@ class AgentEditor(SchedulerEditor):
 
         integrations_block = build_external_integrations_block(self.project_id)
 
+        trigger_url = ""
+        try:
+            from api.triggers_router import _ensure_trigger_token
+            import os as _os
+            _tok = _ensure_trigger_token(self.project_id)
+            _base = _os.getenv("SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud").rstrip("/")
+            trigger_url = f"{_base}/api/triggers/{_tok}"
+        except Exception:
+            trigger_url = f"(get it later: curl -s {backend_url}/api/triggers/info/{self.project_id})"
+
         return f"""{meta_block}
 Project: {project_name} (ID: {self.project_id}) — an AUTOMATION AGENT.
 The user's idea, in their words: "{description}"
@@ -120,6 +130,25 @@ Channel config is ALSO the `env_config` key in <DREAMPILOT_WORKFLOW_META>.
 The executor's existing sender functions: _send_telegram/_send_discord/
 _send_email/_call_api. If the requested channel is not configured, use the
 configured ones and note it in the message.
+
+==================================================
+EVENT TRIGGERS (webhook -> run) — if the idea implies one
+==================================================
+
+This agent has a webhook URL; external services POSTing to it fire the
+agent's job_type="event" jobs within ~10s:
+
+    {trigger_url}
+
+If the idea implies reacting to external events ("when a GitHub issue...",
+"when Stripe payment...", "when someone calls my webhook..."):
+1. Add an event handler reading payload["event"] = {{"headers": {{safe
+   subset}}, "body": "<raw>", "body_json": {{...}}}}
+2. Create the job with "job_type": "event", "schedule_value": "event"
+   (dormant — runs ONLY when the webhook fires)
+3. Tell the user (in your final message) to paste the URL into the
+   external service's webhook settings — plain POST, the URL is the
+   credential, 64KB body cap.
 
 ==================================================
 CONDITIONS + STATE ("only when ...")
