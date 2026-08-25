@@ -141,6 +141,9 @@ def resolve_content(payload: dict) -> dict:
     """
     fetch_keys = payload.get("fetch", [])
     if not fetch_keys:
+        # Clear stale resolved values from a previous job in the same
+        # process (in-process mode) so 'changed' never compares against them.
+        _last_resolved.clear()
         return payload
 
     # Fetch all requested data

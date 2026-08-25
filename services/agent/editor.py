@@ -18,6 +18,7 @@ import logging
 
 from services.scheduler.editor import SchedulerEditor
 from workflow_prompt_meta import build_workflow_meta_block
+from integration_prompt_block import build_external_integrations_block
 from services.container_storage import to_container_path
 
 logger = logging.getLogger("services.agent.editor")

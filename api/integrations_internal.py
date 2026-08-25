@@ -42,6 +42,7 @@ class ProxyRequest(BaseModel):
     method: str = "GET"                 # GET | POST | PUT | PATCH | DELETE
     endpoint: str                       # provider path, e.g. 'youtube/v3/channels?part=snippet&mine=true'
     body: Optional[dict] = None         # JSON body for non-GET
+    params: Optional[dict] = None       # query params (alternative to embedding ?... in endpoint)
 
 
 def _project_env_secret(project_id: int) -> Optional[str]:
@@ -160,6 +161,8 @@ async def integrations_proxy(
     kwargs = {}
     if request.body is not None and request.method.upper() != "GET":
         kwargs["json"] = request.body
+    if request.params:
+        kwargs["params"] = request.params
 
     result = nango_client.proxy_request(
         provider_config_key=request.provider,
