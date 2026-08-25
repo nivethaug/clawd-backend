@@ -102,6 +102,8 @@ ENV_SUBDIR_MAP = {
     2: "telegram",     # telegram bot — .env at {project_path}/telegram/.env
     3: "discord",      # discord bot — .env at {project_path}/discord/.env
     5: "",             # scheduler — .env at {project_path}/.env (root)
+    7: "",             # agent — .env at {project_path}/.env (root; fast path,
+                       # slug fallback below covers non-7 ids)
 }
 
 # Value returned for masked sensitive variables (never the real value)
@@ -251,6 +253,23 @@ def get_project_env_info(project_id: int) -> Tuple[str, int, Optional[str], str]
     # type_id not in the map at all -> genuinely unsupported.
     # type_id in map with subdir="" -> supported, .env at project root.
     if type_id not in ENV_SUBDIR_MAP:
+        # Slug fallback: 'agent' (scheduler-family, root .env) may carry any
+        # SERIAL id on environments where the seed order differed.
+        try:
+            with get_db() as _conn:
+                _trow = _conn.execute(
+                    "SELECT type FROM project_types WHERE id = ?",
+                    (type_id,),
+                ).fetchone()
+            _slug = ""
+            if _trow:
+                _d = dict(_trow) if not isinstance(_trow, dict) else _trow
+                _slug = _d.get("type") or ""
+        except Exception:
+            _slug = ""
+        if _slug in ("agent", "scheduler"):
+            env_path = os.path.join(project_path, ".env")
+            return env_path, type_id, domain, project_name
         raise ValueError(
             f"Environment variable editing is not supported for type_id={type_id}. "
             f"Supported types: {list(ENV_SUBDIR_MAP.keys())}"

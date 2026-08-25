@@ -17,6 +17,7 @@ PROJECT_TYPES = {
     3: "discord",
     5: "scheduler",
     6: "custom",
+    7: "agent",
 }
 
 

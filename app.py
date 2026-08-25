@@ -1942,7 +1942,8 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         from services.plan_cache import get_operation, get_operation_for_type
 
         _fb_types = {1: "WEBSITE", 2: "TELEGRAM_BOT", 3: "DISCORD_BOT", 5: "SCHEDULER"}
-        _op_code = _fb_types.get(type_id, "WEBSITE")
+        # Agents charge under the SCHEDULER bucket (same creation cost class)
+        _op_code = "SCHEDULER" if type_slug == "agent" else _fb_types.get(type_id, "WEBSITE")
         _op = get_operation_for_type(type_id) if type_id else None
         if _op:
             _op_code = _op["code"]

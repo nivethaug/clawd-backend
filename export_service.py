@@ -189,12 +189,13 @@ def generate_env_example(project_path: str, type_id: int) -> str:
     Falls back to type-specific defaults if no .env is found.
     """
     # Map type_id -> subdirectory containing .env (matches env_manager.ENV_SUBDIR_MAP)
-    env_subdir_map = {1: "backend", 2: "telegram", 3: "discord", 5: "scheduler"}
+    # "" = root .env (scheduler + agent families; matches env_manager)
+    env_subdir_map = {1: "backend", 2: "telegram", 3: "discord", 5: "", 7: ""}
     subdir = env_subdir_map.get(type_id)
 
     keys: List[str] = []
-    if subdir:
-        env_path = os.path.join(project_path, subdir, ".env")
+    if subdir is not None:
+        env_path = os.path.join(project_path, subdir, ".env") if subdir else os.path.join(project_path, ".env")
         if os.path.exists(env_path):
             try:
                 with open(env_path, "r", encoding="utf-8") as f:

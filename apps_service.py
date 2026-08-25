@@ -249,6 +249,7 @@ TYPE_MAP = {
     4: "tradingbot",
     5: "scheduler",
     6: "custom",
+    7: "agent",
 }
 
 
@@ -605,6 +606,23 @@ def _scheduler_project_action(project_id: int, action: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def _is_scheduler_family(type_id) -> bool:
+    """Scheduler + agent projects share the central scheduler runtime —
+    start/stop map to job pause/resume, never per-project PM2."""
+    if type_id == 5:
+        return True
+    try:
+        from database_postgres import get_db
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT type FROM project_types WHERE id = %s", (type_id,)
+            ).fetchone()
+        d = (dict(row) if row and not isinstance(row, dict) else row) if row else {}
+        return d.get("type") == "agent"
+    except Exception:
+        return False
+
+
 def pm2_action(project_domain: str, action: str) -> Dict[str, Any]:
     """
     Execute a PM2 action on a project.
@@ -618,7 +636,7 @@ def pm2_action(project_domain: str, action: str) -> Dict[str, Any]:
     """
     project = _get_project_for_runtime_action(project_domain)
 
-    if project and project.get("type_id") == 5:
+    if project and _is_scheduler_family(project.get("type_id")):
         return _scheduler_project_action(int(project["id"]), action)
 
     if project:

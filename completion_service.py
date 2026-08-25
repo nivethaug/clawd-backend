@@ -248,6 +248,19 @@ Scheduler Creation Rules:
 - For digest jobs, specify: content sections, compilation order, delivery time, HTML vs plain text format.
 - For monitoring jobs, specify: what to check, healthy vs unhealthy thresholds, alert frequency.
 - Always mention that jobs use the platform's job_manager.py and scheduler_jobs API for creation.""",
+        "agent": """Selected Project Type: Agent (Automation)
+
+Agent Creation Rules:
+- Always include: Agent Purpose, Data Sources & Integrations, Trigger (schedule or webhook), Actions, Conditions, Delivery, Final Expectations.
+- Describe triggers precisely: time-based (every 5m, hourly, daily:09:00) or event-based (webhook fired when an external service POSTs).
+- Specify data sources: public APIs (name the exact API), web scraping targets, or the user's connected OAuth accounts (YouTube, GitHub, Notion, X, Google Sheets, Slack, Discord).
+- For connected-account actions, reference the capability: read/post/upload/append (the platform injects credentials server-side).
+- Specify actions: post to X, append Google Sheets rows, create GitHub issues, send Slack/Telegram/Discord messages, send email.
+- Include conditions when implied: thresholds ("only if BTC > 100k") or change detection ("only when the value changed").
+- Specify delivery channels for reports/alerts: Telegram, Discord, email, or API endpoint.
+- For webhook-triggered agents, state what external service will call the webhook and how the agent should react to its payload.
+- Include error handling direction: API failure, rate limit, timeout behavior.
+- Always mention that jobs use the platform's job_manager.py and scheduler_jobs API for creation.""",
         "custom": """Selected Project Type: Custom
 
 Custom Project Creation Rules:
@@ -284,6 +297,16 @@ Discord Bot Editing Rules:
 Trading Bot Editing Rules:
 - Include affected strategy logic, indicators, exchange behavior, risk management, stop loss, take profit, position sizing, constraints, and final behavior.
 - Preserve or improve risk controls. Never remove risk management unless the user explicitly asks and the prompt warns against it.""",
+        "agent": """Selected Project Type: Agent (Automation)
+
+Agent Editing Rules:
+- Include affected jobs, triggers (schedule/webhook), conditions, integrations, delivery, constraints, and final behavior.
+- Preserve existing active jobs unless the user explicitly asks to replace them.
+- Specify which executor.py handlers are affected and whether new task_type routes need to be added.
+- If data sources or integrations change: name the new API, scraping target, or connected account capability.
+- If trigger changes: specify the new interval, or the move to/from webhook triggering.
+- If conditions change: specify the threshold or change-detection rule.
+- Always mention buildpublish.py for deploying executor changes.""",
         "scheduler": """Selected Project Type: Scheduler
 
 Scheduler Editing Rules:
@@ -315,6 +338,10 @@ Custom Project Editing Rules:
         "trading_bot": "tradingbot",
         "trading-bot": "tradingbot",
         "trading bot": "tradingbot",
+        "agents": "agent",
+        "ai agent": "agent",
+        "automation agent": "agent",
+        "automation": "agent",
     }
 
     MODE_ALIASES = {
