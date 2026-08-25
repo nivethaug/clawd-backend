@@ -58,6 +58,21 @@ JOB_TIMEOUT_SECONDS = int(os.getenv("SCHEDULER_JOB_TIMEOUT", "120"))
 # Static: always container mode — bot-sandbox.sh uses shared venv Python
 _USE_SANDBOX = os.path.exists(_SANDBOX_SCRIPT)
 
+# Credential keys that must come from the PROJECT'S OWN .env — NEVER from
+# this daemon's environment. Without this guard, the platform's own
+# OPENROUTER_API_KEY (present in the daemon env) flows into every user's
+# sandbox via the allowlist, and any user's agent code can read and
+# exfiltrate it (live incident: platform key lifted and used in opencode).
+_PROJECT_SOURCED_KEYS = frozenset({
+    'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY',
+    'GEMINI_API_KEY', 'GITHUB_TOKEN', 'STRIPE_SECRET_KEY',
+    'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RESEND_API_KEY',
+    'SLACK_WEBHOOK_URL', 'COINGECKO_API_KEY', 'SERPER_API_KEY',
+    'TELEGRAM_BOT_TOKEN', 'DISCORD_TOKEN', 'DISCORD_WEBHOOK_URL',
+    'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM',
+    'EMAIL_TO', 'API_ENDPOINT',
+})
+
 # Env var keys the executor is allowed to see. The project's .env (loaded by
 # config.py via load_dotenv) is the source of truth for these — we explicitly
 # do NOT pass platform env (DATABASE_URL, etc.) into the sandbox subprocess.
@@ -278,6 +293,15 @@ def _execute_in_sandbox(project_id: int, project_path: str, job: dict) -> dict:
 
     # Minimal env — whitelisted keys only. No DATABASE_URL leak.
     clean_env = {k: v for k, v in os.environ.items() if k in _SCHEDULER_ENV_KEYS}
+
+    # SECURITY: credential keys are sourced from the PROJECT'S .env only.
+    # Any value inherited from this daemon's environment (i.e. the
+    # platform's own keys) is removed; the sandbox's config.py loads the
+    # project .env with override=True afterwards, so a project value (when
+    # the user configured one) still reaches the executor.
+    for _k in _PROJECT_SOURCED_KEYS:
+        clean_env.pop(_k, None)
+
     # Guarantee PATH has the venv binaries + system paths even if the host
     # env didn't set PATH in a way bwrap would inherit cleanly.
     clean_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")

@@ -1,4 +1,13 @@
 #!/bin/bash
+
+# SECURITY: strip platform credential keys inherited from the pm2 daemon's
+# environment. Project credentials reach the backend ONLY via its own .env
+# (loaded by the app); the platform's own keys must never be visible to
+# user project code.
+unset OPENROUTER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY
+unset GITHUB_TOKEN STRIPE_SECRET_KEY RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET
+unset RESEND_API_KEY SLACK_WEBHOOK_URL COINGECKO_API_KEY SERPER_API_KEY
+unset TELEGRAM_BOT_TOKEN DISCORD_TOKEN NANGO_SECRET_KEY SCHEDULER_INTERNAL_ALLOWLIST
 # Backend sandbox wrapper — isolates uvicorn via bubblewrap (bwrap).
 #
 # Usage: backend-sandbox.sh <venv_path> <backend_path> <port> [entry_point]
