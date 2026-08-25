@@ -10,9 +10,11 @@ Flow:
                                     to the job dict as job["event"] just
                                     before the executor subprocess runs.
 
-One unconsumed event is delivered to the NEXT executed job of the project;
-everything older is marked consumed in the same pass (latest-wins, no
-backlog replay storms).
+Delivery model: TTL-based, NOT consumed-on-read. Every job executed within
+the freshness window (10 min) sees the newest event — so ALL of a project's
+armed event jobs receive the same webhook body (handlers filter by event
+content). Events expire after 15 min and are pruned opportunistically, so
+stale webhooks never replay and the table stays tiny.
 """
 
 import json
@@ -33,6 +35,9 @@ SAFE_HEADERS = frozenset({
     "svix-id", "svix-type", "svix-signature",
 })
 
+FRESH_SECONDS = 600      # events are deliverable for 10 minutes
+PRUNE_MINUTES = 15       # hard delete after 15 minutes
+
 
 def _filter_headers(headers: Dict[str, str]) -> Dict[str, str]:
     return {k.lower(): v for k, v in (headers or {}).items()
@@ -40,9 +45,14 @@ def _filter_headers(headers: Dict[str, str]) -> Dict[str, str]:
 
 
 def record_event(project_id: int, headers: Dict[str, str], body: str) -> int:
-    """Store an inbound webhook event. Returns the event id."""
+    """Store an inbound webhook event. Returns the event id.
+    Opportunistically prunes expired events for the project."""
     safe = _filter_headers(headers)
     with get_db() as cur:
+        cur.execute("""
+            DELETE FROM scheduler_events
+            WHERE project_id = %s AND created_at < NOW() - INTERVAL '15 minutes'
+        """, (project_id,))
         cur.execute("""
             INSERT INTO scheduler_events (project_id, headers, body)
             VALUES (%s, %s::jsonb, %s)
@@ -57,37 +67,32 @@ def record_event(project_id: int, headers: Dict[str, str], body: str) -> int:
 
 
 def take_pending_event(project_id: int) -> Optional[Dict[str, Any]]:
-    """Newest unconsumed event for the project, marked consumed (all of them).
+    """Newest FRESH event for the project (within 10 minutes), if any.
 
-    Returns {"headers": {...}, "body": "..."} or None. Best-effort parse of
-    the body into JSON when possible (body_json key added)."""
+    Does NOT consume — every job executing in the freshness window sees it.
+    Returns {"headers": {...}, "body": "..."} (+ "body_json" when parseable)."""
     with get_db() as cur:
         cur.execute("""
             SELECT id, headers, body FROM scheduler_events
-            WHERE project_id = %s AND consumed = false
+            WHERE project_id = %s
+              AND created_at >= NOW() - INTERVAL '10 minutes'
             ORDER BY id DESC LIMIT 1
         """, (project_id,))
         row = cur.fetchone()
         if not row:
             return None
         d = dict(row) if not isinstance(row, dict) else row
-        cur.execute("""
-            UPDATE scheduler_events SET consumed = true
-            WHERE project_id = %s AND consumed = false
-        """, (project_id,))
-        conn = cur._connection
-        conn.commit()
 
-        headers = d.get("headers") or {}
-        if isinstance(headers, str):
-            try:
-                headers = json.loads(headers)
-            except Exception:
-                headers = {}
-        body = d.get("body") or ""
-        out: Dict[str, Any] = {"headers": headers, "body": body}
+    headers = d.get("headers") or {}
+    if isinstance(headers, str):
         try:
-            out["body_json"] = json.loads(body)
+            headers = json.loads(headers)
         except Exception:
-            pass
-        return out
+            headers = {}
+    body = d.get("body") or ""
+    out: Dict[str, Any] = {"headers": headers, "body": body}
+    try:
+        out["body_json"] = json.loads(body)
+    except Exception:
+        pass
+    return out

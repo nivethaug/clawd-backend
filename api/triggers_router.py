@@ -74,6 +74,25 @@ def _ensure_trigger_token(project_id: int) -> str:
     return token
 
 
+@router.get("/info/{project_id}")
+async def trigger_info(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+    request_obj: Request = None,
+):
+    """The project's webhook trigger URL (owner JWT or worker-IP allowlist —
+    same auth as the scheduler job API, so in-container agents can curl it).
+
+    Declared BEFORE /{token} so "info" isn't captured as a token."""
+    from api.scheduler_router import _require_project_owner
+    _require_project_owner(project_id, authorization, request_obj)
+
+    token = _ensure_trigger_token(project_id)
+    import os as _os
+    backend = _os.getenv("SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud").rstrip("/")
+    return {"project_id": project_id, "url": f"{backend}/api/triggers/{token}"}
+
+
 @router.post("/{token}")
 async def trigger_event(token: str, request: Request):
     """Webhook ingress: store the event, arm the project's event jobs."""
@@ -118,21 +137,3 @@ async def trigger_ping(token: str):
     if not project:
         raise HTTPException(status_code=404, detail="Not found")
     return {"ok": True, "project": project.get("name")}
-
-
-@router.get("/info/{project_id}")
-async def trigger_info(
-    project_id: int,
-    authorization: Optional[str] = Header(None),
-    request_obj: Request = None,
-):
-    """The project's webhook trigger URL (owner JWT or worker-IP allowlist —
-    same auth as the scheduler job API, so in-container agents can curl it)."""
-    from api.scheduler_router import _require_project_owner
-    _require_project_owner(project_id, authorization, request_obj)
-
-    token = _ensure_trigger_token(project_id)
-    backend = "https://api.dreamagent.cloud"
-    import os as _os
-    backend = _os.getenv("SCHEDULER_BACKEND_URL", backend).rstrip("/")
-    return {"project_id": project_id, "url": f"{backend}/api/triggers/{token}"}

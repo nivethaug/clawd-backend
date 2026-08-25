@@ -221,10 +221,10 @@ def _sync_from_container(project_id: int, project_path: str) -> bool:
 
 
 def _attach_pending_event(project_id: int, job: dict) -> None:
-    """Attach the project's newest unconsumed webhook event as job["event"]
-    (see services/scheduler/events.py). Latest-wins; marks the backlog
-    consumed so replays never storm. No-op on any failure — a broken event
-    pickup must never block job execution."""
+    """Attach the project's newest FRESH webhook event as job["event"]
+    (see services/scheduler/events.py — TTL-based delivery, every job in
+    the window sees it). No-op on any failure — a broken event pickup must
+    never block job execution."""
     try:
         from services.scheduler import events as _events
         pending = _events.take_pending_event(project_id)

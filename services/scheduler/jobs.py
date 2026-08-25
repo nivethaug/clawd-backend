@@ -215,14 +215,20 @@ def update_job_run(job_id: int, next_run: Optional[datetime]):
     """
     Update job after execution: set last_run and next_run.
     For one-time jobs (next_run=None), mark as completed.
+    Event jobs STAY ACTIVE (dormant via next_run=NULL) — each webhook
+    trigger re-arms them; 'completed' would make them fire exactly once.
     """
     with get_db() as cur:
         if next_run is None:
+            cur.execute("SELECT job_type FROM scheduler_jobs WHERE id = %s", (job_id,))
+            row = cur.fetchone()
+            job_type = (dict(row) if row and not isinstance(row, dict) else row or {}).get("job_type") if row else None
+            new_status = "active" if job_type == "event" else "completed"
             cur.execute("""
                 UPDATE scheduler_jobs
-                SET last_run = NOW(), next_run = NULL, status = 'completed'
+                SET last_run = NOW(), next_run = NULL, status = %s
                 WHERE id = %s
-            """, (job_id,))
+            """, (new_status, job_id))
         else:
             cur.execute("""
                 UPDATE scheduler_jobs
@@ -285,7 +291,8 @@ def trigger_event_jobs(project_id: int) -> int:
 
     Called by the public webhook endpoint (POST /api/triggers/{token}) —
     mirrors run_job_now's mechanism (next_run = NOW() so the next scheduler
-    poll picks them up), applied to every active job_type='event' job.
+    poll picks them up), applied to every non-paused job_type='event' job
+    (re-arms 'completed' ones too — belt and braces).
 
     Returns the number of jobs armed."""
     with get_db() as cur:
@@ -294,7 +301,7 @@ def trigger_event_jobs(project_id: int) -> int:
             SET next_run = NOW(), status = 'active'
             WHERE project_id = %s
               AND job_type = 'event'
-              AND status = 'active'
+              AND status <> 'paused'
             RETURNING id
         """, (project_id,))
         conn = cur._connection

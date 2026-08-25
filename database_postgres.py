@@ -863,17 +863,18 @@ def init_schema():
 
             # Webhook event triggers: inbound events awaiting pickup by the
             # execution engine (attached to the job as job["event"]).
+            # TTL-based delivery — no consumed flag; events expire by age
+            # (see services/scheduler/events.py).
             cur.execute("""CREATE TABLE IF NOT EXISTS scheduler_events (
                 id SERIAL PRIMARY KEY,
                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 headers JSONB DEFAULT '{}',
                 body TEXT,
-                consumed BOOLEAN DEFAULT false,
                 created_at TIMESTAMP DEFAULT NOW()
             )""")
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_scheduler_events_pending
-                ON scheduler_events (project_id, consumed, id DESC)
+                ON scheduler_events (project_id, created_at DESC)
             """)
             conn.commit()
 
