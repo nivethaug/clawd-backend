@@ -3068,6 +3068,36 @@ def _scheduler_family_type_ids() -> set:
     return ids
 
 
+def _sanitize_clone_env(clone_path: str):
+    """Blank VALUES in every copied .env so clones never carry the source
+    project's secrets (BYOK keys, bot tokens, API keys).
+
+    Key NAMES are preserved (KEY=) so the app and the cloner can see what
+    needs configuring; infra Phase 3 / clone updates write the fresh
+    platform vars (PORT, DATABASE_URL, SECRET_KEY, PROJECT_ID...) on top.
+    Never touches .env.example."""
+    import re as _re
+    root = Path(clone_path)
+    targets = [root / ".env", root / "backend" / ".env",
+               root / "telegram" / ".env", root / "discord" / ".env"]
+    for env_path in targets:
+        if not env_path.is_file() or env_path.name == ".env.example":
+            continue
+        try:
+            lines = env_path.read_text().splitlines()
+            out = []
+            for line in lines:
+                m = _re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
+                if m:
+                    out.append(f"{m.group(1)}=")
+                else:
+                    out.append(line)
+            env_path.write_text('\n'.join(out) + '\n')
+            logger.info("[CLONE] Sanitized env values in %s", env_path)
+        except Exception as e:
+            logger.warning("[CLONE] Could not sanitize %s: %s", env_path, e)
+
+
 def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
                   source_path: str, clone_path: str, template_id: Optional[str],
                   description: Optional[str], source_domain: str = "",
@@ -3086,6 +3116,9 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         logger.info(f"[CLONE] Copying files from {source_path} -> {clone_path}")
         _copy_project_files(source_path, clone_path)
         logger.info(f"[CLONE] File copy complete for project {project_id}")
+
+        # Never carry the source project's secret VALUES into the clone
+        _sanitize_clone_env(clone_path)
 
         # Re-initialise git (remove copied .git if any, re-init fresh)
         git_dir = os.path.join(clone_path, ".git")

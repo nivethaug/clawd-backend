@@ -1968,20 +1968,20 @@ class InfrastructureManager:
             logger.error(f"❌ Failed to save ports to database: {type(e).__name__}: {e}")
 
     def _copy_clone_database(self, source_domain: str, target_db: str) -> None:
-        """Copy the source project's database (schema + data) into the clone.
+        """Copy the source project's database SCHEMA (not data) into the clone.
 
         Clones used to boot with an EMPTY database, betting on the app's
         own create_all at import time — AI-written backends with fragile
         import order (module-level create_all with FKs to not-yet-created
-        tables) crash on a fresh DB (live case: project 2019). Copying the
-        source DB makes clones faithful (content included) and sidesteps
-        boot-time schema init entirely. Best-effort: on any failure the
-        clone proceeds with an empty DB as before."""
+        tables) crash on a fresh DB (live case: project 2019). Schema-only
+        copy gives the clone its tables without duplicating the source
+        project's content. Row data is deliberately NOT cloned. Best-effort:
+        on any failure the clone proceeds with an empty DB as before."""
         try:
             source_db = f"{self.db_provisioner._sanitize_db_name(source_domain)}_db"
             logger.info(f"[CLONE-DB] Copying {source_db} -> {target_db}")
             dump_pipe = (
-                f"pg_dump -U {POSTGRES_USER} --no-owner --no-privileges {source_db} "
+                f"pg_dump -U {POSTGRES_USER} --schema-only --no-owner --no-privileges {source_db} "
                 f"| psql -U {POSTGRES_USER} -d {target_db} -q"
             )
             result = subprocess.run(
