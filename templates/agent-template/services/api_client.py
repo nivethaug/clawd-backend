@@ -374,8 +374,10 @@ def proxy_call(provider: str, method: str, endpoint: str,
         return {"status": 0, "body": "SECRET_KEY not configured for this project", "headers": {}}
 
     try:
-        r = requests.request(
-            method.upper(),
+        # Transport is ALWAYS POST to the platform proxy; the provider's
+        # HTTP verb rides inside the JSON body ("method": ...). Sending the
+        # provider verb here hits the POST-only proxy route -> 405.
+        r = requests.post(
             f"{_config.BACKEND_URL}/api/integrations/proxy",
             headers={
                 "Authorization": f"Bearer {_config.SECRET_KEY}",
