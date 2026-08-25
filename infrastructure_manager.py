@@ -520,7 +520,6 @@ class ServiceManager:
             # Install Python dependencies FIRST (before import validation)
             requirements_path = backend_path / "requirements.txt"
             if requirements_path.exists():
-                # logger.info("[SERVICE] Installing Python dependencies from requirements.txt...")  # Commented for cleaner logs
                 try:
                     subprocess.run(
                         [venv_pip, "install", "-r", "requirements.txt"],
@@ -532,9 +531,39 @@ class ServiceManager:
                     )
                     logger.info("[SERVICE] ✓ Python dependencies installed successfully")
                 except subprocess.CalledProcessError as e:
-                    logger.error(f"[SERVICE] Failed to install dependencies: {e}")
-                    logger.error(f"[SERVICE] Install stderr: {e.stderr[:500]}")
-                    return False
+                    # Self-heal: AI-written requirements.txt often hard-pins
+                    # versions that lack wheels for this venv's Python (e.g.
+                    # cryptography==41 has no cp313 wheel). Retry once with
+                    # pins relaxed (== -> >=) in a temp requirements file —
+                    # the original file is left untouched.
+                    logger.warning(f"[SERVICE] Install failed with pinned requirements: {e.stderr[:300]}")
+                    logger.info("[SERVICE] Retrying with relaxed pins (== -> >=)")
+                    try:
+                        import re as _re
+                        relaxed_path = backend_path / "requirements.relaxed.txt"
+                        original = requirements_path.read_text()
+                        relaxed = "\n".join(
+                            _re.sub(r"==\s*([0-9][^\s;]+)", r">= \1", line)
+                            if not line.strip().startswith("#") else line
+                            for line in original.splitlines()
+                        )
+                        relaxed_path.write_text(relaxed)
+                        relax_result = subprocess.run(
+                            [venv_pip, "install", "-r", "requirements.relaxed.txt"],
+                            cwd=str(backend_path),
+                            capture_output=True,
+                            text=True,
+                            timeout=300
+                        )
+                        relaxed_path.unlink(missing_ok=True)
+                        if relax_result.returncode == 0:
+                            logger.info("[SERVICE] ✓ Dependencies installed via relaxed pins")
+                        else:
+                            logger.error(f"[SERVICE] Relaxed install also failed: {relax_result.stderr[:500]}")
+                            return False
+                    except Exception as relax_err:
+                        logger.error(f"[SERVICE] Relaxed-pin retry error: {relax_err}")
+                        return False
             else:
                 logger.warning(f"[SERVICE] No requirements.txt found at {requirements_path}")
             
