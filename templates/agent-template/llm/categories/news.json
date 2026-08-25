@@ -1,0 +1,53 @@
+{
+  "category": "news",
+  "name": "News",
+  "description": "News aggregation and story discovery",
+  "prefix": "/news",
+  "apis": [
+    {
+      "id": "hackernews",
+      "name": "HackerNews",
+      "base_url": "https://hacker-news.firebaseio.com/v0",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/news/hackernews/top",
+          "method": "GET",
+          "summary": "Get top stories",
+          "direct_url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+          "parameters": [
+            {"name": "limit", "type": "query", "default": 30, "description": "Number of stories"}
+          ],
+          "sample_request": "https://hacker-news.firebaseio.com/v0/topstories.json",
+          "sample_response": [12345678, 12345679, 12345680, 12345681, 12345682]
+        },
+        {
+          "path": "/news/hackernews/item/{item_id}",
+          "method": "GET",
+          "summary": "Get specific story details",
+          "direct_url": "https://hacker-news.firebaseio.com/v0/item/{item_id}.json",
+          "parameters": [
+            {"name": "item_id", "type": "path", "description": "Story ID"}
+          ],
+          "sample_request": "https://hacker-news.firebaseio.com/v0/item/12345678.json",
+          "sample_response": {
+            "by": "user123",
+            "id": 12345678,
+            "kids": [12345679, 12345680],
+            "score": 342,
+            "time": 1711843200,
+            "title": "Show HN: I built a tool for API exploration",
+            "type": "story",
+            "url": "https://github.com/example/api-explorer"
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Get trending tech stories",
+    "Find tech news",
+    "Follow discussions and comments",
+    "Discover new articles"
+  ]
+}

@@ -24,6 +24,26 @@ logger = logging.getLogger("integration_prompt_block")
 _EXCLUDE_KEYS = frozenset({"JWT_SECRET"})
 _EXCLUDE_PREFIXES = ("INTERNAL_", "SYSTEM_")
 
+# Composition hints for key-based integrations: what the agent can DO with
+# each key (titles/docs come from the env registry; this adds the verb layer
+# so automation agents can compose actions without extra lookups).
+_ENV_CAPABILITY_HINTS = {
+    "OPENAI_API_KEY": "run LLM calls (api.openai.com/v1/chat/completions) inside jobs",
+    "OPENROUTER_API_KEY": "route LLM calls across models (openrouter.ai/api/v1/chat/completions)",
+    "ANTHROPIC_API_KEY": "run Claude messages API",
+    "GEMINI_API_KEY": "run Gemini generateContent",
+    "GITHUB_TOKEN": "read/write repos, issues, PRs (api.github.com)",
+    "STRIPE_SECRET_KEY": "read payments, balance, customers",
+    "RAZORPAY_KEY_ID": "read payments/orders (needs RAZORPAY_KEY_SECRET too)",
+    "RESEND_API_KEY": "send email (POST api.resend.com/emails, Bearer key)",
+    "SLACK_WEBHOOK_URL": "post messages to the hooked Slack channel (JSON body)",
+    "COINGECKO_API_KEY": "crypto market data — prices, history (api.coingecko.com)",
+    "SERPER_API_KEY": "Google web search (google.serper.dev/search, POST JSON)",
+    "TELEGRAM_BOT_TOKEN": "send Telegram messages (api.telegram.org/bot<TOKEN>/sendMessage)",
+    "DISCORD_TOKEN": "Discord bot actions (REST as the bot)",
+    "DISCORD_WEBHOOK_URL": "post to a Discord channel (JSON body)",
+}
+
 
 def build_external_integrations_block(project_id: Optional[int]) -> str:
     """Return a markdown section listing the project's configured external
@@ -142,6 +162,8 @@ def _render_oauth_section(connected: list, pid_hint: str, who: str,
         if meta.get("docs"):
             bits.append(f"docs: {meta['docs']}")
         ref_lines.append(f"- **{title}**" + (f" ({', '.join(bits)})" if bits else ""))
+        for verb, hint in (extras.get("capabilities") or {}).items():
+            ref_lines.append(f"  - {verb}: {hint}")
         for ex in extras.get("examples") or []:
             ref_lines.append(f"  - `{ex}`")
         for gotcha in extras.get("gotchas") or []:
@@ -242,6 +264,9 @@ def _env_key_block(project_id: Optional[int]) -> str:
                 provider = key
                 desc = "Configured (no metadata registered)"
                 docs = "—"
+            cap = _ENV_CAPABILITY_HINTS.get(key)
+            if cap:
+                desc = f"{desc} — capabilities: {cap}"
             lines.append(f"| {provider} | `{key}` | {desc} | {docs} |")
 
         table = "\n".join(lines)

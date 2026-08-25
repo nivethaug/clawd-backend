@@ -31,23 +31,27 @@ CRITICAL_FILES = [
 ]
 
 
-def copy_scheduler_template(project_path: str) -> Tuple[bool, str]:
+def copy_scheduler_template(project_path: str, template_name: str = "scheduler-template") -> Tuple[bool, str]:
     """
-    Copy scheduler template to project directory.
+    Copy a scheduler-family template to the project directory.
 
-    Copies the contents of templates/scheduler-template/ directly into
+    Copies the contents of templates/{template_name}/ directly into
     {project_path}/ so that executor.py lands at {project_path}/scheduler/executor.py.
 
     Args:
         project_path: Base project path (e.g., /root/dreampilot/projects/scheduler/10_my-scheduler/)
+        template_name: "scheduler-template" (legacy type-5) or
+                       "agent-template" (automation agents — adds the
+                       capability layer: proxy_call, state, conditions).
 
     Returns:
         (True, project_path) on success
         (False, error_message) on failure
     """
+    source = TEMPLATE_SOURCE.parent / template_name
     # Validate source template exists
-    if not TEMPLATE_SOURCE.exists():
-        error_msg = f"Scheduler template not found at {TEMPLATE_SOURCE}"
+    if not source.exists():
+        error_msg = f"Template '{template_name}' not found at {source}"
         logger.error(f"❌ {error_msg}")
         return False, error_msg
 
@@ -55,7 +59,7 @@ def copy_scheduler_template(project_path: str) -> Tuple[bool, str]:
 
     # Copy each item from template into project root (avoids double-nesting)
     try:
-        for item in TEMPLATE_SOURCE.iterdir():
+        for item in source.iterdir():
             dest = target_path / item.name
             if item.is_dir():
                 if dest.exists():
@@ -64,7 +68,7 @@ def copy_scheduler_template(project_path: str) -> Tuple[bool, str]:
             else:
                 shutil.copy2(str(item), str(dest))
 
-        logger.info(f"✅ Scheduler template copied to {target_path}")
+        logger.info(f"✅ Template '{template_name}' copied to {target_path}")
     except Exception as e:
         error_msg = f"Failed to copy template: {e}"
         logger.error(f"❌ {error_msg}")
@@ -86,14 +90,15 @@ def copy_scheduler_template(project_path: str) -> Tuple[bool, str]:
     return True, str(target_path)
 
 
-def verify_template_structure() -> bool:
-    """Verify the scheduler template source exists and has all critical files."""
-    if not TEMPLATE_SOURCE.exists():
-        logger.error(f"Template source not found: {TEMPLATE_SOURCE}")
+def verify_template_structure(template_name: str = "scheduler-template") -> bool:
+    """Verify a template source exists and has all critical files."""
+    source = TEMPLATE_SOURCE.parent / template_name
+    if not source.exists():
+        logger.error(f"Template source not found: {source}")
         return False
 
     for file_path in CRITICAL_FILES:
-        full_path = TEMPLATE_SOURCE / file_path
+        full_path = source / file_path
         if not full_path.exists():
             logger.error(f"Missing template file: {full_path}")
             return False

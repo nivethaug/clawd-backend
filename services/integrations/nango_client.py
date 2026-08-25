@@ -94,6 +94,10 @@ ENABLED_PROVIDERS: Dict[str, Dict[str, Any]] = {
 # Keys here are our provider_config_keys (ENABLED_PROVIDERS).
 PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
     "youtube": {
+        "capabilities": {
+            "read": "channel profile+stats, latest videos, per-video statistics",
+            "post": "upload videos (resumable two-step)",
+        },
         "examples": [
             "GET youtube/v3/channels?part=snippet&mine=true",
             "GET youtube/v3/search?part=snippet&channelId={CHANNEL_ID}&order=date&maxResults=10",
@@ -110,6 +114,10 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
         ],
     },
     "github": {
+        "capabilities": {
+            "read": "own profile, repos, issues, pull requests, commits",
+            "create": "issues, comments, releases",
+        },
         "examples": [
             "GET user",
             "GET user/repos?per_page=100",
@@ -117,6 +125,9 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
         ],
     },
     "discord": {
+        "capabilities": {
+            "read": "own profile, servers (guilds) the user is in",
+        },
         "examples": ["GET users/@me", "GET users/@me/guilds"],
         "gotchas": [
             "User OAuth cannot read or send channel messages — that needs a "
@@ -124,6 +135,11 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
         ],
     },
     "notion": {
+        "capabilities": {
+            "read": "pages, databases (query with filters)",
+            "create": "pages (append blocks, database rows)",
+            "update": "page properties and content",
+        },
         "examples": [
             "GET v1/pages/{page_id}",
             "POST v1/databases/{database_id}/query",
@@ -132,6 +148,10 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
         "gotchas": ["Pagination cursor param is start_cursor (not page)."],
     },
     "twitter": {
+        "capabilities": {
+            "read": "own profile (public_metrics: followers/following/tweet_count)",
+            "post": "tweets and threads (~500/month free tier)",
+        },
         "examples": [
             "GET 2/users/me?user.fields=public_metrics",
             "POST 2/tweets",
@@ -145,6 +165,11 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
         ],
     },
     "google-sheet": {
+        "capabilities": {
+            "read": "ranges and full sheet metadata",
+            "append": "rows (values:append)",
+            "update": "cells/ranges (values:update PUT)",
+        },
         "examples": [
             "GET v4/spreadsheets/{sheet_id}/values/{range}",
             "PUT v4/spreadsheets/{sheet_id}/values/{range}?valueInputOption=RAW",
@@ -152,6 +177,10 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
         "gotchas": ["Range format is Sheet1!A1:D1; read the sheetId from the URL."],
     },
     "slack": {
+        "capabilities": {
+            "read": "channels (conversations.list), channel history",
+            "post": "messages (chat.postMessage as the app bot)",
+        },
         "examples": [
             "POST chat.postMessage",
             "GET conversations.list",

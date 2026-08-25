@@ -1,0 +1,238 @@
+{
+  "category": "ecommerce",
+  "name": "E-commerce & Products",
+  "description": "Product catalogs, categories, and e-commerce data",
+  "prefix": "/ecommerce",
+  "apis": [
+    {
+      "id": "fakestore",
+      "name": "Fake Store API",
+      "base_url": "https://fakestoreapi.com",
+      "auth_required": false,
+      "rate_limited": false,
+      "status": "DOWN",
+      "status_notes": "API is currently unreachable (523 error as of 2026-04-01). Use DummyJSON or Platzi API as alternatives.",
+      "endpoints": [
+        {
+          "path": "/ecommerce/products",
+          "method": "GET",
+          "summary": "Get all products",
+          "direct_url": "https://fakestoreapi.com/products",
+          "parameters": [
+            {"name": "limit", "type": "query", "required": false, "description": "Limit number of results (1-20)"}
+          ],
+          "sample_request": "https://fakestoreapi.com/products",
+          "sample_response": [
+            {
+              "id": 1,
+              "title": "Fjallraven - Foldsack No. 1 Backpack, Fits 15 Laptops",
+              "price": 109.95,
+              "description": "Your perfect pack for everyday use and walks in the forest.",
+              "category": "men's clothing",
+              "image": "https://fakestoreapi.com/img/81fPKd-2AYL._AC_SL1500_.jpg",
+              "rating": {
+                "rate": 3.9,
+                "count": 120
+              }
+            }
+          ]
+        },
+        {
+          "path": "/ecommerce/products/{product_id}",
+          "method": "GET",
+          "summary": "Get product by ID",
+          "direct_url": "https://fakestoreapi.com/products/{id}",
+          "parameters": [
+            {"name": "product_id", "type": "path", "required": true, "description": "Product ID"}
+          ],
+          "sample_request": "https://fakestoreapi.com/products/1",
+          "sample_response": {
+            "id": 1,
+            "title": "Fjallraven - Foldsack No. 1 Backpack, Fits 15 Laptops",
+            "price": 109.95,
+            "description": "Your perfect pack for everyday use and walks in the forest.",
+            "category": "men's clothing",
+            "image": "https://fakestoreapi.com/img/81fPKd-2AYL._AC_SL1500_.jpg",
+            "rating": {
+              "rate": 3.9,
+              "count": 120
+            }
+          }
+        },
+        {
+          "path": "/ecommerce/categories",
+          "method": "GET",
+          "summary": "Get all product categories",
+          "direct_url": "https://fakestoreapi.com/products/categories",
+          "sample_request": "https://fakestoreapi.com/products/categories",
+          "sample_response": [
+            "electronics",
+            "jewelery",
+            "men's clothing",
+            "women's clothing"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dummyjson",
+      "name": "DummyJSON",
+      "base_url": "https://dummyjson.com",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/ecommerce/dummy/products",
+          "method": "GET",
+          "summary": "Get products from DummyJSON",
+          "direct_url": "https://dummyjson.com/products",
+          "parameters": [
+            {"name": "limit", "type": "query", "default": 10, "description": "Number of results (1-100)"},
+            {"name": "skip", "type": "query", "default": 0, "description": "Number of results to skip"}
+          ],
+          "sample_request": "https://dummyjson.com/products?limit=10&skip=0",
+          "sample_response": {
+            "products": [
+              {
+                "id": 1,
+                "title": "iPhone 5s",
+                "description": "An apple mobile which nothing like apple",
+                "price": 549,
+                "discountPercentage": 12.96,
+                "rating": 4.69,
+                "stock": 94,
+                "brand": "Apple",
+                "category": "smartphones",
+                "thumbnail": "https://cdn.dummyjson.com/products/images/smartphones/iPhone%205s/thumbnail.png",
+                "images": [
+                  "https://cdn.dummyjson.com/products/images/smartphones/iPhone%205s/1.png"
+                ]
+              }
+            ],
+            "total": 100,
+            "skip": 0,
+            "limit": 10
+          }
+        }
+      ]
+    },
+    {
+      "id": "jsonplaceholder",
+      "name": "JSONPlaceholder",
+      "base_url": "https://jsonplaceholder.typicode.com",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/ecommerce/posts",
+          "method": "GET",
+          "summary": "Get posts from JSONPlaceholder",
+          "direct_url": "https://jsonplaceholder.typicode.com/posts",
+          "parameters": [
+            {"name": "limit", "type": "query", "default": 10, "description": "Number of results (1-100)"}
+          ],
+          "sample_request": "https://jsonplaceholder.typicode.com/posts?_limit=10",
+          "sample_response": [
+            {
+              "userId": 1,
+              "id": 1,
+              "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+              "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+            }
+          ]
+        },
+        {
+          "path": "/ecommerce/users",
+          "method": "GET",
+          "summary": "Get users from JSONPlaceholder",
+          "direct_url": "https://jsonplaceholder.typicode.com/users",
+          "parameters": [
+            {"name": "limit", "type": "query", "default": 10, "description": "Number of results (1-100)"}
+          ],
+          "sample_request": "https://jsonplaceholder.typicode.com/users?_limit=10",
+          "sample_response": [
+            {
+              "id": 1,
+              "name": "Leanne Graham",
+              "username": "Bret",
+              "email": "Sincere@april.biz",
+              "address": {
+                "street": "Kulas Light",
+                "suite": "Apt. 556",
+                "city": "Gwenborough",
+                "zipcode": "92998-3874",
+                "geo": {
+                  "lat": "-37.3159",
+                  "lng": "81.1496"
+                }
+              },
+              "phone": "1-770-736-8031 x56442",
+              "website": "hildegard.org",
+              "company": {
+                "name": "Romaguera-Crona",
+                "catchPhrase": "Multi-layered client-server neural-net",
+                "bs": "harness real-time e-markets"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "platzi",
+      "name": "Platzi Fake Store API",
+      "base_url": "https://api.escuelajs.co/api/v1",
+      "auth_required": false,
+      "rate_limited": false,
+      "status": "ACTIVE",
+      "status_notes": "Alternative to Fake Store API. Fully functional as of 2026-04-01.",
+      "endpoints": [
+        {
+          "path": "/ecommerce/platzi/products",
+          "method": "GET",
+          "summary": "Get all products from Platzi Fake Store",
+          "direct_url": "https://api.escuelajs.co/api/v1/products",
+          "parameters": [
+            {"name": "limit", "type": "query", "required": false, "description": "Limit number of results"},
+            {"name": "offset", "type": "query", "required": false, "description": "Number of results to skip"}
+          ],
+          "sample_request": "https://api.escuelajs.co/api/v1/products?limit=10&offset=0",
+          "sample_response": [            {
+              "id": 1,
+              "title": "Classic Red Jacket",
+              "price": 150,
+              "description": "A classic red jacket for all occasions",
+              "images": ["https://api.lorem.space/image/fashion?w=640&h=480&r=4198"],
+              "category": {
+                "id": 1,
+                "name": "Clothes",
+                "image": "https://api.lorem.space/image/fashion?w=640&h=480&r=4305"
+              }
+            }
+          ]
+        },
+        {
+          "path": "/ecommerce/platzi/categories",
+          "method": "GET",
+          "summary": "Get all product categories",
+          "direct_url": "https://api.escuelajs.co/api/v1/categories",
+          "sample_request": "https://api.escuelajs.co/api/v1/categories",
+          "sample_response": [
+            {
+              "id": 1,
+              "name": "Clothes",
+              "image": "https://api.lorem.space/image/fashion?w=640&h=480&r=4305"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Browse product catalogs",
+    "Get product details and categories",
+    "Retrieve e-commerce data",
+    "Test e-commerce applications",
+    "Generate mock product data"
+  ]
+}

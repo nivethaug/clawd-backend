@@ -1,0 +1,173 @@
+{
+  "category": "utilities",
+  "name": "Utilities & Tools",
+  "description": "Utility functions like QR codes, color info, hashing, UUIDs, timestamps",
+  "prefix": "/utilities",
+  "apis": [
+    {
+      "id": "qrserver",
+      "name": "QR Server",
+      "base_url": "https://api.qrserver.com/v1",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/utilities/qr/generate",
+          "method": "GET",
+          "summary": "Generate QR code",
+          "direct_url": "https://api.qrserver.com/v1/create-qr-code/",
+          "parameters": [
+            {"name": "text", "type": "query", "required": true, "description": "Text to encode"},
+            {"name": "size", "type": "query", "default": 150, "description": "QR code size in pixels"}
+          ],
+          "sample_request": "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=HelloWorld",
+          "sample_response": "Returns QR code image binary data",
+          "note": "This endpoint returns QR code image, not JSON"
+        }
+      ]
+    },
+    {
+      "id": "thecolorapi",
+      "name": "TheColorAPI",
+      "base_url": "https://www.thecolorapi.com",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/utilities/color/info",
+          "method": "GET",
+          "summary": "Get color information",
+          "direct_url": "https://www.thecolorapi.com/id",
+          "parameters": [
+            {"name": "hex_color", "type": "query", "required": true, "description": "Hex color code"}
+          ],
+          "sample_request": "https://www.thecolorapi.com/id?hex=24B1E0",
+          "sample_response": {
+            "hex": {
+              "value": "#24B1E0",
+              "clean": "24B1E0"
+            },
+            "rgb": {
+              "fraction": {
+                "r": 0.141176,
+                "g": 0.694118,
+                "b": 0.878431
+              },
+              "r": 36,
+              "g": 177,
+              "b": 224,
+              "value": "rgb(36, 177, 224)"
+            },
+            "hsl": {
+              "fraction": {
+                "h": 0.538,
+                "s": 0.757,
+                "l": 0.51
+              },
+              "h": 193,
+              "s": 76,
+              "l": 51,
+              "value": "hsl(193, 76%, 51%)"
+            },
+            "name": {
+              "value": "Summer Sky",
+              "closest_named_hex": "#1AB4FF",
+              "exact_match_name": false,
+              "distance": 125
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "uuidtools",
+      "name": "UUID Tools",
+      "base_url": "https://www.uuidtools.com/api",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/utilities/uuid/generate",
+          "method": "GET",
+          "summary": "Generate UUIDs",
+          "direct_url": "https://www.uuidtools.com/api/generate/v1/count/3",
+          "parameters": [
+            {"name": "count", "type": "path", "default": 1, "description": "Number of UUIDs to generate"}
+          ],
+          "sample_request": "https://www.uuidtools.com/api/generate/v1/count/3",
+          "sample_response": {
+            "uuids": [
+              "550e8400-e29b-41d4-a716-446655440000",
+              "7b1d4e29-41d4-a716-550e8400446",
+              "a716-4466-5544-0055-0e8400e29b41"
+            ],
+            "count": 3,
+            "version": 4
+          }
+        }
+      ]
+    },
+    {
+      "id": "ipify",
+      "name": "IPify",
+      "base_url": "https://api.ipify.org",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/utilities/ip",
+          "method": "GET",
+          "summary": "Get public IP address",
+          "direct_url": "https://api.ipify.org?format=json",
+          "parameters": [
+            {"name": "format", "type": "query", "default": "json", "description": "Response format (json, text, jsonp)"}
+          ],
+          "sample_request": "https://api.ipify.org?format=json",
+          "sample_response": {
+            "ip": "8.8.8.8"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sunrisesunset",
+      "name": "Sunrise and Sunset API",
+      "base_url": "https://api.sunrisesunset.io",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/utilities/times",
+          "method": "GET",
+          "summary": "Get sunrise and sunset times",
+          "direct_url": "https://api.sunrisesunset.io/json",
+          "parameters": [
+            {"name": "lat", "type": "query", "required": true, "description": "Latitude"},
+            {"name": "lng", "type": "query", "required": true, "description": "Longitude"},
+            {"name": "date", "type": "query", "required": false, "description": "Date (default: today)"}
+          ],
+          "sample_request": "https://api.sunrisesunset.io/json?lat=36.7201600&lng=-4.4203400&date=today",
+          "sample_response": {
+            "results": {
+              "sunrise": "6:36:17 AM",
+              "sunset": "8:11:58 PM",
+              "solar_noon": "1:24:08 PM",
+              "day_length": "13:35:41",
+              "civil_twilight_begin": "6:06:28 AM",
+              "civil_twilight_end": "8:41:47 PM",
+              "nautical_twilight_begin": "5:30:53 AM",
+              "nautical_twilight_end": "9:17:22 PM",
+              "astronomical_twilight_begin": "4:53:19 AM",
+              "astronomical_twilight_end": "9:54:56 PM"
+            },
+            "status": "OK"
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Generate QR codes",
+    "Get color information",
+    "Generate unique identifiers",
+    "Get public IP address",
+    "Get sunrise and sunset times"
+  ]
+}

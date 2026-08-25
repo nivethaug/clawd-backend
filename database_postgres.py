@@ -336,6 +336,9 @@ def init_schema():
                 ('tradingbot', 'Trading Bot', 'templates/trading_bot.md'),
                 ('scheduler', 'Scheduler', 'templates/scheduler.md'),
                 ('custom', 'Custom', 'templates/custom.md'),
+                # Agent = the evolution of Scheduler (new slug; type-5 keeps
+                # running untouched for existing projects).
+                ('agent', 'Agent', 'templates/agent.md'),
             ]
             
             for type_slug, display_name, template_path in default_types:
@@ -848,7 +851,17 @@ def init_schema():
             """)
             conn.commit()
 
-            logger.info("✓ Added scheduler_jobs and scheduler_logs tables")
+            # Scheduler/Agent per-project state — small JSONB blob persisted
+            # between runs ("only alert when changed" workflows). One row per
+            # project; 64KB enforced at the API layer.
+            cur.execute("""CREATE TABLE IF NOT EXISTS scheduler_state (
+                project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+                state JSONB DEFAULT '{}',
+                updated_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+
+            logger.info("✓ Added scheduler_jobs, scheduler_logs and scheduler_state tables")
 
             # Token Usage table — tracks AI token consumption per user/project
             cur.execute("""CREATE TABLE IF NOT EXISTS token_usage (

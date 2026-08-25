@@ -1869,6 +1869,17 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                     detail=f"Invalid type_id: {request.type_id}. Project type does not exist."
                 )
 
+    # Slug for the resolved type (dispatch key for slug-keyed branches like
+    # 'agent' — ids are SERIAL, never hardcode them).
+    type_slug = ""
+    if type_id is not None:
+        with get_db() as conn:
+            _trow = conn.execute(
+                "SELECT type FROM project_types WHERE id = ?", (type_id,)
+            ).fetchone()
+        if _trow:
+            type_slug = (_trow["type"] if isinstance(_trow, dict) else _trow[0]) or ""
+
     # If type_id is None (not provided), default to Website
     if type_id is None:
         with get_db() as conn:
@@ -2494,6 +2505,65 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                 conn.commit()
             raise HTTPException(status_code=500, detail=error_msg)
 
+    elif type_slug == "agent":
+        # Automation agent — scheduler-family pipeline with the capability
+        # layer (proxy actions, conditions, state). backend_url=None so
+        # env_injector's public default wins (localhost is unreachable from
+        # the worker-VPS containers).
+        logger.info(f"[PROJECT_TYPE] Entering AGENT branch (type_id={type_id})")
+
+        try:
+            from services.agent import run_agent_pipeline
+            import threading
+
+            def run_agent_worker():
+                try:
+                    success, result_info = run_agent_pipeline(
+                        project_id=project_id,
+                        project_name=request.name,
+                        description=description_for_worker,
+                        project_path=project_folder_path,
+                        backend_url=None,
+                        telegram_bot_token=request.telegram_bot_token,
+                        telegram_chat_id=request.telegram_chat_id,
+                        discord_webhook_url=request.discord_webhook_url,
+                        email_to=request.email_to,
+                        api_endpoint=request.api_endpoint,
+                        initial_environment_variables=initial_environment_variables,
+                    )
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE projects SET status = ? WHERE id = ?",
+                            ("ready" if success else "failed", project_id)
+                        )
+                        conn.commit()
+                    if not success:
+                        logger.error(
+                            "❌ Agent pipeline failed for project %s: %s",
+                            project_id, result_info.get("errors", [])
+                        )
+                except Exception as e:
+                    logger.error("❌ Agent worker error: %s", e, exc_info=True)
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE projects SET status = ? WHERE id = ?",
+                            ("failed", project_id)
+                        )
+                        conn.commit()
+
+            threading.Thread(target=run_agent_worker, daemon=True).start()
+            logger.info(f"✅ Agent worker started for project {project_id}")
+
+        except ImportError as e:
+            logger.error(f"❌ [AGENT] ImportError: {e}", exc_info=True)
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE projects SET status = ? WHERE id = ?",
+                    ("failed", project_id)
+                )
+                conn.commit()
+            raise HTTPException(status_code=500, detail=f"Failed to import agent services: {e}")
+
     elif type_id == 5:
         # Scheduler project - trigger scheduler worker
         logger.info(f"[PROJECT_TYPE] Entering SCHEDULER branch (type_id=5)")
@@ -2976,6 +3046,23 @@ def _set_clone_status(project_id: int, status: str, message: str = "") -> None:
         logger.warning(f"[CLONE] failed to set status={status} for project={project_id}: {exc}")
 
 
+def _scheduler_family_type_ids() -> set:
+    """Type ids that use the scheduler clone path: type-5 (scheduler) plus
+    the 'agent' slug (id resolved at runtime — never hardcoded)."""
+    ids = {5}
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id FROM project_types WHERE type = 'agent'"
+            ).fetchone()
+        if row:
+            d = dict(row) if not isinstance(row, dict) else row
+            ids.add(int(d["id"]))
+    except Exception:
+        pass
+    return ids
+
+
 def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
                   source_path: str, clone_path: str, template_id: Optional[str],
                   description: Optional[str], source_domain: str = "",
@@ -3184,10 +3271,10 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 conn.commit()
             logger.info(f"[CLONE] {bot_type_label} bot clone ready for project {project_id}")
 
-        elif source_type_id == 5:
-            # Scheduler clone
+        elif source_type_id in _scheduler_family_type_ids():
+            # Scheduler / agent clone (same layout: scheduler/executor.py)
             _set_clone_status(project_id, "deploying", f"Provisioning scheduler")
-            logger.info(f"[CLONE] Provisioning scheduler for project {project_id}")
+            logger.info(f"[CLONE] Provisioning scheduler-family for project {project_id}")
 
             # Copy scheduler-specific subdirectory from source if it exists
             sched_subdir = os.path.join(source_path, "scheduler")

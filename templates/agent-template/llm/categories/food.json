@@ -1,0 +1,148 @@
+{
+  "category": "food",
+  "name": "Food & Beverage",
+  "description": "Recipes, meals, cocktails, and brewery information",
+  "prefix": "/food",
+  "apis": [
+    {
+      "id": "themealdb",
+      "name": "TheMealDB",
+      "base_url": "https://www.themealdb.com/api/json/v1",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/food/meals/search",
+          "method": "GET",
+          "summary": "Search meals by ingredient",
+          "direct_url": "https://www.themealdb.com/api/json/v1/1/filter.php",
+          "parameters": [
+            {"name": "ingredient", "type": "query", "required": true, "description": "Main ingredient"}
+          ],
+          "sample_request": "https://www.themealdb.com/api/json/v1/1/filter.php?i=chicken",
+          "sample_response": {
+            "meals": [
+              {
+                "idMeal": "52795",
+                "strMeal": "Chicken Handi",
+                "strMealThumb": "https://www.themealdb.com/images/media/meals/wyxwsp1486979827.jpg",
+                "strInstructions": "Heat the oil in a large pot...",
+                "strIngredient1": "Chicken",
+                "strIngredient2": "Onion",
+                "strMeasure1": "1 kg",
+                "strMeasure2": "2 chopped"
+              }
+            ]
+          }
+        },
+        {
+          "path": "/food/meals/random",
+          "method": "GET",
+          "summary": "Get random meal",
+          "direct_url": "https://www.themealdb.com/api/json/v1/1/random.php",
+          "sample_request": "https://www.themealdb.com/api/json/v1/1/random.php",
+          "sample_response": {
+            "meals": [
+              {
+                "idMeal": "53049",
+                "strMeal": "Apam balik",
+                "strCategory": "Dessert",
+                "strArea": "Malaysian",
+                "strInstructions": "Mix milk, oil and eggs...",
+                "strMealThumb": "https://www.themealdb.com/images/media/meals/adxcbq1619787919.jpg",
+                "strYoutube": "https://www.youtube.com/watch?v=6R8ffRRJcrg"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "thecocktaildb",
+      "name": "TheCocktailDB",
+      "base_url": "https://www.thecocktaildb.com/api/json/v1",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/food/cocktails/search",
+          "method": "GET",
+          "summary": "Search cocktails by ingredient",
+          "direct_url": "https://www.thecocktaildb.com/api/json/v1/1/filter.php",
+          "parameters": [
+            {"name": "ingredient", "type": "query", "required": true, "description": "Ingredient name"}
+          ],
+          "sample_request": "https://www.thecocktaildb.com/api/json/v1/1/filter.php?i=Vodka",
+          "sample_response": {
+            "drinks": [
+              {
+                "strDrink": "155 Belmont",
+                "strDrinkThumb": "https://www.thecocktaildb.com/images/media/drink/yqvvqs1475667388.jpg",
+                "idDrink": "15346"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "openbrewerydb",
+      "name": "Open Brewery DB",
+      "base_url": "https://api.openbrewerydb.org/breweries",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/food/breweries/list",
+          "method": "GET",
+          "summary": "List breweries",
+          "direct_url": "https://api.openbrewerydb.org/breweries",
+          "parameters": [
+            {"name": "by_city", "type": "query", "required": false, "description": "Filter by city"},
+            {"name": "by_state", "type": "query", "required": false, "description": "Filter by state"},
+            {"name": "per_page", "type": "query", "default": 20, "description": "Results per page"}
+          ],
+          "sample_request": "https://api.openbrewerydb.org/v1/breweries?by_city=portland&per_page=3",
+          "sample_response": [
+            {
+              "id": 5494,
+              "name": "Doggie Style Brewing",
+              "brewery_type": "micro",
+              "street": "4014 Myrtle Ave",
+              "city": "Baltimore",
+              "state": "Maryland",
+              "postal_code": "21207-3223",
+              "country": "United States",
+              "longitude": "-76.680006",
+              "latitude": "39.329188",
+              "phone": "4438372848",
+              "website_url": "http://www.doggiestylebrew.com",
+              "updated_at": "2021-10-23T02:24:55.243Z"
+            }
+          ]
+        },
+        {
+          "path": "/food/breweries/random",
+          "method": "GET",
+          "summary": "Get random brewery",
+          "direct_url": "https://api.openbrewerydb.org/v1/breweries/random",
+          "sample_request": "https://api.openbrewerydb.org/v1/breweries/random",
+          "sample_response": [
+            {
+              "id": 1234,
+              "name": "Random Brewing Co",
+              "brewery_type": "regional",
+              "city": "Portland",
+              "state": "Oregon"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Find recipes and meal ideas",
+    "Search by ingredients",
+    "Get cooking instructions",
+    "Find cocktail recipes",
+    "Locate breweries",
+    "Food and beverage discovery"
+  ]
+}

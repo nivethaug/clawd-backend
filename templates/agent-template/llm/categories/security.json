@@ -1,0 +1,279 @@
+{
+  "category": "security",
+  "name": "Security & Threat Intelligence",
+  "description": "Cybersecurity data, vulnerability information, and threat intelligence",
+  "prefix": "/security",
+  "apis": [
+    {
+      "id": "ukpolice",
+      "name": "UK Police Data",
+      "base_url": "https://data.police.uk/api",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/security/police/forces",
+          "method": "GET",
+          "summary": "Get UK police forces list",
+          "direct_url": "https://data.police.uk/api/forces",
+          "sample_request": "https://data.police.uk/api/forces",
+          "sample_response": [
+            {
+              "id": "avon-and-somerset",
+              "name": "Avon and Somerset Constabulary"
+            },
+            {
+              "id": "bedfordshire",
+              "name": "Bedfordshire Police"
+            },
+            {
+              "id": "cambridgeshire",
+              "name": "Cambridgeshire Constabulary"
+            }
+          ]
+        },
+        {
+          "path": "/security/police/force/{force_id}",
+          "method": "GET",
+          "summary": "Get police force details",
+          "direct_url": "https://data.police.uk/api/forces/{force_id}",
+          "parameters": [
+            {"name": "force_id", "type": "path", "required": true, "description": "Force ID (e.g., 'metropolitan')"}
+          ],
+          "sample_request": "https://data.police.uk/api/forces/metropolitan",
+          "sample_response": {
+            "id": "metropolitan",
+            "name": "Metropolitan Police Service",
+            "url": "https://www.met.police.uk/",
+            "description": "The Metropolitan Police Service covers London area",
+            "engagement_methods": [
+              {
+                "url": "https://www.met.police.uk/",
+                "title": "Metropolitan Police Service website",
+                "description": "Visit the Metropolitan Police Service website"
+              }
+            ],
+            "telephone": "101",
+            "id": "metropolitan"
+          }
+        }
+      ]
+    },
+    {
+      "id": "shodan",
+      "name": "Shodan Internet Intelligence",
+      "base_url": "https://api.shodan.io",
+      "auth_required": true,
+      "rate_limited": true,
+      "endpoints": [
+        {
+          "path": "/security/shodan/host",
+          "method": "GET",
+          "summary": "Get host information (Requires API Key)",
+          "direct_url": "https://api.shodan.io/shodan/host/{ip}",
+          "parameters": [
+            {"name": "ip", "type": "path", "required": true, "description": "IP address or hostname"}
+          ],
+          "sample_request": "https://api.shodan.io/shodan/host/8.8.8.8?key=YOUR_API_KEY",
+          "sample_response": {
+            "ip_str": "8.8.8.8",
+            "country_code": "US",
+            "country_name": "United States",
+            "city": "Mountain View",
+            "org": "Google LLC",
+            "isp": "Google LLC",
+            "asn": "15169",
+            "ports": [53, 80, 443],
+            "vulns": ["CVE-2015-0235"],
+            "os": "Linux 3.x",
+            "hostnames": ["dns.google"],
+            "data": [
+              {
+                "port": 443,
+                "transport": "tcp",
+                "protocol": "https"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "nvd",
+      "name": "National Vulnerability Database (NVD)",
+      "base_url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+      "auth_required": false,
+      "rate_limited": true,
+      "endpoints": [
+        {
+          "path": "/security/nvd/cves",
+          "method": "GET",
+          "summary": "Search CVE vulnerabilities from NVD",
+          "direct_url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+          "parameters": [
+            {"name": "keyword", "type": "query", "required": false, "description": "Keyword search"},
+            {"name": "results_per_page", "type": "query", "default": 10, "description": "Results per page (1-100)"}
+          ],
+          "sample_request": "https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=log4j&resultsPerPage=10",
+          "sample_response": {
+            "resultsPerPage": 10,
+            "startIndex": 0,
+            "totalResults": 150,
+            "format": "NVD_CVE",
+            "version": "2.0",
+            "timestamp": "2025-03-31T12:00:00.000Z",
+            "vulnerabilities": [
+              {
+                "cve": {
+                  "id": "CVE-2021-44228",
+                  "sourceIdentifier": "security@apache.org",
+                  "published": "2021-12-10T00:00:00Z",
+                  "lastModified": "2025-03-31T12:00:00Z",
+                  "vulnStatus": "Analyzed",
+                  "descriptions": [
+                    {
+                      "lang": "en",
+                      "value": "Apache Log4j2 2.0-beta9 through 2.15.0 (excluding security releases) JNDI features..."
+                    }
+                  ],
+                  "metrics": {
+                    "cvssMetricV31": [
+                      {
+                        "cvssData": {
+                          "version": "3.1",
+                          "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+                          "baseScore": 10.0,
+                          "baseSeverity": "CRITICAL"
+                        },
+                        "exploitabilityScore": 3.9,
+                        "impactScore": 6.0
+                      }
+                    ]
+                  },
+                  "weaknesses": [
+                    {
+                      "source": "nvd@nist.gov",
+                      "type": "Primary",
+                      "description": [
+                        {
+                          "lang": "en",
+                          "value": "CWE-502"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "path": "/security/nvd/cves/{cve_id}",
+          "method": "GET",
+          "summary": "Get specific CVE details",
+          "direct_url": "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}",
+          "parameters": [
+            {"name": "cve_id", "type": "path", "required": true, "description": "CVE ID (e.g., 'CVE-2021-44228')"}
+          ],
+          "sample_request": "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2021-44228",
+          "sample_response": {
+            "resultsPerPage": 1,
+            "startIndex": 0,
+            "totalResults": 1,
+            "format": "NVD_CVE",
+            "version": "2.0",
+            "timestamp": "2025-03-31T12:00:00.000Z",
+            "vulnerabilities": [
+              {
+                "cve": {
+                  "id": "CVE-2021-44228",
+                  "sourceIdentifier": "security@apache.org",
+                  "published": "2021-12-10T00:00:00Z",
+                  "lastModified": "2025-03-31T12:00:00Z",
+                  "vulnStatus": "Analyzed",
+                  "descriptions": [
+                    {
+                      "lang": "en",
+                      "value": "Apache Log4j2 2.0-beta9 through 2.15.0 JNDI features..."
+                    }
+                  ],
+                  "metrics": {
+                    "cvssMetricV31": [
+                      {
+                        "cvssData": {
+                          "version": "3.1",
+                          "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+                          "baseScore": 10.0,
+                          "baseSeverity": "CRITICAL"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "httpbin",
+      "name": "HTTPBin",
+      "base_url": "https://httpbin.org",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/security/http/get",
+          "method": "GET",
+          "summary": "Inspect HTTP request data (user agent, headers, etc)",
+          "direct_url": "https://httpbin.org/get",
+          "parameters": [
+            {"name": "show_headers", "type": "query", "required": false, "description": "Show response headers"}
+          ],
+          "sample_request": "https://httpbin.org/get",
+          "sample_response": {
+            "args": {},
+            "headers": {
+              "Accept": "application/json",
+              "Host": "httpbin.org",
+              "User-Agent": "Mozilla/5.0"
+            },
+            "origin": "1.2.3.4",
+            "url": "https://httpbin.org/get"
+          }
+        },
+        {
+          "path": "/security/http/ip",
+          "method": "GET",
+          "summary": "Get client IP address",
+          "direct_url": "https://httpbin.org/ip",
+          "sample_request": "https://httpbin.org/ip",
+          "sample_response": {
+            "origin": "1.2.3.4"
+          }
+        },
+        {
+          "path": "/security/http/user-agent",
+          "method": "GET",
+          "summary": "Get client user agent",
+          "direct_url": "https://httpbin.org/user-agent",
+          "sample_request": "https://httpbin.org/user-agent",
+          "sample_response": {
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Query UK police force information",
+    "Get crime statistics by location",
+    "Inspect HTTP request data and headers",
+    "Get client IP address and user agent",
+    "Search CVE vulnerabilities",
+    "Get detailed vulnerability information",
+    "Threat intelligence research",
+    "Security auditing and compliance"
+  ]
+}

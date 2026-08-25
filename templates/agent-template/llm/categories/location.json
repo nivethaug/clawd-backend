@@ -1,0 +1,174 @@
+{
+  "category": "location",
+  "name": "Maps & Location",
+  "description": "Geolocation, geocoding, and geographic data",
+  "prefix": "/location",
+  "apis": [
+    {
+      "id": "rest_countries",
+      "name": "REST Countries",
+      "base_url": "https://restcountries.com/v3.1",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/location/countries",
+          "method": "GET",
+          "summary": "List all countries",
+          "direct_url": "https://restcountries.com/v3.1/all",
+          "parameters": [
+            {"name": "name", "type": "query", "description": "Filter by country name"},
+            {"name": "region", "type": "query", "description": "Filter by region"}
+          ],
+          "sample_request": "https://restcountries.com/v3.1/name/united",
+          "sample_response": [
+            {
+              "name": {
+                "common": "United States",
+                "official": "United States of America",
+                "nativeName": {
+                  "eng": {
+                    "official": "United States of America",
+                    "common": "United States"
+                  }
+                }
+              },
+              "tld": [".us"],
+              "cca2": "US",
+              "ccn3": "840",
+              "cca3": "USA",
+              "cioc": "USA",
+              "independent": true,
+              "status": "officially-assigned",
+              "unMember": true,
+              "currencies": {
+                "USD": {
+                  "name": "United States dollar",
+                  "symbol": "$"
+                }
+              },
+              "capital": ["Washington, D.C."],
+              "region": "Americas",
+              "subregion": "North America",
+              "population": 331002651,
+              "area": 9833520.0,
+              "latlng": [38.0, -97.0],
+              "flag": "🇺🇸"
+            }
+          ]
+        },
+        {
+          "path": "/location/countries/{code}",
+          "method": "GET",
+          "summary": "Get country by code",
+          "direct_url": "https://restcountries.com/v3.1/alpha/{code}",
+          "parameters": [
+            {"name": "code", "type": "path", "description": "Country code (ISO 3166-1)"}
+          ],
+          "sample_request": "https://restcountries.com/v3.1/alpha/US",
+          "sample_response": {
+            "name": {"common": "United States", "official": "United States of America"},
+            "capital": ["Washington, D.C."],
+            "region": "Americas",
+            "population": 331002651
+          }
+        }
+      ]
+    },
+    {
+      "id": "ipapi_co",
+      "name": "IPAPI.co",
+      "base_url": "https://ipapi.co",
+      "auth_required": false,
+      "rate_limited": true,
+      "endpoints": [
+        {
+          "path": "/location/ip",
+          "method": "GET",
+          "summary": "Get IP geolocation (JSON format)",
+          "direct_url": "https://ipapi.co/json/",
+          "parameters": [
+            {"name": "ip", "type": "query", "description": "IP address (optional, uses your IP if not provided)"}
+          ],
+          "sample_request": "https://ipapi.co/json/?ip=8.8.8.8",
+          "sample_response": {
+            "ip": "8.8.8.8",
+            "city": "Mountain View",
+            "region": "California",
+            "country_code": "US",
+            "country_name": "United States",
+            "latitude": 37.386,
+            "longitude": -122.0838,
+            "postal": "94035",
+            "timezone": "America/Los_Angeles",
+            "asn": "AS15169",
+            "org": "Google LLC"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ipinfo_io",
+      "name": "IPinfo.io",
+      "base_url": "https://ipinfo.io",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/location/ip/geo",
+          "method": "GET",
+          "summary": "Get detailed IP geolocation",
+          "direct_url": "https://ipinfo.io/8.8.8.8/json",
+          "parameters": [
+            {"name": "ip", "type": "path", "description": "IP address"}
+          ],
+          "sample_request": "https://ipinfo.io/8.8.8.8/json",
+          "sample_response": {
+            "ip": "8.8.8.8",
+            "hostname": "dns.google",
+            "anycast": false,
+            "city": "Mountain View",
+            "region": "California",
+            "country": "United States",
+            "loc": "37.41920,-122.05740",
+            "org": "Google LLC",
+            "postal": "94043",
+            "timezone": "America/Los_Angeles",
+            "asn": {
+              "asn": "AS15169",
+              "route": "8.8.8.0/24",
+              "type": "Business",
+              "domain": "google.com",
+              "name": "Google LLC"
+            },
+            "company": {
+              "name": "Google LLC",
+              "domain": "google.com",
+              "type": "Business"
+            },
+            "privacy": {
+              "vpn": false,
+              "proxy": false,
+              "tor": false,
+              "hosting": false,
+              "service": false
+            },
+            "abuse": {
+              "address": "Google Inc., 1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA",
+              "country": "US",
+              "email": "network-abuse@google.com",
+              "name": "Google Inc.",
+              "phone": "+1-650-2530000"
+            },
+            "countryCode": "US"
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Get country information",
+    "Lookup coordinates to addresses",
+    "Get geolocation from IP",
+    "Find user location",
+    "Geographic filtering"
+  ]
+}

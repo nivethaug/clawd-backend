@@ -1,0 +1,384 @@
+{
+  "symbols": {
+    "execute_task": {
+      "type": "function",
+      "file": "scheduler/executor.py",
+      "start_line": 140,
+      "end_line": 189,
+      "module": "scheduler",
+      "description": "execute_task(job) - Main entry point called by central execution engine. Resolves dynamic content, routes to task handler by task_type. Returns {status, message}."
+    },
+    "resolve_content": {
+      "type": "function",
+      "file": "scheduler/executor.py",
+      "start_line": 81,
+      "end_line": 120,
+      "module": "scheduler",
+      "description": "resolve_content(payload) - Fetches live data via FETCH_DATA_REGISTRY and replaces {{variable}} templates in all string fields."
+    },
+    "FETCH_DATA_REGISTRY": {
+      "type": "registry",
+      "file": "scheduler/executor.py",
+      "start_line": 49,
+      "end_line": 54,
+      "module": "scheduler",
+      "description": "FETCH_DATA_REGISTRY - Maps variable names (btc_price, eth_price, weather, news) to fetch functions. AI adds new entries here."
+    },
+    "_deep_replace": {
+      "type": "function",
+      "file": "scheduler/executor.py",
+      "start_line": 123,
+      "end_line": 133,
+      "module": "scheduler",
+      "description": "_deep_replace(obj, resolved) - Recursively replaces {{key}} in all string/dict/list values."
+    },
+    "_send_telegram": {
+      "type": "handler",
+      "file": "scheduler/executor.py",
+      "start_line": 196,
+      "end_line": 214,
+      "module": "scheduler",
+      "description": "_send_telegram(payload) - Send message via Telegram Bot API sendMessage. Requires TELEGRAM_BOT_TOKEN and chat_id in payload."
+    },
+    "_send_discord": {
+      "type": "handler",
+      "file": "scheduler/executor.py",
+      "start_line": 217,
+      "end_line": 230,
+      "module": "scheduler",
+      "description": "_send_discord(payload) - Send message via Discord webhook. Requires webhook_url in payload."
+    },
+    "_send_email": {
+      "type": "handler",
+      "file": "scheduler/executor.py",
+      "start_line": 233,
+      "end_line": 256,
+      "module": "scheduler",
+      "description": "_send_email(payload) - Send email via SMTP. Requires SMTP_* in .env and 'to' in payload."
+    },
+    "_call_api": {
+      "type": "handler",
+      "file": "scheduler/executor.py",
+      "start_line": 259,
+      "end_line": 279,
+      "module": "scheduler",
+      "description": "_call_api(payload) - HTTP request to any URL. Method, headers, body from payload."
+    },
+    "_execute_trade": {
+      "type": "handler",
+      "file": "scheduler/executor.py",
+      "start_line": 282,
+      "end_line": 290,
+      "module": "scheduler",
+      "description": "_execute_trade(payload) - Paper trade placeholder (safe, no real execution)."
+    },
+    "_fetch_crypto": {
+      "type": "function",
+      "file": "scheduler/executor.py",
+      "start_line": 57,
+      "end_line": 62,
+      "module": "scheduler",
+      "description": "_fetch_crypto(coin) - Fetches crypto price via api_client.get_crypto_price(), returns formatted string."
+    },
+    "_fetch_weather": {
+      "type": "function",
+      "file": "scheduler/executor.py",
+      "start_line": 65,
+      "end_line": 70,
+      "module": "scheduler",
+      "description": "_fetch_weather() - Fetches weather via api_client.get_weather(), returns formatted string."
+    },
+    "_fetch_news": {
+      "type": "function",
+      "file": "scheduler/executor.py",
+      "start_line": 73,
+      "end_line": 78,
+      "module": "scheduler",
+      "description": "_fetch_news() - Fetches top stories via api_client.get_news(), returns pipe-separated titles."
+    },
+    "job_manager.create": {
+      "type": "function",
+      "file": "scheduler/job_manager.py",
+      "start_line": 46,
+      "end_line": 64,
+      "module": "scheduler",
+      "description": "job_manager.create(job_type, schedule_value, task_type, payload) - Create new job via POST /api/scheduler/projects/{id}/jobs"
+    },
+    "job_manager.list_jobs": {
+      "type": "function",
+      "file": "scheduler/job_manager.py",
+      "start_line": 67,
+      "end_line": 69,
+      "module": "scheduler",
+      "description": "job_manager.list_jobs() - List all jobs for this project via GET /api/scheduler/projects/{id}/jobs"
+    },
+    "job_manager.pause": {
+      "type": "function",
+      "file": "scheduler/job_manager.py",
+      "start_line": 93,
+      "end_line": 95,
+      "module": "scheduler",
+      "description": "job_manager.pause(job_id) - Pause an active job via POST /api/scheduler/jobs/{id}/pause"
+    },
+    "job_manager.resume": {
+      "type": "function",
+      "file": "scheduler/job_manager.py",
+      "start_line": 98,
+      "end_line": 100,
+      "module": "scheduler",
+      "description": "job_manager.resume(job_id) - Resume a paused job via POST /api/scheduler/jobs/{id}/resume"
+    },
+    "job_manager.run_now": {
+      "type": "function",
+      "file": "scheduler/job_manager.py",
+      "start_line": 103,
+      "end_line": 105,
+      "module": "scheduler",
+      "description": "job_manager.run_now(job_id) - Trigger job immediately via POST /api/scheduler/jobs/{id}/run"
+    },
+    "job_manager.get_logs": {
+      "type": "function",
+      "file": "scheduler/job_manager.py",
+      "start_line": 108,
+      "end_line": 110,
+      "module": "scheduler",
+      "description": "job_manager.get_logs(job_id) - Get execution logs via GET /api/scheduler/jobs/{id}/logs"
+    },
+    "fetch_json": {
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 20,
+      "end_line": 41,
+      "module": "services",
+      "description": "fetch_json(url, params, timeout) - Generic JSON fetcher for public APIs with error handling."
+    },
+    "safe_get": {
+      "type": "function",
+      "file": "services/api_client.py",
+      "start_line": 44,
+      "end_line": 56,
+      "module": "services",
+      "description": "safe_get(data, *keys, default) - Safely get nested dictionary value."
+    },
+    "get_crypto_price": {
+      "type": "api",
+      "file": "services/api_client.py",
+      "start_line": 63,
+      "end_line": 92,
+      "module": "services",
+      "description": "get_crypto_price(coin_id, currency) - Fetch crypto price from CoinGecko API."
+    },
+    "get_weather": {
+      "type": "api",
+      "file": "services/api_client.py",
+      "start_line": 95,
+      "end_line": 127,
+      "module": "services",
+      "description": "get_weather(latitude, longitude) - Fetch weather from Open-Meteo API."
+    },
+    "get_news": {
+      "type": "api",
+      "file": "services/api_client.py",
+      "start_line": 130,
+      "end_line": 155,
+      "module": "services",
+      "description": "get_news(query, page) - Fetch top stories from Hacker News API."
+    },
+    "ScrapeConfig": {
+      "type": "class",
+      "file": "services/web_scraper.py",
+      "start_line": 45,
+      "end_line": 57,
+      "module": "services",
+      "description": "ScrapeConfig - Dataclass describing config-driven scraping settings."
+    },
+    "WebScraper": {
+      "type": "class",
+      "file": "services/web_scraper.py",
+      "start_line": 267,
+      "end_line": 572,
+      "module": "services",
+      "description": "WebScraper - Base class for CDP navigation, extraction, and pagination."
+    },
+    "scrape_url": {
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 618,
+      "end_line": 656,
+      "module": "services",
+      "description": "scrape_url(url, config) - Standalone scraping helper for one-off jobs."
+    },
+    "register_scraper": {
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 602,
+      "end_line": 604,
+      "module": "services",
+      "description": "register_scraper(name, scraper_class) - Registers custom scraper implementation."
+    },
+    "get_scraper": {
+      "type": "function",
+      "file": "services/web_scraper.py",
+      "start_line": 607,
+      "end_line": 614,
+      "module": "services",
+      "description": "get_scraper(name, config) - Instantiates registered scraper by name."
+    }
+  },
+  "summaries": {
+    "scheduler/executor.py": {
+      "summary": "Task execution router with dynamic content resolution. Supports {{variable}} templates in payloads that are resolved to live data before sending. Routes to task-specific handlers (telegram, discord, email, api, trade). AI agents add entries to FETCH_DATA_REGISTRY and new task_type handlers with elif routes in execute_task().",
+      "key_components": [
+        "FETCH_DATA_REGISTRY - maps variable names to data fetch functions",
+        "resolve_content() - replaces {{variable}} with live data",
+        "execute_task(job) - main entry point called by central scheduler",
+        "Task handlers: _send_telegram, _send_discord, _send_email, _call_api, _execute_trade",
+        "Data fetchers: _fetch_crypto, _fetch_weather, _fetch_news"
+      ]
+    },
+    "scheduler/job_manager.py": {
+      "summary": "HTTP client that wraps the backend REST API at /api/scheduler/. This is the LLM's primary tool for creating and managing jobs. All functions call BACKEND_URL/api/scheduler/ endpoints. No direct database access.",
+      "key_components": [
+        "create() - POST /projects/{PROJECT_ID}/jobs",
+        "list_jobs() - GET /projects/{PROJECT_ID}/jobs",
+        "pause/resume/run_now/delete - Job lifecycle control",
+        "get_logs/get_project_logs - Execution history"
+      ]
+    },
+    "scheduler/__init__.py": {
+      "summary": "Package init for scheduler module.",
+      "key_components": []
+    },
+    "services/api_client.py": {
+      "summary": "External API client module. Provides helper functions for public APIs (CoinGecko for crypto, Open-Meteo for weather, Hacker News for news). AI agents add new API functions here. All HTTP requests centralized in this module.",
+      "key_components": [
+        "fetch_json() - generic JSON fetcher utility",
+        "safe_get() - safe nested dict access",
+        "get_crypto_price() - CoinGecko integration",
+        "get_weather() - Open-Meteo integration",
+        "get_news() - Hacker News integration"
+      ]
+    },
+    "services/web_scraper.py": {
+      "summary": "CDP-based web scraping module using chrome-devtools-mcp. Enables extraction from JS-heavy websites with config-driven selectors, pagination, auth support, and extensible scraper registry.",
+      "key_components": [
+        "ScrapeConfig and ScrapeResult dataclasses",
+        "MCPClient with browser lifecycle management",
+        "WebScraper base class with extraction helpers",
+        "register_scraper/get_scraper registry",
+        "scrape_url() for standalone scraping"
+      ]
+    },
+    "services/__init__.py": {
+      "summary": "Package init for services module.",
+      "key_components": []
+    },
+    "config.py": {
+      "summary": "Environment configuration loaded via python-dotenv. Contains PROJECT_ID, PROJECT_PATH, BACKEND_URL (for job_manager), and optional task credentials (TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, SMTP_*). No DATABASE_URL — jobs are in main DB.",
+      "key_components": [
+        "PROJECT_ID, PROJECT_PATH - project identity",
+        "BACKEND_URL - for job_manager API calls",
+        "Task tokens: TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, SMTP_*"
+      ]
+    },
+    "main.py": {
+      "summary": "Thin entry point. No FastAPI, no database, no scheduler loop. The centralized backend handles all scheduling, job storage, and execution. This file only sets up logging.",
+      "key_components": [
+        "Logging configuration"
+      ]
+    }
+  },
+  "files": {
+    "scheduler/executor.py": {
+      "path": "scheduler/executor.py",
+      "lines": 291,
+      "type": "task_router",
+      "purpose": "Routes task execution by type with dynamic content resolution. AI agents add FETCH_DATA_REGISTRY entries and task handlers here.",
+      "functions": [
+        "resolve_content()",
+        "_deep_replace()",
+        "execute_task()",
+        "_send_telegram()",
+        "_send_discord()",
+        "_send_email()",
+        "_call_api()",
+        "_execute_trade()",
+        "_fetch_crypto()",
+        "_fetch_weather()",
+        "_fetch_news()"
+      ],
+      "registry": "FETCH_DATA_REGISTRY"
+    },
+    "scheduler/job_manager.py": {
+      "path": "scheduler/job_manager.py",
+      "lines": 121,
+      "type": "api_client",
+      "purpose": "HTTP client wrapping the backend REST API at /api/scheduler/. This is the LLM's tool for creating and managing jobs.",
+      "functions": [
+        "create()",
+        "list_jobs()",
+        "get()",
+        "update()",
+        "delete()",
+        "pause()",
+        "resume()",
+        "run_now()",
+        "get_logs()",
+        "get_project_logs()",
+        "clear_all()"
+      ]
+    },
+    "scheduler/__init__.py": {
+      "path": "scheduler/__init__.py",
+      "lines": 3,
+      "type": "package",
+      "purpose": "Package init for scheduler module",
+      "functions": []
+    },
+    "services/api_client.py": {
+      "path": "services/api_client.py",
+      "lines": 156,
+      "type": "api_client",
+      "purpose": "External API helper functions. AI agents add new data source functions here.",
+      "functions": [
+        "fetch_json()",
+        "safe_get()",
+        "get_crypto_price()",
+        "get_weather()",
+        "get_news()"
+      ]
+    },
+    "services/web_scraper.py": {
+      "path": "services/web_scraper.py",
+      "lines": 700,
+      "type": "scraper_service",
+      "purpose": "CDP web scraper for dynamic content extraction and config-driven scraping workflows.",
+      "functions": [
+        "scrape_url()",
+        "register_scraper()",
+        "get_scraper()"
+      ]
+    },
+    "services/__init__.py": {
+      "path": "services/__init__.py",
+      "lines": 3,
+      "type": "package",
+      "purpose": "Package init for services module",
+      "functions": []
+    },
+    "config.py": {
+      "path": "config.py",
+      "lines": 30,
+      "type": "configuration",
+      "purpose": "Environment variable loading: PROJECT_ID, PROJECT_PATH, BACKEND_URL, task tokens",
+      "functions": []
+    },
+    "main.py": {
+      "path": "main.py",
+      "lines": 14,
+      "type": "entry_point",
+      "purpose": "Thin entry point. No server, no database, no scheduler loop. All centralized.",
+      "functions": []
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "category": "jobs",
+  "name": "Jobs & Career",
+  "description": "Job search, career opportunities, and employment data",
+  "prefix": "/jobs",
+  "apis": [
+    {
+      "id": "jobicy",
+      "name": "Jobicy",
+      "base_url": "https://jobicy.com/api",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/jobs/remote",
+          "method": "GET",
+          "summary": "Get remote job listings",
+          "direct_url": "https://jobicy.com/api/v2/remote-jobs",
+          "parameters": [
+            {"name": "count", "type": "query", "default": 20, "description": "Number of jobs to return"},
+            {"name": "geo", "type": "query", "default": "usa", "description": "Geographic filter"},
+            {"name": "industry", "type": "query", "required": false, "description": "Industry filter"}
+          ],
+          "sample_request": "https://jobicy.com/api/v2/remote-jobs?count=20&geo=usa",
+          "sample_response": {
+            "jobs": [
+              {
+                "title": "Software Developer",
+                "company": "TechStart",
+                "url": "https://jobicy.com/job/123",
+                "description": "Remote software developer position...",
+                "tags": ["remote", "developer", "javascript"],
+                "location": "Remote"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "arbeitnow",
+      "name": "Arbeitnow",
+      "base_url": "https://www.arbeitnow.com/api",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/jobs/remote",
+          "method": "GET",
+          "summary": "Get remote job listings",
+          "direct_url": "https://www.arbeitnow.com/api/job-board-api",
+          "parameters": [
+            {"name": "search", "type": "query", "required": false, "description": "Search query for job titles"},
+            {"name": "location", "type": "query", "required": false, "description": "Location filter"}
+          ],
+          "sample_request": "https://www.arbeitnow.com/api/job-board-api?search=developer",
+          "sample_response": {
+            "data": [
+              {
+                "slug": "senior-software-engineer",
+                "company_name": "TechCorp",
+                "title": "Senior Software Engineer",
+                "description": "We are looking for a senior software engineer to join our team...",
+                "remote": true,
+                "url": "https://arbeitnow.com/view/senior-software-engineer",
+                "tags": ["remote", "engineering", "developer"],
+                "job_types": ["full-time"],
+                "location": "Remote",
+                "created_at": "2025-03-30T10:00:00Z"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "usajobs",
+      "name": "USAJOBS API",
+      "base_url": "https://data.usajobs.gov/api",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/jobs/search",
+          "method": "GET",
+          "summary": "Search US government jobs",
+          "direct_url": "https://data.usajobs.gov/api/Search",
+          "parameters": [
+            {"name": "Keyword", "type": "query", "required": false, "description": "Search keywords"}
+          ],
+          "sample_request": "https://data.usajobs.gov/api/Search?Keyword=developer",
+          "sample_response": {
+            "SearchResult": {
+              "SearchResultCount": 1250,
+              "SearchResultItems": [
+                {
+                  "MatchedObjectId": 123456,
+                  "PositionTitle": "Software Developer",
+                  "OrganizationName": "Department of Defense",
+                  "PositionLocation": [
+                    {"LocationName": "Washington, DC"}
+                  ],
+                  "PositionURI": "https://www.usajobs.gov/job/123456",
+                  "ApplyURI": ["https://www.usajobs.gov/job/123456/apply"],
+                  "PositionScheduleCode": ["Full-Time"],
+                  "SalaryMin": 72000,
+                  "SalaryMax": 95000
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Search for jobs by keyword",
+    "Filter jobs by location or category",
+    "Find remote work opportunities",
+    "Browse IT and developer jobs",
+    "Get career opportunities data"
+  ]
+}

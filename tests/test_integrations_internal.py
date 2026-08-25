@@ -188,8 +188,12 @@ def test_prompt_block():
     assert '"provider": "youtube"' in block
     assert "X-Project-Id" in block and "101" in block
     assert "NEVER ask the user for an API key" in block
+    # v3 capability menu: verb lines render for the connected provider
+    # (metadata fetch is skipped without NANGO_SECRET_KEY; extras still show)
+    assert "- read:" in block and "- post:" in block
+    assert "upload videos" in block  # youtube capability hint
     assert "conn-abc" not in block and "GOCSPX" not in block and "305a2e46" not in block
-    print("PASS 3: prompt snippet has proxy URL + auth pattern + project id; no secrets")
+    print("PASS 3: prompt snippet has proxy URL + auth pattern + project id + capability lines; no secrets")
 
     # no connections -> empty
     empty = dict(ROWS, nango=[])

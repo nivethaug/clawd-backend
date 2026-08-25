@@ -1,0 +1,68 @@
+{
+  "category": "currency",
+  "name": "Currency Exchange",
+  "description": "Currency exchange rates and conversions",
+  "prefix": "/currency",
+  "apis": [
+    {
+      "id": "frankfurter",
+      "name": "Frankfurter",
+      "base_url": "https://api.frankfurter.app",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/currency/frankfurter/latest",
+          "method": "GET",
+          "summary": "Get latest exchange rates",
+          "direct_url": "https://api.frankfurter.app/latest",
+          "parameters": [
+            {"name": "base", "type": "query", "default": "USD", "description": "Base currency"}
+          ],
+          "sample_request": "https://api.frankfurter.app/latest?from=USD",
+          "sample_response": {
+            "amount": 1,
+            "base": "USD",
+            "date": "2025-03-31",
+            "rates": {
+              "EUR": 0.9234,
+              "GBP": 0.7891,
+              "JPY": 149.56,
+              "CAD": 1.3567,
+              "AUD": 1.5234,
+              "CHF": 0.8901,
+              "CNY": 7.2345,
+              "INR": 83.12,
+              "MXN": 16.789
+            }
+          }
+        },
+        {
+          "path": "/currency/convert",
+          "method": "GET",
+          "summary": "Convert currency",
+          "direct_url": "https://api.frankfurter.app/latest",
+          "parameters": [
+            {"name": "amount", "type": "query", "required": true, "description": "Amount to convert"},
+            {"name": "from_currency", "type": "query", "required": true, "description": "Source currency"},
+            {"name": "to_currency", "type": "query", "required": true, "description": "Target currency"}
+          ],
+          "sample_request": "https://api.frankfurter.app/latest?amount=100&from=USD&to=EUR",
+          "sample_response": {
+            "amount": 100,
+            "base": "USD",
+            "date": "2025-03-31",
+            "rates": {
+              "EUR": 92.34
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Get real-time exchange rates",
+    "Convert between currencies",
+    "Get historical exchange rates",
+    "Track currency movements"
+  ]
+}

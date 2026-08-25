@@ -454,6 +454,66 @@ async def api_clear_project_jobs(
 
 
 # ============================================================================
+# Project State Endpoints (cross-run memory — scheduler + agent projects)
+# ============================================================================
+
+class StateUpdateRequest(BaseModel):
+    state: Dict[str, Any]
+
+# Hard cap so a buggy executor can't balloon the JSONB row.
+_STATE_MAX_BYTES = 64 * 1024
+
+
+@router.get("/projects/{project_id}/state")
+async def api_get_state(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+    request_obj: Request = None,
+):
+    """Get the project's persisted run-state (JSONB). Empty dict when never set."""
+    _require_project_owner(project_id, authorization, request_obj)
+    with get_db() as cur:
+        cur.execute("SELECT state FROM scheduler_state WHERE project_id = %s", (project_id,))
+        row = cur.fetchone()
+    state = _row_value(row, "state", {}) if row else {}
+    if isinstance(state, str):
+        import json as _json
+        try:
+            state = _json.loads(state)
+        except Exception:
+            state = {}
+    return {"project_id": project_id, "state": state or {}}
+
+
+@router.put("/projects/{project_id}/state")
+async def api_put_state(
+    project_id: int,
+    request: StateUpdateRequest,
+    authorization: Optional[str] = Header(None),
+    request_obj: Request = None,
+):
+    """Replace the project's persisted run-state (one JSONB row, 64KB cap).
+
+    Executors merge before calling — this is a full replace."""
+    _require_project_owner(project_id, authorization, request_obj)
+    import json as _json
+    encoded = _json.dumps(request.state)
+    if len(encoded.encode("utf-8")) > _STATE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="State exceeds 64KB cap")
+    with get_db() as cur:
+        cur.execute(
+            """INSERT INTO scheduler_state (project_id, state, updated_at)
+               VALUES (%s, %s::jsonb, NOW())
+               ON CONFLICT (project_id) DO UPDATE SET
+                 state = EXCLUDED.state, updated_at = NOW()""",
+            (project_id, encoded),
+        )
+        conn = cur._connection
+        conn.commit()
+    return {"success": True, "project_id": project_id, "bytes": len(encoded)}
+
+
+# ============================================================================
 # Log Endpoints
 # ============================================================================
 

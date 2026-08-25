@@ -1,0 +1,67 @@
+{
+  "category": "stocks",
+  "name": "Stocks & Market Data",
+  "description": "Stock market and crypto market data",
+  "prefix": "/stocks",
+  "apis": [
+    {
+      "id": "coingecko_stocks",
+      "name": "CoinGecko (Stocks)",
+      "base_url": "https://api.coingecko.com/api/v3",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/stocks/crypto/list",
+          "method": "GET",
+          "summary": "List crypto stocks",
+          "direct_url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd",
+          "parameters": [
+            {"name": "vs_currency", "type": "query", "default": "usd", "description": "Currency to compare against"},
+            {"name": "order", "type": "query", "default": "market_cap_desc", "description": "Sort order"},
+            {"name": "per_page", "type": "query", "default": 10, "description": "Results per page"}
+          ],
+          "sample_request": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=2",
+          "sample_response": [
+            {
+              "id": "bitcoin",
+              "symbol": "btc",
+              "name": "Bitcoin",
+              "current_price": 67234.12,
+              "market_cap_rank": 1
+            }
+          ]
+        },
+        {
+          "path": "/stocks/trending",
+          "method": "GET",
+          "summary": "Get trending cryptos",
+          "direct_url": "https://api.coingecko.com/api/v3/search/trending",
+          "sample_response": {
+            "coins": [
+              {
+                "item": {
+                  "id": "pepe",
+                  "coin_id": 12345,
+                  "name": "Pepe",
+                  "symbol": "PEPE",
+                  "market_cap_rank": 25,
+                  "thumb": "https://assets.coingecko.com/coins/images/12345/thumb/pepe.jpg",
+                  "small": "https://assets.coingecko.com/coins/images/12345/small/pepe.jpg",
+                  "large": "https://assets.coingecko.com/coins/images/12345/large/pepe.jpg",
+                  "slug": "pepe",
+                  "price_btc": "0.00000012",
+                  "score": 0
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Track trending cryptocurrencies",
+    "Get crypto market rankings",
+    "Monitor price trends"
+  ]
+}

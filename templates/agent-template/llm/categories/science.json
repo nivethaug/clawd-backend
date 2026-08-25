@@ -1,0 +1,368 @@
+{
+  "category": "science",
+  "name": "Science & Space",
+  "description": "Space exploration, NASA data, ISS tracking, and scientific information",
+  "prefix": "/science",
+  "apis": [
+    {
+      "id": "spaceflightnews",
+      "name": "Spaceflight News API",
+      "base_url": "https://api.spaceflightnewsapi.net/v4",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/science/articles",
+          "method": "GET",
+          "summary": "Get spaceflight news articles",
+          "direct_url": "https://api.spaceflightnewsapi.net/v4/articles",
+          "parameters": [
+            {
+              "name": "limit",
+              "type": "query",
+              "default": 10,
+              "description": "Number of articles"
+            },
+            {
+              "name": "summary",
+              "type": "query",
+              "default": 1,
+              "description": "Include summary"
+            }
+          ],
+          "sample_request": "https://api.spaceflightnewsapi.net/v4/articles?limit=10&summary=1",
+          "sample_response": {
+            "articles": [
+              {
+                "id": 1,
+                "title": "SpaceX Launches Starlink Satellites",
+                "url": "https://spaceflightnow.com/2025/04/01/spacex-starlink",
+                "news_site": "Spaceflight Now",
+                "published_at": "2025-04-01T10:00:00Z",
+                "image_url": "https://spaceflightnow.com/img/launches/123.jpg"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "spacex",
+      "name": "SpaceX API",
+      "base_url": "https://api.spacexdata.com/v4",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/science/spacex/launches",
+          "method": "GET",
+          "summary": "Get SpaceX launches",
+          "direct_url": "https://api.spacexdata.com/v4/launches",
+          "parameters": [
+            {
+              "name": "limit",
+              "type": "query",
+              "default": 10,
+              "description": "Number of results (1-100)"
+            }
+          ],
+          "sample_request": "https://api.spacexdata.com/v4/launches",
+          "sample_response": [
+            {
+              "fairings": {
+                "reused": false,
+                "recovery_attempt": true,
+                "recovered": true,
+                "ships": [
+                  "5ea6ed2e080df4000697c908"
+                ]
+              },
+              "links": {
+                "patch": {
+                  "small": "https://images2.imgbox.com/3c/51/QZHQxjRL_o.png",
+                  "large": "https://images2.imgbox.com/40/e3/GYPZ9PFt_o.png"
+                },
+                "reddit": {
+                  "campaign": "https://www.reddit.com/r/spacex/comments/ljthzm",
+                  "launch": "https://www.reddit.com/r/spacex/comments/m0hpr8",
+                  "media": "https://www.reddit.com/r/spacex/comments/m0pm6o",
+                  "recovery": "https://www.reddit.com/r/spacex/comments/m1djmj"
+                },
+                "flickr": {
+                  "small": [],
+                  "original": [
+                    "https://live.staticflickr.com/65535/51234033826_d9143d5870_o.jpg"
+                  ]
+                },
+                "presskit": "https://www.spacex.com/sites/spacex/files/presskit.pdf",
+                "webcast": "https://youtu.be/JBGjE1v7UWQ",
+                "youtube_id": "JBGjE1v7UWQ",
+                "article": "https://spaceflightnow.com/2025/03/31",
+                "wikipedia": "https://en.wikipedia.org/wiki/Starlink"
+              },
+              "static_fire_date_utc": "2025-03-15T10:00:00.000Z",
+              "static_fire_date_unix": 1710496800,
+              "net": false,
+              "window": 0,
+              "rocket": "5e9d0d95eda69973a809d1ec",
+              "success": true,
+              "details": "Starlink mission",
+              "crew": [],
+              "ships": [
+                "5ea6ed2e080df4000697c908"
+              ],
+              "capsules": [],
+              "payloads": [
+                "5eb0e4b5b6c3bb0006eeb1e1"
+              ],
+              "launchpad": "5e9e4501f509094188566f88",
+              "flight_number": 200,
+              "name": "Starlink 4-15",
+              "date_utc": "2025-03-31T12:00:00.000Z",
+              "date_unix": 1711881600,
+              "date_local": "2025-03-31T08:00:00-04:00",
+              "date_precision": "hour",
+              "upcoming": false,
+              "cores": [
+                {
+                  "core": "5e9e28a7f35918a2345d668c",
+                  "flight": 10,
+                  "gridfins": true,
+                  "legs": true,
+                  "reused": true,
+                  "landing_attempt": true,
+                  "landing_success": true,
+                  "landing_type": "ASDS",
+                  "landpad": "5e9e3032383ecb6bb234e7ca"
+                }
+              ],
+              "auto_update": true,
+              "tbd": false,
+              "launch_library_id": null,
+              "id": "5eb87d42ffd86e000604b384"
+            }
+          ]
+        },
+        {
+          "path": "/science/spacex/rockets",
+          "method": "GET",
+          "summary": "Get SpaceX rockets information",
+          "direct_url": "https://api.spacexdata.com/v4/rockets",
+          "sample_request": "https://api.spacexdata.com/v4/rockets",
+          "sample_response": [
+            {
+              "height": {
+                "meters": 22.25,
+                "feet": 73
+              },
+              "diameter": {
+                "meters": 1.68,
+                "feet": 5.5
+              },
+              "mass": {
+                "kg": 30146,
+                "lb": 66460
+              },
+              "first_stage": {
+                "thrust_sea_level": {
+                  "kN": 420,
+                  "lbf": 94000
+                },
+                "thrust_vacuum": {
+                  "kN": 480,
+                  "lbf": 110000
+                },
+                "reusable": false,
+                "engines": 1,
+                "fuel_amount_tons": 44.3,
+                "burn_time_sec": 169
+              },
+              "second_stage": {
+                "thrust": {
+                  "kN": 31,
+                  "lbf": 7000
+                },
+                "payloads": {
+                  "composite_fairing": {
+                    "height": {
+                      "meters": 3.5,
+                      "feet": 11.5
+                    },
+                    "diameter": {
+                      "meters": 1.5,
+                      "feet": 4.9
+                    }
+                  },
+                  "option_1": "composite_fairing",
+                  "option_2": "dragon"
+                },
+                "reusable": false,
+                "engines": 1,
+                "fuel_amount_tons": 3.38,
+                "burn_time_sec": 378
+              },
+              "engines": {
+                "number": 1,
+                "type": "merlin",
+                "version": "1C",
+                "layout": "single",
+                "engine_loss_max": 0,
+                "propellant_1": "RP-1",
+                "propellant_2": "liquid oxygen",
+                "thrust_sea_level": {
+                  "kN": 420,
+                  "lbf": 94000
+                },
+                "thrust_vacuum": {
+                  "kN": 480,
+                  "lbf": 110000
+                },
+                "thrust_to_weight": 96
+              },
+              "landing_legs": {
+                "number": 0,
+                "material": null
+              },
+              "flickr_images": [
+                "https://www.spacex.com/sites/spacex/files/styles/media_gallery_large/public/first_reflight_-_landing_vertical_raptor_test_4.jpg"
+              ],
+              "wikipedia": "https://en.wikipedia.org/wiki/Falcon_1",
+              "description": "The Falcon 1 was an expendable launch system privately developed and manufactured by SpaceX during 2006-2009.",
+              "rocket_id": "falcon1",
+              "rocket_name": "Falcon 1",
+              "rocket_type": "rocket",
+              "stages": 2,
+              "boosters": 0,
+              "cost_per_launch": 6700000,
+              "success_rate_pct": 40,
+              "first_flight": "2006-03-24",
+              "country": "Republic of the Marshall Islands",
+              "company": "SpaceX",
+              "active": false,
+              "id": "5e9d0d95eda69955f709d1eb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "spaceflight",
+      "name": "Spaceflight News API",
+      "base_url": "https://api.spaceflightnewsapi.net/v4",
+      "auth_required": false,
+      "rate_limited": false,
+      "endpoints": [
+        {
+          "path": "/science/spaceflight/news",
+          "method": "GET",
+          "summary": "Get spaceflight news",
+          "direct_url": "https://api.spaceflightnewsapi.net/v4/articles",
+          "parameters": [
+            {
+              "name": "limit",
+              "type": "query",
+              "default": 10,
+              "description": "Number of results"
+            }
+          ],
+          "sample_request": "https://api.spaceflightnewsapi.net/v4/articles?limit=3",
+          "sample_response": [
+            {
+              "id": 12345,
+              "title": "SpaceX Successfully Launches Starlink Satellites",
+              "url": "https://spaceflightnow.com/2025/03/31/spacex-starlink",
+              "image_url": "https://images2.imgbox.com/3c/51/QZHQxjRL_o.png",
+              "news_site": "Spaceflight Now",
+              "summary": "SpaceX successfully launched another batch of Starlink satellites into orbit...",
+              "published_at": "2025-03-31T12:00:00Z",
+              "updated_at": "2025-03-31T12:30:00Z",
+              "featured": false,
+              "launches": [
+                {
+                  "id": "5eb87d42ffd86e000604b384",
+                  "provider": "Launch Library 2"
+                }
+              ],
+              "events": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "min_magnitude",
+      "type": "query",
+      "default": 4.5,
+      "description": "Minimum magnitude (0-10)"
+    },
+    {
+      "name": "timeframe",
+      "type": "query",
+      "default": "day",
+      "description": "Timeframe: hour, day, week, month"
+    }
+  ],
+  "sample_request": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson",
+  "sample_response": {
+    "type": "FeatureCollection",
+    "metadata": {
+      "generated": 1711929600000,
+      "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson",
+      "title": "USGS Magnitude 4.5+ Earthquakes, Past Day",
+      "status": 200,
+      "api": "1.10.0",
+      "count": 15
+    },
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "mag": 5.2,
+          "place": "100km SW of Hanga Roa, Chile",
+          "time": 1711929000000,
+          "updated": 1711929600000,
+          "tz": -360,
+          "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000abcd",
+          "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000abcd.geojson",
+          "felt": null,
+          "cdi": null,
+          "mmi": null,
+          "alert": null,
+          "status": "reviewed",
+          "tsunami": 0,
+          "sig": 456,
+          "net": "us",
+          "code": "7000abcd",
+          "ids": ",us7000abcd,",
+          "sources": ",us,",
+          "types": ",origin,phase-data,",
+          "nst": null,
+          "dmin": 2.5,
+          "rms": 0.8,
+          "gap": 120,
+          "magType": "mb",
+          "type": "earthquake",
+          "title": "M 5.2 - 100km SW of Hanga Roa, Chile"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -109.456,
+            -28.123,
+            10.5
+          ]
+        },
+        "id": "us7000abcd"
+      }
+    ]
+  },
+  "use_cases": [
+    "Track the International Space Station",
+    "Get current ISS crew information",
+    "Explore SpaceX launch history",
+    "View spaceflight news articles",
+    "Get Mars rover photos",
+    "Monitor earthquake activity",
+    "Space and science research"
+  ]
+}

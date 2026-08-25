@@ -195,7 +195,27 @@ class ACPChatHandler:
         # type_id 1 = website, type_id 2 = telegrambot, type_id 3 = discordbot, type_id 5 = scheduler
         self.is_telegram_bot = (project_type_id == 2)
         self.is_discord_bot = (project_type_id == 3)
-        self.is_scheduler = (project_type_id == 5)
+        # 'agent' type id is dynamic (seeded slug) — resolve by slug when the
+        # id is none of the fixed legacy ones.
+        self.is_agent = False
+        if project_type_id not in (None, 1, 2, 3, 5):
+            try:
+                from database_adapter import get_db as _get_db
+                with _get_db() as _conn:
+                    _row = _conn.execute(
+                        "SELECT type FROM project_types WHERE id = ?",
+                        (project_type_id,),
+                    ).fetchone()
+                _slug = ""
+                if _row:
+                    _d = dict(_row) if not isinstance(_row, dict) else _row
+                    _slug = _d.get("type") or ""
+                self.is_agent = (_slug == "agent")
+            except Exception:
+                pass
+        # Agents ride the scheduler chat flow (same files + job API) with an
+        # agent-voiced prompt (see _build_chat_prompt_scheduler dispatch).
+        self.is_scheduler = (project_type_id == 5) or self.is_agent
         self.is_bot_project = self.is_telegram_bot or self.is_discord_bot or self.is_scheduler
 
         # Bot projects have code in a subdirectory (telegram/, discord/).
@@ -253,6 +273,8 @@ class ACPChatHandler:
             return 'telegram'
         elif self.is_discord_bot:
             return 'discord'
+        elif getattr(self, "is_agent", False):
+            return 'agent'
         elif self.is_scheduler:
             return 'scheduler'
         return 'website'
@@ -680,6 +702,8 @@ class ACPChatHandler:
         Build chat prompt for scheduler project modifications.
         Covers: executor.py enhancement, REST API job management, api_client helpers.
         """
+        if getattr(self, "is_agent", False):
+            return self._build_chat_prompt_agent(user_message, session_context)
         import os
         # Read BACKEND_URL from the project's .env — NOT from the backend's own env.
         # The backend runs on the main VPS, but this prompt is consumed by Claude
@@ -1141,10 +1165,349 @@ Before making any code changes, follow this process:
 {user_message}
 """
 
+    def _build_chat_prompt_agent(self, user_message: str, session_context: str = "") -> str:
+        """
+        Build chat prompt for AUTOMATION AGENT projects (type slug 'agent').
+
+        Same mechanics as the scheduler chat prompt (files, job REST API,
+        publish step) but agent-voiced: presents the unified capability menu
+        (OAuth proxy actions / key integrations / custom env), declarative
+        conditions and cross-run state.
+        """
+        import os
+        backend_url = self._read_project_env_value("BACKEND_URL") or os.getenv(
+            "SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud"
+        )
+        jobs_base = f"{backend_url}/api/scheduler/projects/{self.project_id}/jobs"
+
+        channels = self._detect_configured_channels()
+        channels_block = self._format_channels_block(channels)
+
+        context_section = ""
+        if session_context:
+            context_section = f"""
+## CONVERSATION HISTORY
+
+{session_context}
+
+---
+"""
+        integrations_section = build_external_integrations_block(self.project_id)
+
+        return f"""{self._workflow_meta_block(operation="edit", prompt_kind="agent_chat_edit")}
+{self._env_rules_block()}
+You are a friendly AI assistant helping a user with their **{self.project_name}** automation agent.
+
+---
+
+## PROJECT CONTEXT
+
+Project Name: **{self.project_name}**
+Project ID: **{self.project_id}**
+Project Type: Automation Agent
+Project Path: `{self.project_path}`
+Agent Directory: `{self.project_path}/scheduler/`
+Backend API: `{backend_url}/api/scheduler`
+
+---
+
+## WHAT YOU CAN DO
+
+1. **Add new automations** — write a handler in executor.py (+ helpers in api_client.py), then create the job via API
+2. **Compose actions from the capability menu** — connected OAuth accounts, key-based integrations, custom env keys
+3. **Add conditions** — "only when X > Y" / "only when changed" via the payload `when` list
+4. **List / edit / pause / resume / delete / run jobs** and **view logs** — same REST API as below
+
+---
+
+## CAPABILITY MENU — HOW THIS AGENT ACTS
+
+{integrations_section}
+Surface 1 — Connected OAuth accounts (from the block above):
+    api_client.proxy_call(provider, method, endpoint, body, params)
+    The platform injects the account token server-side — no credentials in
+    code. Per-provider capabilities + endpoint examples are in the block above.
+
+Surface 2 — Key-based managed integrations (the "AVAILABLE EXTERNAL
+    INTEGRATIONS" table above, if present): call the provider API directly
+    with `os.environ["KEY"]` (RESEND_API_KEY, SERPER_API_KEY,
+    SLACK_WEBHOOK_URL, GITHUB_TOKEN, ...). The table lists capabilities +
+    docs URL per key.
+
+Surface 3 — Custom env keys (same table when present): compose the client
+    yourself from the docs URL, reading values by env var NAME only.
+
+Built-in helpers in api_client.py:
+- get_crypto_price / get_crypto_price_num, get_weather, get_news
+- fetch_json(url, params), fetch_page(url, extract_js) — fast scraping
+- proxy_call(...) — Surface 1
+- state_get() / state_set(dict) — cross-run memory
+
+---
+
+## CONDITIONS + STATE ("only when ...")
+
+Jobs support declarative conditions in the payload:
+
+```json
+"when": [{{"var": "btc_price_num", "op": ">", "value": 100000}},
+         {{"var": "views", "op": "changed"}}]
+```
+
+Ops: `> < >= <= == != contains changed`. All must pass or the run is
+skipped (logged as "skipped: ...") — the handler never fires. Every
+resolved fetch var is auto-persisted as `last_<var>`, so `changed` works
+on the next run with zero code. For custom logic use
+`api_client.state_get()/state_set()` from handlers (state_set is a FULL
+replace — merge first).
+
+---
+
+## FILE STRUCTURE
+
+```
+{self.project_path}/
+└── scheduler/
+    ├── executor.py          ← YOU MODIFY THIS (add task handlers)
+    └── ...
+└── services/
+    ├── api_client.py        ← YOU MODIFY THIS (add helpers)
+    └── web_scraper.py       ← USE for website data (calls scraping API)
+```
+
+---
+
+## DELIVERY CHANNELS
+
+The executor already has these sender functions:
+- `_send_telegram({{"text": msg, "chat_id": "..."}})`
+- `_send_discord({{"content": msg}})`
+- `_send_email({{"to": "...", "subject": "...", "body": msg}})`
+- `_call_api({{"url": "...", "body": {{}}}})`
+
+Send to ALL configured channels unless the user specifies one.
+
+**Channel configuration (pre-computed — DO NOT read .env, it is security-blocked):**
+
+{channels_block}
+
+Channel config is ALSO the `env_config` key in your
+`<DREAMPILOT_WORKFLOW_META>` JSON. DO NOT read `.env` or run `env`/`printenv`
+— they are blocked by the security guard. The list above is authoritative.
+
+---
+
+## HOW TO ADD A NEW AUTOMATION
+
+### Step 1: Pick the data + actions from the capability menu
+- Data: FETCH_DATA_REGISTRY entry (for {{{{variable}}}} resolution + conditions)
+  or a direct helper call inside your handler
+- Actions: proxy_call for OAuth accounts, direct calls for key-based APIs,
+  sender functions for delivery
+
+### Step 2: Add API helper to services/api_client.py (only if needed)
+Only add a NEW function for an API not already available.
+
+Website data: use `api_client.fetch_page(url, extract_js)` (fast) or
+`web_scraper.scrape_url()` with scroll=True (JS pages). Do NOT create a
+new scraping system.
+
+### Step 3: Add task handler to scheduler/executor.py
+
+```python
+# Registry entry (for {{{{variable}}}} + when-conditions)
+FETCH_DATA_REGISTRY["my_metric"] = lambda: _fetch_my_metric()
+
+# Multi-channel handler
+def _my_alert(payload: dict):
+    metric = _fetch_my_metric()
+    msg = f"My Update\\n\\nValue: {{metric}}"
+    results = []
+    if TELEGRAM_BOT_TOKEN:
+        s, m = _send_telegram({{"text": msg}})
+        results.append(("telegram", s))
+    if DISCORD_WEBHOOK_URL:
+        s, m = _send_discord({{"content": msg}})
+        results.append(("discord", s))
+    if EMAIL_TO:
+        s, m = _send_email({{"subject": "Update", "body": msg}})
+        results.append(("email", s))
+    failed = [r for r in results if r[1] == "failed"]
+    if failed:
+        return ("failed", f"Failed: {{failed}}")
+    return ("success", f"Sent to {{len(results)}} channels")
+
+# Register in execute_task() routing:
+elif task_type == 'my_alert':
+    status, message = _my_alert(payload)
+```
+
+### Step 4: Create the job via REST API (EXECUTE the curl — never just print it)
+
+```bash
+curl -s -X POST {jobs_base} \\
+  -H "Content-Type: application/json" \\
+  -d '{{
+    "job_type": "interval",
+    "schedule_value": "1h",
+    "task_type": "my_alert",
+    "payload": {{
+        "fetch": ["my_metric"],
+        "when": [{{"var": "my_metric", "op": "changed"}}]
+    }}
+  }}'
+```
+
+### Step 5: Verify the file compiles
+
+```bash
+python -c "import py_compile; py_compile.compile('{self.project_path}/scheduler/executor.py', doraise=True)"
+```
+
+### Step 6: Publish changes (restart the scheduler)
+
+The centralized `clawd-scheduler` caches executor modules in memory (importlib).
+
+```bash
+cd {self.project_path} && python3 buildpublish.py --skip-deps
+```
+
+After it completes, run the job once to verify the new code is live.
+
+---
+
+## JOB MANAGEMENT REST API
+
+⚠️ **CRITICAL — DO NOT PROBE PORTS. DO NOT try localhost, 127.0.0.1, or host.docker.internal.**
+
+The backend API is at `{backend_url}` — the ONLY reachable URL. The worker
+VPS IP is allowlisted so requests from here bypass JWT auth — no auth header.
+
+### List all jobs
+```bash
+curl -s {jobs_base} | python3 -m json.tool
+```
+
+### Get / edit a job
+```bash
+curl -s {backend_url}/api/scheduler/jobs/JOB_ID | python3 -m json.tool
+curl -s -X PUT {backend_url}/api/scheduler/jobs/JOB_ID \\
+  -H "Content-Type: application/json" \\
+  -d '{{"schedule_value": "30m"}}'
+```
+
+### Pause / resume / run now / delete
+```bash
+curl -s -X POST {backend_url}/api/scheduler/jobs/JOB_ID/pause
+curl -s -X POST {backend_url}/api/scheduler/jobs/JOB_ID/resume
+curl -s -X POST {backend_url}/api/scheduler/jobs/JOB_ID/run
+curl -s -X DELETE {backend_url}/api/scheduler/jobs/JOB_ID
+```
+
+### Logs
+```bash
+curl -s {backend_url}/api/scheduler/jobs/JOB_ID/logs | python3 -m json.tool
+curl -s {backend_url}/api/scheduler/projects/{self.project_id}/logs | python3 -m json.tool
+```
+
+---
+
+## DYNAMIC CONTENT ({{{{variable}}}} system)
+
+The "fetch" array in the job payload resolves {{{{variable}}}} placeholders.
+Names MUST match FETCH_DATA_REGISTRY keys exactly. Stock keys:
+btc_price, eth_price, btc_price_num, eth_price_num, weather, news — add your own.
+
+---
+
+## MESSAGE FORMATTING RULES
+
+- Plain text ONLY (no parse_mode)
+- No `$` before {{{{variable}}}} — the value already carries formatting
+- Concise, scannable; unicode symbols over emoji codes
+
+---
+
+## SCHEDULE FORMATS
+
+| Format | Example | Meaning |
+|--------|---------|---------|
+| Seconds | `30s` | Every 30 seconds |
+| Minutes | `5m`, `10m` | Every 5/10 minutes |
+| Hours | `1h`, `6h` | Every 1/6 hours |
+| Days | `1d`, `2d` | Every 1/2 days |
+| Daily | `daily:09:00` | Once daily at 9:00 AM |
+| Once | `once` | Run once immediately |
+
+---
+
+## COMMON USER REQUESTS → ACTIONS
+
+| User says | What to do |
+|-----------|------------|
+| "Alert me when X changes" | Handler + job with `when: [{{var, changed}}]` |
+| "Only if price above Y" | Job payload `"when": [{{"var": ..., "op": ">", "value": Y}}]` |
+| "Post to my sheet/twitter/slack daily" | proxy_call handler + `daily:09:00` job |
+| "Show my jobs" | `curl -s {jobs_base}` |
+| "Change to every 10min" | List → `PUT .../jobs/ID -d '{{"schedule_value": "10m"}}'` |
+| "Pause/resume/delete/test" | List → pause/resume/delete/run endpoint |
+| "What's failing?" | `curl -s .../projects/{self.project_id}/logs` |
+
+**IMPORTANT**: For EXISTING jobs, FIRST list jobs to find the ID, then act.
+
+---
+
+## RULES
+
+1. KEEP execute_task signature: `def execute_task(job: dict) -> dict`
+2. KEEP all existing handlers (telegram, discord, email, api, trade)
+3. KEEP FETCH_DATA_REGISTRY, resolve_content AND the when/state logic
+4. Return `{{"status": "success"|"failed", "message": str}}` from all handlers
+5. Use services.api_client for ALL external calls; proxy_call for OAuth actions
+6. task_type MUST match the elif route in execute_task()
+7. Create the job AFTER adding the handler
+8. EXECUTE curl commands — never just print them
+9. AFTER editing any .py file, run py_compile on it (fix failures immediately)
+10. When editing existing jobs, ALWAYS list jobs first for the correct ID
+11. AFTER editing executor.py, run `cd {self.project_path} && python3 buildpublish.py --skip-deps`
+
+---
+
+## FINAL CHECKLIST BEFORE RESPONDING
+
+- [ ] Did I read agent/ai_index/index.json before making changes?
+- [ ] Did I modify only executor.py and/or api_client.py?
+- [ ] Did I run py_compile on all edited files?
+- [ ] Did I publish changes with `python3 buildpublish.py --skip-deps`?
+- [ ] Did I create/update the job via REST API (with `when` if implied)?
+- [ ] Did I test the job (run now) if possible?
+- [ ] Did I update agent/ai_index/index.json after changes?
+
+⛔ If ANY box is unchecked → STOP and complete it before responding
+
+---
+
+## BEFORE EXECUTING — CLARIFICATION RULE (MANDATORY)
+
+1. Clear request → proceed directly
+2. Ambiguous → max 2 rounds of clarification, then best understanding
+3. Small edits → no plan file; large/multi-system/API-heavy → brief plan at
+   `{self.project_path}/plans/plan_YYYYMMDD_HHMMSS.md`, delete after
+
+---
+
+{context_section}
+{integrations_section}
+{_PROMPT_API_SOURCE_GATE}
+
+## USER REQUEST
+
+{user_message}
+"""
+
     # ------------------------------------------------------------------
     # External integrations metadata block
     # ------------------------------------------------------------------
-    # External integrations block is now built by the shared
     # build_external_integrations_block(project_id) helper in
     # integration_prompt_block.py — used by both the chat prompts here and
     # the create-time editors (services/*/editor.py, acp_frontend_editor_v2).

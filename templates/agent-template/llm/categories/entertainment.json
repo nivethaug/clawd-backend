@@ -1,0 +1,116 @@
+{
+  "category": "entertainment",
+  "name": "Entertainment",
+  "description": "Movies, jokes, quotes, and entertainment content",
+  "prefix": "/entertainment",
+  "apis": [
+    {
+      "id": "jokeapi",
+      "name": "JokeAPI",
+      "base_url": "https://v2.jokeapi.dev",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/entertainment/jokes/random",
+          "method": "GET",
+          "summary": "Get random joke",
+          "direct_url": "https://v2.jokeapi.dev/joke/Any",
+          "sample_request": "https://v2.jokeapi.dev/joke/Any",
+          "sample_response": {
+            "error": false,
+            "category": "Programming",
+            "type": "twopart",
+            "setup": "Why do programmers prefer dark mode?",
+            "delivery": "Because light attracts bugs.",
+            "flags": {
+              "nsfw": false,
+              "religious": false,
+              "political": false,
+              "racist": false,
+              "sexist": false,
+              "explicit": false
+            },
+            "id": 187,
+            "safe": true,
+            "lang": "en"
+          }
+        }
+      ]
+    },
+    {
+      "id": "chucknorris",
+      "name": "Chuck Norris IO",
+      "base_url": "https://api.chucknorris.io",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/entertainment/jokes/chuck-norris",
+          "method": "GET",
+          "summary": "Get Chuck Norris joke",
+          "direct_url": "https://api.chucknorris.io/jokes/random",
+          "sample_request": "https://api.chucknorris.io/jokes/random",
+          "sample_response": {
+            "categories": ["science"],
+            "created_at": "2020-01-05 13:42:19.576875",
+            "icon_url": "https://assets.chucknorris.host/img/avatar/chuck-norris.png",
+            "id": "xqx1vs3irqeet0bpfrs7tq",
+            "updated_at": "2020-01-05 13:42:19.576875",
+            "url": "https://api.chucknorris.io/jokes/xqx1vs3irqeet0bpfrs7tq",
+            "value": "Chuck Norris can solve the halting problem in polynomial time."
+          }
+        }
+      ]
+    },
+    {
+      "id": "forismatic",
+      "name": "Forismatic Quotes",
+      "base_url": "https://api.forismatic.com/api/1.0/",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/entertainment/quotes/random",
+          "method": "GET",
+          "summary": "Get random quote",
+          "direct_url": "https://api.forismatic.com/api/1.0/?method=getQuote&format=json&lang=en",
+          "sample_request": "https://api.forismatic.com/api/1.0/?method=getQuote&format=json&lang=en",
+          "sample_response": {
+            "quoteText": "The only way to do great work is to love what you do.",
+            "quoteAuthor": "Steve Jobs",
+            "senderName": "",
+            "senderLink": "",
+            "quoteLink": "http://forismatic.com/en/1234567890/"
+          }
+        }
+      ]
+    },
+    {
+      "id": "uselessfacts",
+      "name": "Useless Facts",
+      "base_url": "https://uselessfacts.jsph.pl",
+      "auth_required": false,
+      "endpoints": [
+        {
+          "path": "/entertainment/facts/random",
+          "method": "GET",
+          "summary": "Get random fact",
+          "direct_url": "https://uselessfacts.jsph.pl/random.json?language=en",
+          "sample_request": "https://uselessfacts.jsph.pl/random.json?language=en",
+          "sample_response": {
+            "id": "5eb17aab2676b3b68930a70c",
+            "text": "Honey never spoils. Archaeologists have found 3000-year-old honey in Egyptian tombs that was still edible.",
+            "source": "djtech.net",
+            "source_url": "http://www.djtech.net/humor/useless_facts.htm",
+            "language": "en",
+            "permalink": "https://uselessfacts.jsph.pl/5eb17aab2676b3b68930a70c"
+          }
+        }
+      ]
+    }
+  ],
+  "use_cases": [
+    "Get jokes and humor content",
+    "Generate inspirational quotes",
+    "Get movie information",
+    "Entertainment for bots and applications"
+  ]
+}
