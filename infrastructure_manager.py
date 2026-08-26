@@ -1979,7 +1979,7 @@ class InfrastructureManager:
         on any failure the clone proceeds with an empty DB as before."""
         try:
             source_db = f"{self.db_provisioner._sanitize_db_name(source_domain)}_db"
-            logger.info(f"[CLONE-DB] Copying {source_db} -> {target_db}")
+            logger.info(f"[CLONE-DB] Copying {source_db} -> {target_db} (schema-only, no data)")
             dump_pipe = (
                 f"pg_dump -U {POSTGRES_USER} --schema-only --no-owner --no-privileges {source_db} "
                 f"| psql -U {POSTGRES_USER} -d {target_db} -q"
@@ -2000,7 +2000,7 @@ class InfrastructureManager:
                     f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "{username}";',
                 ):
                     self.db_provisioner._execute_sql(grant_sql, database_name=target_db)
-            logger.info(f"✓ [CLONE-DB] {source_db} copied into {target_db} (grants applied)")
+            logger.info(f"✓ [CLONE-DB] {source_db} schema copied into {target_db} — tables only, 0 data rows (grants applied)")
 
         except Exception as e:
             logger.warning(f"[CLONE-DB] Copy error (clone proceeds with empty DB): {e}")
