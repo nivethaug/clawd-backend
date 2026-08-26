@@ -130,6 +130,32 @@ async def trigger_event(token: str, request: Request):
     return {"triggered": armed, "event_id": event_id}
 
 
+@router.post("/info/{project_id}/rotate")
+async def trigger_rotate(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+    request_obj: Request = None,
+):
+    """Regenerate the project's trigger token — the old webhook URL stops
+    working immediately (tokens resolve from the DB value). Owner JWT or
+    worker-IP allowlist, same as the info endpoint."""
+    from api.scheduler_router import _require_project_owner
+    _require_project_owner(project_id, authorization, request_obj)
+
+    new_token = secrets.token_urlsafe(24)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE projects SET trigger_token = %s WHERE id = %s",
+            (new_token, project_id),
+        )
+        conn.commit()
+    logger.info("[TRIGGERS] rotated token for project %s", project_id)
+
+    import os as _os
+    backend = _os.getenv("SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud").rstrip("/")
+    return {"project_id": project_id, "url": f"{backend}/api/triggers/{new_token}", "rotated": True}
+
+
 @router.get("/{token}")
 async def trigger_ping(token: str):
     """Browser-verifiable ping for the trigger URL."""
