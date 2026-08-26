@@ -2148,7 +2148,7 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         logger.info(f"[GITHUB] Creating repository for project: {domain}")
         repo_url = github.create_repository(
             name=domain,
-            public=True,  # Public by default
+            public=False,  # Private by default (policy: project code is private)
             description=f"Project: {request.name}"
         )
         
@@ -3141,7 +3141,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             github = get_github_service()
             repo_url = github.create_repository(
                 name=clone_domain,
-                public=True,
+                public=False,
                 description=f"Cloned project: {clone_name}"
             )
             if repo_url:

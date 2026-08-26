@@ -133,7 +133,7 @@ class GitHubService:
         
         return name
     
-    def create_repository(self, name: str, public: bool = True, description: str = "") -> Optional[str]:
+    def create_repository(self, name: str, public: bool = False, description: str = "") -> Optional[str]:
         """
         Create a new GitHub repository.
         
