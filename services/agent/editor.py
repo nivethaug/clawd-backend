@@ -230,6 +230,15 @@ CRITICAL RULES
    python -c "import py_compile; py_compile.compile('FILE_PATH', doraise=True)"
    If compilation fails, FIX immediately.
 
+NOTIFICATION DISCIPLINE (default for watcher/monitor agents):
+- Message the user only on CHANGE (value differs from state), MILESTONE/
+  threshold crossed, or FAILURE/anomaly. Unchanged observations are logged
+  ("processed, no change") — never messaged. Silence means stable.
+- Prefer declarative conditions ("when": [{"var": X, "op": "changed"}]) over
+  hand-written suppression code.
+- Offer a daily digest instead of per-run pings for heartbeat lovers.
+- If the user explicitly asks "notify me on every run", obey — default, not rule.
+
 ## USER REQUEST
 
 Build this automation agent: {description}

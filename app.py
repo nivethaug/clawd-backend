@@ -12249,6 +12249,13 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
 
         if has_origin:
             # Use --set-upstream in case branch tracking isn't configured yet
+            # Pre-push secret guard (github_service.guard_push)
+            from github_service import guard_push as _gp
+            _allowed, _reason = _gp(project_path)
+            if not _allowed:
+                logger.error("[AUTO-COMMIT] %s", _reason)
+                return False
+
             push_result = subprocess.run(
                 ["git", "-C", project_path, "push", "--set-upstream", "origin", "main"],
                 capture_output=True, text=True, timeout=60

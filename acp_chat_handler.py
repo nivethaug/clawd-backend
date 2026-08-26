@@ -1291,6 +1291,17 @@ Trigger behavior: EVERY event job of this project fires on each webhook;
 handlers filter by event content. GET on the URL is a browser-verifiable
 ping. Bodies cap at 64KB.
 
+EVENT FIELD DISCIPLINE (mandatory):
+- Read the actual fields from payload["event"]["body_json"] with
+  .get(field, fallback) — e.g. data.get("src", "unknown"),
+  data.get("issue", {{}}).get("title").
+- NEVER hardcode placeholder labels like "(unknown)" in messages — always
+  interpolate the real event values.
+
+NOTIFICATION DISCIPLINE (default for watcher/monitor agents):
+- Message only on CHANGE, MILESTONE, or FAILURE. Unchanged observations:
+  log "processed, no change" — never message. Silence means stable.
+
 ---
 
 ## CONDITIONS + STATE ("only when ...")

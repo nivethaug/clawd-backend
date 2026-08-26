@@ -17,6 +17,7 @@ Usage:
 import subprocess
 import logging
 import re
+from pathlib import Path
 import os
 from typing import Optional, Tuple
 
@@ -213,6 +214,72 @@ class GitHubService:
             logger.error(f"[GITHUB] Error adding remote: {e}")
             return False
     
+
+# ── Pre-push secret guard ──────────────────────────────────────────────
+# Blocks pushes whose working tree contains credential patterns (keys
+# hardcoded by AI code, committed .env, etc.). Reports FILE PATHS only —
+# never matching content. Also force-adds .env to .gitignore.
+
+_SECRET_PATTERNS = [
+    re.compile(r"sk-or-v1-[A-Za-z0-9_-]{16,}"),
+    re.compile(r"sk-[A-Za-z0-9]{32,}"),
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{30,}"),
+    re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+]
+
+_SCAN_SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", "dist", "build", ".next"}
+_SCAN_MAX_FILE = 2 * 1024 * 1024  # skip files > 2MB (binaries, bundles)
+
+
+def guard_push(repo_path: str) -> tuple:
+    """Return (allowed: bool, reason: str). Enforces:
+    1. .env present in .gitignore (added if missing)
+    2. no credential patterns in trackable text files
+    Called before every push; blocks the push on hits."""
+    import os as _os
+    rp = Path(repo_path)
+
+    # 1. .gitignore enforcement
+    gi = rp / ".gitignore"
+    try:
+        existing = gi.read_text() if gi.exists() else ""
+        if ".env" not in existing:
+            with open(gi, "a", encoding="utf-8") as fh:
+                if existing and not existing.endswith('\n'):
+                    fh.write('\n')
+                fh.write(".env\n.env.*\n!.env.example\n")
+            logger.info("[GITHUB-GUARD] .env added to .gitignore")
+    except Exception as e:
+        logger.warning("[GITHUB-GUARD] .gitignore update failed: %s", e)
+
+    # 2. pattern scan
+    hits = []
+    for dirpath, dirnames, filenames in _os.walk(rp):
+        dirnames[:] = [d for d in dirnames if d not in _SCAN_SKIP_DIRS]
+        for fname in filenames:
+            if fname == ".env" or fname.endswith((".pyc", ".png", ".jpg", ".woff", ".woff2", ".mp4")):
+                continue
+            fpath = Path(dirpath) / fname
+            try:
+                if fpath.stat().st_size > _SCAN_MAX_FILE:
+                    continue
+                text = fpath.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            for pat in _SECRET_PATTERNS:
+                if pat.search(text):
+                    hits.append(str(fpath.relative_to(rp)))
+                    break
+    if hits:
+        logger.error("[GITHUB-GUARD] PUSH BLOCKED — credential patterns in: %s", ", ".join(hits[:10]))
+        return False, ("Push blocked: credential-looking patterns found in: "
+                       + ", ".join(hits[:5])
+                       + ". Move secrets to environment variables and remove them from code, then commit the fix.")
+    return True, ""
+
+
     def push_to_github(self, project_path: str, branch: str = "main", remote_name: str = "origin", repo_url: str = None) -> bool:
         """
         Push local repository to GitHub.
@@ -226,6 +293,12 @@ class GitHubService:
         Returns:
             True if successful
         """
+
+        allowed, reason = guard_push(project_path)
+        if not allowed:
+            logger.error("[GITHUB] %s", reason)
+            return False
+
         try:
             # Step 0: Fix dubious ownership for git operations (PM2 runs as root)
             subprocess.run(
