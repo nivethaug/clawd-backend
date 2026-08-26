@@ -42,7 +42,17 @@ class ProxyRequest(BaseModel):
     method: str = "GET"                 # GET | POST | PUT | PATCH | DELETE
     endpoint: str                       # provider path, e.g. 'youtube/v3/channels?part=snippet&mine=true'
     body: Optional[dict] = None         # JSON body for non-GET
+    body_base64: Optional[str] = None   # RAW body (binary-safe, e.g. video bytes) — wins over body
+    request_headers: Optional[dict] = None  # outbound headers (allowlisted below)
+    timeout: int = 30                   # seconds, capped at 300 (large uploads)
     params: Optional[dict] = None       # query params (alternative to embedding ?... in endpoint)
+
+# Outbound header allowlist — credential/cookie headers are NEVER taken
+# from callers (the proxy injects auth itself).
+_REQUEST_HEADER_ALLOWLIST = frozenset({
+    "content-type", "content-length",
+    "x-upload-content-type", "x-upload-content-length",
+})
 
 
 def _project_env_secret(project_id: int) -> Optional[str]:
@@ -159,10 +169,26 @@ async def integrations_proxy(
     connection_id = (dict(row) if not isinstance(row, dict) else row)["connection_id"]
 
     kwargs = {}
-    if request.body is not None and request.method.upper() != "GET":
+    if request.body_base64:
+        import base64 as _b64
+        try:
+            raw = _b64.b64decode(request.body_base64, validate=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="body_base64 is not valid base64")
+        if len(raw) > 256 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Raw body exceeds 256MB cap")
+        kwargs["raw_body"] = raw
+    elif request.body is not None and request.method.upper() != "GET":
         kwargs["json"] = request.body
     if request.params:
         kwargs["params"] = request.params
+    if request.request_headers:
+        kwargs["extra_headers"] = {
+            k: v for k, v in request.request_headers.items()
+            if k.lower() in _REQUEST_HEADER_ALLOWLIST
+        }
+    if request.timeout:
+        kwargs["timeout_seconds"] = max(5, min(int(request.timeout), 300))
 
     result = nango_client.proxy_request(
         provider_config_key=request.provider,
@@ -182,10 +208,13 @@ async def integrations_proxy(
     if result["status"] >= 500:
         raise HTTPException(status_code=502, detail="Provider call failed")
     # Pass the provider's status + body through untouched, plus filtered
-    # provider headers (e.g. YouTube resumable-upload Location).
+    # provider headers. Content-type follows the PROVIDER's (binary-safe) —
+    # never force application/json (video bytes etc.).
+    fwd = dict(result.get("headers") or {})
+    provider_ct = fwd.pop("content-type", None)
     return Response(
-        content=result["body"],
+        content=result["body"] if isinstance(result.get("body"), (str, bytes)) else str(result.get("body", "")),
         status_code=result["status"],
-        media_type="application/json",
-        headers=result.get("headers") or {},
+        media_type=provider_ct,
+        headers=fwd,
     )

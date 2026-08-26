@@ -391,22 +391,50 @@ _FORWARD_RESPONSE_HEADERS = frozenset({
 def proxy_request(provider_config_key: str, connection_id: str, method: str,
                   endpoint: str, **kwargs: Any) -> Dict[str, Any]:
     """Authenticated provider call through Nango with credential injection.
-    Returns {status, body, headers} — body is the raw provider JSON; headers
-    is a filtered subset (upload session URLs etc.), never set-cookie."""
+    Returns {status, body, headers} — body is the raw provider bytes/text;
+    headers is a filtered subset (upload session URLs etc.), never
+    set-cookie.
+
+    Extra kwargs beyond httpx's: raw_body (bytes — sent as-is, binary-safe),
+    extra_headers (merged into the outbound request headers), timeout_seconds
+    (per-request timeout, default 30s, max 300s for uploads)."""
+    raw_body = kwargs.pop("raw_body", None)
+    extra_headers = kwargs.pop("extra_headers", None) or {}
+    timeout_seconds = float(kwargs.pop("timeout_seconds", 30.0))
+    outbound_headers = {
+        "Authorization": f"Bearer {_secret()}",
+        "provider-config-key": provider_config_key,
+        "connection-id": connection_id,
+    }
+    outbound_headers.update(extra_headers)
+
+    send_kwargs: Dict[str, Any] = {"headers": outbound_headers,
+                                   "timeout": min(timeout_seconds, 300.0)}
+    if raw_body is not None:
+        send_kwargs["content"] = raw_body
+        # caller's content-type (if any) already in extra_headers; otherwise
+        # httpx sets application/octet-stream
+    elif "json" in kwargs:
+        send_kwargs["json"] = kwargs.pop("json")
+    if "params" in kwargs:
+        send_kwargs["params"] = kwargs.pop("params")
+    if "data" in kwargs:
+        send_kwargs["data"] = kwargs.pop("data")
+
     r = httpx.request(
         method.upper(),
         f"{_base_url()}/proxy/{endpoint.lstrip('/')}",
-        headers={
-            "Authorization": f"Bearer {_secret()}",
-            "provider-config-key": provider_config_key,
-            "connection-id": connection_id,
-        },
-        timeout=30.0,
-        **kwargs,
+        **send_kwargs,
     )
     resp_headers = {
         k: v for k, v in r.headers.items()
         if k.lower() in _FORWARD_RESPONSE_HEADERS
     }
-    return {"status": r.status_code, "body": r.text[:5000],
+    # Binary-safe: pass bytes through untouched (video/audio responses);
+    # truncate only text bodies (log-size safety for JSON APIs).
+    if r.headers.get("content-type", "").startswith(("audio/", "video/", "application/octet-stream")):
+        body_out: Any = r.content
+    else:
+        body_out = r.text[:5000]
+    return {"status": r.status_code, "body": body_out,
             "headers": resp_headers}
