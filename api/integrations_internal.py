@@ -41,6 +41,7 @@ class ProxyRequest(BaseModel):
     provider: str                       # e.g. 'youtube'
     method: str = "GET"                 # GET | POST | PUT | PATCH | DELETE
     endpoint: str                       # provider path, e.g. 'youtube/v3/channels?part=snippet&mine=true'
+    mode: Optional[str] = None          # 'resumable_upload' = proxy runs the whole init->PUT dance server-side
     body: Optional[dict] = None         # JSON body for non-GET
     body_base64: Optional[str] = None   # RAW body (binary-safe, e.g. video bytes) — wins over body
     request_headers: Optional[dict] = None  # outbound headers (allowlisted below)
@@ -117,6 +118,73 @@ def _resolve_project(project_id: int, bearer: str) -> int:
     return owner_id
 
 
+def _resumable_upload(request, connection_id):
+    """Server-side resumable upload: init -> Location -> PUT bytes -> final.
+
+    1. mint the owner's OAuth access token (server-side only)
+    2. POST the metadata JSON to <provider_base>/<endpoint> with the
+       X-Upload-Content-* headers -> provider returns the session URL in
+       the Location header (consumed HERE, never forwarded)
+    3. PUT the raw bytes to the session URL (self-authorizing)
+    4. return the final response (e.g. the uploaded video resource JSON)
+    """
+    import base64 as _b64
+    import httpx as _httpx
+    import json as _json
+    from services.integrations import nango_client
+
+    if not request.body_base64:
+        raise HTTPException(status_code=400, detail="resumable_upload requires body_base64 (the file bytes)")
+    try:
+        raw = _b64.b64decode(request.body_base64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="body_base64 is not valid base64")
+    if len(raw) > 256 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File exceeds 256MB cap")
+
+    token = nango_client.get_access_token(connection_id, request.provider)
+    if not token:
+        raise HTTPException(status_code=502, detail="Could not mint provider access token")
+
+    meta = nango_client.get_provider_metadata(
+        nango_client.ENABLED_PROVIDERS.get(request.provider, {}).get("nango_provider", request.provider)
+    ) or {}
+    base = (meta.get("base_url") or "").rstrip("/")
+    if not base:
+        raise HTTPException(status_code=502, detail=f"No base_url known for provider '{request.provider}'")
+
+    rh = request.request_headers or {}
+    mime = rh.get("X-Upload-Content-Type") or rh.get("Content-Type") or "application/octet-stream"
+    timeout_s = max(5, min(int(request.timeout or 280), 300))
+
+    init_headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Upload-Content-Type": mime,
+        "X-Upload-Content-Length": str(len(raw)),
+    }
+    init = _httpx.post(
+        f"{base}/{request.endpoint.lstrip('/')}",
+        json=request.body or {},
+        headers=init_headers,
+        timeout=timeout_s,
+    )
+    if init.status_code >= 400:
+        logger.warning("[INTEGRATIONS-INTERNAL] upload init failed: %s %s", init.status_code, init.text[:300])
+        return Response(content=init.text, status_code=init.status_code, media_type="application/json")
+    session_url = init.headers.get("location")
+    if not session_url:
+        return Response(
+            content=_json.dumps({"detail": "Provider returned no upload session URL"}),
+            status_code=502, media_type="application/json")
+
+    put = _httpx.put(session_url, content=raw, headers={"Content-Type": mime}, timeout=timeout_s)
+    logger.info(
+        "[INTEGRATIONS-INTERNAL] project upload (%s): init %s -> PUT %s bytes -> %s",
+        request.provider, init.status_code, len(raw), put.status_code,
+    )
+    return Response(content=put.text, status_code=put.status_code, media_type="application/json")
+
+
 @router.post("/proxy")
 async def integrations_proxy(
     request: ProxyRequest,
@@ -167,6 +235,15 @@ async def integrations_proxy(
                    f"(Settings → Integrations)",
         )
     connection_id = (dict(row) if not isinstance(row, dict) else row)["connection_id"]
+
+    # ---- Resumable upload mode: the full two-step runs INSIDE the proxy.
+    # The provider's Location header never crosses to user code (Nango strips
+    # it; here we consume it internally), and the OAuth token never leaves
+    # the server either. Caller supplies: metadata JSON (body), raw bytes
+    # (body_base64), mime via request_headers['X-Upload-Content-Type'] (or
+    # Content-Type). Returns the FINAL provider response (video resource).
+    if request.mode == "resumable_upload":
+        return _resumable_upload(request, connection_id)
 
     kwargs = {}
     if request.body_base64:
