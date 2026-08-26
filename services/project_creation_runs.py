@@ -752,7 +752,7 @@ def _create_github_repo(run_id: int, project_id: int, project_path: str, domain:
     try:
         github = get_github_service()
         append_chunk(run_id, "log", f"Creating GitHub repository: {domain}")
-        repo_url = github.create_repository(name=domain, public=True, description=f"Project: {name}")
+        repo_url = github.create_repository(name=domain, public=False, description=f"Project: {name}")
         if not repo_url:
             append_chunk(run_id, "log", "GitHub repository was not created; continuing without remote")
             return
