@@ -130,7 +130,8 @@ async def get_inr_pricing():
 
     def _inr(usd_cents):
         paise = razorpay_service.usd_cents_to_inr_paise(usd_cents or 0)
-        return paise, razorpay_service.inr_display(paise if usd_cents else None)
+        # 0 cents = Free plan → ₹0; missing price (Enterprise) → "Custom"
+        return paise, razorpay_service.inr_display(paise if usd_cents is not None else None)
 
     plan_out = []
     for slug, p in sorted(plans.items(), key=lambda x: x[1].get("sort_order", 0)):
