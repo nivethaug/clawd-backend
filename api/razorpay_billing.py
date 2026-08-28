@@ -129,13 +129,20 @@ async def get_inr_pricing():
     packs = [dict(r) if not isinstance(r, dict) else r for r in rows]
 
     def _inr(usd_cents):
+        # Charged/displayed price (launch offer applied) + pre-offer
+        # original for the strikethrough. 0 cents = Free plan → ₹0;
+        # missing price (Enterprise) → "Custom".
         paise = razorpay_service.usd_cents_to_inr_paise(usd_cents or 0)
-        # 0 cents = Free plan → ₹0; missing price (Enterprise) → "Custom"
-        return paise, razorpay_service.inr_display(paise if usd_cents is not None else None)
+        orig = razorpay_service.usd_cents_to_inr_paise(usd_cents or 0, discounted=False)
+        return (
+            paise,
+            razorpay_service.inr_display(paise if usd_cents is not None else None),
+            razorpay_service.inr_display(orig if usd_cents is not None else None),
+        )
 
     plan_out = []
     for slug, p in sorted(plans.items(), key=lambda x: x[1].get("sort_order", 0)):
-        paise, display = _inr(p.get("price_monthly_cents"))
+        paise, display, display_original = _inr(p.get("price_monthly_cents"))
         plan_out.append({
             "slug": slug,
             "name": p.get("name"),
@@ -143,6 +150,7 @@ async def get_inr_pricing():
             "price_monthly_display": f"${p.get('price_monthly_cents', 0) / 100:.2f}",
             "inr_price_minor": paise,
             "inr_price_display": display,
+            "inr_price_display_original": display_original,
             "max_active_projects": p.get("max_active_projects"),
             "features": p.get("features", []),
             "sort_order": p.get("sort_order", 0),
@@ -150,7 +158,7 @@ async def get_inr_pricing():
 
     pack_out = []
     for pack in packs:
-        paise, display = _inr(pack.get("price_cents"))
+        paise, display, display_original = _inr(pack.get("price_cents"))
         pack_out.append({
             "id": pack["id"],
             "name": pack["name"],
@@ -159,6 +167,7 @@ async def get_inr_pricing():
             "price_cents": pack["price_cents"],
             "inr_price_minor": paise,
             "inr_price_display": display,
+            "inr_price_display_original": display_original,
             "sort_order": pack.get("sort_order", 0),
         })
 

@@ -73,6 +73,14 @@ def is_configured() -> bool:
 
 DEFAULT_INR_PER_USD = 88
 
+# India launch offer — 25% off ALL INR charges (plans + credit packs).
+# Deliberately a code constant, NOT a DB row: this is a temporary promo.
+# Single choke point: usd_cents_to_inr_paise() feeds BOTH the public
+# pricing display and the actual Razorpay order/subscription amounts, so
+# the advertised price and the charged price can never diverge.
+# To end the offer: set to 0 (or remove its usage) and redeploy.
+INR_LAUNCH_DISCOUNT = 0.25
+
 
 def get_inr_per_usd() -> int:
     """Read INR_PER_USD from billing_config (60s plan-cache TTL)."""
@@ -85,18 +93,23 @@ def get_inr_per_usd() -> int:
     return rate if rate >= 1 else DEFAULT_INR_PER_USD
 
 
-def usd_cents_to_inr_paise(usd_cents: int) -> int:
+def usd_cents_to_inr_paise(usd_cents: int, discounted: bool = True) -> int:
     """Derive an INR paise amount from a USD-cents price.
 
     Rounding for psychological endings: >= ₹200 rounds to the nearest
     hundred minus one (₹1,699); below that to the nearest ten minus one.
     Zero/negative prices return 0 (free/custom plans are not purchasable
     via Razorpay).
+
+    `discounted=False` returns the pre-offer price (used only for the
+    strikethrough original in the pricing display; never charged).
     """
     if not usd_cents or usd_cents <= 0:
         return 0
     rate = get_inr_per_usd()
     rupees = (usd_cents / 100) * rate
+    if discounted and INR_LAUNCH_DISCOUNT > 0:
+        rupees = rupees * (1 - INR_LAUNCH_DISCOUNT)
     if rupees >= 200:
         return (int(round(rupees / 100)) * 100 - 1) * 100
     return (int(round(rupees / 10)) * 10 - 1) * 100
