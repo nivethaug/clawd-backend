@@ -142,7 +142,14 @@ async def get_inr_pricing():
 
     plan_out = []
     for slug, p in sorted(plans.items(), key=lambda x: x[1].get("sort_order", 0)):
-        paise, display, display_original = _inr(p.get("price_monthly_cents"))
+        cents = p.get("price_monthly_cents")
+        if slug == "enterprise" or cents is None:
+            # Enterprise is priced by conversation, not purchasable at a
+            # fixed amount — always "Custom" (its 0-cent row must not
+            # render as ₹0 the way the genuinely-free Free plan does).
+            paise, display, display_original = 0, "Custom", "Custom"
+        else:
+            paise, display, display_original = _inr(cents)
         plan_out.append({
             "slug": slug,
             "name": p.get("name"),
