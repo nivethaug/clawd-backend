@@ -161,7 +161,12 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
             "public_metrics gives follower/following/tweet_count.",
             "Timeline reads (users/{id}/tweets, mentions, search) are PAID "
             "tier — never call them; track tweets you post by saving the "
-            "returned tweet ids (e.g. to a Google Sheet).",
+            "returned tweet ids (e.g. to Notion/Google Sheet).",
+            "Read endpoints reject max_results outside 5-100 — never pass "
+            "max_results=3; request 5 (or 10) and slice the top N yourself.",
+            "POST 2/tweets body: {\"text\": \"...\"} — plain JSON, no "
+            "content-type quirks; character limit applies to the final "
+            "text including emoji and the trailing hashtag line.",
         ],
     },
     "google-sheet": {
