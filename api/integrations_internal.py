@@ -48,6 +48,7 @@ class ProxyRequest(BaseModel):
     request_headers: Optional[dict] = None  # outbound headers (allowlisted below)
     timeout: int = 30                   # seconds, capped at 300 (large uploads)
     params: Optional[dict] = None       # query params (alternative to embedding ?... in endpoint)
+    account: Optional[str] = None       # multi-account: account label OR connection_id; omit = default account
 
 # Outbound header allowlist — credential/cookie headers are NEVER taken
 # from callers (the proxy injects auth itself).
@@ -222,20 +223,39 @@ async def integrations_proxy(
     if not request.endpoint or len(request.endpoint) > MAX_ENDPOINT_CHARS:
         raise HTTPException(status_code=400, detail="endpoint required (<=500 chars)")
 
-    # Owner's active connection for this provider
+    # Owner's connection for this provider — multi-account aware:
+    # account param matches label first, then exact connection_id;
+    # absent → the default account (is_default, else oldest).
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT connection_id FROM nango_connections "
-            "WHERE user_id = ? AND provider_config_key = ?",
+        rows = conn.execute(
+            "SELECT connection_id, label, is_default FROM nango_connections "
+            "WHERE user_id = ? AND provider_config_key = ? "
+            "ORDER BY (is_default = false), created_at ASC",
             (owner_id, request.provider),
-        ).fetchone()
-    if not row:
+        ).fetchall()
+    conns = [(dict(r) if not isinstance(r, dict) else r) for r in rows]
+    if not conns:
         raise HTTPException(
             status_code=409,
             detail=f"'{request.provider}' is not connected for this account "
                    f"(Settings → Integrations)",
         )
-    connection_id = (dict(row) if not isinstance(row, dict) else row)["connection_id"]
+    connection_id = None
+    if request.account:
+        match = next((c for c in conns if c.get("label") == request.account), None) \
+            or next((c for c in conns
+                     if c.get("connection_id") == request.account), None)
+        if not match:
+            labels = ", ".join(
+                f'"{c.get("label") or "default"}"' for c in conns)
+            raise HTTPException(
+                status_code=404,
+                detail=f"No {request.provider} account '{request.account}'. "
+                       f"Connected accounts: {labels}",
+            )
+        connection_id = match["connection_id"]
+    else:
+        connection_id = conns[0]["connection_id"]
 
     # ---- Resumable upload mode: the full two-step runs INSIDE the proxy.
     # The provider's Location header never crosses to user code (Nango strips

@@ -1594,10 +1594,12 @@ def init_schema():
                 provider_config_key TEXT NOT NULL,
                 connection_id TEXT NOT NULL,
                 end_user_id TEXT NOT NULL,
+                label TEXT,
+                is_default BOOLEAN DEFAULT false,
                 metadata JSONB DEFAULT '{}'::jsonb,
                 created_at TIMESTAMP DEFAULT NOW(),
                 last_checked_at TIMESTAMP,
-                UNIQUE(user_id, provider_config_key)
+                UNIQUE(user_id, provider_config_key, connection_id)
             )""")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_nango_conns_user "
@@ -1836,6 +1838,59 @@ def init_schema():
                                    'TELEGRAM_BOT', 'AUTOMATION', 'SCHEDULER', 'API_GENERATION')
                 """)
             _run_migration(migrate_creation_credit_costs)
+
+            # ----------------------------------------------------------------
+            # NANGO MULTI-ACCOUNT: several OAuth accounts per provider.
+            # label = user-facing account name, is_default = the account
+            # used when proxy_call doesn't specify one.
+            # ----------------------------------------------------------------
+            def migrate_nango_multi_account():
+                cur.execute(
+                    "ALTER TABLE nango_connections ADD COLUMN label TEXT")
+                cur.execute(
+                    "ALTER TABLE nango_connections "
+                    "ADD COLUMN is_default BOOLEAN DEFAULT false")
+            _run_migration(migrate_nango_multi_account)
+
+            def migrate_nango_unique_per_connection():
+                # Relax UNIQUE(user_id, provider) → UNIQUE per connection.
+                # Try constraint name first, then the auto index name.
+                for drop_sql in (
+                    "ALTER TABLE nango_connections DROP CONSTRAINT "
+                    "nango_connections_user_provider_key",
+                    "DROP INDEX IF EXISTS nango_connections_user_provider_key",
+                ):
+                    try:
+                        cur.execute(drop_sql)
+                        break
+                    except Exception:
+                        conn.rollback()
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    "uq_nango_user_provider_connection "
+                    "ON nango_connections(user_id, provider_config_key, "
+                    "connection_id)")
+            _run_migration(migrate_nango_unique_per_connection)
+
+            def migrate_nango_default_backfill():
+                # Oldest row per (user, provider) becomes the default.
+                cur.execute("""
+                    UPDATE nango_connections nc SET
+                        is_default = true,
+                        label = COALESCE(nc.label, 'default')
+                    WHERE nc.id = (
+                        SELECT id FROM nango_connections c2
+                        WHERE c2.user_id = nc.user_id
+                          AND c2.provider_config_key = nc.provider_config_key
+                        ORDER BY c2.created_at ASC, c2.id ASC LIMIT 1
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM nango_connections c3
+                        WHERE c3.user_id = nc.user_id
+                          AND c3.provider_config_key = nc.provider_config_key
+                          AND c3.is_default
+                    )
+                """)
+            _run_migration(migrate_nango_default_backfill)
 
 
             # Seed plan_credit_grants

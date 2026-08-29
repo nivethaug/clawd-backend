@@ -346,7 +346,8 @@ def get_youtube_analytics_summary(start_date: str, end_date: str) -> dict:
 # ============================================================================
 
 def proxy_call(provider: str, method: str, endpoint: str,
-               body: dict = None, params: dict = None, timeout: int = 30) -> dict:
+               body: dict = None, params: dict = None, timeout: int = 30,
+               account: str = None) -> dict:
     """Call ANY OAuth-connected integration through the DreamAgent proxy.
 
     The platform injects the account token server-side — the agent never
@@ -361,6 +362,8 @@ def proxy_call(provider: str, method: str, endpoint: str,
                   "v1/databases/{id}/query", "chat.postMessage"
         body:     JSON body (optional)
         params:   query params (optional)
+        account:  account label for multi-account providers (optional);
+                  omit to use the provider's default account
 
     Returns:
         {"status": int, "body": str, "headers": {...}} — provider response
@@ -387,7 +390,8 @@ def proxy_call(provider: str, method: str, endpoint: str,
             json={"provider": provider, "method": method.upper(),
                   "endpoint": endpoint,
                   **({"body": body} if body is not None else {}),
-                  **({"params": params} if params else {})},
+                  **({"params": params} if params else {}),
+                  **({"account": account} if account else {})},
             timeout=timeout,
         )
     except requests.exceptions.RequestException as e:

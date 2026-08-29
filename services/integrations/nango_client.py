@@ -296,11 +296,20 @@ def get_provider_metadata(nango_provider_name: str) -> Optional[Dict[str, Any]]:
 # ----------------------------------------------------------------------
 
 def mint_connect_session(user_id: int, user_email: str,
-                         providers: List[str]) -> Dict[str, Any]:
-    r = httpx.post(f"{_base_url()}/connect/sessions", headers=_headers(), json={
+                         providers: List[str],
+                         connection_id: Optional[str] = None) -> Dict[str, Any]:
+    """Mint a short-lived connect session. `connection_id` scopes the new
+    OAuth link to a named account — without it Nango defaults the
+    connection_id to end_user.id, giving one connection per provider
+    (the legacy single-account behavior)."""
+    payload: Dict[str, Any] = {
         "end_user": {"id": str(user_id), "email": user_email},
         "allowed_integrations": providers,
-    }, timeout=_TIMEOUT)
+    }
+    if connection_id:
+        payload["connection_id"] = connection_id
+    r = httpx.post(f"{_base_url()}/connect/sessions", headers=_headers(),
+                   json=payload, timeout=_TIMEOUT)
     if r.status_code >= 400:
         _log_error("connect session", r.status_code, r.text)
         return {"error": "could not start connection flow"}

@@ -8,13 +8,21 @@ Isolation: all logic in services/integrations/nango_client.py; this router
 authenticates, resolves the user from the token (never client-supplied),
 and reconciles Nango connections with our nango_connections rows.
 
+Multi-account: a user may connect SEVERAL accounts per provider (e.g. two
+YouTube channels). Each connection carries a label; the oldest per provider
+(or an explicitly chosen one) is the DEFAULT used by proxy_call when no
+account is specified. Connection ids for extra accounts are
+"<user_id>:<provider>:<label-slug>"; the legacy default connection keeps
+Nango's end_user.id-based connection id and works unchanged.
+
 Feature gate: NANGO_SECRET_KEY unset → 503 on every route; the rest of
 DreamAgent (API-key vault, Custom Env, projects) is unaffected.
 """
 
 import json
 import logging
-from typing import Optional
+import re
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
@@ -30,6 +38,9 @@ router = APIRouter()
 
 class ConnectSessionRequest(BaseModel):
     provider: str
+    # Optional account label, e.g. "Clips channel". Omitted → legacy
+    # single-account flow (connection_id = end_user.id, becomes default).
+    label: Optional[str] = None
 
 
 def _require_configured():
@@ -50,39 +61,53 @@ def _user_email(user_id: int) -> str:
     return d.get("email") or f"user{user_id}@dreamagent.cloud"
 
 
+def _slugify(label: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (label or "").strip().lower()).strip("-")
+    return slug[:40] or "account"
+
+
+def _connection_id_for(user_id: int, provider: str, label: str) -> str:
+    return f"{user_id}:{provider}:{_slugify(label)}"
+
+
 # ----------------------------------------------------------------------
-# Providers + connected status (lazily reconciled with Nango)
+# Providers + connected accounts (lazily reconciled with Nango)
 # ----------------------------------------------------------------------
 
 @router.get("/providers")
 async def list_providers(authorization: Optional[str] = Header(None)):
-    """Enabled OAuth providers + the caller's connected status."""
+    """Enabled OAuth providers + the caller's connected accounts."""
     user_id = get_user_id_from_token(authorization)
     _require_configured()
 
     # Reconcile: Nango is the source of truth for live connections; our
     # table maps them. Rows without a live Nango connection are dropped.
-    live = {
-        c.get("provider_config_key"): c
-        for c in nango_client.list_connections_for_user(user_id)
-    }
+    live_by_provider: Dict[str, List[dict]] = {}
+    for c in nango_client.list_connections_for_user(user_id):
+        key = c.get("provider_config_key")
+        if key:
+            live_by_provider.setdefault(key, []).append(c)
+
     with get_db() as conn:
         rows = conn.execute(
             "SELECT * FROM nango_connections WHERE user_id = ?", (user_id,)
         ).fetchall()
-    local = {
-        (dict(r) if not isinstance(r, dict) else r)["provider_config_key"]:
-            (dict(r) if not isinstance(r, dict) else r)
-        for r in rows
-    }
+    local_rows = [(dict(r) if not isinstance(r, dict) else r) for r in rows]
+    local_by_id = {r["connection_id"]: r for r in local_rows}
 
-    # Remove stale local rows (disconnected elsewhere, or provider since
-    # disabled on our side — only ENABLED_PROVIDERS may keep a mapping row)
-    for key, row in local.items():
-        if key not in live or key not in nango_client.ENABLED_PROVIDERS:
+    # Remove stale local rows (deleted in Nango, or provider disabled)
+    live_conn_ids = {
+        c.get("connection_id")
+        for conns in live_by_provider.values() for c in conns
+    }
+    for row in local_rows:
+        stale = (row["connection_id"] not in live_conn_ids
+                 or row["provider_config_key"] not in nango_client.ENABLED_PROVIDERS)
+        if stale:
             with get_db() as conn:
                 conn.execute("DELETE FROM nango_connections WHERE id = ?", (row["id"],))
                 conn.commit()
+            local_by_id.pop(row["connection_id"], None)
 
     providers = []
     for key, meta in nango_client.ENABLED_PROVIDERS.items():
@@ -93,28 +118,78 @@ async def list_providers(authorization: Optional[str] = Header(None)):
             "description": meta["description"],
             "auth": "oauth",
             "connected": False,
-            "connection": None,
+            "connection": None,          # default account (legacy field)
+            "connected_accounts": [],    # multi-account list
         }
-        conn_live = live.get(key)
-        if conn_live:
-            display = nango_client.get_connection_metadata(conn_live)
-            entry["connected"] = True
-            entry["connection"] = display
-            with get_db() as conn:
-                conn.execute(
-                    """INSERT INTO nango_connections
-                       (user_id, provider_config_key, connection_id, end_user_id,
-                        metadata, last_checked_at)
-                       VALUES (?, ?, ?, ?, ?::jsonb, NOW())
-                       ON CONFLICT (user_id, provider_config_key) DO UPDATE SET
-                         connection_id = EXCLUDED.connection_id,
-                         metadata = EXCLUDED.metadata,
-                         last_checked_at = NOW()""",
-                    (user_id, key, conn_live.get("connection_id") or "",
-                     str(user_id),
-                     json.dumps(display)),
-                )
-                conn.commit()
+        live_conns = live_by_provider.get(key, [])
+        if live_conns:
+            # Preserve our stored label/default ordering; new live
+            # connections not yet in our table append at the end.
+            ordered: List[dict] = []
+            seen = set()
+            stored = [r for r in local_rows if r["provider_config_key"] == key]
+            by_cid = {r["connection_id"]: r for r in stored}
+            for r in sorted(stored, key=lambda r: (not r.get("is_default"), r["id"])):
+                match = next((c for c in live_conns
+                              if c.get("connection_id") == r["connection_id"]), None)
+                if match:
+                    ordered.append(match)
+                    seen.add(r["connection_id"])
+            ordered.extend(c for c in live_conns if c.get("connection_id") not in seen)
+
+            accounts = []
+            for i, c in enumerate(ordered):
+                cid = c.get("connection_id") or ""
+                stored_row = by_cid.get(cid) or {}
+                display = nango_client.get_connection_metadata(c)
+                is_default = bool(stored_row.get("is_default")) or (
+                    not any(by_cid.values()) and i == 0 and len(ordered) == 1
+                ) or (not stored and i == 0)
+                accounts.append({
+                    "connection_id": cid,
+                    "label": stored_row.get("label") or display.get("display_name") or "default",
+                    "display_name": display.get("display_name"),
+                    "external_id": display.get("external_id"),
+                    "is_default": is_default,
+                })
+                # Upsert the mapping row (per connection, not per provider)
+                with get_db() as conn:
+                    conn.execute(
+                        """INSERT INTO nango_connections
+                           (user_id, provider_config_key, connection_id, end_user_id,
+                            metadata, last_checked_at)
+                           VALUES (?, ?, ?, ?, ?::jsonb, NOW())
+                           ON CONFLICT (user_id, provider_config_key, connection_id)
+                           DO UPDATE SET
+                             metadata = EXCLUDED.metadata,
+                             last_checked_at = NOW()""",
+                        (user_id, key, cid, str(user_id), json.dumps(display)),
+                    )
+                    # Ensure exactly one default per provider
+                    has_default = conn.execute(
+                        "SELECT 1 FROM nango_connections WHERE user_id = ? "
+                        "AND provider_config_key = ? AND is_default LIMIT 1",
+                        (user_id, key),
+                    ).fetchone() is not None
+                    if not has_default:
+                        conn.execute(
+                            "UPDATE nango_connections SET is_default = true, "
+                            "label = COALESCE(label, 'default') WHERE id = ("
+                            "  SELECT id FROM nango_connections WHERE user_id = ? "
+                            "  AND provider_config_key = ? "
+                            "  ORDER BY created_at ASC, id ASC LIMIT 1)",
+                            (user_id, key),
+                        )
+                    conn.commit()
+
+            entry["connected"] = bool(accounts)
+            default = next((a for a in accounts if a["is_default"]), accounts[0])
+            entry["connection"] = {
+                "display_name": default.get("display_name"),
+                "external_id": default.get("external_id"),
+                "label": default.get("label"),
+            }
+            entry["connected_accounts"] = accounts
         providers.append(entry)
 
     return {"providers": providers}
@@ -129,28 +204,130 @@ async def create_connect_session(request: ConnectSessionRequest,
                                  authorization: Optional[str] = Header(None)):
     """Mint a short-lived Nango connect session for the caller. The
     frontend SDK opens the consent popup with this token; no secrets are
-    involved — the session only allows connecting as THIS end user."""
+    involved — the session only allows connecting as THIS end user.
+
+    With `label`, the new connection is scoped to a named account
+    (multi-account). Without it, the legacy default-connection flow runs
+    (and is refused if the provider already has a connected account —
+    use a label to add more)."""
     user_id = get_user_id_from_token(authorization)
     _require_configured()
     if request.provider not in nango_client.ENABLED_PROVIDERS:
         raise HTTPException(status_code=404, detail="Unknown OAuth provider")
+
+    connection_id: Optional[str] = None
+    if request.label:
+        label = request.label.strip()
+        if not label or len(label) > 60:
+            raise HTTPException(status_code=400,
+                                detail="Account label must be 1-60 characters")
+        connection_id = _connection_id_for(user_id, request.provider, label)
+        with get_db() as conn:
+            existing = conn.execute(
+                "SELECT label FROM nango_connections WHERE user_id = ? "
+                "AND provider_config_key = ? AND label = ?",
+                (user_id, request.provider, label),
+            ).fetchone()
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Account label '{label}' is already used for "
+                       f"{request.provider}. Pick a different label or "
+                       "disconnect it first.")
+    else:
+        # Legacy flow: refuse if this provider already has any account —
+        # the unscoped session would silently rebind the default connection.
+        with get_db() as conn:
+            existing = conn.execute(
+                "SELECT label, connection_id FROM nango_connections "
+                "WHERE user_id = ? AND provider_config_key = ? LIMIT 1",
+                (user_id, request.provider),
+            ).fetchone()
+        if existing:
+            row = (dict(existing) if not isinstance(existing, dict) else existing)
+            raise HTTPException(
+                status_code=409,
+                detail=f"{request.provider} is already connected as "
+                       f"'{row.get('label') or 'default'}'. To add another "
+                       "account, provide a new account label.")
+
     result = nango_client.mint_connect_session(
-        user_id, _user_email(user_id), [request.provider]
+        user_id, _user_email(user_id), [request.provider],
+        connection_id=connection_id,
     )
     if result.get("error"):
         raise HTTPException(status_code=502, detail=result["error"])
+    result["connection_id"] = connection_id
+    result["label"] = request.label
     return result
+
+
+# ----------------------------------------------------------------------
+# Per-connection management
+# ----------------------------------------------------------------------
+
+def _owned_connection(user_id: int, provider: str, connection_id: str) -> Optional[dict]:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM nango_connections WHERE user_id = ? "
+            "AND provider_config_key = ? AND connection_id = ?",
+            (user_id, provider, connection_id),
+        ).fetchone()
+    return (dict(row) if row and not isinstance(row, dict) else row) if row else None
+
+
+@router.delete("/{provider}/{connection_id}")
+async def disconnect_account(provider: str, connection_id: str,
+                             authorization: Optional[str] = Header(None)):
+    """Disconnect ONE account: delete the Nango connection (revokes stored
+    tokens) and our mapping row. If it was the default, the oldest
+    remaining account becomes the new default. Ownership enforced by
+    user_id in every WHERE."""
+    user_id = get_user_id_from_token(authorization)
+    _require_configured()
+    local = _owned_connection(user_id, provider, connection_id)
+    if not local:
+        raise HTTPException(status_code=404,
+                            detail="No such connected account for this provider")
+    nango_client.delete_connection(connection_id, provider)
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM nango_connections WHERE user_id = ? "
+            "AND provider_config_key = ? AND connection_id = ?",
+            (user_id, provider, connection_id),
+        )
+        # Promote oldest remaining account to default if we removed it
+        remaining_default = conn.execute(
+            "SELECT 1 FROM nango_connections WHERE user_id = ? "
+            "AND provider_config_key = ? AND is_default LIMIT 1",
+            (user_id, provider),
+        ).fetchone()
+        if not remaining_default:
+            conn.execute(
+                "UPDATE nango_connections SET is_default = true, "
+                "label = COALESCE(label, 'default') WHERE id = ("
+                "  SELECT id FROM nango_connections WHERE user_id = ? "
+                "  AND provider_config_key = ? "
+                "  ORDER BY created_at ASC, id ASC LIMIT 1)",
+                (user_id, provider),
+            )
+        conn.commit()
+    logger.info("[NANGO] user %s disconnected %s account %s",
+                user_id, provider, connection_id)
+    return {"disconnected": True, "connection_id": connection_id}
 
 
 @router.delete("/{provider}")
 async def disconnect(provider: str, authorization: Optional[str] = Header(None)):
-    """Disconnect: delete the Nango connection (revokes stored tokens) and
-    our mapping row. Ownership enforced by user_id in every WHERE."""
+    """Legacy disconnect: removes the DEFAULT account for the provider.
+    Prefer DELETE /{provider}/{connection_id} for multi-account."""
     user_id = get_user_id_from_token(authorization)
     _require_configured()
     with get_db() as conn:
         row = conn.execute(
-            "SELECT * FROM nango_connections WHERE user_id = ? AND provider_config_key = ?",
+            "SELECT * FROM nango_connections WHERE user_id = ? "
+            "AND provider_config_key = ? "
+            "ORDER BY (is_default = false), created_at ASC LIMIT 1",
             (user_id, provider),
         ).fetchone()
     local = (dict(row) if row and not isinstance(row, dict) else row) if row else None
@@ -167,10 +344,50 @@ async def disconnect(provider: str, authorization: Optional[str] = Header(None))
         nango_client.delete_connection(connection_id, provider)
     with get_db() as conn:
         conn.execute(
-            "DELETE FROM nango_connections WHERE user_id = ? AND provider_config_key = ?",
-            (user_id, provider),
+            "DELETE FROM nango_connections WHERE user_id = ? "
+            "AND provider_config_key = ? AND connection_id = ?",
+            (user_id, provider, connection_id or ""),
         )
+        remaining_default = conn.execute(
+            "SELECT 1 FROM nango_connections WHERE user_id = ? "
+            "AND provider_config_key = ? AND is_default LIMIT 1",
+            (user_id, provider),
+        ).fetchone()
+        if not remaining_default:
+            conn.execute(
+                "UPDATE nango_connections SET is_default = true, "
+                "label = COALESCE(label, 'default') WHERE id = ("
+                "  SELECT id FROM nango_connections WHERE user_id = ? "
+                "  AND provider_config_key = ? "
+                "  ORDER BY created_at ASC, id ASC LIMIT 1)",
+                (user_id, provider),
+            )
         conn.commit()
     logger.info("[NANGO] user %s disconnected %s (connection %s)",
                 user_id, provider, connection_id or "none")
     return {"disconnected": True}
+
+
+@router.post("/{provider}/{connection_id}/default")
+async def set_default_account(provider: str, connection_id: str,
+                              authorization: Optional[str] = Header(None)):
+    """Make the given connected account the provider default (used by
+    proxy_call when no account is specified)."""
+    user_id = get_user_id_from_token(authorization)
+    _require_configured()
+    if not _owned_connection(user_id, provider, connection_id):
+        raise HTTPException(status_code=404,
+                            detail="No such connected account for this provider")
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE nango_connections SET is_default = false "
+            "WHERE user_id = ? AND provider_config_key = ?",
+            (user_id, provider),
+        )
+        conn.execute(
+            "UPDATE nango_connections SET is_default = true "
+            "WHERE user_id = ? AND provider_config_key = ? AND connection_id = ?",
+            (user_id, provider, connection_id),
+        )
+        conn.commit()
+    return {"provider": provider, "default_connection_id": connection_id}

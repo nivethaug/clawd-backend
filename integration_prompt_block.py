@@ -51,6 +51,31 @@ def build_external_integrations_block(project_id: Optional[int]) -> str:
     return _env_key_block(project_id) + _oauth_block(project_id)
 
 
+def _connected_providers_with_accounts(owner_id: int):
+    """(sorted provider keys, {provider: [(label, is_default)]}) for enabled
+    providers only. Multi-account aware: several labels per provider."""
+    from database_adapter import get_db
+    from services.integrations import nango_client as _nc
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT provider_config_key, label, is_default "
+            "FROM nango_connections WHERE user_id = ?",
+            (owner_id,),
+        ).fetchall()
+    accounts: dict = {}
+    for r in rows:
+        d = dict(r) if not isinstance(r, dict) else r
+        key = d["provider_config_key"]
+        if key not in _nc.ENABLED_PROVIDERS:
+            continue  # stale row must never leak into the prompt
+        accounts.setdefault(key, []).append(
+            (d.get("label") or "default", bool(d.get("is_default"))))
+    for key in accounts:
+        # default first, then insertion order
+        accounts[key].sort(key=lambda t: not t[1])
+    return sorted(accounts.keys()), accounts
+
+
 def build_oauth_block_for_user(user_id: Optional[int], project_id_for_snippet: Optional[int] = None) -> str:
     """OAuth block for a user who is CREATING a project (no project row yet).
 
@@ -62,25 +87,13 @@ def build_oauth_block_for_user(user_id: Optional[int], project_id_for_snippet: O
     if not user_id:
         return ""
     try:
-        from database_adapter import get_db
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT provider_config_key FROM nango_connections WHERE user_id = ?",
-                (user_id,),
-            ).fetchall()
-        connected = sorted({
-            (dict(r) if not isinstance(r, dict) else r)["provider_config_key"]
-            for r in rows
-        })
-        # Only providers DreamAgent enables reach the model — a stale row for
-        # anything else must never leak into the prompt.
-        from services.integrations import nango_client as _nc
-        connected = [p for p in connected if p in _nc.ENABLED_PROVIDERS]
+        connected, accounts = _connected_providers_with_accounts(user_id)
         if not connected:
             return ""
         pid_hint = str(project_id_for_snippet) if project_id_for_snippet else "<PROJECT_ID>"
         return _render_oauth_section(
             connected,
+            accounts=accounts,
             pid_hint=pid_hint,
             who="your account",
             who_verb="You have connected",
@@ -110,23 +123,12 @@ def _oauth_block(project_id: Optional[int]) -> str:
         if not proj:
             return ""
         owner_id = (dict(proj) if not isinstance(proj, dict) else proj)["user_id"]
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT provider_config_key FROM nango_connections WHERE user_id = ?",
-                (owner_id,),
-            ).fetchall()
-        connected = sorted({
-            (dict(r) if not isinstance(r, dict) else r)["provider_config_key"]
-            for r in rows
-        })
-        # Only providers DreamAgent enables reach the model — a stale row for
-        # anything else must never leak into the prompt.
-        from services.integrations import nango_client as _nc
-        connected = [p for p in connected if p in _nc.ENABLED_PROVIDERS]
+        connected, accounts = _connected_providers_with_accounts(owner_id)
         if not connected:
             return ""
         return _render_oauth_section(
             connected,
+            accounts=accounts,
             pid_hint=str(project_id),
             who="owner's account",
             who_verb="The project owner has connected",
@@ -138,7 +140,8 @@ def _oauth_block(project_id: Optional[int]) -> str:
 
 
 def _render_oauth_section(connected: list, pid_hint: str, who: str,
-                          who_verb: str, extra_rules: list) -> str:
+                          who_verb: str, extra_rules: list,
+                          accounts: Optional[dict] = None) -> str:
     """Shared markdown renderer for connected OAuth providers.
 
     Per-provider reference lines come from Nango's own catalog metadata
@@ -168,6 +171,15 @@ def _render_oauth_section(connected: list, pid_hint: str, who: str,
             ref_lines.append(f"  - `{ex}`")
         for gotcha in extras.get("gotchas") or []:
             ref_lines.append(f"  - note: {gotcha}")
+        prov_accounts = (accounts or {}).get(p) or []
+        if len(prov_accounts) > 1:
+            acc = ", ".join(
+                f'"{label}"' + (" (default)" if is_def else "")
+                for label, is_def in prov_accounts)
+            ref_lines.append(
+                f"  - accounts: {acc} — pass `account: \"<label>\"` in the "
+                "proxy JSON body to target a specific one; omit it to use "
+                "the default")
 
     # Snippet example endpoint: first example of the first connected provider
     # ("GET v1/pages/{id}" -> method GET + endpoint); generic fallback works
@@ -215,6 +227,8 @@ Provider reference — `endpoint` is the path after each provider's base URL:
 - All provider calls go through the proxy (server-side). No tokens ever appear in code or .env.
 - If the proxy returns 409 "not connected", tell the user to connect it in
   Settings → Integrations (one click).
+- If a provider lists multiple accounts, target one with `"account": "<label>"`
+  in the proxy JSON body; omitting `account` uses that provider's default account.
 {extra_md}"""
 
 
