@@ -142,9 +142,7 @@ async def list_providers(authorization: Optional[str] = Header(None)):
                 cid = c.get("connection_id") or ""
                 stored_row = by_cid.get(cid) or {}
                 display = nango_client.get_connection_metadata(c)
-                is_default = bool(stored_row.get("is_default")) or (
-                    not any(by_cid.values()) and i == 0 and len(ordered) == 1
-                ) or (not stored and i == 0)
+                is_default = bool(stored_row.get("is_default")) or (not stored and i == 0)
                 accounts.append({
                     "connection_id": cid,
                     "label": stored_row.get("label") or display.get("display_name") or "default",
@@ -152,18 +150,23 @@ async def list_providers(authorization: Optional[str] = Header(None)):
                     "external_id": display.get("external_id"),
                     "is_default": is_default,
                 })
-                # Upsert the mapping row (per connection, not per provider)
+                # Upsert the mapping row (per connection, not per provider).
+                # Label: preserved from any stored row (set at connect time);
+                # Nango-side display metadata refreshes every reconcile.
+                stored_label = stored_row.get("label")
                 with get_db() as conn:
                     conn.execute(
                         """INSERT INTO nango_connections
                            (user_id, provider_config_key, connection_id, end_user_id,
-                            metadata, last_checked_at)
-                           VALUES (?, ?, ?, ?, ?::jsonb, NOW())
+                            label, metadata, last_checked_at)
+                           VALUES (?, ?, ?, ?, ?, ?::jsonb, NOW())
                            ON CONFLICT (user_id, provider_config_key, connection_id)
                            DO UPDATE SET
+                             label = COALESCE(nango_connections.label, EXCLUDED.label),
                              metadata = EXCLUDED.metadata,
                              last_checked_at = NOW()""",
-                        (user_id, key, cid, str(user_id), json.dumps(display)),
+                        (user_id, key, cid, str(user_id), stored_label,
+                         json.dumps(display)),
                     )
                     # Ensure exactly one default per provider
                     has_default = conn.execute(
@@ -222,18 +225,39 @@ async def create_connect_session(request: ConnectSessionRequest,
             raise HTTPException(status_code=400,
                                 detail="Account label must be 1-60 characters")
         connection_id = _connection_id_for(user_id, request.provider, label)
+        # Uniqueness is enforced on the SLUG (connection_id), not the raw
+        # label — "My Clips" and "my clips" would otherwise collide silently
+        # and rebind the existing account's Nango connection.
         with get_db() as conn:
             existing = conn.execute(
                 "SELECT label FROM nango_connections WHERE user_id = ? "
-                "AND provider_config_key = ? AND label = ?",
-                (user_id, request.provider, label),
+                "AND provider_config_key = ? AND connection_id = ?",
+                (user_id, request.provider, connection_id),
             ).fetchone()
         if existing:
+            used = (dict(existing) if not isinstance(existing, dict) else existing)
             raise HTTPException(
                 status_code=409,
-                detail=f"Account label '{label}' is already used for "
-                       f"{request.provider}. Pick a different label or "
-                       "disconnect it first.")
+                detail=f"An account labeled '{used.get('label') or label}' "
+                       f"already exists for {request.provider} (labels are "
+                       "case/punctuation-insensitive). Pick a different "
+                       "label or disconnect it first.")
+        # Persist the label NOW: the /providers reconcile inserts the row
+        # after consent completes, but it can't know the label — only the
+        # connection_id. A placeholder row here carries the label through
+        # (ON CONFLICT DO NOTHING keeps it); if the user abandons the popup,
+        # the reconcile's stale-connection cleanup removes the row.
+        with get_db() as conn:
+            conn.execute(
+                """INSERT INTO nango_connections
+                   (user_id, provider_config_key, connection_id, end_user_id,
+                    label, is_default)
+                   VALUES (?, ?, ?, ?, ?, false)
+                   ON CONFLICT (user_id, provider_config_key, connection_id)
+                   DO NOTHING""",
+                (user_id, request.provider, connection_id, str(user_id), label),
+            )
+            conn.commit()
     else:
         # Legacy flow: refuse if this provider already has any account —
         # the unscoped session would silently rebind the default connection.
