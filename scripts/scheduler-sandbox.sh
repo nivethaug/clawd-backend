@@ -120,6 +120,26 @@ fi
 # scripts, no secrets.
 BWRAP_ARGS+=(--ro-bind "$SCRIPT_DIR" "$SCRIPT_DIR")
 
+# ── Package gate (Layer 1A) ─────────────────────────────────────────────
+# Install a pip shim into the project dir (rw inside bwrap) so every
+# `pip install` run by the executor hits the blocklist + size cap. The
+# scripts/ dir is ro-bound above, so pip-gate.py + package_gate.py are
+# visible inside; PATH points at the shim dir. Best-effort: a failure here
+# never blocks the sandbox itself (the platform-side gate in
+# infrastructure_manager still covers project builds).
+GATE_SRC="$SCRIPT_DIR/pip-gate.py"
+GATE_MOD="$SCRIPT_DIR/../services/sandbox/package_gate.py"
+GATE_DIR="$PROJECT_DIR/.pip-gate"
+if [ -f "$GATE_SRC" ] && [ -f "$GATE_MOD" ]; then
+  mkdir -p "$GATE_DIR" 2>/dev/null || true
+  cp "$GATE_SRC" "$GATE_DIR/pip" 2>/dev/null || true
+  cp "$GATE_SRC" "$GATE_DIR/pip3" 2>/dev/null || true
+  cp "$GATE_MOD" "$GATE_DIR/package_gate.py" 2>/dev/null || true
+  chmod +x "$GATE_DIR/pip" "$GATE_DIR/pip3" 2>/dev/null || true
+  BWRAP_ARGS+=(--setenv PATH "$GATE_DIR:/usr/local/bin:/usr/bin:/bin")
+fi
+
+
 if [ "$SANDBOX_DEBUG" = "1" ]; then
   echo "--- launching bwrap scheduler_runner.py ---" >> "$DEBUG_LOG" 2>&1
 fi

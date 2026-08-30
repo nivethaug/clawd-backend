@@ -131,6 +131,12 @@ Per `docs/worker_vps_setup.md` Phase 8. Worker runs `start-scheduler.sh`,
 | `ANTHROPIC_MODEL` | 🟡 | default agent model |
 | `ZAI_API_KEY` / `OPENROUTER_API_KEY` | 🔴 | provider keys for wrapper tiers |
 | `CHROME_CDP_URL` | 🟢 | headless Chrome endpoint (containers) |
+| `PROJECT_PIP_MAX_MB` | 🟢 | package-gate size cap (default 500 MB) |
+| `PIP_BLOCKED_PACKAGES` | 🟢 | extra blocked packages (built-in: torch/tensorflow/transformers/nvidia-*…) |
+| `WHEELHOUSE_URL` | 🟢 | shared wheel cache dir (`scripts/build-wheelhouse.sh`) |
+| `EGRESS_ENFORCE` | 🟡 | `1` = squid allowlist sidecar (`scripts/setup-sandbox-enforcement.sh`) |
+| `EGRESS_ALLOWLIST` / `EGRESS_REPLY_MAX_MB` | 🟢 | allowlist domains / per-response body cap (default 200 MB) |
+| `PROJECT_DISK_LIMIT_GB` | 🟡 | hard container disk cap (XFS pquota) + reaper soft quota |
 
 ### Containers / secrets
 | Var | Status | Purpose / notes |

@@ -97,6 +97,7 @@ BWRAP_ARGS=(
   --proc /proc
   --tmpfs /tmp
   --bind "$PROJECT_DIR" "$PROJECT_DIR"
+
   --ro-bind "$VENV" "$VENV"
   --ro-bind /usr /usr
   --symlink usr/lib /lib
@@ -140,6 +141,23 @@ fi
 
 # exec replaces this shell with bwrap. PM2 then tracks the bwrap process.
 # Unbuffered python (-u) ensures uvicorn output flushes to PM2's log capture.
+# ── Package gate (Layer 1A) ─────────────────────────────────────────────
+# pip shim into the project dir (rw inside bwrap); scripts dir must also be
+# ro-bound so pip-gate.py + package_gate.py are visible inside the sandbox.
+GATE_SRC="/root/clawd-backend/scripts/pip-gate.py"
+GATE_MOD="/root/clawd-backend/services/sandbox/package_gate.py"
+GATE_DIR="$PROJECT_DIR/.pip-gate"
+if [ -f "$GATE_SRC" ] && [ -f "$GATE_MOD" ]; then
+  mkdir -p "$GATE_DIR" 2>/dev/null || true
+  cp "$GATE_SRC" "$GATE_DIR/pip" 2>/dev/null || true
+  cp "$GATE_SRC" "$GATE_DIR/pip3" 2>/dev/null || true
+  cp "$GATE_MOD" "$GATE_DIR/package_gate.py" 2>/dev/null || true
+  chmod +x "$GATE_DIR/pip" "$GATE_DIR/pip3" 2>/dev/null || true
+  BWRAP_ARGS+=(--ro-bind /root/clawd-backend/scripts /root/clawd-backend/scripts)
+  BWRAP_ARGS+=(--ro-bind /root/clawd-backend/services/sandbox /root/clawd-backend/services/sandbox)
+  BWRAP_ARGS+=(--setenv PATH "$GATE_DIR:/usr/local/bin:/usr/bin:/bin")
+fi
+
 exec bwrap "${BWRAP_ARGS[@]}" \
   --setenv PYTHONPATH "$PROJECT_DIR" \
   --setenv PYTHONUNBUFFERED "1" \

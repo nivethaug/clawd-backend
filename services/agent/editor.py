@@ -19,6 +19,7 @@ import logging
 from services.scheduler.editor import SchedulerEditor
 from workflow_prompt_meta import build_workflow_meta_block
 from integration_prompt_block import build_external_integrations_block
+from sandbox_limits_prompt import sandbox_limits_block
 from services.container_storage import to_container_path
 
 logger = logging.getLogger("services.agent.editor")
@@ -84,6 +85,7 @@ then create the job via the REST API. Compose freely from the capability
 menu below — you are NOT limited to any fixed action list.
 
 {integrations_block}
+{sandbox_limits_block()}
 Allowed files to modify:
 - scheduler/executor.py (add task handlers + routes) — PRIMARY file to modify
 - services/api_client.py — ONLY if you need a NEW API function that doesn't exist yet

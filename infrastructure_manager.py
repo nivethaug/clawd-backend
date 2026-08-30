@@ -90,6 +90,15 @@ BACKEND_PORT_MAX = 9000
 NGINX_CONFIG_DIR = "/etc/nginx/sites-available"
 NGINX_ENABLED_DIR = "/etc/nginx/sites-enabled"
 
+
+def _wheelhouse_args():
+    """pip args for the shared wheelhouse (Layer 1C). Empty when unset."""
+    try:
+        from services.sandbox.package_gate import wheelhouse_index_args
+        return wheelhouse_index_args()
+    except ImportError:
+        return []
+
 # DNS settings
 HOSTINGER_DNS_SKILL_DIR = "/usr/lib/node_modules/openclaw/skills/hostinger-dns"
 HOSTINGER_DNS_SKILL = "/usr/lib/node_modules/openclaw/skills/hostinger-dns/hostinger_dns.py"
@@ -520,9 +529,26 @@ class ServiceManager:
             # Install Python dependencies FIRST (before import validation)
             requirements_path = backend_path / "requirements.txt"
             if requirements_path.exists():
+                # Package gate (Layer 1A): block LLM/GPU runtimes and
+                # oversized installs BEFORE pip runs. agents get an
+                # actionable message and self-correct.
+                try:
+                    from services.sandbox.package_gate import (
+                        gate_requirements, wheelhouse_index_args)
+                    _reqs = [l.strip() for l in
+                             requirements_path.read_text().splitlines()
+                             if l.strip() and not l.strip().startswith("#")]
+                    _ok, _msg = gate_requirements(_reqs)
+                    if not _ok:
+                        logger.error("[SERVICE] ❌ %s", _msg)
+                        return False
+                    logger.info("[SERVICE] ✓ %s", _msg)
+                except ImportError:
+                    pass  # gate module unavailable — never block builds
                 try:
                     subprocess.run(
-                        [venv_pip, "install", "-r", "requirements.txt"],
+                        [venv_pip, "install", "-r", "requirements.txt"]
+                        + _wheelhouse_args(),
                         cwd=str(backend_path),
                         check=True,
                         capture_output=True,

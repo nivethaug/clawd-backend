@@ -257,6 +257,30 @@ class ContainerManager:
             CONTAINER_IMAGE,
         ]
 
+        # ── Sandbox enforcement layers ────────────────────────────────
+        # Layer 1C: shared wheelhouse (local pip wheel cache), ro-bind.
+        import os as _os
+        _wheelhouse = _os.getenv("WHEELHOUSE_URL", "").strip()
+        if _wheelhouse.startswith("/"):
+            args += ["--mount",
+                     f"type=bind,source={_wheelhouse},target=/opt/wheelhouse,ro"]
+
+        # Layer 3: egress allowlist sidecar — proxy env points at squid.
+        try:
+            from services.sandbox import egress as _egress
+            for _k, _v in _egress.proxy_env("container").items():
+                args += ["-e", f"{_k}={_v}"]
+        except ImportError:
+            pass
+
+        # Layer 2: hard per-container disk cap. REQUIRES overlay2 on XFS
+        # with pquota on the docker root (scripts/setup-egress.sh prints
+        # the setup). Silently skipped when unset or on non-XFS hosts.
+        _disk_gb = (_os.getenv("PROJECT_DISK_LIMIT_GB") or "").strip()
+        if _disk_gb:
+            args += ["--storage-opt", f"size={_disk_gb}g"]
+        return args
+
     def ensure_container(self) -> str:
         """Create the container if missing, start it if stopped, return name.
 
@@ -286,6 +310,15 @@ class ContainerManager:
         # Case 2: need to create.
         if not _docker_available():
             raise RuntimeError("docker daemon not available — cannot create container")
+
+        # Layer 3: make sure the egress sidecar exists before any project
+        # container references it (idempotent, no-op when EGRESS_ENFORCE
+        # is unset).
+        try:
+            from services.sandbox import egress as _egress
+            _egress.ensure_egress_sidecar(_run_docker)
+        except ImportError:
+            pass
 
         logger.info("[CONTAINER] creating container: %s (image=%s)", self.container_name, CONTAINER_IMAGE)
         args = self._build_run_args()
