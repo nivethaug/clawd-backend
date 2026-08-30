@@ -312,17 +312,40 @@ class ContainerManager:
             raise RuntimeError("docker daemon not available — cannot create container")
 
         # Layer 3: make sure the egress sidecar exists before any project
-        # container references it (idempotent, no-op when EGRESS_ENFORCE
-        # is unset).
+        # container references it. NEVER restarts an existing sidecar —
+        # restarting it would briefly cut egress for every running project.
         try:
             from services.sandbox import egress as _egress
             _egress.ensure_egress_sidecar(_run_docker)
         except ImportError:
             pass
+        except Exception as _e:
+            logger.warning("[EGRESS] sidecar check failed (continuing): %s", _e)
 
         logger.info("[CONTAINER] creating container: %s (image=%s)", self.container_name, CONTAINER_IMAGE)
         args = self._build_run_args()
         result = _run_docker(args, timeout=60)
+        if result.returncode != 0 and "storage-opt" in (result.stderr or ""):
+            # PROJECT_DISK_LIMIT_GB was set but the docker root doesn't
+            # support per-container size (overlay2 requires XFS+pquota).
+            # Degrade gracefully: create WITHOUT the hard cap — the reaper's
+            # soft quota still covers over-limit workspaces.
+            logger.warning(
+                "[CONTAINER] --storage-opt unsupported on this host "
+                "(needs XFS+pquota); creating without hard disk cap")
+            # remove the --storage-opt flag + its value pair
+            out = []
+            skip = False
+            for a in args:
+                if skip:
+                    skip = False
+                    continue
+                if a == "--storage-opt":
+                    skip = True
+                    continue
+                out.append(a)
+            args = out
+            result = _run_docker(args, timeout=60)
         if result.returncode != 0:
             logger.error("[CONTAINER] docker run failed: %s", result.stderr.strip())
             raise RuntimeError(f"docker run failed: {result.stderr.strip()}")

@@ -136,7 +136,11 @@ if [ -f "$GATE_SRC" ] && [ -f "$GATE_MOD" ]; then
   cp "$GATE_SRC" "$GATE_DIR/pip3" 2>/dev/null || true
   cp "$GATE_MOD" "$GATE_DIR/package_gate.py" 2>/dev/null || true
   chmod +x "$GATE_DIR/pip" "$GATE_DIR/pip3" 2>/dev/null || true
-  BWRAP_ARGS+=(--setenv PATH "$GATE_DIR:/usr/local/bin:/usr/bin:/bin")
+  # Real venv pip for the shim's passthrough — installs land in the SAME
+  # venv as before, never the system python. PATH keeps every existing
+  # entry; the shim dir is merely prepended.
+  ln -sf "$VENV/bin/pip" "$GATE_DIR/pip.real" 2>/dev/null || true
+  BWRAP_ARGS+=(--setenv PATH "$GATE_DIR:$PATH")
 fi
 
 

@@ -78,13 +78,13 @@ def check_workspace_quotas() -> int:
         return 0
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT container_name, workspace_host_path FROM user_containers "
+            "SELECT container_name, workspace_path FROM user_containers "
             "WHERE status = 'running'"
         ).fetchall()
     stopped = 0
     for r in rows:
         d = dict(r) if not isinstance(r, dict) else r
-        ws = d.get("workspace_host_path")
+        ws = d.get("workspace_path")
         name = d.get("container_name")
         if not ws or not os.path.isdir(ws):
             continue

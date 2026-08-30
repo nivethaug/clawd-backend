@@ -65,7 +65,12 @@ def proxy_env(where: str = "container") -> dict:
     return {
         "HTTP_PROXY": url, "http_proxy": url,
         "HTTPS_PROXY": url, "https_proxy": url,
-        "NO_PROXY": "localhost,127.0.0.1,api.dreamagent.cloud",
+        # CRITICAL exclusions: host.docker.internal is the wrapper-v2 LLM
+        # endpoint — proxying it would break every agent's LLM calls.
+        "NO_PROXY": "localhost,127.0.0.1,host.docker.internal,172.17.0.1,"
+                    "api.dreamagent.cloud",
+        "no_proxy": "localhost,127.0.0.1,host.docker.internal,172.17.0.1,"
+                    "api.dreamagent.cloud",
     }
 
 
@@ -116,8 +121,21 @@ def ensure_egress_sidecar(_run) -> Optional[str]:
         logger.error("[EGRESS] cannot write %s: %s", conf_path, e)
         return None
 
+    # Idempotent: an existing sidecar is NEVER removed — restarting it
+    # would briefly cut egress for every running project container.
+    # Stopped → started; missing → created; config drift → logged only
+    # (restart requires a manual `docker restart dreamagent-egress`).
+    exists = _run(["ps", "-a", "-q", "-f", f"name={name}"]).stdout.strip()
+    if exists:
+        running = _run(["ps", "-q", "-f", f"name={name}"]).stdout.strip()
+        if not running:
+            _run(["start", name])
+            logger.info("[EGRESS] sidecar started (was stopped): %s", name)
+        else:
+            logger.debug("[EGRESS] sidecar already running: %s", name)
+        return name
+
     _run(["pull", "-q", image])
-    _run(["rm", "-f", name])
     result = _run([
         "run", "-d", "--name", name,
         "--restart", "unless-stopped",

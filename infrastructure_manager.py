@@ -543,8 +543,10 @@ class ServiceManager:
                         logger.error("[SERVICE] ❌ %s", _msg)
                         return False
                     logger.info("[SERVICE] ✓ %s", _msg)
-                except ImportError:
-                    pass  # gate module unavailable — never block builds
+                except Exception as _gate_err:
+                    # Gate problems must NEVER block a build — log and
+                    # continue with the install (network layers still cover).
+                    logger.warning("[SERVICE] package gate unavailable: %s", _gate_err)
                 try:
                     subprocess.run(
                         [venv_pip, "install", "-r", "requirements.txt"]

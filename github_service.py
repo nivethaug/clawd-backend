@@ -245,12 +245,19 @@ def guard_push(repo_path: str) -> tuple:
     gi = rp / ".gitignore"
     try:
         existing = gi.read_text() if gi.exists() else ""
-        if ".env" not in existing:
+        if ".env" not in existing or ".pip-gate" not in existing:
             with open(gi, "a", encoding="utf-8") as fh:
                 if existing and not existing.endswith('\n'):
                     fh.write('\n')
-                fh.write(".env\n.env.*\n!.env.example\n")
-            logger.info("[GITHUB-GUARD] .env added to .gitignore")
+                additions = ""
+                if ".env" not in existing:
+                    additions += ".env\n.env.*\n!.env.example\n"
+                if ".pip-gate" not in existing:
+                    # platform pip-gate shim (sandbox internals — never
+                    # belongs in a user-facing repo)
+                    additions += ".pip-gate/\n"
+                fh.write(additions)
+            logger.info("[GITHUB-GUARD] .gitignore updated (.env/.pip-gate)")
     except Exception as e:
         logger.warning("[GITHUB-GUARD] .gitignore update failed: %s", e)
 
