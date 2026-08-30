@@ -1287,6 +1287,9 @@ server {{
 
     # API proxy (trailing slash strips /api prefix)
     location /api/ {{
+        client_max_body_size 512M;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
         proxy_pass http://127.0.0.1:{backend_port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -1321,6 +1324,13 @@ server {{
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
+
+    # User uploads (media, video, audio) hit this vhost — nginx's default
+    # 1 MB client_max_body_size would 413 them before the app ever sees
+    # the request. 512M matches the platform API vhost.
+    client_max_body_size 512M;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
 
     location / {{
         proxy_pass http://127.0.0.1:{backend_port};
@@ -1380,6 +1390,9 @@ server {{
     }}
 
     location /api/ {{
+        client_max_body_size 512M;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
         proxy_pass http://127.0.0.1:{backend_port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
