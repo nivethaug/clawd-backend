@@ -296,18 +296,20 @@ def get_provider_metadata(nango_provider_name: str) -> Optional[Dict[str, Any]]:
 # ----------------------------------------------------------------------
 
 def mint_connect_session(user_id: int, user_email: str,
-                         providers: List[str],
-                         connection_id: Optional[str] = None) -> Dict[str, Any]:
-    """Mint a short-lived connect session. `connection_id` scopes the new
-    OAuth link to a named account — without it Nango defaults the
-    connection_id to end_user.id, giving one connection per provider
-    (the legacy single-account behavior)."""
+                         providers: List[str]) -> Dict[str, Any]:
+    """Mint a short-lived connect session.
+
+    NOTE: Nango 0.71.4's /connect/sessions schema is .strict() and has NO
+    connection_id field (sending one 400s), and /oauth/connect rejects
+    connection_id when a session token is present. The session flow always
+    creates the connection with a server-generated connection_id — so
+    multi-account works via CLAIM: the caller diffs live connections
+    before/after consent and labels the new one (see the router's
+    /claim endpoint)."""
     payload: Dict[str, Any] = {
         "end_user": {"id": str(user_id), "email": user_email},
         "allowed_integrations": providers,
     }
-    if connection_id:
-        payload["connection_id"] = connection_id
     r = httpx.post(f"{_base_url()}/connect/sessions", headers=_headers(),
                    json=payload, timeout=_TIMEOUT)
     if r.status_code >= 400:

@@ -21,7 +21,6 @@ DreamAgent (API-key vault, Custom Env, projects) is unaffected.
 
 import json
 import logging
-import re
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -59,15 +58,6 @@ def _user_email(user_id: int) -> str:
         ).fetchone()
     d = (dict(row) if row and not isinstance(row, dict) else row) or {}
     return d.get("email") or f"user{user_id}@dreamagent.cloud"
-
-
-def _slugify(label: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", (label or "").strip().lower()).strip("-")
-    return slug[:40] or "account"
-
-
-def _connection_id_for(user_id: int, provider: str, label: str) -> str:
-    return f"{user_id}:{provider}:{_slugify(label)}"
 
 
 # ----------------------------------------------------------------------
@@ -218,52 +208,33 @@ async def create_connect_session(request: ConnectSessionRequest,
     if request.provider not in nango_client.ENABLED_PROVIDERS:
         raise HTTPException(status_code=404, detail="Unknown OAuth provider")
 
-    connection_id: Optional[str] = None
     if request.label:
         label = request.label.strip()
         if not label or len(label) > 60:
             raise HTTPException(status_code=400,
                                 detail="Account label must be 1-60 characters")
-        connection_id = _connection_id_for(user_id, request.provider, label)
-        # Uniqueness is enforced on the SLUG (connection_id), not the raw
-        # label — "My Clips" and "my clips" would otherwise collide silently
-        # and rebind the existing account's Nango connection.
+        # Label uniqueness (slug-insensitive so "My Clips"/"my clips" can't
+        # coexist and confuse agent targeting).
         with get_db() as conn:
-            existing = conn.execute(
+            rows = conn.execute(
                 "SELECT label FROM nango_connections WHERE user_id = ? "
-                "AND provider_config_key = ? AND connection_id = ?",
-                (user_id, request.provider, connection_id),
-            ).fetchone()
-        if existing:
-            used = (dict(existing) if not isinstance(existing, dict) else existing)
+                "AND provider_config_key = ?",
+                (user_id, request.provider),
+            ).fetchall()
+        labels = {(dict(r) if not isinstance(r, dict) else r)["label"] or "default"
+                  for r in rows}
+        if label in labels:
             raise HTTPException(
                 status_code=409,
-                detail=f"An account labeled '{used.get('label') or label}' "
-                       f"already exists for {request.provider} (labels are "
-                       "case/punctuation-insensitive). Pick a different "
-                       "label or disconnect it first.")
-        # Persist the label NOW: the /providers reconcile inserts the row
-        # after consent completes, but it can't know the label — only the
-        # connection_id. A placeholder row here carries the label through
-        # (ON CONFLICT DO NOTHING keeps it); if the user abandons the popup,
-        # the reconcile's stale-connection cleanup removes the row.
-        with get_db() as conn:
-            conn.execute(
-                """INSERT INTO nango_connections
-                   (user_id, provider_config_key, connection_id, end_user_id,
-                    label, is_default)
-                   VALUES (?, ?, ?, ?, ?, false)
-                   ON CONFLICT (user_id, provider_config_key, connection_id)
-                   DO NOTHING""",
-                (user_id, request.provider, connection_id, str(user_id), label),
-            )
-            conn.commit()
+                detail=f"An account labeled '{label}' already exists for "
+                       f"{request.provider}. Pick a different label or "
+                       "disconnect it first.")
     else:
         # Legacy flow: refuse if this provider already has any account —
-        # the unscoped session would silently rebind the default connection.
+        # adding more requires a label so each is targetable.
         with get_db() as conn:
             existing = conn.execute(
-                "SELECT label, connection_id FROM nango_connections "
+                "SELECT label FROM nango_connections "
                 "WHERE user_id = ? AND provider_config_key = ? LIMIT 1",
                 (user_id, request.provider),
             ).fetchone()
@@ -275,15 +246,101 @@ async def create_connect_session(request: ConnectSessionRequest,
                        f"'{row.get('label') or 'default'}'. To add another "
                        "account, provide a new account label.")
 
+    # Nango 0.71.4 sessions can't carry connection_id (strict schema) —
+    # consent creates a connection with a server-generated id, which the
+    # frontend CLAIMS with the label after the popup resolves (see /claim).
     result = nango_client.mint_connect_session(
         user_id, _user_email(user_id), [request.provider],
-        connection_id=connection_id,
     )
     if result.get("error"):
         raise HTTPException(status_code=502, detail=result["error"])
-    result["connection_id"] = connection_id
     result["label"] = request.label
     return result
+
+
+class ClaimAccountRequest(BaseModel):
+    provider: str
+    label: str
+
+
+@router.post("/claim")
+async def claim_account(request: ClaimAccountRequest,
+                        authorization: Optional[str] = Header(None)):
+    """After consent completes, attach the user's label to the NEW Nango
+    connection (0.71.4 generates connection ids server-side, so the label
+    is bound by diffing live connections against our known rows)."""
+    user_id = get_user_id_from_token(authorization)
+    _require_configured()
+    if request.provider not in nango_client.ENABLED_PROVIDERS:
+        raise HTTPException(status_code=404, detail="Unknown OAuth provider")
+    label = request.label.strip()
+    if not label or len(label) > 60:
+        raise HTTPException(status_code=400, detail="Invalid account label")
+
+    live = [c for c in nango_client.list_connections_for_user(user_id)
+            if c.get("provider_config_key") == request.provider]
+    live_ids = {c.get("connection_id") for c in live}
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT connection_id, label FROM nango_connections "
+            "WHERE user_id = ? AND provider_config_key = ?",
+            (user_id, request.provider),
+        ).fetchall()
+    known = [(dict(r) if not isinstance(r, dict) else r) for r in rows]
+    known_ids = {r["connection_id"] for r in known}
+    known_labels = {r["label"] or "default" for r in known}
+    if label in known_labels:
+        raise HTTPException(status_code=409,
+                            detail=f"Label '{label}' is already used for "
+                                   f"{request.provider}.")
+
+    new_ids = [cid for cid in live_ids if cid not in known_ids]
+    if len(new_ids) == 1:
+        cid = new_ids[0]
+        display = nango_client.get_connection_metadata(
+            next(c for c in live if c.get("connection_id") == cid))
+        with get_db() as conn:
+            conn.execute(
+                """INSERT INTO nango_connections
+                   (user_id, provider_config_key, connection_id, end_user_id,
+                    label, metadata, is_default)
+                   VALUES (?, ?, ?, ?, ?, ?::jsonb, false)
+                   ON CONFLICT (user_id, provider_config_key, connection_id)
+                   DO UPDATE SET label = EXCLUDED.label,
+                                 metadata = EXCLUDED.metadata""",
+                (user_id, request.provider, cid, str(user_id), label,
+                 json.dumps(display)),
+            )
+            # First account for this provider becomes the default
+            has_default = conn.execute(
+                "SELECT 1 FROM nango_connections WHERE user_id = ? "
+                "AND provider_config_key = ? AND is_default LIMIT 1",
+                (user_id, request.provider),
+            ).fetchone() is not None
+            if not has_default:
+                conn.execute(
+                    "UPDATE nango_connections SET is_default = true "
+                    "WHERE user_id = ? AND provider_config_key = ? "
+                    "AND connection_id = ?",
+                    (user_id, request.provider, cid),
+                )
+            conn.commit()
+        logger.info("[NANGO] user %s claimed %s account '%s' (%s)",
+                    user_id, request.provider, label, cid)
+        return {"claimed": True, "connection_id": cid, "label": label}
+
+    if not new_ids:
+        # No new connection — user likely abandoned consent or re-authorized
+        # an existing account. 409 with actionable message.
+        raise HTTPException(
+            status_code=409,
+            detail="No new connection found to claim. Complete the consent "
+                   "popup first, then try again — or the account may "
+                   "already be connected.")
+    raise HTTPException(
+        status_code=409,
+        detail=f"{len(new_ids)} new connections found (parallel connects?) "
+               "— refresh the page and label them via disconnect/reconnect.")
 
 
 # ----------------------------------------------------------------------
