@@ -19,6 +19,7 @@ logs tokens or secrets; the frontend only ever receives connect-session
 tokens minted here.
 """
 
+import json
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -385,10 +386,55 @@ def get_connection_metadata(connection: Dict[str, Any]) -> Dict[str, Any]:
         for key in ("channel_id", "account_id", "id"):
             if source.get(key):
                 out.setdefault("external_id", str(source[key])[:100])
-    if connection.get("end_user"):
-        out.setdefault("display_name", (connection["end_user"].get("display_name")
-                                        or connection["end_user"].get("email")))
+    # NO end_user fallback: end_user is the DREAMAGENT account holder (same
+    # for all their connections) — showing their login email as the identity
+    # of every connected provider account is actively misleading.
     return out
+
+
+# Best-effort per-provider identity reads — used at claim time so a newly
+# labeled account shows its REAL handle/channel instead of nothing.
+_IDENTITY_ENDPOINTS: Dict[str, tuple] = {
+    "twitter": ("GET", "2/users/me?user.fields=username"),
+    "youtube": ("GET", "youtube/v3/channels?part=snippet&mine=true"),
+    "github": ("GET", "user"),
+    "notion": ("GET", "v1/users/me"),
+    "slack": ("POST", "auth.test"),
+    "discord": ("GET", "users/@me"),
+}
+
+
+def fetch_identity(provider_key: str, connection_id: str) -> Optional[str]:
+    """Fetch a human identity for a NEWLY claimed connection via the proxy.
+    Never raises; returns None when unknown/unsupported — the label is the
+    primary identity anyway."""
+    spec = _IDENTITY_ENDPOINTS.get(provider_key)
+    if not spec:
+        return None
+    method, endpoint = spec
+    conf = ENABLED_PROVIDERS.get(provider_key, {})
+    try:
+        result = proxy_request(
+            conf.get("nango_provider", provider_key), connection_id,
+            method, endpoint)
+        body = json.loads(result.get("body") or "{}")
+    except Exception as e:  # noqa: BLE001 — identity is best-effort only
+        logger.debug("identity fetch failed for %s: %s", provider_key, e)
+        return None
+    try:
+        if provider_key == "twitter":
+            u = (body.get("data") or {})
+            return u.get("username") or u.get("name")
+        if provider_key == "youtube":
+            items = body.get("items") or []
+            return items[0].get("snippet", {}).get("title") if items else None
+        if provider_key in ("github", "notion", "discord"):
+            return body.get("login") or body.get("name") or body.get("username")
+        if provider_key == "slack":
+            return body.get("user")
+    except Exception:
+        return None
+    return None
 
 
 # ----------------------------------------------------------------------

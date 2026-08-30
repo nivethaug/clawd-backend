@@ -127,11 +127,16 @@ async def list_providers(authorization: Optional[str] = Header(None)):
                     seen.add(r["connection_id"])
             ordered.extend(c for c in live_conns if c.get("connection_id") not in seen)
 
+            owner_email = _user_email(user_id)
             accounts = []
             for i, c in enumerate(ordered):
                 cid = c.get("connection_id") or ""
                 stored_row = by_cid.get(cid) or {}
                 display = nango_client.get_connection_metadata(c)
+                # Legacy fallback artifact: display was the OWNER's email
+                # (same on every row) — drop it so the label shines through.
+                if display.get("display_name") == owner_email:
+                    display.pop("display_name", None)
                 is_default = bool(stored_row.get("is_default")) or (not stored and i == 0)
                 accounts.append({
                     "connection_id": cid,
@@ -299,6 +304,11 @@ async def claim_account(request: ClaimAccountRequest,
         cid = new_ids[0]
         display = nango_client.get_connection_metadata(
             next(c for c in live if c.get("connection_id") == cid))
+        # Real identity (handle/channel name) — best-effort, so the row
+        # shows WHO the account belongs to, not the DreamAgent login email.
+        identity = nango_client.fetch_identity(request.provider, cid)
+        if identity:
+            display["display_name"] = identity
         with get_db() as conn:
             conn.execute(
                 """INSERT INTO nango_connections
