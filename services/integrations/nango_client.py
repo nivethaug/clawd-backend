@@ -393,48 +393,83 @@ def get_connection_metadata(connection: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # Best-effort per-provider identity reads — used at claim time so a newly
-# labeled account shows its REAL handle/channel instead of nothing.
+# labeled account shows its REAL handle/channel/email instead of nothing.
+# Each entry: (method, endpoint, [(display_path..., key), (email_path..., key)])
 _IDENTITY_ENDPOINTS: Dict[str, tuple] = {
-    "twitter": ("GET", "2/users/me?user.fields=username"),
-    "youtube": ("GET", "youtube/v3/channels?part=snippet&mine=true"),
-    "github": ("GET", "user"),
-    "notion": ("GET", "v1/users/me"),
-    "slack": ("POST", "auth.test"),
-    "discord": ("GET", "users/@me"),
+    "twitter": ("GET", "2/users/me?user.fields=username",
+                (("data", "username"), ("data", "name")), ()),
+    "youtube": ("GET", "youtube/v3/channels?part=snippet&mine=true",
+                (("items", 0, "snippet", "title"),
+                 ("items", 0, "snippet", "customUrl")), ()),
+    "github": ("GET", "user", (("login",), ("name",)), (("email",),)),
+    "notion": ("GET", "v1/users/me",
+               (("name",), ("bot", "owner", "user", "name")), ()),
+    "slack": ("POST", "auth.test", (("user",),), ()),
+    "discord": ("GET", "users/@me",
+                (("username",), ("global_name",)), ()),
+    # Google account email/name — REQUIRES the userinfo email/profile
+    # scopes on the youtube Nango integration config (see runbook);
+    # without them this 403s and is skipped.
+    "youtube-userinfo": ("GET", "oauth2/v3/userinfo",
+                         (("name",),), (("email",),)),
 }
 
 
-def fetch_identity(provider_key: str, connection_id: str) -> Optional[str]:
+def _dig(body: Any, path: tuple) -> Optional[str]:
+    cur: Any = body
+    for part in path:
+        try:
+            cur = cur[part]
+        except (KeyError, IndexError, TypeError):
+            return None
+    return str(cur)[:120] if cur else None
+
+
+def fetch_identity(provider_key: str, connection_id: str) -> Optional[Dict[str, str]]:
     """Fetch a human identity for a NEWLY claimed connection via the proxy.
-    Never raises; returns None when unknown/unsupported — the label is the
-    primary identity anyway."""
+    Returns {"display_name"?, "email"?} — best effort, never raises; the
+    label is the primary identity anyway."""
     spec = _IDENTITY_ENDPOINTS.get(provider_key)
     if not spec:
         return None
-    method, endpoint = spec
+    method, endpoint, display_paths, email_paths = spec
     conf = ENABLED_PROVIDERS.get(provider_key, {})
-    try:
-        result = proxy_request(
-            conf.get("nango_provider", provider_key), connection_id,
-            method, endpoint)
-        body = json.loads(result.get("body") or "{}")
-    except Exception as e:  # noqa: BLE001 — identity is best-effort only
-        logger.debug("identity fetch failed for %s: %s", provider_key, e)
-        return None
-    try:
-        if provider_key == "twitter":
-            u = (body.get("data") or {})
-            return u.get("username") or u.get("name")
-        if provider_key == "youtube":
-            items = body.get("items") or []
-            return items[0].get("snippet", {}).get("title") if items else None
-        if provider_key in ("github", "notion", "discord"):
-            return body.get("login") or body.get("name") or body.get("username")
-        if provider_key == "slack":
-            return body.get("user")
-    except Exception:
-        return None
-    return None
+    out: Dict[str, str] = {}
+
+    def _try(ep: str, dpaths, epaths) -> Dict[str, Any]:
+        try:
+            result = proxy_request(
+                conf.get("nango_provider", provider_key), connection_id,
+                method, ep)
+            if result.get("status") != 200:
+                return {}
+            return json.loads(result.get("body") or "{}")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("identity fetch failed for %s: %s", provider_key, e)
+            return {}
+
+    body = _try(endpoint, display_paths, email_paths)
+    for p in display_paths:
+        v = _dig(body, p)
+        if v:
+            out["display_name"] = v
+            break
+    for p in email_paths:
+        v = _dig(body, p)
+        if v and "@" in v:
+            out["email"] = v
+            break
+
+    # Google-backed: also pull the ACCOUNT email (channel ≠ Google account)
+    if provider_key in ("youtube", "google-sheet") and "email" not in out:
+        _m, ui_ep, ui_disp, ui_mail = _IDENTITY_ENDPOINTS["youtube-userinfo"]
+        ui = _try(ui_ep, ui_disp, ui_mail)
+        if _dig(ui, ("email",)):
+            out["email"] = _dig(ui, ("email",))
+        if not out.get("display_name") and _dig(ui, ("name",)):
+            out["display_name"] = _dig(ui, ("name",))
+    out = {k: v for k, v in out.items() if v}
+    return out or None
 
 
 # ----------------------------------------------------------------------
