@@ -1854,17 +1854,21 @@ def init_schema():
 
             def migrate_nango_unique_per_connection():
                 # Relax UNIQUE(user_id, provider) → UNIQUE per connection.
-                # Try constraint name first, then the auto index name.
-                for drop_sql in (
-                    "ALTER TABLE nango_connections DROP CONSTRAINT "
-                    "nango_connections_user_provider_key",
-                    "DROP INDEX IF EXISTS nango_connections_user_provider_key",
-                ):
-                    try:
-                        cur.execute(drop_sql)
-                        break
-                    except Exception:
-                        conn.rollback()
+                # Discover the actual constraint/index name from the catalog
+                # instead of guessing (Postgres names it from the column
+                # list: nango_connections_user_id_provider_config_key_key).
+                cur.execute("""
+                    SELECT conname FROM pg_constraint
+                    WHERE conrelid = 'nango_connections'::regclass
+                      AND contype = 'u'
+                """)
+                for (conname,) in cur.fetchall():
+                    cur.execute(
+                        f"ALTER TABLE nango_connections "
+                        f"DROP CONSTRAINT IF EXISTS {conname}")
+                cur.execute(
+                    "DROP INDEX IF EXISTS "
+                    "nango_connections_user_id_provider_config_key_key")
                 cur.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS "
                     "uq_nango_user_provider_connection "
