@@ -407,11 +407,9 @@ _IDENTITY_ENDPOINTS: Dict[str, tuple] = {
     "slack": ("POST", "auth.test", (("user",),), ()),
     "discord": ("GET", "users/@me",
                 (("username",), ("global_name",)), ()),
-    # Google account email/name — REQUIRES the userinfo email/profile
-    # scopes on the youtube Nango integration config (see runbook);
-    # without them this 403s and is skipped.
-    "youtube-userinfo": ("GET", "oauth2/v3/userinfo",
-                         (("name",),), (("email",),)),
+    # NOTE: the Google ACCOUNT email is intentionally NOT fetched — it
+    # needs userinfo email/profile scopes (extra consent + verification
+    # churn). Channel title / handle identifies the account well enough.
 }
 
 
@@ -460,14 +458,6 @@ def fetch_identity(provider_key: str, connection_id: str) -> Optional[Dict[str, 
             out["email"] = v
             break
 
-    # Google-backed: also pull the ACCOUNT email (channel ≠ Google account)
-    if provider_key in ("youtube", "google-sheet") and "email" not in out:
-        _m, ui_ep, ui_disp, ui_mail = _IDENTITY_ENDPOINTS["youtube-userinfo"]
-        ui = _try(ui_ep, ui_disp, ui_mail)
-        if _dig(ui, ("email",)):
-            out["email"] = _dig(ui, ("email",))
-        if not out.get("display_name") and _dig(ui, ("name",)):
-            out["display_name"] = _dig(ui, ("name",))
     out = {k: v for k, v in out.items() if v}
     return out or None
 
