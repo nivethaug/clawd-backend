@@ -1258,7 +1258,8 @@ class ACPFrontendEditorV2:
     async def _infer_pages_via_openrouter(self, description: str) -> Tuple[List[str], str]:
         """
         Infer page names using the Prompt Assistant's OpenRouter stack
-        (GLM-4.7-flash, reasoning disabled for fast formatted output).
+        (GLM-5.3-flash — thinking is forced ON for this model, so max_tokens
+        must leave room for reasoning tokens or the JSON comes back empty).
 
         Args:
             description: Product/project description
@@ -1283,7 +1284,7 @@ Look for phrases like: "main pages:", "pages:", "sections:", "modules:"
 If found, extract them EXACTLY as written.
 
 Step 2 — Contextual Inference (if no explicit pages)
-Identify the product type and generate 4-8 realistic pages:
+Identify the product type and generate exactly 4 realistic pages:
 - Analytics platform → ActivityMonitor, DataExplorer, Metrics, Reports, Alerts, Integrations
 - CRM → Contacts, Leads, Deals, Accounts, Reports, Settings
 - E-commerce → Products, Orders, Customers, Inventory, Analytics, StoreSettings
@@ -1309,7 +1310,11 @@ RULES:
             response = await client.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=200,
+                # 5.3-flash cannot disable thinking — reasoning tokens draw
+                # from this budget. 200 starved the JSON (observed on
+                # glm-4.7-flash: budget consumed → empty text); 2000 leaves
+                # room for thinking + the tiny JSON payload.
+                max_tokens=2000,
             )
             raw = client.get_text_response(response)
             logger.info(
@@ -1422,7 +1427,7 @@ RULES:
                 len(explicit_pages), re.sub(r"\s+", " ", pages_section).strip()[:150],
             )
 
-        # Step 1: LLM page inference (OpenRouter GLM-4.7-flash, no reasoning)
+        # Step 1: LLM page inference (OpenRouter GLM-5.3-flash, thinking forced ON)
         llm_status = None
         llm_latency_ms = None
         try:
@@ -1454,9 +1459,11 @@ RULES:
                 type(e).__name__, e,
             )
 
-        # Step 2: Fallback to default pages
+        # Step 2: Fallback to default pages — domain-neutral, NOT a SaaS
+        # dashboard trio (the create prompt forbids assuming dashboard apps;
+        # a dashboard fallback made the agent fight its own instructions)
         if len(required_pages) < 3:
-            required_pages = ["Dashboard", "Settings", "Overview"]
+            required_pages = ["Home", "Features", "About"]
             decision = "DEFAULT"
             logger.warning(
                 "[PAGE-INFERENCE] falling back to default pages %s (llm_status=%s) — inference did not produce >= 3 usable pages",

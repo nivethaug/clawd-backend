@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-PROMPT_ASSISTANT_MODEL = os.getenv("PROMPT_ASSISTANT_MODEL", "z-ai/glm-4.7-flash")
+PROMPT_ASSISTANT_MODEL = os.getenv("PROMPT_ASSISTANT_MODEL", "z-ai/glm-5.3-flash")
 OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
 OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "DreamAgent")
 # 45s per-request timeout — GLM-4.7-flash routinely takes 10-15s for the
