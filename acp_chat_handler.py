@@ -1604,7 +1604,62 @@ btc_price, eth_price, btc_price_num, eth_price_num, weather, news — add your o
 """
         integrations_section = build_external_integrations_block(self.project_id)
         limits_section = sandbox_limits_block()
-        
+
+        # ── DESIGN MODE: turn carries a design reference image ────────────
+        # Detected via the marker appended by append_chat_image_instruction
+        # (backend persists the image into the project workspace so the agent
+        # can Read it). Enables visual-grounding discipline + a scoped
+        # screenshot-verify loop (the global screenshot ban is relaxed).
+        design_mode = "DESIGN REFERENCE (authoritative" in user_message
+        if design_mode:
+            design_screenshot_rules = (
+                "❌ NEVER take PNG screenshots — WebP (quality 75) ONLY\n"
+                "✅ Screenshots ARE required for DESIGN VERIFY (see DESIGN MODE) — the global screenshot ban does not apply there"
+            )
+            design_verify_section = """
+---
+
+## 🎨 DESIGN MODE — BUILD TO MATCH THE REFERENCE
+
+A design reference image is attached to this request (path in the image
+block above). Your job: make the target page(s) look like the reference.
+
+**Analyze before editing (from the reference image):**
+- Layout regions (header/hero/sections/footer) and their order
+- Color palette (background, surfaces, text, accents) and light/dark treatment
+- Typography (heading weights/sizes, body size, line height)
+- Spacing rhythm, corner radii, borders, shadows
+- Component inventory → map each to the existing `src/components/ui/`
+  primitives where possible; build custom components only for gaps
+
+**User annotations:** red circles, arrows, boxes, or scribbles in the
+reference mark the user's target area — prioritize them. Never answer
+"everything looks good" when markup is present.
+
+**Do NOT copy pixel-for-pixel or clone another product's identity.** Match
+structure and quality; keep the project's existing brand, copy, and routes.
+
+**DESIGN VERIFY LOOP (required — overrides the no-screenshot rules):**
+1. Make the changes, run `python3 buildpublish.py`, wait for success
+2. Open the live page via Chrome DevTools, run your normal Tier check
+3. Then `take_screenshot(format: "webp", quality: 75)` — WebP ONLY, never PNG
+4. Compare the screenshot against the design reference:
+   - Layout order and alignment
+   - Colors and typography
+   - Spacing and component shapes
+5. If something is visibly off: ONE fix cycle (edit → rebuild → re-screenshot).
+   Max 2 verify cycles total, then report remaining differences honestly.
+6. Close the page. Then respond: what changed, what matches, what deviates.
+
+---
+"""
+        else:
+            design_screenshot_rules = (
+                "❌ NEVER take PNG screenshots (~48KB, 12,000 tokens)\n"
+                "❌ NEVER take screenshots for initial verification — use evaluate_script"
+            )
+            design_verify_section = ""
+
         return  f"""{self._workflow_meta_block(operation="edit", prompt_kind="website_chat_edit")}
 {self._env_rules_block()}
 You are a friendly AI assistant helping a user build their **{self.project_name}** web application.
@@ -1927,6 +1982,7 @@ After verification (successful or failed) → respond to the user immediately.
 
 If Chrome DevTools fails 1 time, STOP retrying. Use curl to confirm the site is up, then tell the user the changes are live. Do NOT loop on Chrome retries.
 
+{design_verify_section}
 ---
 
 ## ⛔⛔⛔ FORBIDDEN PATTERNS ⛔⛔⛔
@@ -1945,8 +2001,7 @@ If Chrome DevTools fails 1 time, STOP retrying. Use curl to confirm the site is 
 ❌ NEVER try to run the backend locally to test — it's already running on the server via PM2
 ❌ NEVER rely on code review alone — ACTUAL testing is required
 ❌ NEVER test on localhost — always test on the LIVE site only
-❌ NEVER take PNG screenshots (~48KB, 12,000 tokens)
-❌ NEVER take screenshots for initial verification — use evaluate_script
+{design_screenshot_rules}
  
 ## ✅ REQUIRED WORKFLOW (NO EXCEPTIONS)
  

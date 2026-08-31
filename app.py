@@ -360,6 +360,43 @@ def prepare_chat_image_attachment(payload: str, session_id: int, log_prefix: str
     }
 
 
+def persist_design_reference(project_path: str, payload: str, log_prefix: str) -> Optional[dict]:
+    """
+    Save a chat design image INTO the project workspace so the containerized
+    agent can actually read it (the bind mount exposes it at /workspace/...).
+
+    Temp chat images live on the API host (/tmp/acp_images) which is NOT
+    visible inside the project container in EXECUTION_MODE=container. This
+    writes the design reference next to the frontend source instead.
+    Returns {"container_path", "host_path", "bytes"} or None on failure.
+    Unlike temp images, the reference is intentionally NOT cleaned up — it
+    must survive the run (and later sessions) for the verify loop.
+    """
+    if not project_path:
+        return None
+    try:
+        image_data, image_extension = decode_chat_image_payload(payload)
+        design_dir = Path(project_path) / "frontend" / "design"
+        design_dir.mkdir(parents=True, exist_ok=True)
+        image_id = uuid.uuid4().hex[:8]
+        host_path = design_dir / f"reference-{image_id}{image_extension}"
+        host_path.write_bytes(image_data)
+        from services.container_storage import to_container_path
+
+        container_path = to_container_path(str(host_path))
+        logger.info(
+            "%s Saved design reference to %s (container: %s, %s bytes)",
+            log_prefix,
+            host_path,
+            container_path,
+            len(image_data),
+        )
+        return {"container_path": container_path, "host_path": str(host_path), "bytes": len(image_data)}
+    except Exception as design_err:
+        logger.warning("%s Failed to persist design reference: %s", log_prefix, design_err)
+        return None
+
+
 def get_image_mime_type(image_path: str) -> str:
     extension = Path(image_path).suffix.lower()
     if extension in {".jpg", ".jpeg"}:
@@ -603,36 +640,73 @@ async def analyze_chat_image_attachment(attachment: dict, user_content: str, log
     )
 
 
-def append_chat_image_instruction(user_content: str, attachment: dict, vision_summary: Optional[str] = None) -> str:
-    """Add mandatory screenshot-grounding instructions for non-vision ACP agents."""
+def append_chat_image_instruction(
+    user_content: str,
+    attachment: dict,
+    vision_summary: Optional[str] = None,
+    design_reference: Optional[dict] = None,
+) -> str:
+    """Add mandatory screenshot-grounding instructions for the ACP agent.
+
+    When design_reference is set (project-scoped copy of the image), the
+    agent is pointed at that CONTAINER path first — the model is natively
+    multimodal (GLM-5.3-flash) and reading the file shows it the actual
+    image, which outranks the text-only vision preprocessor summary.
+    """
     image_path = attachment["inspection_path"]
     image_size = ""
     if attachment.get("width") and attachment.get("height"):
         image_size = f"\nImage size: {attachment['width']}x{attachment['height']}px"
 
+    if design_reference and design_reference.get("container_path"):
+        design_section = (
+            "DESIGN REFERENCE (authoritative — read it first):\n"
+            f"{design_reference['container_path']}\n"
+            "This file is inside your workspace; your Read tool renders it as a "
+            "visible image. Read it BEFORE any code changes.\n\n"
+            "Primary grounding: the design reference image you read yourself.\n"
+            "The vision preprocessor summary below is supporting context only.\n\n"
+        )
+        grounding_rules = (
+            "1. Read the DESIGN REFERENCE path above with your Read tool FIRST — the actual image outranks the summary.\n"
+            "2. Match the reference: layout regions, colors, typography, spacing, component choices.\n"
+            "3. Map visual elements to the existing src/components/ui/ primitives where possible.\n"
+            "4. In your first user-visible response, state: Observed screen, User annotation "
+            "(red circles/arrows/boxes = the user's target area — do not dismiss them), Visible issue, Confidence.\n"
+            "5. If confidence is low or the reference cannot be read, ask one short clarification question before editing.\n"
+            "6. Do not guess page names; do not code until the design is understood.\n"
+            "7. If the user asks only to explain the design, describe it and do not edit files.\n"
+        )
+    else:
+        design_section = ""
+        grounding_rules = (
+            "1. Treat the vision preprocessor summary as the primary visual grounding for the screenshot.\n"
+            "2. If more detail is needed, inspect the image file path with available filesystem/image tools.\n"
+            "3. Base the page/screen identification only on the image/vision summary, not on chat history or assumptions.\n"
+            "4. In your first user-visible response about this image, include:\n"
+            "   - Observed screen: the page, route, or UI area visible in the screenshot, or 'unclear'.\n"
+            "   - User annotation: whether the screenshot contains red circles/arrows/boxes/scribbles and what region they mark.\n"
+            "   - Visible issue: the specific visible problem or requested target area.\n"
+            "   - Confidence: high, medium, or low.\n"
+            "5. If confidence is low or the image cannot be opened/read clearly, ask one short clarification question.\n"
+            "6. Do not guess page names. Do not proceed to code changes until the screenshot is understood.\n"
+            "7. If the user explicitly asks only to explain what is visible, describe the screenshot and do not edit files.\n"
+            "8. Do not use live-page inspection as a replacement for screenshot understanding; only inspect the live page after "
+            "the screenshot has been identified or the user confirms the target page.\n"
+            "9. If red markup is present, treat it as the user's target/problem area. Do not answer 'everything looks good' "
+            "or run a generic page QA unless the user explicitly asks for validation.\n"
+        )
+
     return (
         f"{user_content}\n\n"
         "<IMAGE_ATTACHED_REQUIRES_VISUAL_INSPECTION>\n"
         "The user attached a screenshot/image for this request.\n\n"
+        f"{design_section}"
         f"Image path:\n{image_path}"
         f"{image_size}\n\n"
         f"Vision preprocessor summary:\n{vision_summary or 'Unavailable. Use the image path directly and say clearly if it cannot be read.'}\n\n"
         "Mandatory visual grounding:\n"
-        "1. Treat the vision preprocessor summary as the primary visual grounding for the screenshot.\n"
-        "2. If more detail is needed, inspect the image file path with available filesystem/image tools.\n"
-        "3. Base the page/screen identification only on the image/vision summary, not on chat history or assumptions.\n"
-        "4. In your first user-visible response about this image, include:\n"
-        "   - Observed screen: the page, route, or UI area visible in the screenshot, or 'unclear'.\n"
-        "   - User annotation: whether the screenshot contains red circles/arrows/boxes/scribbles and what region they mark.\n"
-        "   - Visible issue: the specific visible problem or requested target area.\n"
-        "   - Confidence: high, medium, or low.\n"
-        "5. If confidence is low or the image cannot be opened/read clearly, ask one short clarification question.\n"
-        "6. Do not guess page names. Do not proceed to code changes until the screenshot is understood.\n"
-        "7. If the user explicitly asks only to explain what is visible, describe the screenshot and do not edit files.\n"
-        "8. Do not use live-page inspection as a replacement for screenshot understanding; only inspect the live page after "
-        "the screenshot has been identified or the user confirms the target page.\n"
-        "9. If red markup is present, treat it as the user's target/problem area. Do not answer 'everything looks good' "
-        "or run a generic page QA unless the user explicitly asks for validation.\n"
+        f"{grounding_rules}"
         "</IMAGE_ATTACHED_REQUIRES_VISUAL_INSPECTION>"
     )
 
@@ -7643,8 +7717,9 @@ async def chat_stream_endpoint(
                 logger.info(f"[ACP-STREAM] Image detected, preparing inspection file...")
                 try:
                     image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-STREAM]")
+                    design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-STREAM]")
                     vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-STREAM]")
-                    acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary)
+                    acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary, design_reference)
                 except Exception as img_err:
                     logger.error(f"[ACP-STREAM] Failed to save image: {img_err}")
                     acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
@@ -8616,8 +8691,9 @@ async def chat_endpoint(
                     logger.info(f"[ACP-MODE] Image detected, preparing inspection file...")
                     try:
                         image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-MODE]")
+                        design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-MODE]")
                         vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-MODE]")
-                        acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary)
+                        acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary, design_reference)
                     except Exception as img_err:
                         logger.error(f"[ACP-MODE] Failed to save image: {img_err}")
                         acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
