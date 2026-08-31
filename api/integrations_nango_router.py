@@ -463,6 +463,49 @@ async def disconnect(provider: str, authorization: Optional[str] = Header(None))
     return {"disconnected": True}
 
 
+class RenameAccountRequest(BaseModel):
+    label: str
+
+
+@router.patch("/{provider}/{connection_id}")
+async def rename_account(provider: str, connection_id: str,
+                          request: RenameAccountRequest,
+                          authorization: Optional[str] = Header(None)):
+    """Rename an account's label (no re-consent needed). The label is what
+    agents target via proxy_call(account=...)."""
+    user_id = get_user_id_from_token(authorization)
+    _require_configured()
+    if provider not in nango_client.ENABLED_PROVIDERS:
+        raise HTTPException(status_code=404, detail="Unknown OAuth provider")
+    label = request.label.strip()
+    if not label or len(label) > 60:
+        raise HTTPException(status_code=400,
+                            detail="Label must be 1-60 characters")
+    if not _owned_connection(user_id, provider, connection_id):
+        raise HTTPException(status_code=404,
+                            detail="No such connected account for this provider")
+    with get_db() as conn:
+        dup = conn.execute(
+            "SELECT 1 FROM nango_connections WHERE user_id = ? "
+            "AND provider_config_key = ? AND label = ? "
+            "AND connection_id <> ?",
+            (user_id, provider, label, connection_id),
+        ).fetchone()
+        if dup:
+            raise HTTPException(status_code=409,
+                                detail=f"Label '{label}' is already used for "
+                                       f"{provider}.")
+        conn.execute(
+            "UPDATE nango_connections SET label = ? "
+            "WHERE user_id = ? AND provider_config_key = ? AND connection_id = ?",
+            (label, user_id, provider, connection_id),
+        )
+        conn.commit()
+    logger.info("[NANGO] user %s renamed %s account %s -> '%s'",
+                user_id, provider, connection_id, label)
+    return {"renamed": True, "connection_id": connection_id, "label": label}
+
+
 @router.post("/{provider}/{connection_id}/default")
 async def set_default_account(provider: str, connection_id: str,
                               authorization: Optional[str] = Header(None)):
