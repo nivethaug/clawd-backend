@@ -7717,7 +7717,11 @@ async def chat_stream_endpoint(
                 logger.info(f"[ACP-STREAM] Image detected, preparing inspection file...")
                 try:
                     image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-STREAM]")
-                    design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-STREAM]")
+                    # Design references only make sense for website projects —
+                    # they land in <project>/frontend/design/
+                    design_reference = None
+                    if handler.project_type_id == 1:
+                        design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-STREAM]")
                     vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-STREAM]")
                     acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary, design_reference)
                 except Exception as img_err:
@@ -8691,7 +8695,11 @@ async def chat_endpoint(
                     logger.info(f"[ACP-MODE] Image detected, preparing inspection file...")
                     try:
                         image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-MODE]")
-                        design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-MODE]")
+                        # Design references only make sense for website projects —
+                        # they land in <project>/frontend/design/
+                        design_reference = None
+                        if handler.project_type_id == 1:
+                            design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-MODE]")
                         vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-MODE]")
                         acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary, design_reference)
                     except Exception as img_err:
