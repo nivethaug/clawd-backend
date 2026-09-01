@@ -456,6 +456,84 @@ def persist_design_reference(project_path: str, payload: str, log_prefix: str) -
         return None
 
 
+def latest_design_reference(project_path: str, log_prefix: str) -> Optional[dict]:
+    """
+    Find the most recent design reference in <project>/frontend/design/ and
+    return its paths — lets Design-mode follow-up messages keep matching the
+    same reference without re-uploading. Picks the newest reference-*.{webp,
+    png,jpg,jpeg} (excluding generated -tokens/-band files) by mtime.
+    """
+    if not project_path:
+        return None
+    try:
+        design_dir = Path(project_path) / "frontend" / "design"
+        if not design_dir.is_dir():
+            return None
+        refs = [
+            f for f in design_dir.glob("reference-*")
+            if f.suffix.lower() in {".webp", ".png", ".jpg", ".jpeg"}
+            and "-band-" not in f.name and "-tokens" not in f.name
+        ]
+        if not refs:
+            return None
+        host_path = max(refs, key=lambda f: f.stat().st_mtime)
+        stem = host_path.stem
+        from services.container_storage import to_container_path
+
+        tokens_name = f"{stem}-tokens.json"
+        tokens_container = to_container_path(str(design_dir / tokens_name)) if (design_dir / tokens_name).is_file() else ""
+        band_container = [
+            to_container_path(str(design_dir / b.name))
+            for b in sorted(design_dir.glob(f"{stem}-band-*.png"))
+        ]
+        container_path = to_container_path(str(host_path))
+        logger.info(
+            "%s Reusing latest design reference %s (container: %s)",
+            log_prefix, host_path.name, container_path,
+        )
+        return {
+            "container_path": container_path,
+            "host_path": str(host_path),
+            "tokens_path": tokens_container,
+            "band_paths": band_container,
+        }
+    except Exception as reuse_err:
+        logger.warning("%s Failed to find latest design reference: %s", log_prefix, reuse_err)
+        return None
+
+
+def append_design_reference_continuation(user_content: str, design_reference: dict) -> str:
+    """
+    Re-attach the active design reference on Design-mode follow-up messages
+    that arrive without a new upload — the agent re-reads the same
+    reference (and tokens/zoom bands) and continues matching it.
+    Includes the 'DESIGN REFERENCE (authoritative' marker so the handler's
+    design-mode detection and verify section trigger on this turn too.
+    """
+    tokens_line = (
+        f"\nTokens (exact colors): {design_reference['tokens_path']}\n" if design_reference.get("tokens_path") else "\n"
+    )
+    bands_block = ""
+    if design_reference.get("band_paths"):
+        band_lines = "\n".join(f"- {b}" for b in design_reference["band_paths"])
+        bands_block = f"Zoom bands (read for region detail):\n{band_lines}\n"
+
+    return (
+        f"{user_content}\n\n"
+        "<DESIGN_MODE_ACTIVE>\n"
+        "DESIGN MODE is active for this session — continue matching the active design reference.\n\n"
+        "DESIGN REFERENCE (authoritative — read it first):\n"
+        f"{design_reference['container_path']}\n"
+        "This file is inside your workspace; your Read tool renders it as a visible image.\n"
+        f"{tokens_line}"
+        f"{bands_block}\n"
+        "Read the reference (plus tokens/bands if present) before continuing, apply the\n"
+        "PIXEL-PERFECT MATCH PROTOCOL, and verify with a WebP screenshot before claiming\n"
+        "any match.\n"
+        "</DESIGN_MODE_ACTIVE>"
+    )
+
+
 def get_image_mime_type(image_path: str) -> str:
     extension = Path(image_path).suffix.lower()
     if extension in {".jpg", ".jpeg"}:
@@ -7919,6 +7997,12 @@ async def chat_stream_endpoint(
                 except Exception as img_err:
                     logger.error(f"[ACP-STREAM] Failed to save image: {img_err}")
                     acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
+            elif getattr(request, "mode", "dream") == "design" and handler.project_type_id == 1:
+                # Design-mode follow-up without a new upload → reuse the
+                # latest saved reference so iteration continues seamlessly
+                design_reference = latest_design_reference(str(handler.project_path), "[ACP-STREAM]")
+                if design_reference:
+                    acp_user_content = append_design_reference_continuation(user_content, design_reference)
             
             # Get conversation context from database for continuity (last 4 messages = 2 exchanges)
             # Replace base64 images with placeholder to avoid bloating context
@@ -8898,6 +8982,12 @@ async def chat_endpoint(
                     except Exception as img_err:
                         logger.error(f"[ACP-MODE] Failed to save image: {img_err}")
                         acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
+                elif getattr(request, "mode", "dream") == "design" and handler.project_type_id == 1:
+                    # Design-mode follow-up without a new upload → reuse the
+                    # latest saved reference so iteration continues seamlessly
+                    design_reference = latest_design_reference(str(handler.project_path), "[ACP-MODE]")
+                    if design_reference:
+                        acp_user_content = append_design_reference_continuation(user_content, design_reference)
                 
                 # Get conversation context from database
                 # Replace base64 images with placeholder to avoid bloating context
