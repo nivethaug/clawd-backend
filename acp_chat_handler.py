@@ -1626,11 +1626,15 @@ Your job: reproduce it as closely as possible — region by region, with
 measured values, not vibes.
 
 ### STEP 1 — ZOOM THE REFERENCE, PART BY PART (before any code)
-Walk the reference top to bottom and analyze EACH region separately:
+If a design-tokens JSON was provided, Read it FIRST — its hex colors and
+dimensions were extracted programmatically and are EXACT; your visual
+estimates only fill in what the tokens lack.
+Then walk the reference top to bottom and analyze EACH region separately:
 nav bar → page header → every section → every card/button type → footer.
+Read each zoom-band image to inspect that region at high resolution.
 For EVERY region extract and note:
 - **Colors** — background, surface/card, text, muted text, accent
-  (estimate hex values, e.g. #7c5cfc, #0b0b12, rgba whites)
+  (hex from tokens, or estimate only for colors the tokens lack)
 - **Typography** — font size in px, weight (400/500/600/700/800), color,
   line-height, letter-spacing for every text level (H1, section titles,
   body, labels, links)
@@ -1646,6 +1650,10 @@ values to reproduce measurements (`text-[15px]`, `font-semibold`, `p-5`,
 `gap-4`, `rounded-xl`, `text-[#7c5cfc]`, `bg-[#0b0b12]`). Reuse existing
 `src/components/ui/` primitives but OVERRIDE their default sizes/colors
 with the measured values — defaults lose to the reference, every time.
+Card patterns: pin the action link to the card bottom (`mt-auto` on the
+link so all cards' links align regardless of description length); give
+cards the reference's border color and padding. Use the token hex colors
+for icon chips, borders, badges and accent buttons.
 Keep the project's real content, copy, and routes; match the reference's
 visual system exactly: layout, colors, fonts, spacing, shapes.
 
@@ -1666,6 +1674,13 @@ user's target area — prioritize them.
    at narrow widths is correct behavior, not a deviation.
 4. List EVERY visible diff per region, fix them all, rebuild,
    re-screenshot, re-compare. Up to 3 fix cycles.
+
+ALIGNMENT OVERLAY (use when spacing/alignment looks close but you want
+proof): read the reference file via Bash (`base64 -w0`), then
+`evaluate_script` to inject `<img src="data:..." style="position:fixed;
+inset:0;width:100%;opacity:0.5;z-index:99999;pointer-events:none">` over
+the live page — screenshot the overlay state, compare edges/spacing
+against the reference showing through, then remove the element.
 
 ⛔ **HARD RULES:**
 - No "matches the reference" claim without a screenshot comparison in the

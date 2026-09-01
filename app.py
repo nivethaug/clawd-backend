@@ -360,6 +360,56 @@ def prepare_chat_image_attachment(payload: str, session_id: int, log_prefix: str
     }
 
 
+def _extract_design_tokens(image_path: str, design_dir: Path, stem: str, log_prefix: str) -> dict:
+    """
+    Extract exact measurements from the reference image with Pillow.
+
+    Vision models estimate colors by eye and are systematically off; a
+    color histogram is precise. Also slices the reference into 4 vertical
+    bands so the agent can Read each region zoomed (detail >> full-page).
+    Returns {"tokens_file": <name>, "bands": [<name>, ...]} (relative to
+    design_dir) or {} on failure.
+    """
+    try:
+        import json
+        from PIL import Image
+
+        with Image.open(image_path) as img:
+            img = img.convert("RGB")
+            width, height = img.size
+            small = img.resize((160, max(1, int(160 * height / max(1, width)))))
+            colors = small.getcolors(maxcolors=200_000) or []
+            colors.sort(reverse=True)
+            total = sum(count for count, _ in colors) or 1
+            palette = [
+                {"hex": "#{:02x}{:02x}{:02x}".format(*rgb), "share": f"{100 * count / total:.1f}%"}
+                for count, rgb in colors[:10]
+            ]
+
+        bands = []
+        if height > 600:
+            with Image.open(image_path) as img:
+                band_h = height // 4
+                for i in range(4):
+                    top, bottom = i * band_h, min(height, (i + 1) * band_h) if i < 3 else height
+                    band = img.crop((0, top, width, bottom))
+                    band_name = f"{stem}-band-{i + 1}.png"
+                    band.save(design_dir / band_name, format="PNG", optimize=True)
+                    bands.append(band_name)
+
+        tokens = {"width": width, "height": height, "dominantColors": palette, "zoomBands": bands}
+        tokens_name = f"{stem}-tokens.json"
+        (design_dir / tokens_name).write_text(json.dumps(tokens, indent=2))
+        logger.info(
+            "%s Extracted design tokens %s (palette %s, %d zoom bands)",
+            log_prefix, tokens_name, [p["hex"] for p in palette[:4]], len(bands),
+        )
+        return {"tokens_file": tokens_name, "bands": bands}
+    except Exception as tokens_err:
+        logger.warning("%s Design token extraction failed (vision-only fallback): %s", log_prefix, tokens_err)
+        return {}
+
+
 def persist_design_reference(project_path: str, payload: str, log_prefix: str) -> Optional[dict]:
     """
     Save a chat design image INTO the project workspace so the containerized
@@ -383,7 +433,10 @@ def persist_design_reference(project_path: str, payload: str, log_prefix: str) -
         host_path.write_bytes(image_data)
         from services.container_storage import to_container_path
 
+        tokens = _extract_design_tokens(str(host_path), design_dir, f"reference-{image_id}", log_prefix)
         container_path = to_container_path(str(host_path))
+        tokens_container = to_container_path(str(design_dir / tokens["tokens_file"])) if tokens else ""
+        band_paths = [to_container_path(str(design_dir / b)) for b in tokens.get("bands", [])]
         logger.info(
             "%s Saved design reference to %s (container: %s, %s bytes)",
             log_prefix,
@@ -391,7 +444,13 @@ def persist_design_reference(project_path: str, payload: str, log_prefix: str) -
             container_path,
             len(image_data),
         )
-        return {"container_path": container_path, "host_path": str(host_path), "bytes": len(image_data)}
+        return {
+            "container_path": container_path,
+            "host_path": str(host_path),
+            "bytes": len(image_data),
+            "tokens_path": tokens_container,
+            "band_paths": band_paths,
+        }
     except Exception as design_err:
         logger.warning("%s Failed to persist design reference: %s", log_prefix, design_err)
         return None
@@ -667,6 +726,19 @@ def append_chat_image_instruction(
             "Primary grounding: the design reference image you read yourself.\n"
             "The vision preprocessor summary below is supporting context only.\n\n"
         )
+        if design_reference.get("tokens_path"):
+            band_lines = "\n".join(f"- {b}" for b in design_reference.get("band_paths", []))
+            design_section += (
+                "MEASURED DESIGN TOKENS (exact — trust these over your eyes):\n"
+                f"{design_reference['tokens_path']}\n"
+                "Read this JSON FIRST: it contains the reference's true dimensions "
+                "and dominant colors as exact hex values extracted programmatically. "
+                "Use these hex codes directly in your styles — do not re-estimate "
+                "colors by eye.\n\n"
+                "ZOOM BANDS (the reference sliced into 4 regions — Read each one to "
+                "see that region's details at high resolution):\n"
+                f"{band_lines}\n\n"
+            )
         grounding_rules = (
             "1. Read the DESIGN REFERENCE path above with your Read tool FIRST — the actual image outranks the summary.\n"
             "2. Match the reference: layout regions, colors, typography, spacing, component choices.\n"
