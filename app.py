@@ -1719,7 +1719,7 @@ async def serve_chat_image(name: str) -> Response:
     if file_path.is_file():
         return Response(content=file_path.read_bytes(), media_type=get_image_mime_type(name))
     if CHAT_IMAGE_UPSTREAM:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with AsyncClient(timeout=30) as client:
             upstream = await client.get(f"{CHAT_IMAGE_UPSTREAM}/images/chat/{name}")
         if upstream.status_code == 200:
             return Response(content=upstream.content, media_type=upstream.headers.get("content-type") or get_image_mime_type(name))
