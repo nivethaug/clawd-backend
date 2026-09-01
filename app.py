@@ -7801,10 +7801,12 @@ async def chat_stream_endpoint(
                 logger.info(f"[ACP-STREAM] Image detected, preparing inspection file...")
                 try:
                     image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-STREAM]")
-                    # Design references only make sense for website projects —
-                    # they land in <project>/frontend/design/
+                    # DESIGN mode: explicit user-selected mode (like plan/dream).
+                    # Image-only messages WITHOUT design mode keep the classic
+                    # explain/fix grounding — users attach screenshots to ask
+                    # questions too.
                     design_reference = None
-                    if handler.project_type_id == 1:
+                    if handler.project_type_id == 1 and getattr(request, "mode", "dream") == "design":
                         design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-STREAM]")
                         if design_reference:
                             image_attachment["design_reference_path"] = design_reference["host_path"]
@@ -8781,10 +8783,9 @@ async def chat_endpoint(
                     logger.info(f"[ACP-MODE] Image detected, preparing inspection file...")
                     try:
                         image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-MODE]")
-                        # Design references only make sense for website projects —
-                        # they land in <project>/frontend/design/
+                        # DESIGN mode: explicit user-selected mode (like plan/dream)
                         design_reference = None
-                        if handler.project_type_id == 1:
+                        if handler.project_type_id == 1 and getattr(request, "mode", "dream") == "design":
                             design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-MODE]")
                             if design_reference:
                                 image_attachment["design_reference_path"] = design_reference["host_path"]
