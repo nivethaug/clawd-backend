@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Tuple, Any, Set
 # Page manifest system
 from page_manifest import PageManifest, create_page_manifest, scaffold_pages
 from workflow_prompt_meta import build_workflow_meta_block
-from integration_prompt_block import build_external_integrations_block
+from integration_prompt_block import build_external_integrations_block, build_uploaded_files_block
 
 # Claude Code Agent - direct Claude CLI wrapper (replaces ACPX)
 try:
@@ -1723,6 +1723,7 @@ RULES:
             pages=required_pages_list,
         )
         integrations_block = build_external_integrations_block(self.project_id)
+        uploads_block = build_uploaded_files_block(self.project_id)
         status_file_path = f"{to_container_path(str(self.project_path))}/projectcreationstatus.md"
         # Absolute dist path for serve — the shell cwd resets to frontend/src
         # between commands, so a relative `serve -s dist` binds to src/dist
@@ -1740,6 +1741,7 @@ Build a complete desktop web experience by default. Mobile responsiveness is req
 only a narrow mobile mockup centered on an empty desktop canvas unless the user explicitly requested
 mobile-only output.
 {integrations_block}
+{uploads_block}
 ---
 
 ## V1 SCOPE — UI-ONLY MINIMAL BUILD (~25 MIN)

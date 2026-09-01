@@ -12,7 +12,7 @@ from utils.logger import logger  # noqa: F811 — reassign below
 logger = logging.getLogger("services.discord.editor")
 from workflow_prompt_meta import build_workflow_meta_block
 from services.container_storage import to_container_path
-from integration_prompt_block import build_external_integrations_block
+from integration_prompt_block import build_external_integrations_block, build_uploaded_files_block
 
 # Try to import Claude Code Agent
 try:
@@ -183,9 +183,11 @@ class DiscordBotEditor:
             prompt_kind="discord_ai_enhancement",
         )
         integrations_block = build_external_integrations_block(self.project_id)
+        uploads_block = build_uploaded_files_block(self.project_id)
         return f"""{meta_block}
 Bot: {bot_name}
 {integrations_block}
+{uploads_block}
 Allowed files to modify:
 - services/ai_logic.py (PRIMARY — the /ask brain, all keyword/intent logic)
 - services/api_client.py (helper functions only)
