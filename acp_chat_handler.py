@@ -1619,45 +1619,62 @@ btc_price, eth_price, btc_price_num, eth_price_num, weather, news — add your o
             design_verify_section = """
 ---
 
-## 🎨 DESIGN MODE — BUILD TO MATCH THE REFERENCE
+## 🎨 DESIGN MODE — PIXEL-PERFECT MATCH PROTOCOL
 
-A design reference image is attached to this request (path in the image
-block above). Your job: make the target page(s) look like the reference.
+A design reference image is attached (path in the image block above).
+Your job: reproduce it as closely as possible — region by region, with
+measured values, not vibes.
 
-**Analyze before editing (from the reference image):**
-- Layout regions (header/hero/sections/footer) and their order
-- Color palette (background, surfaces, text, accents) and light/dark treatment
-- Typography (heading weights/sizes, body size, line height)
-- Spacing rhythm, corner radii, borders, shadows
-- Component inventory → map each to the existing `src/components/ui/`
-  primitives where possible; build custom components only for gaps
+### STEP 1 — ZOOM THE REFERENCE, PART BY PART (before any code)
+Walk the reference top to bottom and analyze EACH region separately:
+nav bar → page header → every section → every card/button type → footer.
+For EVERY region extract and note:
+- **Colors** — background, surface/card, text, muted text, accent
+  (estimate hex values, e.g. #7c5cfc, #0b0b12, rgba whites)
+- **Typography** — font size in px, weight (400/500/600/700/800), color,
+  line-height, letter-spacing for every text level (H1, section titles,
+  body, labels, links)
+- **Spacing** — container width, section padding, card padding, gaps
+  between cards/elements (estimate px)
+- **Shape** — corner radius, border width + color, shadows, gradients
+- **Inventory** — every component variant with its exact structure
+  (icon placement, title position, link style, badge style)
 
-**User annotations:** red circles, arrows, boxes, or scribbles in the
-reference mark the user's target area — prioritize them. Never answer
-"everything looks good" when markup is present.
+### STEP 2 — IMPLEMENT REGION BY REGION
+Translate the measured values into exact Tailwind classes — use arbitrary
+values to reproduce measurements (`text-[15px]`, `font-semibold`, `p-5`,
+`gap-4`, `rounded-xl`, `text-[#7c5cfc]`, `bg-[#0b0b12]`). Reuse existing
+`src/components/ui/` primitives but OVERRIDE their default sizes/colors
+with the measured values — defaults lose to the reference, every time.
+Keep the project's real content, copy, and routes; match the reference's
+visual system exactly: layout, colors, fonts, spacing, shapes.
 
-**Do NOT copy pixel-for-pixel or clone another product's identity.** Match
-structure and quality; keep the project's existing brand, copy, and routes.
+**User annotations:** red circles, arrows, boxes, or scribbles mark the
+user's target area — prioritize them.
 
-**DESIGN VERIFY LOOP (required — overrides the no-screenshot rules):**
-1. Make the changes, run `python3 buildpublish.py`, wait for success
-2. Open the live page via Chrome DevTools, run your normal Tier check
-3. Then `take_screenshot(format: "webp", quality: 75)` — WebP ONLY, never PNG
-4. Compare the screenshot against the design reference:
-   - Layout order and alignment
-   - Colors and typography
-   - Spacing and component shapes
-5. If something is visibly off: ONE fix cycle (edit → rebuild → re-screenshot).
-   Max 2 verify cycles total, then report remaining differences honestly.
-6. Close the page. Then respond: what changed, what matches, what deviates.
+### STEP 3 — BUILD + PUBLISH
+`python3 buildpublish.py`, wait for success.
 
-⛔ **HARD RULE — no match claims without the screenshot:**
-Reading the code, DOM metrics, or a successful build do NOT prove a visual
-match. You MUST `take_screenshot` and compare it against the design
-reference BEFORE using the words "matches the reference". If you skipped
-the screenshot, say "visually unverified" instead of "matches". DOM checks
-cannot see spacing drift, color shifts, or clipped elements — only the
-screenshot can.
+### STEP 4 — REGION-BY-REGION VISUAL VERIFY
+1. Reload the live page (log in first if auth-gated — read
+   `backend/user.json` for test credentials).
+2. `take_screenshot(format: "webp", quality: 75, fullPage: true)`.
+3. Compare the screenshot against the reference REGION BY REGION — for
+   each region ask: same background? same text size/weight/color? same
+   padding and gaps? same radius/borders? same icon placement?
+   Viewport note: verify in a desktop-width window; responsive stacking
+   at narrow widths is correct behavior, not a deviation.
+4. List EVERY visible diff per region, fix them all, rebuild,
+   re-screenshot, re-compare. Up to 3 fix cycles.
+
+⛔ **HARD RULES:**
+- No "matches the reference" claim without a screenshot comparison in the
+  same run. Code inspection, DOM metrics, and successful builds prove
+  nothing visually.
+- "Close" is not done. Every region must match, or be listed under
+  "still deviates" with what specifically differs.
+- Final response must include a per-region verdict: matched / deviates
+  (with what differs), plus what you changed in this run.
 
 ---
 """
