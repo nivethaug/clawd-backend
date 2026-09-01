@@ -1651,6 +1651,14 @@ structure and quality; keep the project's existing brand, copy, and routes.
    Max 2 verify cycles total, then report remaining differences honestly.
 6. Close the page. Then respond: what changed, what matches, what deviates.
 
+⛔ **HARD RULE — no match claims without the screenshot:**
+Reading the code, DOM metrics, or a successful build do NOT prove a visual
+match. You MUST `take_screenshot` and compare it against the design
+reference BEFORE using the words "matches the reference". If you skipped
+the screenshot, say "visually unverified" instead of "matches". DOM checks
+cannot see spacing drift, color shifts, or clipped elements — only the
+screenshot can.
+
 ---
 """
         else:
