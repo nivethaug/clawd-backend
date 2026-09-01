@@ -1694,6 +1694,31 @@ async def internal_routes_guard(request: Request, call_next):
 async def _deny_chat_image_directory() -> Response:
     return Response(status_code=404)
 
+
+# Chat images are written by the process that serves /chat (the worker API
+# in the split deployment), so the machine fronting api.dreamagent.cloud may
+# not share that disk. When CHAT_IMAGE_UPSTREAM_URL is configured (set it on
+# the fronting box only, e.g. http://<worker-ip>:<worker-api-port>), this
+# route proxies /images/chat/* from the upstream worker. Without it, the
+# local file is served directly (single-box deployments and the worker itself).
+CHAT_IMAGE_UPSTREAM = os.getenv("CHAT_IMAGE_UPSTREAM_URL", "").rstrip("/")
+
+
+@app.get("/images/chat/{name}")
+async def serve_chat_image(name: str) -> Response:
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", name):
+        raise HTTPException(status_code=404)
+    if not CHAT_IMAGE_UPSTREAM:
+        file_path = Path(IMAGES_DIR) / "chat" / name
+        if not file_path.is_file():
+            raise HTTPException(status_code=404)
+        return Response(content=file_path.read_bytes(), media_type=get_image_mime_type(name))
+    async with httpx.AsyncClient(timeout=30) as client:
+        upstream = await client.get(f"{CHAT_IMAGE_UPSTREAM}/images/chat/{name}")
+    if upstream.status_code != 200:
+        raise HTTPException(status_code=upstream.status_code)
+    return Response(content=upstream.content, media_type=upstream.headers.get("content-type") or get_image_mime_type(name))
+
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 
