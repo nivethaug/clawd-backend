@@ -26,7 +26,7 @@ from workflow_prompt_meta import build_workflow_meta_block
 from domain_config import BASE_DOMAIN, frontend_domain as _frontend_domain, backend_domain as _backend_domain, DEFAULT_BOT_EMAIL
 
 # External integration metadata injection (shared with create-time editors)
-from integration_prompt_block import build_external_integrations_block
+from integration_prompt_block import build_external_integrations_block, build_uploaded_files_block
 from sandbox_limits_prompt import sandbox_limits_block
 
 # Try to import ClaudeCodeAgent (preferred backend)
@@ -733,6 +733,7 @@ class ACPChatHandler:
 ---
 """
         integrations_section = build_external_integrations_block(self.project_id)
+        uploads_section = build_uploaded_files_block(self.project_id)
         limits_section = sandbox_limits_block()
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="scheduler_chat_edit")}
@@ -1160,6 +1161,7 @@ Before making any code changes, follow this process:
 
 {context_section}
 {integrations_section}
+{uploads_section}
 {limits_section}
 {_PROMPT_API_SOURCE_GATE}
 
@@ -1207,6 +1209,7 @@ Before making any code changes, follow this process:
 ---
 """
         integrations_section = build_external_integrations_block(self.project_id)
+        uploads_section = build_uploaded_files_block(self.project_id)
         limits_section = sandbox_limits_block()
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="agent_chat_edit")}
@@ -1238,6 +1241,7 @@ Backend API: `{backend_url}/api/scheduler`
 ## CAPABILITY MENU — HOW THIS AGENT ACTS
 
 {integrations_section}
+{uploads_section}
 {limits_section}
 Surface 1 — Connected OAuth accounts (from the block above):
     api_client.proxy_call(provider, method, endpoint, body, params)
@@ -1562,6 +1566,7 @@ btc_price, eth_price, btc_price_num, eth_price_num, weather, news — add your o
 
 {context_section}
 {integrations_section}
+{uploads_section}
 {limits_section}
 {_PROMPT_API_SOURCE_GATE}
 
@@ -1603,6 +1608,7 @@ btc_price, eth_price, btc_price_num, eth_price_num, weather, news — add your o
 ---
 """
         integrations_section = build_external_integrations_block(self.project_id)
+        uploads_section = build_uploaded_files_block(self.project_id)
         limits_section = sandbox_limits_block()
 
         # ── DESIGN MODE: turn carries a design reference image ────────────
@@ -2553,6 +2559,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow, with m
 
 {context_section}
 {integrations_section}
+{uploads_section}
 {limits_section}
 {_PROMPT_API_SOURCE_GATE}
 
@@ -2582,6 +2589,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow, with m
 ---
 """
         integrations_section = build_external_integrations_block(self.project_id)
+        uploads_section = build_uploaded_files_block(self.project_id)
         limits_section = sandbox_limits_block()
         
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="telegram_chat_edit")}
@@ -2978,6 +2986,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 
 {context_section}
 {integrations_section}
+{uploads_section}
 {limits_section}
 {_PROMPT_API_SOURCE_GATE}
 
@@ -3009,6 +3018,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 ---
 """
         integrations_section = build_external_integrations_block(self.project_id)
+        uploads_section = build_uploaded_files_block(self.project_id)
         limits_section = sandbox_limits_block()
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="discord_chat_edit")}
@@ -3359,6 +3369,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
 
 {context_section}
 {integrations_section}
+{uploads_section}
 {limits_section}
 {_PROMPT_API_SOURCE_GATE}
 

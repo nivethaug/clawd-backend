@@ -45,6 +45,54 @@ _ENV_CAPABILITY_HINTS = {
 }
 
 
+def build_uploaded_files_block(project_id: Optional[int]) -> str:
+    """
+    Markdown section listing the project's user-uploaded files (from the
+    upload_files ledger). Tells the agent WHAT files exist, WHERE they live
+    (container paths) and HOW to use them. Fail-open: "" on any error.
+    """
+    if not project_id:
+        return ""
+    try:
+        from database_adapter import get_db
+        with get_db() as conn:
+            rows = conn.execute(
+                """SELECT kind, filename, container_path, original_name, size_bytes
+                   FROM upload_files WHERE project_id = ? ORDER BY created_at DESC""",
+                (project_id,),
+            ).fetchall()
+        if not rows:
+            return ""
+        lines = []
+        for r in rows:
+            d = dict(r) if not isinstance(r, dict) else r
+            size_kb = max(1, int(d["size_bytes"] or 0) // 1024)
+            lines.append(
+                f"- {d['kind']}: `{d['container_path']}` (as \"{d['original_name']}\", ~{size_kb}KB)"
+            )
+        listing = "\n".join(lines)
+        return f"""
+## 📎 UPLOADED FILES (user-provided, ready to use)
+
+The user uploaded these files into the project. Use them instead of asking the user to re-send content:
+
+{listing}
+
+**Rules:**
+- Image files inside `frontend/public/uploads/` are ALREADY served by the site at
+  `/uploads/<filename>` after the next build — reference them directly in code
+  (e.g. `<img src="/uploads/x.webp">`); do NOT copy them elsewhere.
+- Documents inside the python `data/uploads/` folder are readable by backend/bot
+  code (e.g. `open("backend/data/uploads/report.pdf", "rb")` or a parsing lib).
+- If a task relates to an uploaded file, READ or parse it before writing code that
+  guesses its contents.
+---
+"""
+    except Exception as e:
+        logger.warning("Failed to build uploaded-files block: %s", e)
+        return ""
+
+
 def build_external_integrations_block(project_id: Optional[int]) -> str:
     """Return a markdown section listing the project's configured external
     integrations (env-key based) plus the owner's connected OAuth accounts."""

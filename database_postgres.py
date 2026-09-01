@@ -1609,6 +1609,32 @@ def init_schema():
             logger.info("✓ Added nango_connections table (OAuth integrations)")
 
             # ----------------------------------------------------------------
+            # UPLOADS: per-user storage ledger (plan-wise quota enforcement)
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS upload_files (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                host_path TEXT NOT NULL,
+                container_path TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                size_bytes BIGINT NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_upload_files_user "
+                "ON upload_files(user_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_upload_files_project "
+                "ON upload_files(project_id)"
+            )
+            conn.commit()
+            logger.info("✓ Added upload_files table (user file uploads + quota ledger)")
+
+            # ----------------------------------------------------------------
             # BILLING: migrations on existing tables
             # ----------------------------------------------------------------
 

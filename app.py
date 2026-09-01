@@ -20,7 +20,7 @@ from urllib.parse import quote
 # Load environment variables from .env file
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Request, Body, Header, UploadFile, File, Response
+from fastapi import FastAPI, HTTPException, Request, Body, Header, UploadFile, File, Form, Response
 from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -10708,6 +10708,298 @@ async def upload_gallery_thumbnail(
     logger.info(f"[GALLERY] Thumbnail uploaded by user {user_id}: {thumbnail_url}")
 
     return {"success": True, "thumbnail_url": thumbnail_url}
+
+
+# ============================================================================
+# PROJECT FILE UPLOADS — images → frontend/public/, docs → backend data/
+# Per-USER storage quota by plan (ledger-enforced), image compression.
+# ============================================================================
+
+# Plan-wise upload limits (per user, across ALL their projects).
+# Enterprise runs on dedicated VPS storage — excluded from this quota system.
+UPLOAD_PLAN_LIMITS = {
+    "free":       {"max_file_mb": 5,   "total_mb": 25},
+    "pro":        {"max_file_mb": 15,  "total_mb": 100},
+    "dream":      {"max_file_mb": 35,  "total_mb": 250},
+}
+
+UPLOAD_IMAGE_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+UPLOAD_DOC_TYPES = {
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+}
+# Circuit breaker: uploads pause when the workspace volume drops below this
+UPLOAD_MIN_FREE_DISK_BYTES = 5 * 1024 * 1024 * 1024  # 5GB
+
+
+def _upload_tier_limits(tier: str) -> dict:
+    return UPLOAD_PLAN_LIMITS.get((tier or "free").lower(), UPLOAD_PLAN_LIMITS["free"])
+
+
+def _upload_quota_used(user_id: int) -> int:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(size_bytes), 0) AS used FROM upload_files WHERE user_id = %s",
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return 0
+    return int(row.get("used") if isinstance(row, dict) else row[0])
+
+
+def _uploads_dir_for_project(project_path: str, type_id: int, kind: str) -> tuple[Path, bool]:
+    """
+    Resolve the uploads directory (HOST path) for a project + kind.
+
+    Returns (dir, is_public_frontend). Website images go to
+    frontend/public/uploads/ so Vite serves them at /uploads/<name> after
+    the next build; everything else lands in the project's python-side
+    data/uploads tree.
+    """
+    base = Path(project_path)
+    if type_id == 1:
+        if kind == "image":
+            return base / "frontend" / "public" / "uploads", True
+        return base / "backend" / "data" / "uploads", False
+    if type_id == 2:  # telegram
+        subdir = "telegram"
+    elif type_id == 3:  # discord
+        subdir = "discord"
+    else:  # scheduler / agent / custom — code lives at project root
+        return base / "data" / "uploads" / ("images" if kind == "image" else "docs"), False
+    return base / subdir / "data" / "uploads" / ("images" if kind == "image" else "docs"), False
+
+
+def _compress_image_bytes(contents: bytes, ext: str) -> tuple[bytes, str]:
+    """
+    Downscale to max 1920px and recompress as WebP q80 (60-90% smaller).
+    GIFs are returned untouched (no safe lossless recompress for animation).
+    Returns (bytes, final_ext).
+    """
+    if ext == ".gif":
+        return contents, ext
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(BytesIO(contents)) as img:
+            img = img.convert("RGBA") if img.mode in ("RGBA", "P", "LA") else img.convert("RGB")
+            if max(img.size) > 1920:
+                img.thumbnail((1920, 1920))
+            out = BytesIO()
+            img.save(out, format="WEBP", quality=80, method=6)
+            compressed = out.getvalue()
+        # Never keep a larger recompression
+        return (compressed, ".webp") if len(compressed) < len(contents) else (contents, ext)
+    except Exception as compress_err:
+        logger.warning("[UPLOADS] Image compression failed, storing original: %s", compress_err)
+        return contents, ext
+
+
+@app.post("/projects/{project_id}/files/upload")
+async def upload_project_file(
+    project_id: int,
+    file: UploadFile = File(...),
+    kind: str = Form("auto"),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Upload a file into a project workspace.
+
+    Images (jpg/png/webp/gif) are compressed (max 1920px, WebP q80) and for
+    websites land in frontend/public/uploads/ (served at /uploads/<name>).
+    Documents (pdf/docx/xlsx) are stored as-is in the project's python-side
+    data/uploads/ folder. Per-USER storage quota enforced by plan via the
+    upload_files ledger; a disk-level circuit breaker protects the server.
+    """
+    from fastapi.responses import JSONResponse
+
+    user_id = get_user_id_from_token(authorization)
+
+    # Ownership + project path (must be scaffolded already)
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, user_id, project_path, type_id, domain FROM projects WHERE id = %s",
+            (project_id,),
+        ).fetchone()
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    project = dict(project)
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="You can only upload to your own projects")
+    project_path = project.get("project_path") or ""
+    if not project_path:
+        raise HTTPException(
+            status_code=409,
+            detail="Project is still being created — try uploading again in a moment",
+        )
+
+    from services.rate_limiter import get_user_tier_and_role
+
+    tier_info = get_user_tier_and_role(user_id)
+    tier = (tier_info.get("tier") or "free").lower()
+    if tier == "enterprise":
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "detail": "Uploads run on your dedicated infrastructure (Enterprise VPS) — not available on this endpoint.",
+            },
+        )
+    limits = _upload_tier_limits(tier)
+    max_file_bytes = limits["max_file_mb"] * 1024 * 1024
+    total_quota_bytes = limits["total_mb"] * 1024 * 1024
+
+    # Server disk circuit breaker (workspace volume)
+    try:
+        import shutil as _shutil
+
+        disk_free = _shutil.disk_usage(project_path).free
+        if disk_free < UPLOAD_MIN_FREE_DISK_BYTES:
+            raise HTTPException(
+                status_code=503,
+                detail="Uploads are temporarily paused — server storage is nearly full.",
+            )
+    except HTTPException:
+        raise
+    except Exception as disk_err:
+        logger.warning("[UPLOADS] Disk check failed (allowing upload): %s", disk_err)
+
+    # Classify + validate
+    content_type = (file.content_type or "").lower()
+    if kind not in {"image", "doc"}:
+        kind = "image" if content_type in UPLOAD_IMAGE_TYPES else "doc" if content_type in UPLOAD_DOC_TYPES else None
+    if kind == "image" and content_type not in UPLOAD_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid image format. Accepted: .jpg, .png, .webp, .gif")
+    if kind == "doc" and content_type not in UPLOAD_DOC_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid document format. Accepted: .pdf, .docx, .xlsx")
+
+    contents = await file.read()
+    bytes_before = len(contents)
+    if bytes_before > max_file_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Your {tier.capitalize()} plan allows up to {limits['max_file_mb']}MB per file.",
+        )
+
+    # Per-user quota (across all projects)
+    quota_used = _upload_quota_used(user_id)
+    if quota_used + bytes_before > total_quota_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Storage full — {quota_used / 1024 / 1024:.1f}MB of "
+                f"{limits['total_mb']}MB used across your projects. "
+                "Upgrade your plan or remove uploaded files."
+            ),
+        )
+
+    # Compress images before quota is charged (ledger counts stored size)
+    if kind == "image":
+        ext = UPLOAD_IMAGE_TYPES[content_type]
+        contents, ext = _compress_image_bytes(contents, ext)
+    else:
+        ext = UPLOAD_DOC_TYPES[content_type]
+    bytes_after = len(contents)
+
+    # Store into the project workspace
+    uploads_dir, is_public_frontend = _uploads_dir_for_project(project_path, int(project.get("type_id") or 1), kind)
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"{kind}_{project_id}_{timestamp}_{uuid.uuid4().hex[:8]}{ext}"
+    host_path = uploads_dir / filename
+    host_path.write_bytes(contents)
+
+    # Best-effort chown so the in-container agent (dreampilot) can read it
+    try:
+        os.chmod(host_path, 0o644)
+    except Exception:
+        pass
+
+    from services.container_storage import to_container_path
+
+    container_path = to_container_path(str(host_path))
+    url = f"/uploads/{filename}" if (is_public_frontend and project.get("domain")) else None
+
+    # Ledger row
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO upload_files
+               (user_id, project_id, kind, filename, host_path, container_path,
+                original_name, size_bytes)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (
+                user_id,
+                project_id,
+                kind,
+                filename,
+                str(host_path),
+                container_path,
+                file.filename or filename,
+                bytes_after,
+            ),
+        )
+        conn.commit()
+
+    logger.info(
+        "[UPLOADS] user=%s project=%s kind=%s file=%s %s->%s bytes quota=%s/%s",
+        user_id, project_id, kind, filename, bytes_before, bytes_after,
+        quota_used + bytes_after, total_quota_bytes,
+    )
+    return {
+        "success": True,
+        "kind": kind,
+        "name": filename,
+        "original_name": file.filename or filename,
+        "container_path": container_path,
+        "url": url,
+        "bytes_before": bytes_before,
+        "bytes_after": bytes_after,
+        "quota_used": quota_used + bytes_after,
+        "quota_limit": total_quota_bytes,
+    }
+
+
+@app.get("/projects/{project_id}/files")
+async def list_project_uploads(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """List uploaded files for a project (owner only) with quota info."""
+    user_id = get_user_id_from_token(authorization)
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT user_id FROM projects WHERE id = %s", (project_id,)
+        ).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        project = dict(project)
+        if project["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="You can only view your own projects")
+        rows = conn.execute(
+            """SELECT kind, filename, container_path, original_name, size_bytes, created_at
+               FROM upload_files WHERE project_id = %s ORDER BY created_at DESC""",
+            (project_id,),
+        ).fetchall()
+    from services.rate_limiter import get_user_tier_and_role
+
+    tier = (get_user_tier_and_role(user_id).get("tier") or "free").lower()
+    limits = _upload_tier_limits(tier)
+    files = [dict(r) for r in rows] if rows else []
+    return {
+        "success": True,
+        "files": files,
+        "quota_used": _upload_quota_used(user_id),
+        "quota_limit": limits["total_mb"] * 1024 * 1024,
+        "max_file_mb": limits["max_file_mb"],
+    }
 
 
 @app.get("/gallery/my-published")
