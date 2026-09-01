@@ -711,10 +711,55 @@ def append_chat_image_instruction(
     )
 
 
+def archive_design_reference(image_path: str, log_prefix: str) -> None:
+    """
+    Recompress a design reference in place AFTER the AI run has used it.
+
+    The agent reads the reference at full quality during the run; afterwards
+    it is only kept for future sessions, so it is downscaled (max 1024px) and
+    recompressed (WebP q55 / PNG optimized). Typically 300KB -> 30-80KB.
+    Never deletes the file — a failed recompress leaves the original.
+    """
+    try:
+        if not image_path or not os.path.exists(image_path):
+            return
+        size_before = os.path.getsize(image_path)
+        from PIL import Image
+
+        with Image.open(image_path) as img:
+            img = img.convert("RGB") if image_path.lower().endswith((".jpg", ".jpeg")) else img
+            if max(img.size) > 1024:
+                img.thumbnail((1024, 1024))
+            if image_path.lower().endswith(".webp"):
+                img.save(image_path, format="WEBP", quality=55, method=6)
+            else:
+                img.save(image_path, optimize=True)
+        size_after = os.path.getsize(image_path)
+        logger.info(
+            "%s Archived design reference %s: %s -> %s bytes",
+            log_prefix,
+            image_path,
+            size_before,
+            size_after,
+        )
+    except Exception as archive_err:
+        logger.warning(
+            "%s Could not archive design reference %s (keeping original): %s",
+            log_prefix,
+            image_path,
+            archive_err,
+        )
+
+
 def cleanup_chat_image_attachment(attachment: Optional[dict], log_prefix: str) -> None:
     """Remove temporary chat image files after the ACP/Claude session ends."""
     if not attachment:
         return
+
+    # Archive (recompress) the design reference — it intentionally survives
+    # the run, but at archival size, not upload size.
+    if attachment.get("design_reference_path"):
+        archive_design_reference(attachment["design_reference_path"], log_prefix)
 
     for image_path in attachment.get("cleanup_paths", []):
         try:
@@ -7722,6 +7767,8 @@ async def chat_stream_endpoint(
                     design_reference = None
                     if handler.project_type_id == 1:
                         design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-STREAM]")
+                        if design_reference:
+                            image_attachment["design_reference_path"] = design_reference["host_path"]
                     vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-STREAM]")
                     acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary, design_reference)
                 except Exception as img_err:
@@ -8700,6 +8747,8 @@ async def chat_endpoint(
                         design_reference = None
                         if handler.project_type_id == 1:
                             design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-MODE]")
+                            if design_reference:
+                                image_attachment["design_reference_path"] = design_reference["host_path"]
                         vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-MODE]")
                         acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary, design_reference)
                     except Exception as img_err:
