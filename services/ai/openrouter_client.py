@@ -91,11 +91,19 @@ class OpenRouterClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": stream,
-            # Disable reasoning/thinking — GLM burns 500-1500 reasoning tokens
-            # (25s-2.5min) before producing content. Prompt Assistant doesn't
-            # need deep reasoning, just formatted text output.
-            "reasoning": {"enabled": False},
         }
+        # Reasoning/thinking control — model dependent:
+        # - Most GLM models: disable it (they burn 500-1500 reasoning tokens,
+        #   25s-2.5min, before content; Prompt Assistant needs formatted text).
+        # - glm-5.3-flash: thinking CANNOT be disabled — requesting
+        #   {"enabled": false} makes the provider reject the call with 400
+        #   (empty-body error passthrough, observed live on the stream path).
+        #   Use effort=low instead: near-zero reasoning tokens, validated
+        #   against the z.ai API.
+        if "glm-5.3-flash" in (self.model or "").lower():
+            payload["reasoning"] = {"effort": "low"}
+        else:
+            payload["reasoning"] = {"enabled": False}
 
         if tools is not None:
             payload["tools"] = tools
