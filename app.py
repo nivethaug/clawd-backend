@@ -751,6 +751,32 @@ def archive_design_reference(image_path: str, log_prefix: str) -> None:
         )
 
 
+def persist_chat_image_url(payload: str, log_prefix: str = "[CHAT-IMG]") -> Optional[str]:
+    """
+    Store a chat image as a FILE and return its public URL.
+
+    Storing full base64 in the messages table was the largest unbounded
+    growth source in Postgres (a ~400KB WebP becomes ~530KB of text per
+    message, replicated into every backup/replica). The frontend already
+    compresses uploads to <=420KB WebP, so we keep those bytes on disk
+    under IMAGES_DIR/chat/ (publicly served, unguessable uuid name) and
+    the DB row holds just the URL. Falls back to returning None on any
+    failure — caller then stores base64 as before (never lose the image).
+    """
+    try:
+        image_data, image_extension = decode_chat_image_payload(payload)
+        chat_dir = Path(IMAGES_DIR) / "chat"
+        chat_dir.mkdir(parents=True, exist_ok=True)
+        name = f"{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:12]}{image_extension}"
+        (chat_dir / name).write_bytes(image_data)
+        url = f"{IMAGES_BASE_URL}/chat/{name}"
+        logger.info("%s Stored chat image file %s (%s bytes) — DB keeps URL only", log_prefix, name, len(image_data))
+        return url
+    except Exception as img_err:
+        logger.warning("%s Failed to persist chat image file; falling back to base64: %s", log_prefix, img_err)
+        return None
+
+
 def cleanup_chat_image_attachment(attachment: Optional[dict], log_prefix: str) -> None:
     """Remove temporary chat image files after the ACP/Claude session ends."""
     if not attachment:
@@ -7660,9 +7686,13 @@ async def chat_stream_endpoint(
         # Save user message to database and commit
         msg_mode = getattr(request, 'mode', 'dream')
         if request.image:
+            # Store the image as a file + URL in the DB row (base64 in
+            # Postgres was the largest unbounded growth source). Falls back
+            # to raw base64 if the file write fails.
+            stored_image = persist_chat_image_url(request.image, "[STREAM ENDPOINT]") or request.image
             conn.execute(
                 "INSERT INTO messages (session_id, role, content, image, mode) VALUES (?, ?, ?, ?, ?)",
-                (session_id, 'user', user_content, request.image, msg_mode)
+                (session_id, 'user', user_content, stored_image, msg_mode)
             )
         else:
             conn.execute(
@@ -8703,7 +8733,7 @@ async def chat_endpoint(
         if request.image:
             conn.execute(
                 "INSERT INTO messages (session_id, role, content, image) VALUES (?, ?, ?, ?)",
-                (session_id, 'user', user_content, request.image)
+                (session_id, 'user', user_content, persist_chat_image_url(request.image, "[ACP-MODE]") or request.image)
             )
         else:
             conn.execute(
