@@ -1685,6 +1685,15 @@ async def internal_routes_guard(request: Request, call_next):
         return JSONResponse({"detail": "Not Found"}, status_code=404)
     return await call_next(request)
 
+# Explicit 404 for the bare chat-image directory paths. StaticFiles would
+# 404 them anyway (html=False = no directory listing), but this registers
+# BEFORE the mount so the behavior is guaranteed regardless of framework
+# version: only full unguessable file URLs resolve, directories never do.
+@app.get("/images/chat", include_in_schema=False)
+@app.get("/images/chat/", include_in_schema=False)
+async def _deny_chat_image_directory() -> Response:
+    return Response(status_code=404)
+
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 
