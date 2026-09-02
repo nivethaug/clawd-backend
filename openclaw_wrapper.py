@@ -460,6 +460,19 @@ That's all. Execute Phase {phase} now.
             )
             return False
 
+        # Verify frontend/src exists — an empty/partial template copy passes
+        # the frontend/ check above and only explodes 6 phases later in the
+        # ACPX editor (observed: project 2034 'Chai & Coffee').
+        frontend_src_path = frontend_path / "src"
+        if not frontend_src_path.exists():
+            logger.error("❌ frontend/src directory not found — template copy was incomplete")
+            self.status_tracker.fail_phase(
+                PipelinePhase.SCAFFOLD,
+                ErrorCode.SCAFFOLD_MISSING_PAGES,
+                "frontend/src missing — template copy incomplete"
+            )
+            return False
+
         # Verify backend exists
         backend_path = self.project_path / "backend"
         if not backend_path.exists():
