@@ -11020,6 +11020,178 @@ async def list_project_uploads(
     }
 
 
+# ============================================================================
+# USER ACTIVITY AUDIT — page views + labeled clicks (authenticated users only,
+# 90-day retention pruned opportunistically on ingest)
+# ============================================================================
+
+ACTIVITY_EVENT_TYPES = {"page_view", "click"}
+ACTIVITY_MAX_BATCH = 50
+ACTIVITY_MAX_BODY_BYTES = 64 * 1024
+ACTIVITY_RETENTION_DAYS = 90
+
+
+class ActivityEventIn(BaseModel):
+    type: str = Field(..., description="page_view | click")
+    route: str = Field("", max_length=300)
+    label: Optional[str] = Field(None, max_length=120)
+    ts: Optional[float] = Field(None, description="client epoch seconds (optional)")
+
+
+class ActivityBatchIn(BaseModel):
+    events: List[ActivityEventIn] = Field(..., max_length=ACTIVITY_MAX_BATCH)
+
+
+@app.post("/activity/batch")
+async def ingest_activity_batch(batch: ActivityBatchIn, authorization: Optional[str] = Header(None)):
+    """
+    Batched telemetry from the frontend ActivityTracker.
+
+    Authenticated users only — anonymous sessions are rejected (the frontend
+    never sends them). Rate-limit-exempt; body capped by pydantic max_length.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    rows = []
+    for ev in batch.events:
+        if ev.type not in ACTIVITY_EVENT_TYPES:
+            continue
+        rows.append((user_id, ev.type, (ev.route or "")[:300], (ev.label or None), float(ev.ts) if ev.ts else None))
+    if not rows:
+        return {"success": True, "inserted": 0}
+
+    import json as _json
+
+    with get_db() as conn:
+        if len(rows) == 1:
+            u, t, r, l, ts = rows[0]
+            conn.execute(
+                """INSERT INTO user_activity_events (user_id, event_type, page_route, element_label, metadata, created_at)
+                   VALUES (%s, %s, %s, %s, %s, COALESCE(TO_TIMESTAMP(%s), NOW()))""",
+                (u, t, r, l, _json.dumps({}), ts),
+            )
+        else:
+            values_sql = ", ".join(
+                f"(%s, %s, %s, %s, %s, COALESCE(TO_TIMESTAMP(%s), NOW()))" for _ in rows
+            )
+            flat = []
+            for u, t, r, l, ts in rows:
+                flat.extend([u, t, r, l, _json.dumps({}), ts])
+            conn.execute(
+                f"""INSERT INTO user_activity_events
+                    (user_id, event_type, page_route, element_label, metadata, created_at)
+                    VALUES {values_sql}""",
+                flat,
+            )
+        # Opportunistic 90-day prune (~10% of ingests) — no dedicated cron
+        import random as _random
+
+        if _random.random() < 0.10:
+            try:
+                conn.execute(
+                    "DELETE FROM user_activity_events WHERE created_at < NOW() - INTERVAL '%s days'",
+                    (ACTIVITY_RETENTION_DAYS,),
+                )
+            except Exception as prune_err:
+                logger.debug("[ACTIVITY] prune failed (non-fatal): %s", prune_err)
+        conn.commit()
+
+    return {"success": True, "inserted": len(rows)}
+
+
+@app.get("/admin/users/{user_id}/activity")
+async def admin_get_user_activity(
+    user_id: int,
+    limit: int = 50,
+    offset: int = 0,
+    type: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Admin: recent activity events for one user (page views + clicks)."""
+    admin_id = get_user_id_from_token(authorization)
+    require_admin(admin_id)
+
+    limit = max(1, min(200, limit))
+    offset = max(0, offset)
+    type_filter = type if type in ACTIVITY_EVENT_TYPES else None
+
+    with get_db() as conn:
+        where = "user_id = %s" + (" AND event_type = %s" if type_filter else "")
+        params: list = [user_id] + ([type_filter] if type_filter else [])
+        rows = conn.execute(
+            f"""SELECT event_type, page_route, element_label, created_at
+                FROM user_activity_events WHERE {where}
+                ORDER BY created_at DESC LIMIT %s OFFSET %s""",
+            params + [limit, offset],
+        ).fetchall()
+        total_row = conn.execute(
+            f"""SELECT COUNT(*) AS c FROM user_activity_events WHERE {where}""",
+            params,
+        ).fetchone()
+    total = int(total_row.get("c") if isinstance(total_row, dict) else total_row[0]) if total_row else 0
+    events = [
+        {
+            "type": r["event_type"],
+            "route": r["page_route"],
+            "label": r.get("element_label") if isinstance(r, dict) else r[2],
+            "created_at": str(r["created_at"]),
+        }
+        for r in rows
+    ]
+    return {"success": True, "events": events, "total": total, "limit": limit, "offset": offset}
+
+
+@app.get("/admin/analytics/summary")
+async def admin_analytics_summary(authorization: Optional[str] = Header(None)):
+    """Admin: platform activity summary — top pages, top clicks, DAU, trend."""
+    admin_id = get_user_id_from_token(authorization)
+    require_admin(admin_id)
+
+    with get_db() as conn:
+        def _rows(q, params=None):
+            return [dict(r) if not isinstance(r, dict) else r for r in conn.execute(q, params or []).fetchall()]
+
+        top_pages_7d = _rows(
+            """SELECT page_route, COUNT(*) AS views, COUNT(DISTINCT user_id) AS users
+               FROM user_activity_events
+               WHERE event_type = 'page_view' AND created_at > NOW() - INTERVAL '7 days'
+               GROUP BY page_route ORDER BY views DESC LIMIT 15"""
+        )
+        top_clicks_7d = _rows(
+            """SELECT element_label, COUNT(*) AS clicks, COUNT(DISTINCT user_id) AS users
+               FROM user_activity_events
+               WHERE event_type = 'click' AND created_at > NOW() - INTERVAL '7 days'
+                 AND element_label IS NOT NULL
+               GROUP BY element_label ORDER BY clicks DESC LIMIT 15"""
+        )
+        dau = _rows(
+            """SELECT DATE(created_at) AS day, COUNT(DISTINCT user_id) AS active_users,
+                      COUNT(*) AS events
+               FROM user_activity_events
+               WHERE created_at > NOW() - INTERVAL '30 days'
+               GROUP BY day ORDER BY day DESC LIMIT 30"""
+        )
+        totals = _rows(
+            """SELECT
+                 COUNT(DISTINCT user_id) AS total_users,
+                 COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 day') AS events_24h,
+                 COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') AS events_7d
+               FROM user_activity_events"""
+        )
+    summary = totals[0] if totals else {}
+    return {
+        "success": True,
+        "top_pages_7d": top_pages_7d,
+        "top_clicks_7d": top_clicks_7d,
+        "daily_active_users": dau,
+        "totals": {
+            "users_tracked": int(summary.get("total_users") or 0),
+            "events_24h": int(summary.get("events_24h") or 0),
+            "events_7d": int(summary.get("events_7d") or 0),
+        },
+    }
+
+
 @app.get("/gallery/my-published")
 async def get_my_published_projects(
     authorization: Optional[str] = Header(None),
@@ -14032,6 +14204,10 @@ def _classify_rate_limit(request: Request) -> Optional[str]:
     path = request.url.path
     method = request.method.upper()
 
+    # Telemetry ingest never counts against quota (max 1 call/10s per client)
+    if path == "/activity/batch":
+        return None
+
     if method == "GET" and (
         path in SAFE_RATE_LIMIT_EXEMPT_GET_PATHS
         or _is_active_session_poll_path(path)
@@ -14404,6 +14580,7 @@ async def admin_delete_user(
         # Clean up non-cascading tables
         conn.execute("DELETE FROM auth_tokens WHERE user_id = ?", (target_user_id,))
         conn.execute("DELETE FROM session_chat_runs WHERE user_id = ?", (target_user_id,))
+        conn.execute("DELETE FROM user_activity_events WHERE user_id = ?", (target_user_id,))
         conn.execute("DELETE FROM projects WHERE user_id = ?", (target_user_id,))
         conn.execute("UPDATE billing_config SET updated_by = NULL WHERE updated_by = ?", (target_user_id,))
 

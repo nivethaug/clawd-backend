@@ -1635,6 +1635,34 @@ def init_schema():
             logger.info("✓ Added upload_files table (user file uploads + quota ledger)")
 
             # ----------------------------------------------------------------
+            # ACTIVITY: user page-visit + click audit (90-day retention,
+            # pruned opportunistically on ingest)
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS user_activity_events (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                event_type VARCHAR(16) NOT NULL CHECK (event_type IN ('page_view', 'click')),
+                page_route TEXT NOT NULL DEFAULT '',
+                element_label TEXT,
+                metadata JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_user_time "
+                "ON user_activity_events(user_id, created_at DESC)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_type_time "
+                "ON user_activity_events(event_type, created_at DESC)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_route_time "
+                "ON user_activity_events(page_route, created_at DESC)"
+            )
+            conn.commit()
+            logger.info("✓ Added user_activity_events table (page visits + click audit)")
+
+            # ----------------------------------------------------------------
             # BILLING: migrations on existing tables
             # ----------------------------------------------------------------
 
