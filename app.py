@@ -11142,41 +11142,54 @@ async def admin_get_user_activity(
 
 
 @app.get("/admin/analytics/summary")
-async def admin_analytics_summary(authorization: Optional[str] = Header(None)):
-    """Admin: platform activity summary — top pages, top clicks, DAU, trend."""
+async def admin_analytics_summary(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Admin: platform activity summary — top pages, top clicks, DAU, trend.
+
+    user_id: optional per-user filter (all queries scoped to that user).
+    """
     admin_id = get_user_id_from_token(authorization)
     require_admin(admin_id)
+
+    user_filter = (" AND user_id = %s", [user_id]) if user_id else ("", [])
 
     with get_db() as conn:
         def _rows(q, params=None):
             return [dict(r) if not isinstance(r, dict) else r for r in conn.execute(q, params or []).fetchall()]
 
         top_pages_7d = _rows(
-            """SELECT page_route, COUNT(*) AS views, COUNT(DISTINCT user_id) AS users
+            f"""SELECT page_route, COUNT(*) AS views, COUNT(DISTINCT user_id) AS users
                FROM user_activity_events
-               WHERE event_type = 'page_view' AND created_at > NOW() - INTERVAL '7 days'
-               GROUP BY page_route ORDER BY views DESC LIMIT 15"""
+               WHERE event_type = 'page_view' AND created_at > NOW() - INTERVAL '7 days'{user_filter[0]}
+               GROUP BY page_route ORDER BY views DESC LIMIT 15""",
+            user_filter[1],
         )
         top_clicks_7d = _rows(
-            """SELECT element_label, COUNT(*) AS clicks, COUNT(DISTINCT user_id) AS users
+            f"""SELECT element_label, COUNT(*) AS clicks, COUNT(DISTINCT user_id) AS users
                FROM user_activity_events
-               WHERE event_type = 'click' AND created_at > NOW() - INTERVAL '7 days'
+               WHERE event_type = 'click' AND created_at > NOW() - INTERVAL '7 days'{user_filter[0]}
                  AND element_label IS NOT NULL
-               GROUP BY element_label ORDER BY clicks DESC LIMIT 15"""
+               GROUP BY element_label ORDER BY clicks DESC LIMIT 15""",
+            user_filter[1],
         )
         dau = _rows(
-            """SELECT DATE(created_at) AS day, COUNT(DISTINCT user_id) AS active_users,
+            f"""SELECT DATE(created_at) AS day, COUNT(DISTINCT user_id) AS active_users,
                       COUNT(*) AS events
                FROM user_activity_events
-               WHERE created_at > NOW() - INTERVAL '30 days'
-               GROUP BY day ORDER BY day DESC LIMIT 30"""
+               WHERE created_at > NOW() - INTERVAL '30 days'{user_filter[0]}
+               GROUP BY day ORDER BY day DESC LIMIT 30""",
+            user_filter[1],
         )
         totals = _rows(
             """SELECT
                  COUNT(DISTINCT user_id) AS total_users,
                  COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 day') AS events_24h,
                  COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') AS events_7d
-               FROM user_activity_events"""
+               FROM user_activity_events
+               WHERE 1=1""" + user_filter[0],
+            user_filter[1],
         )
     summary = totals[0] if totals else {}
     return {
@@ -14310,42 +14323,48 @@ async def admin_list_users(
     limit: int = 50,
     offset: int = 0,
     sort: str = "cost",
+    search: Optional[str] = None,
     authorization: Optional[str] = Header(None)
 ):
     """List all users with their role, subscription tier, and token cost. Admin only.
 
     sort: 'cost' (default, descending) or 'id' (ascending)
+    search: optional ILIKE filter on email or name
     """
     user_id = get_user_id_from_token(authorization)
     require_admin(user_id)
 
-    with get_db() as conn:
-        if sort == "cost":
-            users = conn.execute(
-                """SELECT u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at,
-                       COALESCE(SUM(t.total_tokens), 0) as total_tokens,
-                       COALESCE(SUM(t.cost_usd), 0) as total_cost_usd
-                   FROM users u
-                   LEFT JOIN token_usage t ON t.user_id = u.id
-                   GROUP BY u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at
-                   ORDER BY total_cost_usd DESC NULLS LAST, u.id ASC
-                   LIMIT %s OFFSET %s""",
-                (limit, offset)
-            ).fetchall()
-        else:
-            users = conn.execute(
-                """SELECT u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at,
-                       COALESCE(SUM(t.total_tokens), 0) as total_tokens,
-                       COALESCE(SUM(t.cost_usd), 0) as total_cost_usd
-                   FROM users u
-                   LEFT JOIN token_usage t ON t.user_id = u.id
-                   GROUP BY u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at
-                   ORDER BY u.id ASC
-                   LIMIT %s OFFSET %s""",
-                (limit, offset)
-            ).fetchall()
+    where_clause = ""
+    where_params: list = []
+    if search and search.strip():
+        where_clause = "WHERE (u.email ILIKE %s OR u.name ILIKE %s)"
+        like = f"%{search.strip()}%"
+        where_params = [like, like]
 
-        total = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()
+    order_clause = (
+        "ORDER BY total_cost_usd DESC NULLS LAST, u.id ASC"
+        if sort == "cost"
+        else "ORDER BY u.id ASC"
+    )
+
+    with get_db() as conn:
+        users = conn.execute(
+            f"""SELECT u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at,
+                   COALESCE(SUM(t.total_tokens), 0) as total_tokens,
+                   COALESCE(SUM(t.cost_usd), 0) as total_cost_usd
+               FROM users u
+               LEFT JOIN token_usage t ON t.user_id = u.id
+               {where_clause}
+               GROUP BY u.id, u.email, u.name, u.role, u.subscription_tier, u.created_at
+               {order_clause}
+               LIMIT %s OFFSET %s""",
+            where_params + [limit, offset]
+        ).fetchall()
+
+        total = conn.execute(
+            f"SELECT COUNT(*) as cnt FROM users u {where_clause}",
+            where_params,
+        ).fetchone()
         total_count = total["cnt"] if isinstance(total, dict) else total[0]
 
     def gv(row, key, idx):
