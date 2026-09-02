@@ -10841,6 +10841,24 @@ async def upload_project_file(
             detail="Project is still being created — try uploading again in a moment",
         )
 
+    # SCAFFOLD GATE — critical race guard (observed: project 2034):
+    # the project folder is created BEFORE fast_wrapper clones the template.
+    # An upload landing in that window mkdirs frontend/ (website images),
+    # fast_wrapper then sees "Target directory 'frontend' already exists,
+    # skipping clone" and the project ships with NO scaffold. Require proof
+    # the scaffold actually ran before accepting any upload.
+    _type_id = int(project.get("type_id") or 1)
+    _scaffold_markers = {
+        1: [Path(project_path) / "frontend" / "package.json"],
+        2: [Path(project_path) / "telegram"],
+        3: [Path(project_path) / "discord"],
+    }.get(_type_id, [Path(project_path) / "backend", Path(project_path) / "main.py"])
+    if not any(_marker.exists() for _marker in _scaffold_markers):
+        raise HTTPException(
+            status_code=409,
+            detail="Project scaffold still in progress — try uploading again in a moment",
+        )
+
     from services.rate_limiter import get_user_tier_and_role
 
     tier_info = get_user_tier_and_role(user_id)
