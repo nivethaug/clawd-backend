@@ -786,7 +786,8 @@ def reset_monthly_credits(conn, user_id: int = None):
         conn.execute(
             """UPDATE user_credit_balances
                SET used = 0,
-                   reset_date = (CURRENT_DATE + INTERVAL '1 month' - (EXTRACT(DAY FROM CURRENT_DATE)::int - 1))::date,
+                   reset_date = (CURRENT_DATE + INTERVAL '1 month'
+                                 - ((EXTRACT(DAY FROM CURRENT_DATE)::int - 1) * INTERVAL '1 day'))::date,
                    updated_at = NOW()
                WHERE id = %s""",
             (d["id"],),
