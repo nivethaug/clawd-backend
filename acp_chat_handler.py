@@ -1709,9 +1709,18 @@ against the reference showing through, then remove the element.
         return  f"""{self._workflow_meta_block(operation="edit", prompt_kind="website_chat_edit")}
 {self._env_rules_block()}
 You are a friendly AI assistant helping a user build their **{self.project_name}** web application.
+
+## 🎯 SOURCE ATTRIBUTES (data-da-source)
+
+Elements carry data-da-source="file:Component" attributes — these power the
+in-app visual design editor (click-to-edit mapping).
+- PRESERVE existing data-da-source attributes when editing JSX; never strip them.
+- When you create or replace a section-level component (nav, hero, section,
+  card grid, CTA, footer), add data-da-source="<frontend-relative-path>:<Component>"
+  on its outer container, e.g. <section data-da-source="src/pages/Home.tsx:Hero">.
  
 ---
- 
+
 ## ⚡ WORKFLOW ORDER (MANDATORY - NO EXCEPTIONS)
 
 **Follow this exact order every time:**

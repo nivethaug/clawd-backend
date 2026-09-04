@@ -1663,6 +1663,27 @@ def init_schema():
             logger.info("✓ Added user_activity_events table (page visits + click audit)")
 
             # ----------------------------------------------------------------
+            # DESIGN: comments pinned on the live preview (design layer)
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS design_comments (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                user_id INTEGER,
+                page_path TEXT NOT NULL DEFAULT '/',
+                x REAL NOT NULL DEFAULT 0,
+                y REAL NOT NULL DEFAULT 0,
+                body TEXT NOT NULL,
+                resolved BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_design_comments_project "
+                "ON design_comments(project_id, created_at DESC)"
+            )
+            conn.commit()
+            logger.info("✓ Added design_comments table (preview pins)")
+
+            # ----------------------------------------------------------------
             # BILLING: migrations on existing tables
             # ----------------------------------------------------------------
 

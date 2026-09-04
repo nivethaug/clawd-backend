@@ -13,14 +13,14 @@ import { Outlet } from "react-router-dom";
  */
 const Layout = () => {
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div className="flex h-screen w-full overflow-hidden" data-da-source="src/layout/Layout.tsx:Layout">
       {/* Future: Sidebar component can go here */}
       {/* <Sidebar /> */}
-      
+
       <div className="flex flex-col flex-1">
         {/* Future: Header component can go here */}
         {/* <Header /> */}
-        
+
         {/* Main content area - scrollable */}
         <main className="flex-1 overflow-y-auto p-6">
           <Outlet />

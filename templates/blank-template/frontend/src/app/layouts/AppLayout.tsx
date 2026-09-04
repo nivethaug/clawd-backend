@@ -33,7 +33,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   return (
     <div className="min-h-screen bg-background">
       {/* Mobile Header */}
-      <header className="lg:hidden sticky top-0 z-50 flex items-center justify-between h-16 px-4 border-b border-border bg-background/95 backdrop-blur-sm">
+      <header data-da-source="src/app/layouts/AppLayout.tsx:MobileHeader" className="lg:hidden sticky top-0 z-50 flex items-center justify-between h-16 px-4 border-b border-border bg-background/95 backdrop-blur-sm">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setSidebarOpen(true)}
@@ -58,6 +58,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
       {/* Sidebar - Desktop: Icon-first collapsible, Mobile: Full drawer */}
       <aside
+        data-da-source="src/app/layouts/AppLayout.tsx:Sidebar"
         onMouseEnter={() => setSidebarExpanded(true)}
         onMouseLeave={() => setSidebarExpanded(false)}
         className={cn(
@@ -147,7 +148,7 @@ export function AppLayout({ children }: AppLayoutProps) {
       </aside>
 
       {/* Main Content */}
-      <main className={cn(
+      <main data-da-source="src/app/layouts/AppLayout.tsx:MainContent" className={cn(
         'transition-all duration-250 ease-[cubic-bezier(0.2,0,0,1)]',
         sidebarExpanded ? 'lg:pl-64' : 'lg:pl-[72px]'
       )}>

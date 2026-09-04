@@ -13960,6 +13960,84 @@ class DesignScreenshotRequest(BaseModel):
     height: int = 800
 
 
+class DesignCommentRequest(BaseModel):
+    page_path: str = "/"
+    x: float = 0
+    y: float = 0
+    body: str
+
+
+@app.get("/projects/{project_id}/design/comments")
+async def design_comments_list(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """List pinned design comments for a project (newest first)."""
+    _require_project_owner(project_id, authorization)
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT id, page_path, x, y, body, resolved, created_at
+               FROM design_comments WHERE project_id = %s
+               ORDER BY created_at DESC LIMIT 100""",
+            (project_id,),
+        ).fetchall()
+    return {
+        "comments": [
+            {
+                "id": r["id"],
+                "page_path": r["page_path"],
+                "x": r["x"],
+                "y": r["y"],
+                "body": r["body"],
+                "resolved": r["resolved"],
+                "created_at": str(r["created_at"]),
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.post("/projects/{project_id}/design/comments")
+async def design_comment_create(
+    project_id: int,
+    request_data: DesignCommentRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Pin a comment on the live preview."""
+    user_id = get_user_id_from_token(authorization)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_project_owner(project_id, authorization)
+    body = (request_data.body or "").strip()
+    if not body or len(body) > 500:
+        raise HTTPException(status_code=400, detail="Comment body required (max 500 chars)")
+    with get_db() as conn:
+        cur = conn.execute(
+            """INSERT INTO design_comments
+               (project_id, user_id, page_path, x, y, body)
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, created_at""",
+            (
+                project_id,
+                user_id,
+                (request_data.page_path or "/")[:200],
+                max(0.0, min(float(request_data.x), 10000.0)),
+                max(0.0, min(float(request_data.y), 10000.0)),
+                body,
+            ),
+        )
+        row = cur.fetchone()
+        conn.commit()
+    return {
+        "id": row["id"],
+        "page_path": request_data.page_path,
+        "x": request_data.x,
+        "y": request_data.y,
+        "body": body,
+        "resolved": False,
+        "created_at": str(row["created_at"]),
+    }
+
+
 @app.post("/projects/{project_id}/design/screenshot")
 async def design_screenshot(
     project_id: int,

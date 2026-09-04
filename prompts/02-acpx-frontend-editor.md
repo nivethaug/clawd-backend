@@ -89,6 +89,20 @@ Verify routing is correct BEFORE creating pages!
    - [ ] NO unauthorized pages were created
    - [ ] All required pages are complete
    - [ ] File names match exactly with REQUIRED PAGES list
+   - [ ] Section-level JSX carries data-da-source attributes (see rule 5)
+
+5. DESIGN-LAYER SOURCE ATTRIBUTES (REQUIRED):
+   Every meaningful layout root must carry a data-da-source attribute so the
+   visual design editor can map a clicked element back to its source file:
+   - Add data-da-source="<file-path>:<ComponentName>" on section-level JSX
+     containers and interactive roots: <nav>, hero/section wrappers, cards,
+     CTA buttons, footers, sidebars, and top-level page sections.
+   - file-path is relative to frontend/ (e.g. "src/pages/Dashboard.tsx").
+   - Example: <section data-da-source="src/pages/Dashboard.tsx:StatsSection" className="...">
+   - Keep the attribute on the OUTER container of each logical block (one per
+     block, not on every nested div).
+   - These attributes power in-app visual editing; never remove existing ones
+     when refactoring.
 
 ---
 
