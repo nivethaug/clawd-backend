@@ -319,13 +319,19 @@
     if (!editingNode) return;
     var nodeId = nodeIdFor(editingNode);
     var text = (editingNode.innerText || '').replace(/\n+$/, '');
-    editingNode.setAttribute('contenteditable', 'false');
+    var original = editingOriginalText;
     editingNode.removeAttribute('contenteditable');
     if (cancel) editingNode.innerText = editingOriginalText;
     var node = editingNode;
     editingNode = null;
     editingOriginalText = null;
-    send({ type: cancel ? 'TEXT_CANCEL' : 'TEXT_COMMIT', nodeId: nodeId, text: text, node: serializeNode(node) });
+    send({
+      type: cancel ? 'TEXT_CANCEL' : 'TEXT_COMMIT',
+      nodeId: nodeId,
+      text: text,
+      original: original,
+      node: serializeNode(node),
+    });
   }
 
   function onTextClick(e) {

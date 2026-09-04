@@ -13805,6 +13805,102 @@ async def editor_build_publish(
         )
 
 
+# ============================================================================
+# Design layer — Path A (agentless visual patches) + fast rebuild
+# ============================================================================
+
+class DesignPatchRequest(BaseModel):
+    label: Optional[str] = "Visual edit"
+    node: Dict[str, Any] = {}
+    style_intent: Optional[Dict[str, str]] = None
+    text_change: Optional[Dict[str, str]] = None
+
+
+class DesignBuildResponse(BaseModel):
+    success: bool
+    build_time: Optional[float] = None
+    output: Optional[str] = None
+    error: Optional[str] = None
+
+
+def _load_project_for_design(project_id: int, authorization: Optional[str]):
+    _require_project_owner(project_id, authorization)
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT id, project_path, type_id, domain FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    if project["type_id"] != 1:
+        raise HTTPException(status_code=400, detail="Design layer is website-only")
+    if not project["project_path"]:
+        raise HTTPException(status_code=400, detail="Project path is not available yet")
+    return project
+
+
+@app.post("/projects/{project_id}/design/patch")
+async def design_patch(
+    project_id: int,
+    request_data: DesignPatchRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Apply a visual patch (Tailwind class edit or text literal swap)
+    directly to source — no agent run. Commits as 'Design: <label>'."""
+    from services.design_patch_service import (
+        DesignPatchError,
+        apply_design_patch,
+        mark_design_build_pending,
+        _design_build_locks,
+    )
+
+    project = _load_project_for_design(project_id, authorization)
+
+    try:
+        result = apply_design_patch(project_id, project["project_path"], request_data.dict())
+    except DesignPatchError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+
+    # If a build is currently running for this project, flag a trailing pass.
+    lock = _design_build_locks.get(project_id)
+    if lock and lock.locked():
+        mark_design_build_pending(project_id)
+
+    return result
+
+
+@app.post("/projects/{project_id}/design/build", response_model=DesignBuildResponse)
+async def design_build(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Fast vite-only rebuild with atomic dist swap. Coalesces concurrent
+    callers into (at most) one trailing rebuild."""
+    from services.design_patch_service import run_design_build
+
+    project = _load_project_for_design(project_id, authorization)
+    result = await run_design_build(project["project_path"], project_id)
+    return DesignBuildResponse(
+        success=result.get("success", False),
+        build_time=result.get("build_time"),
+        output=result.get("output"),
+        error=result.get("error"),
+    )
+
+
+@app.get("/projects/{project_id}/design/commits")
+async def design_commits(
+    project_id: int,
+    limit: int = 20,
+    authorization: Optional[str] = Header(None),
+):
+    """Last N visual commits (for the design undo stack)."""
+    from services.design_patch_service import list_design_commits
+
+    _require_project_owner(project_id, authorization)
+    return {"commits": list_design_commits(project_id, limit)}
+
+
 def _broadcast_rollback_to_sessions(
     project_id: int,
     origin_session_id: Optional[int],
