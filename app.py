@@ -1879,6 +1879,28 @@ async def serve_chat_image(name: str) -> Response:
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 
+# ---------------------------------------------------------------------------
+# Preview bridge — injected into project preview pages by the worker nginx
+# (sub_filter) so the app shell can drive the visual design layer over
+# postMessage. Public by design: the script is inert outside an iframe and
+# carries no secrets.
+_PREVIEW_BRIDGE_PATH = Path(__file__).resolve().parent / "static" / "preview-bridge.js"
+
+
+@app.get("/preview-bridge.js")
+async def serve_preview_bridge() -> Response:
+    if not _PREVIEW_BRIDGE_PATH.is_file():
+        raise HTTPException(status_code=404, detail="preview bridge not deployed")
+    return Response(
+        content=_PREVIEW_BRIDGE_PATH.read_bytes(),
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "public, max-age=300",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
 @app.on_event("startup")
 async def start_background_workers():
     """Start background daemon threads on app boot."""

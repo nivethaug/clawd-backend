@@ -1265,6 +1265,12 @@ class NginxConfigurator:
             frontend_domain = f"{domain}.{BASE_DOMAIN}"
             backend_domain = f"{domain}-api.{BASE_DOMAIN}"
 
+            # Preview-bridge script URL injected into served HTML (sub_filter
+            # below). Served by the control-plane API; override for dev.
+            bridge_url = os.getenv(
+                "PREVIEW_BRIDGE_URL", "https://api.dreamagent.cloud/preview-bridge.js"
+            )
+
             # Resolve the dist path: prefer explicit dist_path (correct for both
             # legacy /root/dreampilot/... and container /workspaces/user_X/... layouts),
             # fall back to constructing from project_path + hardcoded prefix (legacy).
@@ -1308,8 +1314,17 @@ server {{
     root {frontend_root};
     index index.html;
 
+    # DreamAgent preview bridge — injects the design-layer script into HTML
+    # responses so the app shell can drive visual editing over postMessage.
+    # The bridge no-ops for normal visitors (window.parent === window).
+    # gzip off keeps sub_filter reliable (it operates on uncompressed
+    # bodies; static files are not pre-compressed on disk).
+    sub_filter '</head>' '<script src="{bridge_url}" defer></script></head>';
+    sub_filter_once on;
+
     # SPA routing - serve index.html for all routes
     location / {{
+        gzip off;
         try_files $uri $uri/ /index.html;
     }}
 
