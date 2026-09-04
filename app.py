@@ -534,6 +534,52 @@ def append_design_reference_continuation(user_content: str, design_reference: di
     )
 
 
+def _append_design_context_block(user_content: str, design_context: Dict[str, Any]) -> str:
+    """
+    Design layer (Path B): prepend a hidden context block describing the
+    annotated live preview — selected nodes with source hints + viewport.
+    The user-visible message stays exactly what they typed.
+    """
+    viewport = design_context.get("viewport") or {}
+    vp_line = ""
+    if viewport:
+        vp_line = (
+            f"Viewport: {viewport.get('device', 'desktop')} "
+            f"{viewport.get('width', '?')}x{viewport.get('height', '?')}"
+        )
+    lines = []
+    for n in design_context.get("nodes") or []:
+        src = n.get("source") or {}
+        loc = src.get("file") or "unmapped"
+        if src.get("component"):
+            loc += f":{src['component']}"
+        preview = (n.get("textPreview") or "").replace('"', "'")[:60]
+        box = n.get("box") or {}
+        box_str = (
+            f"box={box.get('x')},{box.get('y')},{box.get('w')},{box.get('h')}"
+            if box else "box=?"
+        )
+        cls = f" class~[{(n.get('className') or '')[:80]}]" if n.get("className") else ""
+        lines.append(f'- {loc} "{preview}" {box_str}{cls}')
+
+    nodes_block = "\n".join(lines) if lines else "- (no specific nodes selected — use the annotation image)"
+
+    return (
+        f"{user_content}\n\n"
+        "<DESIGN_PREVIEW_CONTEXT>\n"
+        "The user annotated the live preview.\n"
+        f"{vp_line}\n"
+        "Selected nodes:\n"
+        f"{nodes_block}\n"
+        "An annotation image is attached — circled/boxed regions are the targets.\n"
+        "Apply the user instruction to those regions only.\n"
+        "Update the source files (frontend/src) — never only change a screenshot.\n"
+        "After edits, run the frontend build (cd frontend && python3 buildpublish.py).\n"
+        "Keep existing design tokens when possible.\n"
+        "</DESIGN_PREVIEW_CONTEXT>"
+    )
+
+
 def get_image_mime_type(image_path: str) -> str:
     extension = Path(image_path).suffix.lower()
     if extension in {".jpg", ".jpeg"}:
@@ -1658,7 +1704,9 @@ class ChatRequest(BaseModel):
     stream: bool = False
     image: Optional[str] = None
     acp_mode: bool = True  # Default to ACP mode for frontend editing via ACPX
-    mode: str = "dream"  # "dream" or "plan"
+    mode: str = "dream"  # "dream", "plan" or "design"
+    # Design layer (Path B): {nodes: [...], viewport: {width, height, device}}
+    design_context: Optional[Dict[str, Any]] = None
 
 class ChatResponse(BaseModel):
     id: int
@@ -8025,6 +8073,12 @@ async def chat_stream_endpoint(
                 design_reference = latest_design_reference(str(handler.project_path), "[ACP-STREAM]")
                 if design_reference:
                     acp_user_content = append_design_reference_continuation(user_content, design_reference)
+
+            # Design layer (Path B) — annotated preview + selected nodes.
+            # The user-visible message in the DB stays clean; only the agent
+            # prompt gets the hidden context block.
+            if request.design_context and handler.project_type_id == 1:
+                acp_user_content = _append_design_context_block(acp_user_content, request.design_context)
             
             # Get conversation context from database for continuity (last 4 messages = 2 exchanges)
             # Replace base64 images with placeholder to avoid bloating context
@@ -13899,6 +13953,35 @@ async def design_commits(
 
     _require_project_owner(project_id, authorization)
     return {"commits": list_design_commits(project_id, limit)}
+
+
+class DesignScreenshotRequest(BaseModel):
+    width: int = 1280
+    height: int = 800
+
+
+@app.post("/projects/{project_id}/design/screenshot")
+async def design_screenshot(
+    project_id: int,
+    request_data: Optional[DesignScreenshotRequest] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Capture the project's live preview with headless chromium (Path B
+    fallback when the iframe can't rasterize itself). Returns a PNG dataUrl."""
+    from services.preview_capture import capture_preview_data_url
+
+    project = _load_project_for_design(project_id, authorization)
+    domain = project["domain"]
+    if not domain:
+        raise HTTPException(status_code=400, detail="Project has no live domain")
+    url = _project_public_url(domain)
+    body = request_data or DesignScreenshotRequest()
+    data_url = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: capture_preview_data_url(url, body.width, body.height)
+    )
+    if not data_url:
+        raise HTTPException(status_code=502, detail="Screenshot capture failed")
+    return {"dataUrl": data_url, "width": body.width, "height": body.height}
 
 
 def _broadcast_rollback_to_sessions(
