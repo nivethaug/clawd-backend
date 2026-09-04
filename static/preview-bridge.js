@@ -210,6 +210,7 @@
         display: cs.display,
         width: cs.width,
         height: cs.height,
+        opacity: cs.opacity,
       },
     };
   }

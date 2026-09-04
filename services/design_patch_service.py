@@ -14,7 +14,7 @@ import logging
 import os
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, Optional
 
 from database_postgres import get_db
@@ -64,10 +64,28 @@ def apply_design_patch(project_id: int, project_path: str, payload: dict) -> dic
         )
 
     rel = match.file
-    if not rel.startswith(_ALLOWED_PREFIXES):
+    # Path safety: the relative file comes from page attributes (data-da-source)
+    # and must stay inside frontend/. Backslashes / '..' / absolute paths are
+    # rejected, and the resolved real path must remain under frontend/.
+    rel_parts = PurePosixPath(rel).parts
+    if (
+        not rel.startswith(_ALLOWED_PREFIXES)
+        or "\\" in rel
+        or ".." in rel_parts
+        or rel_parts and rel_parts[0] == "/"
+    ):
         raise DesignPatchError(f"File outside editable scope: {rel}", 403)
 
     target = fe / rel
+    try:
+        fe_real = os.path.realpath(fe)
+        target_real = os.path.realpath(target)
+        if not target_real.startswith(fe_real + os.sep):
+            raise DesignPatchError(f"File outside editable scope: {rel}", 403)
+    except DesignPatchError:
+        raise
+    except Exception as e:
+        raise DesignPatchError(f"Cannot resolve {rel}: {e}", 400)
     try:
         content = target.read_text(encoding="utf-8")
     except OSError as e:

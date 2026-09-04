@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 _SOURCE_EXTS = (".tsx", ".jsx", ".ts", ".js", ".html", ".vue")
@@ -61,6 +61,10 @@ def resolve_node_file(
     rel = (source.get("file") or "").strip().strip("/")
     if rel:
         rel = re.sub(r"^frontend/", "", rel)  # tolerate full repo-relative paths
+        # never honor traversal attempts from page attributes
+        if "\\" in rel or ".." in PurePosixPath(rel).parts or rel.startswith("/"):
+            rel = ""
+    if rel:
         candidate = frontend_path / rel
         if candidate.is_file():
             return SourceMatch(file=rel, confidence="data-da-source",

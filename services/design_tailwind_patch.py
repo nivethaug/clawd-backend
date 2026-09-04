@@ -110,15 +110,19 @@ def _quote_re(attr: str) -> re.Pattern:
     return re.compile(rf'{attr}\s*=\s*"([^"]*)"')
 
 
-def locate_class_attribute(
+def locate_class_attributes(
     content: str,
     class_name: Optional[str],
     text_preview: Optional[str],
-) -> Tuple[int, int, str]:
-    """Find (start, end, current_value) of the target element's class attr.
+    max_occurrences: int = 25,
+) -> List[Tuple[int, int, str]]:
+    """Find (start, end, current_value) spans of the target element's class attr.
 
-    Order: exact className match → text literal with nearest preceding
-    class attribute. Raises PatchError when nothing unique is found.
+    Order: exact className match → text literal with nearest preceding class
+    attribute. All occurrences of an identical className are returned (same
+    class ⇒ same style — multi-select of same-class elements updates them
+    together). Raises PatchError when nothing is found or the file is too
+    repetitive to patch safely.
     """
     candidates: List[Tuple[int, int, str]] = []
 
@@ -149,12 +153,12 @@ def locate_class_attribute(
         raise PatchError(
             "Could not locate the element in source (no unique className or text match)."
         )
-    if len(candidates) > 1:
+    if len(candidates) > max_occurrences:
         raise PatchError(
             f"Element matches {len(candidates)} class attributes in this file — "
             "too ambiguous for a direct patch."
         )
-    return candidates[0]
+    return candidates
 
 
 def _uniform_padding(value: str, notes: List[str]) -> Optional[str]:
@@ -179,10 +183,15 @@ def apply_style_intent(
     text_preview: Optional[str],
     intent: Dict[str, str],
 ) -> ClassPatchResult:
-    """Apply a style intent to the located element's class list."""
-    notes: List[str] = []
-    start, end, current = locate_class_attribute(content, class_name, text_preview)
+    """Apply a style intent to the located element's class list.
 
+    All occurrences of an identical className are rewritten (multi-select of
+    same-class elements updates together). Spans are replaced right-to-left
+    so earlier offsets stay valid.
+    """
+    notes: List[str] = []
+    spans = locate_class_attributes(content, class_name, text_preview)
+    current = spans[0][2]
     tokens = current.split()
     changed_any = False
     last_utility = ""
@@ -225,7 +234,9 @@ def apply_style_intent(
         raise PatchError("No applicable style properties in the intent.")
 
     new_class = " ".join(t for t in tokens if t)
-    new_content = content[:start] + new_class + content[end:]
+    new_content = content
+    for start, end, _ in sorted(spans, key=lambda s: s[0], reverse=True):
+        new_content = new_content[:start] + new_class + new_content[end:]
     return ClassPatchResult(
         new_content=new_content,
         changed=True,
