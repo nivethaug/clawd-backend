@@ -234,7 +234,9 @@ def _insert_class_on_enclosing_tag(
     needle = text_preview.strip()
     pos = content.find(needle)
     if pos == -1 or content.find(needle, pos + 1) != -1:
-        raise PatchError("Text literal is not unique for element targeting.")
+        raise PatchError(
+            "Dynamic or repeated text — describe the change in chat and AI will apply it."
+        )
     window_start = max(0, pos - 300)
     window = content[window_start:pos]
     matches = list(_TAG_OPEN_RE.finditer(window))

@@ -34,6 +34,7 @@
   var nodeRegistry = new Map(); // id -> Element
   var editingNode = null;
   var editingOriginalText = null;
+  var editingWrap = null; // {span, textNode, parent} — targeted single-text-node edit
 
   // ---------------------------------------------------------------- chrome
 
@@ -317,7 +318,30 @@
   // ---------------------------------------------------------------- text mode
 
   function commitText(cancel) {
-    if (!editingNode) return;
+    if (!editingNode && !editingWrap) return;
+
+    // targeted single-text-node edit (icon + text elements)
+    if (editingWrap) {
+      var wspan = editingWrap.span;
+      var wtn = editingWrap.textNode;
+      var wparent = editingWrap.parent;
+      var wtext = (wspan.innerText || '').replace(/\n+$/, '');
+      var woriginal = editingOriginalText;
+      editingWrap = null;
+      editingOriginalText = null;
+      var restored = document.createTextNode(cancel ? woriginal : wtext);
+      wparent.replaceChild(restored, wspan);
+      var wnode = wparent;
+      send({
+        type: cancel ? 'TEXT_CANCEL' : 'TEXT_COMMIT',
+        nodeId: nodeIdFor(wnode),
+        text: wtext,
+        original: woriginal,
+        node: serializeNode(wnode),
+      });
+      return;
+    }
+
     var nodeId = nodeIdFor(editingNode);
     var text = (editingNode.innerText || '').replace(/\n+$/, '');
     var original = editingOriginalText;
@@ -362,16 +386,45 @@
       }
     }
 
-    // Mixed content (text interleaved with child elements, e.g.
-    // "earned <span>1,204 views</span> this week") has no single source
-    // literal — refuse up front so the user routes it to the agent.
+    // Mixed content (icon + text, e.g. <svg/> New Demo): if there is exactly
+    // ONE non-empty direct text node, edit just that node (wrapped in a
+    // temporary span) — the source literal replace then matches the JSX.
+    // Anything more interleaved is dynamic → route to the agent.
     var hasElementChildren = false;
     for (var k = 0; k < target.childNodes.length; k++) {
       if (target.childNodes[k].nodeType === 1) { hasElementChildren = true; break; }
     }
     if (hasElementChildren) {
-      send({ type: 'ERROR', message: 'dynamic-text' });
-      toastDynamic();
+      var nonEmpty = [];
+      for (var m2 = 0; m2 < target.childNodes.length; m2++) {
+        var n2 = target.childNodes[m2];
+        if (n2.nodeType === 3 && n2.nodeValue && n2.nodeValue.trim()) nonEmpty.push(n2);
+      }
+      if (nonEmpty.length !== 1) {
+        send({ type: 'ERROR', message: 'dynamic-text' });
+        toastDynamic();
+        return;
+      }
+      // targeted single-text-node edit
+      var tn = nonEmpty[0];
+      var wrap = document.createElement('span');
+      wrap.setAttribute('data-' + BRIDGE_MARK + '-edit', '1');
+      wrap.setAttribute('contenteditable', 'true');
+      wrap.style.outline = '2px solid #f59e0b';
+      wrap.style.padding = '0 1px';
+      target.insertBefore(wrap, tn);
+      wrap.appendChild(tn);
+      editingWrap = { span: wrap, textNode: tn, parent: target };
+      editingNode = null;
+      editingOriginalText = tn.nodeValue;
+      wrap.focus();
+      try {
+        var wr = document.createRange();
+        wr.selectNodeContents(wrap);
+        var wsel = window.getSelection();
+        wsel.removeAllRanges();
+        wsel.addRange(wr);
+      } catch (err) { /* focus is enough */ }
       return;
     }
 
@@ -403,7 +456,7 @@
   }
 
   function onKeyDown(e) {
-    if (mode !== 'text' || !editingNode) return;
+    if (mode !== 'text' || (!editingNode && !editingWrap)) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -416,9 +469,9 @@
   }
 
   function onBlurText(e) {
-    if (mode === 'text' && editingNode && e.target === editingNode) {
-      commitText(false);
-    }
+    if (mode !== 'text') return;
+    if (editingNode && e.target === editingNode) commitText(false);
+    else if (editingWrap && e.target === editingWrap.span) commitText(false);
   }
 
   // ---------------------------------------------------------------- commands
@@ -452,7 +505,7 @@
   }
 
   function setMode(newMode) {
-    if (editingNode) commitText(false);
+    if (editingNode || editingWrap) commitText(false);
     mode = newMode;
     clearChrome();
     if (mode !== 'select') clearSelectionChrome();
