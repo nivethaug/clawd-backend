@@ -57,7 +57,7 @@ def apply_design_patch(project_id: int, project_path: str, payload: dict) -> dic
         raise DesignPatchError("Patch payload too large", 413)
 
     fe = _frontend_path(project_path)
-    match = resolve_node_file(fe, node)
+    match = resolve_node_file(fe, node, style_intent=intent)
     if not match:
         raise DesignPatchError(
             "Can't lock this node in code. AI will interpret.", 422
@@ -100,12 +100,14 @@ def apply_design_patch(project_id: int, project_path: str, payload: dict) -> dic
         else:
             # Target the literal class string found in the file — the node's
             # runtime className can differ (cn() merges, ordering), in which
-            # case the mapper already resolved the real in-file attribute.
+            # case the mapper already resolved the real in-file attribute or
+            # the conditional class string inside cn()/ternaries.
             result = apply_style_intent(
                 content,
                 match.class_in_file or node.get("className"),
                 node.get("textPreview"),
                 intent,
+                span_is_string=match.class_span_is_string,
             )
             new_content = result.new_content
             detail = result.utility or "style"

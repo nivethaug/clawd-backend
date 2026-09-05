@@ -32,6 +32,10 @@ class SourceMatch:
     # runtime className differs (cn() merges, ordering), the patcher must
     # target THIS string instead of the bridge-reported one.
     class_in_file: Optional[str] = None
+    # True when class_in_file is a conditional class STRING inside an
+    # expression (cn(...), ternaries) rather than a className attribute —
+    # the patcher then targets that string literal directly.
+    class_span_is_string: bool = False
 
 
 def _iter_source_files(frontend_path: Path):
@@ -48,35 +52,73 @@ def _to_rel(p: Path, frontend_path: Path) -> str:
     return p.relative_to(frontend_path).as_posix()
 
 
-def _find_class_in_file(content: str, class_name: str) -> Optional[str]:
-    """Find the literal class attribute in this file matching the node's
-    runtime className — exact first, then token-overlap (≥0.7, ≥2 tokens).
-    Returns the in-file attribute value or None."""
+def _find_class_in_file(content: str, class_name: str, intent: dict = None) -> tuple:
+    """Find the literal class string in this file matching the node's
+    runtime className.
+
+    Pass 1: className/class attributes (exact → token-overlap ≥0.7).
+    Pass 2: string literals — conditional classes live in cn(...) / ternary
+    strings. Scored category-aware: strings containing tokens in the SAME
+    category as the style intent (e.g. a text-color token when changing
+    color) win, so an ACTIVE-state string beats the base class string.
+
+    Returns (literal, is_string_span)."""
     if f'"{class_name}"' in content or f"'{class_name}'" in content:
-        return class_name
+        return class_name, False
     node_tokens = set(class_name.split())
     if len(node_tokens) < 2:
-        return None
+        return None, False
+
+    # categories the intent will touch
+    from services.design_tailwind_patch import classify_token
+    _INTENT_PREFIX_CATS = {
+        "bg-": "bg-color", "text-": "text-color", "color": "text-color",
+        "background": "bg-color", "backgroundColor": "bg-color",
+        "fontSize": "text-size", "fontWeight": "font-weight",
+        "padding": "padding", "margin": "margin", "borderRadius": "radius",
+        "opacity": "opacity", "width": "width", "maxWidth": "max-width",
+        "height": "height",
+    }
+    intent_cats = set()
+    for prop in (intent or {}):
+        cat = _INTENT_PREFIX_CATS.get(prop)
+        if cat:
+            intent_cats.add(cat)
+
+    def conflict_score(tokens):
+        for t in tokens:
+            cat = classify_token(t)
+            if cat and cat in intent_cats:
+                return 1
+        return 0
+
+    best = None  # (conflict, containment, overlap, literal, is_string)
     _attr_re = re.compile(r'(?:className|class)=["\']([^"\']*)["\']')
-    best: Optional[Tuple[float, int, str]] = None
-    for m in _attr_re.finditer(content):
-        attr_tokens = set(m.group(1).split())
-        if len(attr_tokens) < 2:
-            continue
-        overlap = node_tokens & attr_tokens
-        if len(overlap) < 2:
-            continue
-        score = len(overlap) / max(len(node_tokens), len(attr_tokens))
-        if best is None or score > best[0]:
-            best = (score, len(overlap), m.group(1))
-    if best and best[0] >= 0.7:
-        return best[2]
-    return None
+    _any_str_re = re.compile(r'["\']([^"\'\n]{8,240})["\']')
+    for pass_is_string, rex in ((False, _attr_re), (True, _any_str_re)):
+        for m in rex.finditer(content):
+            s_tokens = set(m.group(1).split())
+            if len(s_tokens) < 2:
+                continue
+            overlap = node_tokens & s_tokens
+            if len(overlap) < 2:
+                continue
+            containment = len(overlap) / len(s_tokens)
+            if containment < 0.6:
+                continue
+            conflict = conflict_score(s_tokens) if pass_is_string else 0
+            score = (conflict, containment, len(overlap))
+            if best is None or score > best[:3]:
+                best = (conflict, containment, len(overlap), m.group(1), pass_is_string)
+    if best:
+        return best[3], best[4]
+    return None, False
 
 
 def resolve_node_file(
     frontend_path: Path,
     node: dict,
+    style_intent: dict = None,
 ) -> Optional[SourceMatch]:
     """Map a bridge DesignNode to a source file under frontend/."""
     frontend_path = Path(frontend_path)
@@ -97,33 +139,35 @@ def resolve_node_file(
     if rel:
         candidate = frontend_path / rel
         if candidate.is_file():
-            class_in_file = None
+            class_in_file, span_is_string = None, False
             if class_name:
                 try:
-                    class_in_file = _find_class_in_file(
-                        candidate.read_text(encoding="utf-8", errors="ignore"), class_name
+                    class_in_file, span_is_string = _find_class_in_file(
+                        candidate.read_text(encoding="utf-8", errors="ignore"), class_name, style_intent
                     )
                 except OSError:
-                    class_in_file = None
+                    class_in_file, span_is_string = None, False
             return SourceMatch(file=rel, confidence="data-da-source",
                                component=source.get("component"),
-                               class_in_file=class_in_file)
+                               class_in_file=class_in_file,
+                               class_span_is_string=span_is_string)
         # try to find by basename when the recorded path drifted
         base = Path(rel).name
         for f in _iter_source_files(frontend_path):
             if f.name == base:
-                class_in_file = None
+                class_in_file, span_is_string = None, False
                 if class_name:
                     try:
-                        class_in_file = _find_class_in_file(
-                            f.read_text(encoding="utf-8", errors="ignore"), class_name
+                        class_in_file, span_is_string = _find_class_in_file(
+                            f.read_text(encoding="utf-8", errors="ignore"), class_name, style_intent
                         )
                     except OSError:
-                        class_in_file = None
+                        class_in_file, span_is_string = None, False
                 return SourceMatch(file=_to_rel(f, frontend_path),
                                    confidence="data-da-source",
                                    component=source.get("component"),
-                                   class_in_file=class_in_file)
+                                   class_in_file=class_in_file,
+                                   class_span_is_string=span_is_string)
 
     files = list(_iter_source_files(frontend_path))
     if not files:

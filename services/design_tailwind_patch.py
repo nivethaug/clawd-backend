@@ -133,15 +133,33 @@ def locate_class_attributes(
     class_name: Optional[str],
     text_preview: Optional[str],
     max_occurrences: int = 25,
+    span_is_string: bool = False,
 ) -> List[Tuple[int, int, str]]:
     """Find (start, end, current_value) spans of the target element's class attr.
 
     Order: exact className match → text literal with nearest preceding class
     attribute. All occurrences of an identical className are returned (same
     class ⇒ same style — multi-select of same-class elements updates them
-    together). Raises PatchError when nothing is found or the file is too
-    repetitive to patch safely.
+    together). With span_is_string, class_name is a conditional class STRING
+    inside an expression (cn(...) / ternary) — the string literal itself is
+    the patch target. Raises PatchError when nothing is found or the file is
+    too repetitive to patch safely.
     """
+    if span_is_string and class_name:
+        dq, sq = f'"{class_name}"', f"'{class_name}'"
+        total = content.count(dq) + content.count(sq)
+        if total == 0:
+            raise PatchError(
+                "Dynamic or repeated text — describe the change in chat and AI will apply it."
+            )
+        if total > 1:
+            raise PatchError(
+                "This class string appears multiple times — describe the change in chat."
+            )
+        needle = dq if content.count(dq) else sq
+        pos = content.find(needle)
+        return [(pos + 1, pos + 1 + len(class_name), class_name)]
+
     candidates: List[Tuple[int, int, str]] = []
 
     if class_name:
@@ -263,16 +281,21 @@ def apply_style_intent(
     class_name: Optional[str],
     text_preview: Optional[str],
     intent: Dict[str, str],
+    span_is_string: bool = False,
 ) -> ClassPatchResult:
     """Apply a style intent to the located element's class list.
 
     All occurrences of an identical className are rewritten (multi-select of
     same-class elements updates together). Spans are replaced right-to-left
-    so earlier offsets stay valid.
+    so earlier offsets stay valid. With span_is_string the target is a
+    conditional class string inside cn()/ternary — same token replacement
+    within that string.
     """
     notes: List[str] = []
     try:
-        spans = locate_class_attributes(content, class_name, text_preview)
+        spans = locate_class_attributes(
+            content, class_name, text_preview, span_is_string=span_is_string
+        )
     except PatchError as locate_err:
         # No class attribute anywhere near the element — e.g. a shadcn
         # component usage (<Button>Go</Button>). Insert className on the
