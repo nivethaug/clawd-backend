@@ -31,11 +31,30 @@ _COLOR_FAMILIES = (
 )
 _SIZE_WORDS = "xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl"
 
+_SIZE_WORDS = "xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl"
+
+# bg-/text- tokens that are NOT colors (positioning, sizing, transforms...)
+_BG_NON_COLOR = (
+    "cover|contain|auto|none|center|top|bottom|left|right|fixed|local|scroll|"
+    "no-repeat|repeat|repeat-x|repeat-y|clip\\S*|origin\\S*|space\\S*|border|"
+    "gradient\\S*|position|size"
+)
+_TEXT_NON_COLOR = (
+    f"left|center|right|justify|start|end|{_SIZE_WORDS}|"
+    "uppercase|lowercase|capitalize|normal-case|italic|"
+    "ellipsis|clip|wrap|nowrap|balance|pretty|underline|line-through|no-underline"
+)
+
 # Category regexes — a token is classified into AT MOST one bucket.
+# ORDER MATTERS: specific categories (size/align/weight) before the broad
+# color buckets. Semantic tokens (bg-card, bg-primary, text-muted-foreground)
+# classify as colors — shadcn apps use them everywhere and leaving them
+# beside a new arbitrary utility creates a CSS-order conflict.
 _CATEGORY_RES: Dict[str, re.Pattern] = {
-    "bg-color": re.compile(rf"^bg-({_COLOR_FAMILIES})(-\d{{2,3}})?$|^bg-\["),
-    "text-color": re.compile(rf"^text-({_COLOR_FAMILIES})(-\d{{2,3}})?$|^text-\[#"),
+    "bg-color": re.compile(rf"^bg-(?!({_BG_NON_COLOR})(-|$))"),
     "text-size": re.compile(rf"^text-({_SIZE_WORDS})$|^text-\[\d+(?:\.\d+)?(?:px|rem|em)\]$"),
+    "text-align": re.compile(r"^text-(left|center|right|justify|start|end)$"),
+    "text-color": re.compile(rf"^text-(?!({_TEXT_NON_COLOR})(-|$))|^text-\["),
     "font-weight": re.compile(r"^font-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$|^font-\[\d{3}\]$"),
     "font-family": re.compile(r"^font-(sans|serif|mono)$|^font-\[.+?\]$"),
     "padding": re.compile(r"^(p|px|py|pt|pb|pl|pr)-"),
@@ -48,7 +67,6 @@ _CATEGORY_RES: Dict[str, re.Pattern] = {
     "height": re.compile(r"^h-"),
     "letter-spacing": re.compile(r"^tracking-"),
     "line-height": re.compile(r"^leading-"),
-    "text-align": re.compile(r"^text-(left|center|right|justify|start|end)$"),
 }
 
 # intent property → (utility prefix builder, category)

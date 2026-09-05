@@ -14,7 +14,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Optional
+from typing import Optional, Tuple
 
 _SOURCE_EXTS = (".tsx", ".jsx", ".ts", ".js", ".html", ".vue")
 
@@ -48,6 +48,32 @@ def _to_rel(p: Path, frontend_path: Path) -> str:
     return p.relative_to(frontend_path).as_posix()
 
 
+def _find_class_in_file(content: str, class_name: str) -> Optional[str]:
+    """Find the literal class attribute in this file matching the node's
+    runtime className — exact first, then token-overlap (≥0.7, ≥2 tokens).
+    Returns the in-file attribute value or None."""
+    if f'"{class_name}"' in content or f"'{class_name}'" in content:
+        return class_name
+    node_tokens = set(class_name.split())
+    if len(node_tokens) < 2:
+        return None
+    _attr_re = re.compile(r'(?:className|class)=["\']([^"\']*)["\']')
+    best: Optional[Tuple[float, int, str]] = None
+    for m in _attr_re.finditer(content):
+        attr_tokens = set(m.group(1).split())
+        if len(attr_tokens) < 2:
+            continue
+        overlap = node_tokens & attr_tokens
+        if len(overlap) < 2:
+            continue
+        score = len(overlap) / max(len(node_tokens), len(attr_tokens))
+        if best is None or score > best[0]:
+            best = (score, len(overlap), m.group(1))
+    if best and best[0] >= 0.7:
+        return best[2]
+    return None
+
+
 def resolve_node_file(
     frontend_path: Path,
     node: dict,
@@ -71,15 +97,33 @@ def resolve_node_file(
     if rel:
         candidate = frontend_path / rel
         if candidate.is_file():
+            class_in_file = None
+            if class_name:
+                try:
+                    class_in_file = _find_class_in_file(
+                        candidate.read_text(encoding="utf-8", errors="ignore"), class_name
+                    )
+                except OSError:
+                    class_in_file = None
             return SourceMatch(file=rel, confidence="data-da-source",
-                               component=source.get("component"))
+                               component=source.get("component"),
+                               class_in_file=class_in_file)
         # try to find by basename when the recorded path drifted
         base = Path(rel).name
         for f in _iter_source_files(frontend_path):
             if f.name == base:
+                class_in_file = None
+                if class_name:
+                    try:
+                        class_in_file = _find_class_in_file(
+                            f.read_text(encoding="utf-8", errors="ignore"), class_name
+                        )
+                    except OSError:
+                        class_in_file = None
                 return SourceMatch(file=_to_rel(f, frontend_path),
                                    confidence="data-da-source",
-                                   component=source.get("component"))
+                                   component=source.get("component"),
+                                   class_in_file=class_in_file)
 
     files = list(_iter_source_files(frontend_path))
     if not files:

@@ -13913,6 +13913,12 @@ async def design_patch(
     try:
         result = apply_design_patch(project_id, project["project_path"], request_data.dict())
     except DesignPatchError as e:
+        logger.warning(
+            "[DESIGN] patch rejected project=%s status=%s reason=%s node=%s intent=%s",
+            project_id, e.status, e,
+            json.dumps(request_data.node)[:300] if request_data.node else "{}",
+            json.dumps(request_data.style_intent or {})[:200],
+        )
         raise HTTPException(status_code=e.status, detail=str(e))
 
     # If a build is currently running for this project, flag a trailing pass.
