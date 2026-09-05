@@ -177,6 +177,60 @@ def _uniform_padding(value: str, notes: List[str]) -> Optional[str]:
     return parts[0]
 
 
+def _utilities_for_intent(intent: Dict[str, str], notes: List[str]) -> List[str]:
+    """Compute arbitrary-value utilities for an intent (no existing tokens)."""
+    utilities: List[str] = []
+    for prop in sorted(intent.keys()):
+        value = intent[prop]
+        if prop not in _INTENT_MAP:
+            notes.append(f"Unsupported property: {prop}")
+            continue
+        prefix, _category = _INTENT_MAP[prop]
+        if prop in ("padding", "margin"):
+            value = _uniform_padding(value, notes)
+            if value is None:
+                continue
+        if value in ("", None):
+            continue
+        utilities.append(f"{prefix}[{normalize_css_value(str(value))}]")
+    return utilities
+
+
+_TAG_OPEN_RE = re.compile(r"<([A-Za-z][A-Za-z0-9]*)")
+
+
+def _insert_class_on_enclosing_tag(
+    content: str, text_preview: str, utilities: List[str]
+) -> str:
+    """Style an element that has NO class attribute at all (e.g. a shadcn
+    component usage like <Button>Go</Button>): insert className onto the
+    innermost tag enclosing the (unique) text literal. shadcn's cn() merges
+    it over the variant, so instance styling wins — the idiomatic path."""
+    needle = text_preview.strip()
+    pos = content.find(needle)
+    if pos == -1 or content.find(needle, pos + 1) != -1:
+        raise PatchError("Text literal is not unique for element targeting.")
+    window_start = max(0, pos - 300)
+    window = content[window_start:pos]
+    matches = list(_TAG_OPEN_RE.finditer(window))
+    if not matches:
+        raise PatchError("No enclosing tag found near the element text.")
+    last = matches[-1]
+    tag_name = last.group(1)
+    if tag_name.startswith("!"):  # doctype/comments won't match the regex anyway
+        raise PatchError("Unexpected enclosing tag.")
+    # the innermost tag must actually wrap the text (its '>' must precede it)
+    between = window[last.end():]
+    if ">" not in between:
+        raise PatchError("Enclosing tag is not closed before the text.")
+    # already has a class attribute between tag open and text? then locate()
+    # should have found it — refuse rather than double-add
+    if re.search(r"\bclass(?:Name)?\s*=", between):
+        raise PatchError("Element already carries a class attribute.")
+    insert_at = window_start + last.start() + 1 + len(tag_name)
+    return content[:insert_at] + ' className="' + " ".join(utilities) + '"' + content[insert_at:]
+
+
 def apply_style_intent(
     content: str,
     class_name: Optional[str],
@@ -190,7 +244,22 @@ def apply_style_intent(
     so earlier offsets stay valid.
     """
     notes: List[str] = []
-    spans = locate_class_attributes(content, class_name, text_preview)
+    try:
+        spans = locate_class_attributes(content, class_name, text_preview)
+    except PatchError as locate_err:
+        # No class attribute anywhere near the element — e.g. a shadcn
+        # component usage (<Button>Go</Button>). Insert className on the
+        # enclosing tag instead (cn() merges it over the variant).
+        utilities = _utilities_for_intent(intent, notes)
+        if text_preview and utilities:
+            notes.append("Inserted className on enclosing tag (no existing class).")
+            return ClassPatchResult(
+                new_content=_insert_class_on_enclosing_tag(content, text_preview, utilities),
+                changed=True,
+                utility=" ".join(utilities),
+                notes=notes,
+            )
+        raise locate_err
     current = spans[0][2]
     tokens = current.split()
     changed_any = False
