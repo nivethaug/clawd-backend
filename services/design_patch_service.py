@@ -168,13 +168,18 @@ def _commit_design_change(
     try:
         with get_db() as conn:
             cur = conn.execute(
+                # native %s placeholders — the CursorAsConnection wrapper only
+                # translates '?', and any literal '%' in the SQL breaks
+                # psycopg2's parameter formatting.
                 """INSERT INTO commit_log
                    (project_id, session_id, message_id, commit_hash, commit_message, status)
-                   VALUES (?, NULL, NULL, ?, ?, 'committed') RETURNING id""",
+                   VALUES (%s, NULL, NULL, %s, %s, 'committed') RETURNING id""",
                 (project_id, commit_hash or "uncommitted", message),
             )
-            log_id = cur.fetchone()[0]
-    except Exception as e:
+            row = cur.fetchone()
+            if row is not None:
+                log_id = row["id"] if isinstance(row, dict) else row[0]
+    except Exception as e:  # non-fatal — file is already patched
         logger.warning("[DESIGN] commit_log insert failed: %s", e)
 
     return commit_hash, log_id
@@ -183,12 +188,14 @@ def _commit_design_change(
 def list_design_commits(project_id: int, limit: int = 20) -> list:
     with get_db() as conn:
         rows = conn.execute(
+            # LIKE pattern passed as a PARAMETER — a literal '%' in the SQL
+            # string is misread by psycopg2 as a format placeholder.
             """SELECT id, commit_hash, commit_message, status, created_at
                FROM commit_log
-               WHERE project_id = ? AND commit_message LIKE 'Design: %'
+               WHERE project_id = %s AND commit_message LIKE %s
                  AND status != 'reverted'
-               ORDER BY created_at DESC, id DESC LIMIT ?""",
-            (project_id, max(1, min(limit, 50))),
+               ORDER BY created_at DESC, id DESC LIMIT %s""",
+            (project_id, "Design: %", max(1, min(limit, 50))),
         ).fetchall()
     out = []
     for r in rows:
