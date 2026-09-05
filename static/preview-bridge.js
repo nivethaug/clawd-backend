@@ -345,26 +345,38 @@
 
     // Prefer an element that directly contains text
     var target = el;
-    var own = '';
-    for (var i = 0; i < target.childNodes.length; i++) {
-      var n = target.childNodes[i];
-      if (n.nodeType === 3 && n.textContent.trim()) own += n.textContent;
+    var directTextNodes = [];
+    function ownTextNodes(node) {
+      directTextNodes = [];
+      for (var i = 0; i < node.childNodes.length; i++) {
+        var n = node.childNodes[i];
+        if (n.nodeType === 3 && n.textContent.trim()) directTextNodes.push(n);
+      }
+      return directTextNodes;
     }
-    if (!own) {
+    if (!ownTextNodes(target).length) {
       var parent = target.parentElement;
       while (parent && parent !== document.body) {
-        var pOwn = '';
-        for (var j = 0; j < parent.childNodes.length; j++) {
-          var m = parent.childNodes[j];
-          if (m.nodeType === 3 && m.textContent.trim()) pOwn += m.textContent;
-        }
-        if (pOwn) { target = parent; break; }
+        if (ownTextNodes(parent).length) { target = parent; break; }
         parent = parent.parentElement;
       }
     }
 
+    // Mixed content (text interleaved with child elements, e.g.
+    // "earned <span>1,204 views</span> this week") has no single source
+    // literal — refuse up front so the user routes it to the agent.
+    var hasElementChildren = false;
+    for (var k = 0; k < target.childNodes.length; k++) {
+      if (target.childNodes[k].nodeType === 1) { hasElementChildren = true; break; }
+    }
+    if (hasElementChildren) {
+      send({ type: 'ERROR', message: 'dynamic-text' });
+      toastDynamic();
+      return;
+    }
+
     editingNode = target;
-    editingOriginalText = target.innerText;
+    editingOriginalText = directTextNodes.map(function (n) { return n.nodeValue; }).join('');
     target.setAttribute('contenteditable', 'true');
     target.style.outline = '2px solid #f59e0b';
     target.focus();
@@ -375,6 +387,19 @@
       sel.removeAllRanges();
       sel.addRange(range);
     } catch (err) { /* focus is enough */ }
+  }
+
+  function toastDynamic() {
+    // small in-iframe hint; the parent also shows its own toast
+    var t = document.createElement('div');
+    t.setAttribute('data-' + BRIDGE_MARK, '1');
+    t.textContent = 'Dynamic text — describe the change in chat';
+    t.style.cssText =
+      'position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:2147483647;' +
+      'background:#f59e0b;color:#fff;font:600 12px/1.4 system-ui,sans-serif;' +
+      'padding:6px 14px;border-radius:9999px;box-shadow:0 4px 12px rgba(0,0,0,.25);';
+    document.documentElement.appendChild(t);
+    setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 2600);
   }
 
   function onKeyDown(e) {
