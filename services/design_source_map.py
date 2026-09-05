@@ -25,9 +25,13 @@ _SKIP_DIRS = {"node_modules", "dist", "dist-da", ".git", "design", "public"}
 @dataclass
 class SourceMatch:
     file: str  # relative to frontend/ e.g. "src/components/Hero.tsx"
-    confidence: str  # "data-da-source" | "classname" | "text"
+    confidence: str  # "data-da-source" | "classname" | "classname-partial" | "text"
     line: Optional[int] = None
     component: Optional[str] = None
+    # The literal class attribute value found in the file — when the node's
+    # runtime className differs (cn() merges, ordering), the patcher must
+    # target THIS string instead of the bridge-reported one.
+    class_in_file: Optional[str] = None
 
 
 def _iter_source_files(frontend_path: Path):
@@ -81,23 +85,75 @@ def resolve_node_file(
     if not files:
         return None
 
-    # 2. exact className match
     if class_name:
+        # 2a. exact className match. shadcn primitives (components/ui/*) are
+        # excluded — a className literal there is a variant definition, and
+        # patching it would restyle every instance of that primitive.
         needle = class_name
         hits = []
         for f in files:
+            rel_f = _to_rel(f, frontend_path)
+            if rel_f.startswith("src/components/ui/"):
+                continue
             try:
                 content = f.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
             if f'"{needle}"' in content or f"'{needle}'" in content:
-                hits.append(f)
+                hits.append((f, needle))
         if len(hits) == 1:
-            return SourceMatch(file=_to_rel(hits[0], frontend_path), confidence="classname")
+            f, attr = hits[0]
+            return SourceMatch(file=_to_rel(f, frontend_path), confidence="classname",
+                               class_in_file=attr)
         if len(hits) > 1:
             # prefer files under src/components or src/pages
-            ranked = [h for h in hits if "/src/" in _to_rel(h, frontend_path)] or hits
-            return SourceMatch(file=_to_rel(ranked[0], frontend_path), confidence="classname")
+            ranked = [h for h in hits if "/src/" in _to_rel(h[0], frontend_path)] or hits
+            f, attr = ranked[0]
+            return SourceMatch(file=_to_rel(f, frontend_path), confidence="classname",
+                               class_in_file=attr)
+
+        # 2b. token-overlap match — runtime classNames often differ from the
+        # source literal (cn() merges, class ordering, appended state classes).
+        # Find the className attribute whose token set overlaps the node's
+        # strongly; require a single best file. shadcn primitives
+        # (components/ui/*) are excluded — patching a variant there would
+        # restyle every instance of that primitive.
+        node_tokens = set(class_name.split())
+        if len(node_tokens) >= 2:
+            _attr_re = re.compile(r'(?:className|class)=["\']([^"\']*)["\']')
+            best_per_file = []  # (score, overlap, file, attr_value)
+            for f in files:
+                rel_f = _to_rel(f, frontend_path)
+                if rel_f.startswith("src/components/ui/"):
+                    continue
+                try:
+                    content = f.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+                best = None
+                for m in _attr_re.finditer(content):
+                    attr_tokens = set(m.group(1).split())
+                    if len(attr_tokens) < 2:
+                        continue
+                    overlap = node_tokens & attr_tokens
+                    if len(overlap) < 2:
+                        continue
+                    score = len(overlap) / max(len(node_tokens), len(attr_tokens))
+                    if best is None or score > best[0]:
+                        best = (score, len(overlap), m.group(1))
+                if best and best[0] >= 0.7:
+                    best_per_file.append((best[0], best[1], f, best[2]))
+            if best_per_file:
+                best_per_file.sort(key=lambda t: (-t[0], -t[1], _to_rel(t[2], frontend_path)))
+                top = best_per_file[0]
+                # a close runner-up in a different file = ambiguous → skip
+                runners = [b for b in best_per_file[1:] if b[2] != top[2] and b[0] >= top[0] - 0.05]
+                if not runners:
+                    return SourceMatch(
+                        file=_to_rel(top[2], frontend_path),
+                        confidence="classname-partial",
+                        class_in_file=top[3],
+                    )
 
     # 3. unique text literal
     if text_preview and len(text_preview) >= 4:

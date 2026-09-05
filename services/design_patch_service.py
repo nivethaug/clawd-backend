@@ -98,9 +98,12 @@ def apply_design_patch(project_id: int, project_path: str, payload: dict) -> dic
             )
             detail = f'text "{text_change.get("before", "")[:30]}" → "{text_change.get("after", "")[:30]}"'
         else:
+            # Target the literal class string found in the file — the node's
+            # runtime className can differ (cn() merges, ordering), in which
+            # case the mapper already resolved the real in-file attribute.
             result = apply_style_intent(
                 content,
-                node.get("className"),
+                match.class_in_file or node.get("className"),
                 node.get("textPreview"),
                 intent,
             )
