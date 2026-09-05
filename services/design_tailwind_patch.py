@@ -139,15 +139,22 @@ def locate_class_attributes(
         if needle:
             pos = content.find(needle)
             if pos != -1 and content.find(needle, pos + 1) == -1:
-                # unique text literal — nearest class attr before it
-                window = content[max(0, pos - 600) : pos]
-                best = None
-                for attr in ("className", "class"):
-                    for m in _quote_re(attr).finditer(window):
-                        best = (m.start(1), m.end(1), m.group(1))
-                if best:
-                    off = max(0, pos - 600)
-                    candidates.append((off + best[0], off + best[1], best[2]))
+                # unique text literal — a class attribute counts ONLY if it
+                # sits on the innermost enclosing tag (a class on a further
+                # ancestor would style the wrong element; when the innermost
+                # tag has none, the caller inserts one).
+                window = content[max(0, pos - 300) : pos]
+                tag_matches = list(_TAG_OPEN_RE.finditer(window))
+                if tag_matches:
+                    inner = tag_matches[-1]
+                    segment = window[inner.end():]
+                    best = None
+                    for attr in ("className", "class"):
+                        for m in _quote_re(attr).finditer(segment):
+                            best = (m.start(1), m.end(1), m.group(1))
+                    if best:
+                        off = max(0, pos - 300) + inner.end()
+                        candidates.append((off + best[0], off + best[1], best[2]))
 
     if not candidates:
         raise PatchError(
