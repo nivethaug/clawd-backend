@@ -2103,6 +2103,13 @@ Create exactly these pages, no more, no less:
 - State management (`useState`, `useEffect` as needed)
 - Real UI components — cards, tables, forms, data displays
 - Tailwind CSS responsive layout with `md:` breakpoints
+- **Source attributes (REQUIRED for the visual editor)**: every section-level
+  JSX container — nav, hero, feature/card grids, CTA blocks, footers, and each
+  top-level page section — must carry
+  `data-da-source="<frontend-relative-path>:<ComponentName>"` on its OUTER
+  container. One per logical block, not on nested divs. Example:
+  `<section data-da-source="src/pages/Home.tsx:HeroSection" className="...">`.
+  These attributes power click-to-edit visual styling — never omit them.
 - Functional interactions (clicks, forms, modals)
 - Loading states and error handling
 - Mobile-responsive design
