@@ -56,6 +56,20 @@ def apply_design_patch(project_id: int, project_path: str, payload: dict) -> dic
     if len(str(payload)) > MAX_PATCH_BYTES:
         raise DesignPatchError("Patch payload too large", 413)
 
+    # List-rendered element (same tag+class siblings) — one source element,
+    # many instances: a patch would restyle ALL of them. Per-instance styling
+    # needs conditional source changes → route to the agent.
+    try:
+        repeat_count = int(node.get("repeatCount") or 1)
+    except (TypeError, ValueError):
+        repeat_count = 1
+    if repeat_count > 1:
+        raise DesignPatchError(
+            f"This element repeats {repeat_count}× (rendered from a list). "
+            "Styling just one instance needs AI — describe the change in chat.",
+            422,
+        )
+
     fe = _frontend_path(project_path)
     match = resolve_node_file(fe, node, style_intent=intent)
     if not match:

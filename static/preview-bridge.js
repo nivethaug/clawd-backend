@@ -184,6 +184,19 @@
       var n = el.childNodes[i];
       if (n.nodeType === 3 && n.textContent.trim()) ownText += n.textContent;
     }
+    // How many siblings render with the identical tag+class? >1 means this
+    // element comes from a list/map — one source element, many instances —
+    // and a source patch would restyle ALL of them.
+    var repeatCount = 1;
+    if (el.parentElement && className) {
+      var sibs = el.parentElement.children;
+      for (var s = 0; s < sibs.length; s++) {
+        var sc = typeof sibs[s].className === 'string' ? sibs[s].className : '';
+        if (sibs[s] !== el && sibs[s].tagName === el.tagName && sc === className) {
+          repeatCount++;
+        }
+      }
+    }
     return {
       nodeId: nodeIdFor(el),
       tag: el.tagName,
@@ -191,6 +204,7 @@
       textPreview: (ownText || el.innerText || '').trim().slice(0, 80) || undefined,
       selector: cssSelector(el),
       className: className || undefined,
+      repeatCount: repeatCount,
       source: source,
       box: {
         x: Math.round(rect.left),
