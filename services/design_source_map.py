@@ -86,11 +86,15 @@ def _find_class_in_file(content: str, class_name: str, intent: dict = None) -> t
             intent_cats.add(cat)
 
     def conflict_score(tokens):
+        # dark: variants score highest — when present, the perceived color
+        # in dark mode comes from them (they override the base token)
+        score = 0
         for t in tokens:
-            cat = classify_token(t)
+            base = t[5:] if t.startswith("dark:") else t
+            cat = classify_token(base)
             if cat and cat in intent_cats:
-                return 1
-        return 0
+                score = max(score, 2 if t.startswith("dark:") else 1)
+        return score
 
     best = None  # (conflict, containment, overlap, literal, is_string)
     _attr_re = re.compile(r'(?:className|class)=["\']([^"\']*)["\']')

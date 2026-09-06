@@ -331,21 +331,36 @@ def apply_style_intent(
 
         utility = f"{prefix}[{normalize_css_value(str(value))}]"
 
-        # replace ALL tokens in the category — first gets the utility, the
-        # rest are dropped (py-20 px-6 + uniform p-[24px] → single utility)
-        replaced_tok = None
-        rewritten: List[str] = []
+        # Dark-mode awareness: if the class list carries a `dark:` variant of
+        # the intent category, the PERCEIVED color comes from it (dark mode
+        # overrides the base) — replace that variant in place and keep the
+        # light-mode token, so each mode keeps its own color.
+        dark_tok = None
         for tok in tokens:
-            if classify_token(tok) == category:
-                if replaced_tok is None:
-                    rewritten.append(utility)
-                    replaced_tok = tok
-                # duplicate category token — dropped
-            else:
-                rewritten.append(tok)
-        tokens = rewritten
-        if replaced_tok is None:
-            tokens.append(utility)
+            if tok.startswith("dark:") and classify_token(tok[5:]) == category:
+                dark_tok = tok
+                break
+
+        if dark_tok:
+            rewritten = [f"dark:{utility}" if tok == dark_tok else tok for tok in tokens]
+            tokens = rewritten
+            replaced_tok = dark_tok
+        else:
+            # replace ALL tokens in the category — first gets the utility, the
+            # rest are dropped (py-20 px-6 + uniform p-[24px] → single utility)
+            replaced_tok = None
+            rewritten: List[str] = []
+            for tok in tokens:
+                if classify_token(tok) == category:
+                    if replaced_tok is None:
+                        rewritten.append(utility)
+                        replaced_tok = tok
+                    # duplicate category token — dropped
+                else:
+                    rewritten.append(tok)
+            tokens = rewritten
+            if replaced_tok is None:
+                tokens.append(utility)
         changed_any = True
         last_utility = utility
 
