@@ -873,29 +873,76 @@ That's all. Execute Phase {phase} now.
                 logger.info(f"[Phase 9]   Rollback: {result.get('rollback', False)}")
                 logger.info(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s")
 
-                # ── RETRY-ONCE: a security-guard block or transient agent
-                # give-up must never ship a blank app. Re-run with explicit
-                # Write-tool instructions.
-                if not result.get("success"):
-                    logger.warning("[Phase 9] ⚠️ ACPX unsuccessful — retrying ONCE with Write-tool guidance")
-                    print("⚠️ PHASE_9_RETRY: retrying ACPX with Write-tool instructions", flush=True)
-                    retry_goal = (
+                # ── NEVER-BLANK LADDER ─────────────────────────────────────────
+                # A blank app ships ONLY when the LLM API itself is down.
+                # Escalate: attempt 2 (Write-tool guidance) → attempt 3
+                # (minimal scope) → deterministic zero-LLM scaffold pages.
+                async def _acpx_attempt(att_goal: str, att_label: str) -> dict:
+                    att_exec = f"acp_{uuid.uuid4().hex[:12]}"
+                    try:
+                        att_editor = ACPFrontendEditorV2(frontend_src_path, self.project_name, project_id=self.project_id)
+                        att_result = await att_editor.apply_changes_via_acpx(att_goal, att_exec)
+                        logger.info(
+                            f"[Phase 9] {att_label}: success={att_result.get('success')} "
+                            f"files+{att_result.get('files_added', 0)} "
+                            f"msg={str(att_result.get('message', ''))[:120]}"
+                        )
+                        return att_result
+                    except Exception as att_err:
+                        logger.error(f"[Phase 9] {att_label} exception: {att_err}")
+                        return {"success": False, "message": f"{att_label} exception: {att_err}",
+                                "files_added": 0, "files_modified": 0, "files_removed": 0, "rollback": False}
+
+                def _has_real_pages() -> bool:
+                    pd = Path(frontend_src_path) / "pages"
+                    return any(
+                        p.stem not in ("NotFound", "Welcome", "Error", "Loading")
+                        for p in pd.glob("*.tsx")
+                    ) if pd.exists() else False
+
+                if not (result.get("success") and _has_real_pages()):
+                    logger.warning("[Phase 9] ⚠️ attempt 1 unsuccessful/hollow — attempt 2 (Write-tool guidance)")
+                    print("⚠️ PHASE_9_RETRY: attempt 2 — Write-tool instructions", flush=True)
+                    result = await _acpx_attempt(
                         goal_description
                         + "\n\nIMPORTANT RETRY NOTE: the previous attempt was interrupted (possibly by a "
                         "security guard blocking Bash heredoc writes). Create EVERY file with the Write "
                         "TOOL — never Bash heredocs (cat > file <<EOF) — and complete ALL required pages "
-                        "in this single run."
+                        "in this single run.",
+                        "attempt 2 (Write-tool)",
                     )
-                    retry_exec_id = f"acp_{uuid.uuid4().hex[:12]}"
-                    try:
-                        retry_editor = ACPFrontendEditorV2(frontend_src_path, self.project_name, project_id=self.project_id)
-                        result = await retry_editor.apply_changes_via_acpx(retry_goal, retry_exec_id)
-                        logger.info(
-                            f"[Phase 9] Retry: success={result.get('success')} "
-                            f"files+{result.get('files_added', 0)} msg={str(result.get('message', ''))[:150]}"
-                        )
-                    except Exception as retry_err:
-                        logger.error(f"[Phase 9] Retry attempt failed: {retry_err}")
+
+                if not (result.get("success") and _has_real_pages()):
+                    logger.warning("[Phase 9] ⚠️ attempt 2 unsuccessful/hollow — attempt 3 (minimal scope)")
+                    print("⚠️ PHASE_9_RETRY: attempt 3 — minimal scope", flush=True)
+                    result = await _acpx_attempt(
+                        "Build a MINIMAL but complete React app NOW. Hard rules: "
+                        "(1) create ONLY the required pages listed in src/page_manifest.json — nothing else; "
+                        "(2) each page: a heading, a short description, one simple content card — plain Tailwind, "
+                        "no external components; "
+                        "(3) use ONLY the Write tool to create files — never Bash heredocs; "
+                        "(4) wire every page into src/App.tsx routes inside the Layout route; "
+                        "(5) finish completely — no analysis, no questions, just write the files.",
+                        "attempt 3 (minimal)",
+                    )
+
+                if not _has_real_pages():
+                    # Last resort — deterministic, zero-LLM scaffold so a blank
+                    # app can NEVER deploy. Only fails when the manifest is
+                    # missing too (LLM API down during inference).
+                    logger.error("[Phase 9] 🔴 all agent attempts hollow — deterministic scaffold fallback")
+                    print("🛟 PHASE_9_FALLBACK: scaffolding pages deterministically (zero-LLM)", flush=True)
+                    scaffolded = self._scaffold_fallback_pages(frontend_src_path)
+                    if scaffolded:
+                        result = {
+                            "success": True,
+                            "status": "partial_success",
+                            "message": f"Deterministic fallback pages: {', '.join(scaffolded)} — ask in chat to build them out fully.",
+                            "files_added": len(scaffolded),
+                            "files_modified": 0,
+                            "files_removed": 0,
+                            "rollback": False,
+                        }
 
                 # Log pages created (if any page files were added)
                 # Note: result.get('files_added') returns a count, so we scan the pages directory
@@ -1015,6 +1062,62 @@ That's all. Execute Phase {phase} now.
             # Return True to allow project to complete despite Phase 9 errors
             logger.warning("⚠️ Allowing project to complete despite Phase 9 errors")
             return True
+
+    _FALLBACK_PAGE_TSX = '''export default function {name}() {{
+  return (
+    <div data-da-source="src/pages/{name}.tsx:{name}" className="mx-auto max-w-4xl px-6 py-12">
+      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      <p className="mt-2 text-muted-foreground">
+        This page was scaffolded as a fallback. Ask in the project chat to build it out fully.
+      </p>
+      <div className="mt-8 rounded-xl border border-border bg-card p-8 text-center">
+        <p className="text-sm text-muted-foreground">
+          Ready for content — describe what this page should do and DreamAgent will complete it.
+        </p>
+      </div>
+    </div>
+  );
+}}
+'''
+
+    def _scaffold_fallback_pages(self, frontend_src_path: str) -> list:
+        """NEVER-BLANK last resort — deterministic, zero-LLM page scaffolding.
+
+        Reads required pages from src/page_manifest.json and writes a clean,
+        compilable page for each (skipping existing), then wires routes/nav
+        via _update_router_and_navigation. Returns the page names written;
+        empty list means no manifest (LLM API was down during inference) —
+        the only case where a creation may fail outright.
+        """
+        import json as _json
+        src = Path(frontend_src_path)
+        try:
+            pages = _json.loads((src / "page_manifest.json").read_text(encoding="utf-8")).get("pages") or []
+        except Exception as e:
+            logger.warning(f"[Phase 9] fallback: manifest unreadable ({e})")
+            return []
+        import re as _re
+        pages = [str(p) for p in pages if _re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", str(p))]
+        if not pages:
+            return []
+        written = []
+        for name in pages:
+            page_file = src / "pages" / f"{name}.tsx"
+            if page_file.exists():
+                continue
+            title = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
+            page_file.parent.mkdir(parents=True, exist_ok=True)
+            page_file.write_text(
+                self._FALLBACK_PAGE_TSX.format(name=name, title=title),
+                encoding="utf-8",
+            )
+            written.append(name)
+            logger.info(f"[Phase 9] fallback page written: pages/{name}.tsx")
+        if written:
+            nav_ok = self._update_router_and_navigation(pages)
+            logger.info(f"[Phase 9] fallback router/nav update: {nav_ok}")
+        return written
+
     def _update_router_and_navigation(self, pages: list) -> bool:
         """
         Update React Router and sidebar navigation for new pages.
