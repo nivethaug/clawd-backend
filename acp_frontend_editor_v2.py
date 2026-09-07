@@ -1185,6 +1185,45 @@ class ACPFrontendEditorV2:
                 logger.info(f"[CLAUDE-AGENT]     ... and {len(files_modified) - 10} more")
 
             # =============================================
+            # NO-OP GUARD — required pages must actually exist
+            # =============================================
+            # Tooling can silently block the agent (the wrapper's env-guard
+            # false-positived on TSX heredoc writes) — the agent "completes"
+            # having written nothing and the pipeline used to ship the blank
+            # template as success. Fail loudly instead.
+            try:
+                missing_pages = [
+                    p for p in (required_pages or [])
+                    if not (self.frontend_src_path / "pages" / f"{p}.tsx").is_file()
+                ]
+                if missing_pages and not files_added and not files_modified:
+                    logger.error(
+                        f"[CLAUDE-AGENT] 🔴 NO-OP GUARD: agent wrote nothing; "
+                        f"required pages missing: {missing_pages}"
+                    )
+                    return {
+                        "status": "failed",
+                        "success": False,
+                        "message": (
+                            "ACPX no-op: agent completed without writing files "
+                            f"(required pages missing: {', '.join(missing_pages[:5])}). "
+                            "Check wrapper security-guard logs for blocked tool calls."
+                        ),
+                        "issues": [f"Required pages missing: {missing_pages}"],
+                        "files_added": 0,
+                        "files_modified": 0,
+                        "files_removed": 0,
+                        "build_output": "",
+                        "rollback": False,
+                        "token_usage": self._last_token_usage,
+                    }
+                if missing_pages:
+                    issues.append(f"Pages missing after run: {missing_pages[:5]}")
+                    status = "partial_success"
+            except Exception as guard_err:
+                logger.warning(f"[CLAUDE-AGENT] Page-existence guard failed (non-fatal): {guard_err}")
+
+            # =============================================
             # FINAL RESULT (3-state outcome)
             # =============================================
             
