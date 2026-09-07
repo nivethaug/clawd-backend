@@ -1185,34 +1185,38 @@ class ACPFrontendEditorV2:
                 logger.info(f"[CLAUDE-AGENT]     ... and {len(files_modified) - 10} more")
 
             # =============================================
-            # NO-OP GUARD — required pages must actually exist
+            # PAGE EXISTENCE VERIFICATION (hollow-build guard)
             # =============================================
             # Tooling can silently block the agent (the wrapper's env-guard
             # false-positived on TSX heredoc writes) — the agent "completes"
-            # having written nothing and the pipeline used to ship the blank
-            # template as success. Fail loudly instead.
+            # having written nothing (or only a few feature files) and the
+            # pipeline would ship the blank template. ZERO required pages =
+            # failed, regardless of stray files; SOME pages missing = partial.
             try:
-                missing_pages = [
+                pages_exist = [
                     p for p in (required_pages or [])
-                    if not (self.frontend_src_path / "pages" / f"{p}.tsx").is_file()
+                    if (self.frontend_src_path / "pages" / f"{p}.tsx").is_file()
                 ]
-                if missing_pages and not files_added and not files_modified:
+                missing_pages = [p for p in (required_pages or []) if p not in pages_exist]
+                if required_pages and not pages_exist:
                     logger.error(
-                        f"[CLAUDE-AGENT] 🔴 NO-OP GUARD: agent wrote nothing; "
-                        f"required pages missing: {missing_pages}"
+                        f"[CLAUDE-AGENT] 🔴 HOLLOW BUILD: zero required pages exist "
+                        f"(files touched: +{len(files_added)} ~{len(files_modified)}). "
+                        f"Required: {required_pages}"
                     )
                     return {
                         "status": "failed",
                         "success": False,
                         "message": (
-                            "ACPX no-op: agent completed without writing files "
-                            f"(required pages missing: {', '.join(missing_pages[:5])}). "
+                            "ACPX hollow build: no required pages were created "
+                            f"(expected: {', '.join(required_pages[:5])}; "
+                            f"{len(files_added) + len(files_modified)} non-page files written). "
                             "Check wrapper security-guard logs for blocked tool calls."
                         ),
-                        "issues": [f"Required pages missing: {missing_pages}"],
-                        "files_added": 0,
-                        "files_modified": 0,
-                        "files_removed": 0,
+                        "issues": [f"Required pages missing: {required_pages}"],
+                        "files_added": len(files_added),
+                        "files_modified": len(files_modified),
+                        "files_removed": len(files_removed),
                         "build_output": "",
                         "rollback": False,
                         "token_usage": self._last_token_usage,

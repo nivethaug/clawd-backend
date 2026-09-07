@@ -985,10 +985,13 @@ That's all. Execute Phase {phase} now.
                     + int(result.get("files_modified", 0) or 0)
                     + int(result.get("files_removed", 0) or 0)
                 )
-                if not _real_pages and _files_touched == 0:
+                # ZERO real pages = hollow, even when stray non-page files were
+                # written (project 2039 slipped through with 2 feature files).
+                if not _real_pages:
                     logger.error(
-                        "❌ ACP Phase 9 HOLLOW BUILD: reported success but no pages "
-                        f"and 0 files changed. Response head: {str(result.get('message', ''))[:200]}"
+                        "❌ ACP Phase 9 HOLLOW BUILD: no real pages in src/pages "
+                        f"({_files_touched} non-page files touched). "
+                        f"Response head: {str(result.get('message', ''))[:200]}"
                     )
                     self.completed_phases.append("ACP Frontend Editor (Failed - hollow build)")
                     return False
