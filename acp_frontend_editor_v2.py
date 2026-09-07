@@ -1193,14 +1193,21 @@ class ACPFrontendEditorV2:
             # pipeline would ship the blank template. ZERO required pages =
             # failed, regardless of stray files; SOME pages missing = partial.
             try:
-                pages_exist = [
-                    p for p in (required_pages or [])
-                    if (self.frontend_src_path / "pages" / f"{p}.tsx").is_file()
+                # "Real pages" = any non-template .tsx in src/pages (same
+                # criterion as phase 9) — page NAMING freedom is allowed;
+                # hollow means NO pages at all.
+                _pages_dir = self.frontend_src_path / "pages"
+                _real_pages = [
+                    p.stem for p in (_pages_dir.glob("*.tsx") if _pages_dir.is_dir() else [])
+                    if p.stem not in ("NotFound", "Welcome", "Error", "Loading")
                 ]
-                missing_pages = [p for p in (required_pages or []) if p not in pages_exist]
-                if required_pages and not pages_exist:
+                missing_pages = [
+                    p for p in (required_pages or [])
+                    if not (self.frontend_src_path / "pages" / f"{p}.tsx").is_file()
+                ]
+                if required_pages and not _real_pages:
                     logger.error(
-                        f"[CLAUDE-AGENT] 🔴 HOLLOW BUILD: zero required pages exist "
+                        f"[CLAUDE-AGENT] 🔴 HOLLOW BUILD: no real pages in src/pages "
                         f"(files touched: +{len(files_added)} ~{len(files_modified)}). "
                         f"Required: {required_pages}"
                     )
@@ -1208,7 +1215,7 @@ class ACPFrontendEditorV2:
                         "status": "failed",
                         "success": False,
                         "message": (
-                            "ACPX hollow build: no required pages were created "
+                            "ACPX hollow build: no pages were created "
                             f"(expected: {', '.join(required_pages[:5])}; "
                             f"{len(files_added) + len(files_modified)} non-page files written). "
                             "Check wrapper security-guard logs for blocked tool calls."
@@ -1221,8 +1228,11 @@ class ACPFrontendEditorV2:
                         "rollback": False,
                         "token_usage": self._last_token_usage,
                     }
-                if missing_pages:
-                    issues.append(f"Pages missing after run: {missing_pages[:5]}")
+                if missing_pages and _real_pages:
+                    issues.append(
+                        f"Pages missing after run: {missing_pages[:5]} "
+                        f"(found instead: {_real_pages[:5]})"
+                    )
                     status = "partial_success"
             except Exception as guard_err:
                 logger.warning(f"[CLAUDE-AGENT] Page-existence guard failed (non-fatal): {guard_err}")
