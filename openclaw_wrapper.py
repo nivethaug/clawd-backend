@@ -873,6 +873,30 @@ That's all. Execute Phase {phase} now.
                 logger.info(f"[Phase 9]   Rollback: {result.get('rollback', False)}")
                 logger.info(f"[Phase 9]   📊 AI Duration: {ai_duration:.2f}s")
 
+                # ── RETRY-ONCE: a security-guard block or transient agent
+                # give-up must never ship a blank app. Re-run with explicit
+                # Write-tool instructions.
+                if not result.get("success"):
+                    logger.warning("[Phase 9] ⚠️ ACPX unsuccessful — retrying ONCE with Write-tool guidance")
+                    print("⚠️ PHASE_9_RETRY: retrying ACPX with Write-tool instructions", flush=True)
+                    retry_goal = (
+                        goal_description
+                        + "\n\nIMPORTANT RETRY NOTE: the previous attempt was interrupted (possibly by a "
+                        "security guard blocking Bash heredoc writes). Create EVERY file with the Write "
+                        "TOOL — never Bash heredocs (cat > file <<EOF) — and complete ALL required pages "
+                        "in this single run."
+                    )
+                    retry_exec_id = f"acp_{uuid.uuid4().hex[:12]}"
+                    try:
+                        retry_editor = ACPFrontendEditorV2(frontend_src_path, self.project_name, project_id=self.project_id)
+                        result = await retry_editor.apply_changes_via_acpx(retry_goal, retry_exec_id)
+                        logger.info(
+                            f"[Phase 9] Retry: success={result.get('success')} "
+                            f"files+{result.get('files_added', 0)} msg={str(result.get('message', ''))[:150]}"
+                        )
+                    except Exception as retry_err:
+                        logger.error(f"[Phase 9] Retry attempt failed: {retry_err}")
+
                 # Log pages created (if any page files were added)
                 # Note: result.get('files_added') returns a count, so we scan the pages directory
                 if result.get('success'):
