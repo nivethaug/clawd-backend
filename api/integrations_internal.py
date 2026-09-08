@@ -187,6 +187,49 @@ def _resumable_upload(request, connection_id):
     return Response(content=put.text, status_code=put.status_code, media_type="application/json")
 
 
+@router.get("/mcp-resolve")
+async def mcp_resolve(authorization: Optional[str] = Header(None)):
+    """Resolve a project SECRET_KEY → project + connected providers.
+
+    Used by the container-side integrations MCP server (which only has the
+    project .env). Returns the project id (for the proxy's X-Project-Id)
+    and the provider keys the OWNER has connected — never any tokens.
+    """
+    import hmac as _hmac
+
+    from services.integrations import nango_client
+
+    if not nango_client.is_configured():
+        raise HTTPException(status_code=503, detail="OAuth integrations not configured")
+
+    bearer = (authorization or "").removeprefix("Bearer ").strip()
+    if not bearer:
+        raise HTTPException(status_code=401, detail="Missing project secret")
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, user_id, secret_key FROM projects WHERE secret_key = ?",
+            (bearer,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="Invalid project secret")
+    d = dict(row) if not isinstance(row, dict) else row
+    if not _hmac.compare_digest(str(d.get("secret_key") or ""), bearer):
+        raise HTTPException(status_code=401, detail="Invalid project secret")
+
+    with get_db() as conn:
+        prows = conn.execute(
+            "SELECT DISTINCT provider_config_key FROM nango_connections WHERE user_id = ?",
+            (d["user_id"],),
+        ).fetchall()
+    providers = sorted(
+        (dict(r) if not isinstance(r, dict) else r)["provider_config_key"]
+        for r in prows
+        if (dict(r) if not isinstance(r, dict) else r)["provider_config_key"] in nango_client.ENABLED_PROVIDERS
+    )
+    return {"project_id": d["id"], "user_id": d["user_id"], "providers": providers}
+
+
 @router.post("/proxy")
 async def integrations_proxy(
     request: ProxyRequest,

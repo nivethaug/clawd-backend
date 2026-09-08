@@ -114,6 +114,9 @@ RUN groupadd --system --gid 1001 dreampilot \
 COPY docker/claude.settings.json /opt/claude-config/settings.json
 COPY docker/claude.onboarding.json /opt/claude-config/.claude.json
 
+# Integrations MCP server (Nango OAuth tools for Claude agents; stdlib only)
+COPY docker/mcp/dreamagent_integrations_mcp.py /opt/mcp/dreamagent_integrations_mcp.py
+
 # ─────────────────────────────────────────────────────────────────────
 # Entrypoint: copies config templates to writable home, drops privileges,
 # then runs the main command as dreampilot.
