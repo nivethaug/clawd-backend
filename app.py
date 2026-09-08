@@ -11061,6 +11061,83 @@ async def upload_project_file(
     }
 
 
+@app.get("/projects/{project_id}/files/uploads")
+async def list_uploaded_files(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """List files uploaded to a project's workspace (newest first)."""
+    _require_project_owner(project_id, authorization)
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT id, kind, original_name, filename, size_bytes, created_at
+               FROM upload_files WHERE project_id = %s
+               ORDER BY created_at DESC, id DESC LIMIT 200""",
+            (project_id,),
+        ).fetchall()
+    return {
+        "files": [
+            {
+                "id": r["id"],
+                "kind": r["kind"],
+                "name": r["original_name"] or r["filename"],
+                "size_bytes": int(r["size_bytes"]),
+                "created_at": str(r["created_at"]),
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.delete("/projects/{project_id}/files/uploads/{upload_id}")
+async def delete_uploaded_file(
+    project_id: int,
+    upload_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Delete an uploaded file: removes it from disk AND from the quota
+    ledger, so the user's plan quota is freed immediately."""
+    _require_project_owner(project_id, authorization)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, host_path, filename, original_name FROM upload_files "
+            "WHERE id = %s AND project_id = %s",
+            (upload_id, project_id),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    # Path safety: only delete files that live under this project's folder
+    # (the row's host_path is backend-controlled, but stay defensive).
+    host_path = str(row["host_path"] or "")
+    with get_db() as conn:
+        proj = conn.execute(
+            "SELECT project_path FROM projects WHERE id = %s", (project_id,)
+        ).fetchone()
+    project_path = str(proj["project_path"]) if proj and proj["project_path"] else ""
+    real = os.path.realpath(host_path)
+    under_project = project_path and real.startswith(os.path.realpath(project_path) + os.sep)
+    under_uploads = "/public/uploads/" in real.replace("\\", "/") or "/data/uploads/" in real.replace("\\", "/")
+    if not (under_project or under_uploads):
+        raise HTTPException(status_code=403, detail="Refusing to delete: file outside project uploads")
+
+    try:
+        if os.path.isfile(real):
+            os.remove(real)
+    except OSError as e:
+        logger.warning("[UPLOADS] delete: could not remove file %s: %s", real, e)
+        # still remove the ledger row — quota must free up regardless
+
+    with get_db() as conn:
+        conn.execute("DELETE FROM upload_files WHERE id = %s", (upload_id,))
+        conn.commit()
+
+    logger.info(
+        "[UPLOADS] deleted upload=%s project=%s file=%s", upload_id, project_id, row["original_name"]
+    )
+    return {"success": True, "id": upload_id}
+
+
 @app.get("/projects/{project_id}/files")
 async def list_project_uploads(
     project_id: int,
@@ -11078,7 +11155,7 @@ async def list_project_uploads(
         if project["user_id"] != user_id:
             raise HTTPException(status_code=403, detail="You can only view your own projects")
         rows = conn.execute(
-            """SELECT kind, filename, container_path, original_name, size_bytes, created_at
+            """SELECT id, kind, filename, container_path, original_name, size_bytes, created_at
                FROM upload_files WHERE project_id = %s ORDER BY created_at DESC""",
             (project_id,),
         ).fetchall()
