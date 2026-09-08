@@ -58,20 +58,32 @@ def _read_env_file(path: str) -> Dict[str, str]:
 
 
 def _project_env() -> Dict[str, str]:
-    cwd = os.environ.get("DA_MCP_PROJECT_DIR") or os.getcwd()
-    candidates = [
-        os.path.join(cwd, ".env"),
-        os.path.join(cwd, "backend", ".env"),
-        os.path.join(cwd, "..", "backend", ".env"),
-        os.path.join(cwd, "..", ".env"),
-        os.path.join(cwd, "..", "..", ".env"),
-    ]
+    """Find the project's .env from the agent's CWD.
+
+    Layout per project type (env_manager): website → backend/.env,
+    telegram → telegram/.env, discord → discord/.env, scheduler → .env.
+    The agent's cwd can be anywhere in the tree (commonly
+    <project>/frontend/src), so walk UP several levels, checking both
+    .env and backend/.env at each step. First file with SECRET_KEY wins.
+    """
+    import pathlib
+
+    start = pathlib.Path(os.environ.get("DA_MCP_PROJECT_DIR") or os.getcwd()).resolve()
+    dirs = [start] + list(start.parents)[:6]
+    candidates = []
+    for d in dirs:
+        candidates.append(d / "backend" / ".env")
+        candidates.append(d / ".env")
+    # shallowest backend/.env first at each level, then that level's .env
     for cand in candidates:
-        env = _read_env_file(cand)
-        if env.get("SECRET_KEY"):
-            log.info("project env found: %s", cand)
-            return env
-    log.warning("no project .env with SECRET_KEY found from %s", cwd)
+        if cand.is_file():
+            env = _read_env_file(str(cand))
+            if env.get("SECRET_KEY"):
+                log.info("project env found: %s", cand)
+                return env
+    log.warning(
+        "no project .env with SECRET_KEY found (walked up from %s)", start
+    )
     return {}
 
 
