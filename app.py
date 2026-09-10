@@ -2104,6 +2104,43 @@ async def get_projects(authorization: Optional[str] = Header(None)):
     with get_db() as conn:
         projects = conn.execute("SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
 
+    # Populate frontend info for projects with template_id
+    response_projects = []
+    selector = TemplateSelector()
+
+    for project in projects:
+        # Handle both dict (PostgreSQL) and tuple (SQLite) row types
+        if isinstance(project, dict):
+            project_dict = project
+        else:
+            project_dict = dict(project)
+
+        # Ensure created_at is a string (handle both string and integer timestamps)
+        if "created_at" in project_dict and not isinstance(project_dict["created_at"], str):
+            project_dict["created_at"] = str(project_dict["created_at"])
+
+        # Ensure updated_at is a string (handle both string and integer timestamps)
+        if "updated_at" in project_dict and not isinstance(project_dict["updated_at"], str):
+            project_dict["updated_at"] = str(project_dict["updated_at"])
+
+        # Add frontend info if template_id is set
+        if "template_id" in project_dict and project_dict["template_id"]:
+            try:
+                template = selector._find_template_by_id(project_dict["template_id"])
+                if template:
+                    project_dict["frontend"] = {
+                        "template": template.get("id"),
+                        "repo": template.get("repo"),
+                        "category": template.get("category"),
+                        "modified": False
+                    }
+            except Exception as e:
+                logger.error(f"Failed to fetch template details for project {project_dict.get('id')}: {e}")
+
+        response_projects.append(ProjectResponse(**project_dict))
+
+    return response_projects
+
 
 @app.get("/projects/all", response_model=list[ProjectResponse])
 async def get_all_projects(
