@@ -1034,6 +1034,7 @@ class ProjectResponse(BaseModel):
     # unchanged: FastAPI serializes datetime to ISO on the way out).
     created_at: Union[str, datetime]
     owner_email: Optional[str] = None
+    owner_name: Optional[str] = None
 
 
 
@@ -2101,50 +2102,48 @@ app.include_router(slack_webhook_router, tags=["slack"])
 async def get_projects(authorization: Optional[str] = Header(None)):
     user_id = get_user_id_from_token(authorization)
     with get_db() as conn:
-        # Admins see ALL users' projects (owner email attached for the UI).
-        if _is_admin_user(user_id):
-            projects = conn.execute(
-                """SELECT p.*, u.email AS owner_email
-                   FROM projects p LEFT JOIN users u ON u.id = p.user_id
-                   ORDER BY p.created_at DESC LIMIT 500"""
-            ).fetchall()
-        else:
-            projects = conn.execute("SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
+        projects = conn.execute("SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
 
-    # Populate frontend info for projects with template_id
+
+@app.get("/projects/all", response_model=list[ProjectResponse])
+async def get_all_projects(
+    limit: int = 200,
+    offset: int = 0,
+    search: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """ADMIN ONLY: list ALL users' projects with owner info.
+    Supports search by project name or owner email."""
+    user_id = get_user_id_from_token(authorization)
+    require_admin(user_id)
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+
+    where = ""
+    params: list = []
+    if search:
+        where = "WHERE p.name ILIKE %s OR u.email ILIKE %s"
+        params = [f"%{search}%", f"%{search}%"]
+
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""SELECT p.*, u.email AS owner_email, u.name AS owner_name
+               FROM projects p
+               LEFT JOIN users u ON u.id = p.user_id
+               {where}
+               ORDER BY p.created_at DESC
+               LIMIT %s OFFSET %s""",
+            (*params, limit, offset),
+        ).fetchall()
+
     response_projects = []
-    selector = TemplateSelector()
-
-    for project in projects:
-        # Handle both dict (PostgreSQL) and tuple (SQLite) row types
-        if isinstance(project, dict):
-            project_dict = project
-        else:
-            project_dict = dict(project)
-
-        # Ensure created_at is a string (handle both string and integer timestamps)
-        if "created_at" in project_dict and not isinstance(project_dict["created_at"], str):
-            project_dict["created_at"] = str(project_dict["created_at"])
-
-        # Ensure updated_at is a string (handle both string and integer timestamps)
-        if "updated_at" in project_dict and not isinstance(project_dict["updated_at"], str):
-            project_dict["updated_at"] = str(project_dict["updated_at"])
-
-        # Add frontend info if template_id is set
-        if "template_id" in project_dict and project_dict["template_id"]:
-            try:
-                template = selector._find_template_by_id(project_dict["template_id"])
-                if template:
-                    project_dict["frontend"] = {
-                        "template": template.get("id"),
-                        "repo": template.get("repo"),
-                        "category": template.get("category"),
-                        "modified": False
-                    }
-            except Exception as e:
-                logger.error(f"Failed to fetch template details for project {project_dict.get('id')}: {e}")
-
-        response_projects.append(ProjectResponse(**project_dict))
+    for row in rows:
+        d = dict(row) if not isinstance(row, dict) else row
+        if "created_at" in d and not isinstance(d["created_at"], str):
+            d["created_at"] = str(d["created_at"])
+        if "updated_at" in d and not isinstance(d["updated_at"], str):
+            d["updated_at"] = str(d["updated_at"])
+        response_projects.append(ProjectResponse(**d))
 
     return response_projects
 
