@@ -1033,6 +1033,9 @@ class ProjectResponse(BaseModel):
     # call sites pass pre-serialized strings — accept both (wire format
     # unchanged: FastAPI serializes datetime to ISO on the way out).
     created_at: Union[str, datetime]
+    owner_email: Optional[str] = None
+
+
 
 class ProjectTypeResponse(BaseModel):
     id: int
@@ -1123,6 +1126,17 @@ def _creation_project_field(row, key: str, index: int):
     return row[index] if row and len(row) > index else None
 
 
+def _is_admin_user(user_id: Optional[int]) -> bool:
+    """True when the user exists with role='admin'."""
+    if not user_id:
+        return False
+    from services.rate_limiter import get_user_tier_and_role
+    try:
+        return get_user_tier_and_role(user_id).get("role") == "admin"
+    except Exception:
+        return False
+
+
 def _require_project_owner(project_id: int, authorization: Optional[str]) -> int:
     """Require the authenticated user to own a project."""
     user_id = get_user_id_from_token(authorization)
@@ -1136,7 +1150,7 @@ def _require_project_owner(project_id: int, authorization: Optional[str]) -> int
         raise HTTPException(status_code=404, detail=f"Project with id {project_id} not found")
 
     owner_id = project["user_id"] if isinstance(project, dict) else project[1]
-    if str(owner_id) != str(user_id):
+    if str(owner_id) != str(user_id) and not _is_admin_user(user_id):
         raise HTTPException(status_code=403, detail="You do not have access to this project")
 
     return user_id
@@ -1160,7 +1174,7 @@ def _require_session_owner(session_id: int, authorization: Optional[str]) -> int
         raise HTTPException(status_code=404, detail="Session not found")
 
     owner_id = row["user_id"] if isinstance(row, dict) else row[1]
-    if str(owner_id) != str(user_id):
+    if str(owner_id) != str(user_id) and not _is_admin_user(user_id):
         raise HTTPException(status_code=403, detail="You do not have access to this session")
 
     return user_id
@@ -1184,7 +1198,7 @@ def _require_session_key_owner(session_key: str, authorization: Optional[str]) -
         raise HTTPException(status_code=404, detail="Session not found")
 
     owner_id = row["user_id"] if isinstance(row, dict) else row[1]
-    if str(owner_id) != str(user_id):
+    if str(owner_id) != str(user_id) and not _is_admin_user(user_id):
         raise HTTPException(status_code=403, detail="You do not have access to this session")
 
     return user_id
@@ -2087,7 +2101,15 @@ app.include_router(slack_webhook_router, tags=["slack"])
 async def get_projects(authorization: Optional[str] = Header(None)):
     user_id = get_user_id_from_token(authorization)
     with get_db() as conn:
-        projects = conn.execute("SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
+        # Admins see ALL users' projects (owner email attached for the UI).
+        if _is_admin_user(user_id):
+            projects = conn.execute(
+                """SELECT p.*, u.email AS owner_email
+                   FROM projects p LEFT JOIN users u ON u.id = p.user_id
+                   ORDER BY p.created_at DESC LIMIT 500"""
+            ).fetchall()
+        else:
+            projects = conn.execute("SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
 
     # Populate frontend info for projects with template_id
     response_projects = []
