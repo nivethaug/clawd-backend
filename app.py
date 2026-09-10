@@ -2203,7 +2203,7 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             if not row:
                 raise HTTPException(status_code=404, detail=f"Global integration {gi_id} not found")
             owner = row["user_id"] if isinstance(row, dict) else row[1]
-            if str(owner) != str(user_id):
+            if str(owner) != str(user_id) and not _is_admin_user(user_id):
                 raise HTTPException(status_code=403, detail=f"No access to global integration {gi_id}")
             d = dict(row) if not isinstance(row, dict) else row
             try:
@@ -2341,7 +2341,7 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         if not row:
             raise HTTPException(status_code=404, detail="Bot token integration not found")
         d = dict(row) if not isinstance(row, dict) else row
-        if str(d.get("user_id")) != str(user_id):
+        if str(d.get("user_id")) != str(user_id) and not _is_admin_user(user_id):
             raise HTTPException(status_code=403, detail="No access to that integration")
         try:
             request.bot_token = decrypt_value(d.get("value_encrypted"))
@@ -6513,7 +6513,7 @@ async def reveal_project_env(
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
     owner_id = project["user_id"] if isinstance(project, dict) else project[0]
-    if owner_id != user_id:
+    if owner_id != user_id and not _is_admin_user(user_id):
         raise HTTPException(
             status_code=403,
             detail="Only the project owner can reveal environment variable values",
@@ -10514,7 +10514,7 @@ async def github_export_project(
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
     project = _normalize_project_row(row) if not isinstance(row, dict) else row
-    if str(project.get("user_id")) != str(user_id):
+    if str(project.get("user_id")) != str(user_id) and not _is_admin_user(user_id):
         raise HTTPException(status_code=403, detail="You do not own this project")
 
     project_path = project.get("project_path")
@@ -10600,7 +10600,7 @@ async def download_project_zip(
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
     project = _normalize_project_row(row) if not isinstance(row, dict) else row
-    if str(project.get("user_id")) != str(user_id):
+    if str(project.get("user_id")) != str(user_id) and not _is_admin_user(user_id):
         raise HTTPException(status_code=403, detail="You do not own this project")
 
     project_path = project.get("project_path")
@@ -10930,7 +10930,7 @@ async def upload_project_file(
     if not project:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
     project = dict(project)
-    if project["user_id"] != user_id:
+    if project["user_id"] != user_id and not _is_admin_user(user_id):
         raise HTTPException(status_code=403, detail="You can only upload to your own projects")
     project_path = project.get("project_path") or ""
     if not project_path:
@@ -11174,7 +11174,7 @@ async def list_project_uploads(
         if not project:
             raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
         project = dict(project)
-        if project["user_id"] != user_id:
+        if project["user_id"] != user_id and not _is_admin_user(user_id):
             raise HTTPException(status_code=403, detail="You can only view your own projects")
         rows = conn.execute(
             """SELECT id, kind, filename, container_path, original_name, size_bytes, created_at
@@ -11462,7 +11462,7 @@ async def publish_to_gallery(
         if not project:
             raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
         project = dict(project)
-        if project["user_id"] != user_id:
+        if project["user_id"] != user_id and not _is_admin_user(user_id):
             raise HTTPException(status_code=403, detail="You can only publish your own projects")
 
         # Check if already published (unique index on project_id will also enforce)
@@ -11575,7 +11575,7 @@ async def delete_gallery_listing(
         if not row:
             raise HTTPException(status_code=404, detail="Gallery listing not found")
         owner_id = dict(row).get("user_id") if row else None
-        if owner_id != user_id:
+        if owner_id != user_id and not _is_admin_user(user_id):
             raise HTTPException(status_code=403, detail="Only the publisher can remove this listing")
 
         conn.execute("DELETE FROM gallery_projects WHERE id = %s", (gallery_id,))
@@ -11604,7 +11604,7 @@ async def get_gallery_status(
         ).fetchone()
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
-        if dict(project).get("user_id") != user_id:
+        if dict(project).get("user_id") != user_id and not _is_admin_user(user_id):
             raise HTTPException(status_code=403, detail="Not your project")
 
         row = conn.execute(
@@ -12129,7 +12129,7 @@ async def get_project_logs(
         raise HTTPException(status_code=404, detail="Project not found")
 
     d = dict(row)
-    if d.get("user_id") != user_id:
+    if d.get("user_id") != user_id and not _is_admin_user(user_id):
         raise HTTPException(status_code=403, detail="Access denied")
 
     result = _build_project_logs(row, num_lines)
@@ -12167,7 +12167,7 @@ async def download_project_logs(
         raise HTTPException(status_code=404, detail="Project not found")
 
     d = dict(row)
-    if d.get("user_id") != user_id:
+    if d.get("user_id") != user_id and not _is_admin_user(user_id):
         raise HTTPException(status_code=403, detail="Access denied")
 
     result = _build_project_logs(row, num_lines)
