@@ -2157,11 +2157,12 @@ async def get_all_projects(
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
 
-    where = ""
+    conditions = ["(u.role IS NULL OR u.role != 'admin')"]
     params: list = []
     if search:
-        where = "WHERE p.name ILIKE %s OR u.email ILIKE %s"
+        conditions.append("(p.name ILIKE %s OR u.email ILIKE %s)")
         params = [f"%{search}%", f"%{search}%"]
+    where = "WHERE " + " AND ".join(conditions)
 
     with get_db() as conn:
         rows = conn.execute(
