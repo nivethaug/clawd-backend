@@ -493,6 +493,11 @@ def init_schema():
                 logger.info("✓ Added processing_channel column to sessions")
             _run_migration(migrate_session_processing_channel)
 
+            def migrate_sessions_created_by():
+                cur.execute("ALTER TABLE sessions ADD COLUMN created_by INTEGER")
+                logger.info("✓ Added created_by column to sessions")
+            _run_migration(migrate_sessions_created_by)
+
             # Messages table
             cur.execute("""CREATE TABLE IF NOT EXISTS messages (
                 id SERIAL PRIMARY KEY,

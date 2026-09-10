@@ -1055,6 +1055,7 @@ class SessionResponse(BaseModel):
     created_at: str
     last_used_at: Optional[str] = None
     processing: bool = False
+    created_by: Optional[int] = None
 
 class InitialEnvironmentVariable(BaseModel):
     key: str
@@ -7626,8 +7627,24 @@ async def get_active_session(
     Returns:
         Active session ID and name, or null if unlocked
     """
-    _require_project_owner(project_id, authorization)
+    user_id = _require_project_owner(project_id, authorization)
     result = SessionLockService.get_active_session(project_id)
+
+    # If the lock is held by an admin-created session, hide it from
+    # regular users (the session itself is invisible to them).
+    active_session_id = result["active_session_id"]
+    if active_session_id and not _is_admin_user(user_id):
+        with get_db() as conn:
+            row = conn.execute(
+                """SELECT u.role FROM sessions s
+                   LEFT JOIN users u ON u.id = s.created_by
+                   WHERE s.id = ?""",
+                (active_session_id,),
+            ).fetchone()
+        role = (row.get("role") if isinstance(row, dict) else row[0]) if row else None
+        if role == "admin":
+            return ActiveSessionResponse(active_session_id=None, session_name=None)
+
     return ActiveSessionResponse(
         active_session_id=result["active_session_id"],
         session_name=result["session_name"]
@@ -7714,12 +7731,26 @@ async def get_sessions(
     project_id: int,
     authorization: Optional[str] = Header(None),
 ):
-    _require_project_owner(project_id, authorization)
+    user_id = _require_project_owner(project_id, authorization)
     with get_db() as conn:
-        sessions = conn.execute(
-            "SELECT * FROM sessions WHERE project_id = ? AND archived = 0 ORDER BY created_at DESC",
-            (project_id,)
-        ).fetchall()
+        if _is_admin_user(user_id):
+            # Admins see every session in the project (incl. other admins').
+            sessions = conn.execute(
+                "SELECT * FROM sessions WHERE project_id = ? AND archived = 0 ORDER BY created_at DESC",
+                (project_id,)
+            ).fetchall()
+        else:
+            # Regular users never see sessions created by admins
+            # (e.g. admin debugging inside their project). Legacy rows
+            # (created_by NULL) stay visible.
+            sessions = conn.execute(
+                """SELECT s.* FROM sessions s
+                   LEFT JOIN users u ON u.id = s.created_by
+                   WHERE s.project_id = ? AND s.archived = 0
+                     AND (s.created_by IS NULL OR u.role IS NULL OR u.role != 'admin')
+                   ORDER BY s.created_at DESC""",
+                (project_id,)
+            ).fetchall()
 
     # Convert datetime objects to strings for PostgreSQL compatibility
     session_responses = []
@@ -7741,12 +7772,12 @@ async def create_session(
     request: CreateSessionRequest,
     authorization: Optional[str] = Header(None),
 ):
-    _require_project_owner(project_id, authorization)
+    user_id = _require_project_owner(project_id, authorization)
     session_key = str(uuid.uuid4())
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO sessions (project_id, session_key, label, channel, agent_id) VALUES (?, ?, ?, ?, ?)",
-            (project_id, session_key, request.label, DEFAULT_CHANNEL, DEFAULT_AGENT_ID)
+            "INSERT INTO sessions (project_id, session_key, label, channel, agent_id, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+            (project_id, session_key, request.label, DEFAULT_CHANNEL, DEFAULT_AGENT_ID, user_id)
         )
         conn.commit()
         result = conn.execute(
