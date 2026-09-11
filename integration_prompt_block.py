@@ -269,6 +269,15 @@ data = r.json()
 Provider reference — `endpoint` is the path after each provider's base URL:
 {ref_md}
 
+**Calling them from THIS session (agent-side MCP):** you also have MCP tools that
+call the same providers directly — no code, no key material:
+- `integrations_status` — see what's connected for this account right now.
+- `integrations_request` — make a call, e.g. `provider="{snippet_provider}"`,
+  `method="GET"`, `endpoint="{snippet_endpoint}"` (same providers/endpoints as
+  the proxy reference above).
+Use MCP for interactive checks while building; use the proxy snippet in the
+app's runtime code.
+
 **Rules:**
 - NEVER ask the user for an API key / token / channel ID for the connected services above —
   the account is already authorized.
