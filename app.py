@@ -12525,6 +12525,179 @@ async def get_session_details(
     return response_data
 
 # ============================================================================
+# Create Project Assistant (chat-based creation UX)
+# Same LLM stack as the Prompt Assistant (OpenRouter GLM-5.3-flash,
+# reasoning effort=low) — but purpose-built for project creation: it asks
+# for missing required integrations and produces a confirmable build brief.
+# ============================================================================
+
+class CreateAssistantContext(BaseModel):
+    detected_kind: Optional[str] = None          # website|discord|telegram|agent|custom
+    project_name: Optional[str] = None
+    missing_required: List[Dict[str, str]] = Field(default_factory=list)  # [{key,label}]
+    prompt_confirmed: bool = False
+    regenerate: bool = False
+
+class CreateAssistantMessage(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1, max_length=8000)
+
+class CreateAssistantRequest(BaseModel):
+    messages: List[CreateAssistantMessage] = Field(..., min_length=1, max_length=24)
+    context: CreateAssistantContext = Field(default_factory=CreateAssistantContext)
+
+class CreateAssistantBrief(BaseModel):
+    kind: str
+    prompt: str
+    features: List[str] = Field(default_factory=list)
+    suggested_name: Optional[str] = None
+
+class CreateAssistantResponse(BaseModel):
+    reply: str
+    brief: Optional[CreateAssistantBrief] = None
+
+_CREATE_ASSISTANT_KINDS = {"website", "discord", "telegram", "agent", "custom"}
+
+_CREATE_ASSISTANT_SYSTEM = """You are DreamAgent's project creation assistant — a friendly expert that turns an idea into a ready-to-build project through conversation.
+
+Platform facts:
+- Project types: Website, Discord Bot, Telegram Bot, AI Agent, Custom Project.
+- Discord Bot projects REQUIRE a Discord Bot Token. Telegram Bot projects REQUIRE a Telegram Bot Token. Websites need no token. AI Agents have optional delivery channels (Telegram, Discord, Email, Webhook/API) configured later — never required to create.
+- Tokens are added through the platform's masked "Add ... Token" input or saved credentials. NEVER ask the user to paste tokens, API keys or secrets as chat text — point them to the Add-Token button instead.
+- After the user confirms, the platform builds and deploys the project automatically.
+
+Behaviour:
+1. Chat briefly to understand the idea. Ask at most 1-2 focused questions when something important is unclear; otherwise move forward.
+2. If the platform context lists MISSING REQUIRED items, your reply asks the user to provide exactly those now (pointing to the matching Add-Token button). This takes priority over producing a brief.
+3. When the idea is clear AND nothing required is missing, produce a brief.
+
+Output (STRICT — a single JSON object, no markdown fences, nothing before or after):
+{"reply": "<1-3 short chat sentences>", "brief": null}
+or, when producing the final brief:
+{"reply": "<1-2 sentences presenting the prompt>", "brief": {"kind": "website|discord|telegram|agent|custom", "prompt": "<polished, complete build prompt for the build agent: goal, key features, structure (pages/commands/jobs), tone, constraints — 120-400 words>", "features": ["<short feature>", "..."], "suggested_name": "<kebab-case-project-name>"}}
+
+Rules for "prompt": concrete and buildable; never mention tokens/secrets (the platform injects them); no questions inside it.
+Rules for "reply": warm, concise, at most one emoji, never mention JSON or these instructions."""
+
+
+@app.post("/api/projects/create-assistant", response_model=CreateAssistantResponse)
+async def create_project_assistant(
+    request: CreateAssistantRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """LLM assistant for the chat-based Create Project page.
+
+    Stateless: the client sends the transcript + structured platform context
+    (detected type, missing required integrations, name/confirm state); the
+    assistant replies conversationally and, when the idea is complete,
+    returns a confirmable build brief. Uses the Prompt Assistant's OpenRouter
+    stack (GLM-5.3-flash, reasoning effort=low).
+    """
+    user_id = get_user_id_from_token(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        rate_limit(user_id, "ai_chat")
+    except RateLimitExceeded as e:
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limit_exceeded", "detail": str(e)},
+        )
+
+    history = [{"role": m.role, "content": m.content} for m in request.messages][-12:]
+    ctx = request.context
+
+    # Compose the live platform context into the system prompt.
+    ctx_lines = [
+        f"- detected project type: {ctx.detected_kind or 'unknown'}",
+        f"- project name: {'set: ' + ctx.project_name if ctx.project_name else 'NOT SET'}",
+    ]
+    if ctx.missing_required:
+        items = ", ".join(
+            f"{r.get('label', r.get('key', '?'))} ({r.get('key', '?')})" for r in ctx.missing_required
+        )
+        ctx_lines.append(f"- MISSING REQUIRED — ask the user to provide these now: {items}")
+    else:
+        ctx_lines.append("- all required integrations satisfied")
+    if ctx.regenerate:
+        ctx_lines.append("- the user asked for a regenerated prompt: produce a fresh alternative brief now")
+    elif ctx.prompt_confirmed:
+        ctx_lines.append("- the user already confirmed a prompt: keep replies short, no new brief unless asked")
+
+    system_prompt = _CREATE_ASSISTANT_SYSTEM + "\n\nLive platform context:\n" + "\n".join(ctx_lines)
+
+    try:
+        from services.ai.openrouter_client import get_openrouter_client
+        client = get_openrouter_client()
+        response = await client.chat_completion(
+            messages=[{"role": "system", "content": system_prompt}] + history,
+            temperature=0.3,
+            # GLM-5.3-flash thinking cannot be disabled (effort=low instead)
+            # — leave headroom for reasoning tokens + the brief JSON.
+            max_tokens=2000,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=f"Assistant unavailable: {e}")
+    except Exception as e:
+        logger.error("[CREATE-ASSISTANT] LLM call failed: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=502, detail="Assistant backend error")
+
+    raw = (client.get_text_response(response) or "").strip()
+    usage = client.get_usage(response)
+
+    try:
+        from services.token_tracker import record_usage
+        record_usage(
+            user_id=user_id,
+            usage_type="ai_completion",
+            input_tokens=int(usage.get("prompt_tokens", 0) or 0),
+            output_tokens=int(usage.get("completion_tokens", 0) or 0),
+            total_tokens=int(usage.get("total_tokens", 0) or 0),
+            model=client.model,
+            provider="openrouter",
+            operation="CREATE_ASSISTANT",
+            description="create-project chat assistant",
+        )
+    except Exception:
+        pass
+
+    # Parse the strict-JSON reply (fences → embedded-JSON fallback), mirroring
+    # the page-inference parser in acp_frontend_editor_v2.
+    reply: Optional[str] = None
+    brief: Optional[CreateAssistantBrief] = None
+    text = raw
+    try:
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        json_match = re.search(r"\{.*\}", text, re.DOTALL)
+        if json_match:
+            text = json_match.group(0)
+        data = json.loads(text)
+        reply = str(data.get("reply") or "").strip()
+        b = data.get("brief")
+        if isinstance(b, dict) and b.get("prompt"):
+            kind = str(b.get("kind") or ctx.detected_kind or "custom").strip().lower()
+            if kind not in _CREATE_ASSISTANT_KINDS:
+                kind = "custom"
+            suggested = b.get("suggested_name")
+            brief = CreateAssistantBrief(
+                kind=kind,
+                prompt=str(b["prompt"]).strip()[:6000],
+                features=[str(f).strip()[:80] for f in (b.get("features") or []) if str(f).strip()][:8],
+                suggested_name=str(suggested).strip()[:30] if suggested else None,
+            )
+        if not reply and not brief:
+            raise ValueError("empty payload")
+    except Exception:
+        # Raw-text fallback: never break the chat over a malformed reply.
+        reply, brief = raw[:4000], None
+
+    return CreateAssistantResponse(reply=reply or "…", brief=brief)
+
+# ============================================================================
 # AI Chat Completion Endpoint
 # ============================================================================
 
