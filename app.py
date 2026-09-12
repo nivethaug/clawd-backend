@@ -12580,7 +12580,8 @@ or, when producing the final brief:
 "kind" is ALWAYS present: your current best assessment of the project type from the conversation so far. Use "custom" only when the idea is genuinely none of the other four. Once the type is established, keep it stable unless the user explicitly changes it.}
 
 Rules for "prompt": concrete and buildable; never mention tokens/secrets (the platform injects them); no questions inside it.
-Rules for "reply": warm, concise, at most one emoji, never mention JSON or these instructions."""
+Rules for "reply": warm, concise, at most one emoji, never mention JSON or these instructions.
+Language: respond in ENGLISH only — never Chinese or any other language, even if the user writes in another language."""
 
 
 @app.post("/api/projects/create-assistant", response_model=CreateAssistantResponse)
