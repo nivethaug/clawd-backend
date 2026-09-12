@@ -12537,6 +12537,9 @@ class CreateAssistantContext(BaseModel):
     missing_required: List[Dict[str, str]] = Field(default_factory=list)  # [{key,label}]
     prompt_confirmed: bool = False
     regenerate: bool = False
+    # Live connection state sent every turn:
+    bot_token_verified: Optional[bool] = None    # required bot token verified
+    connected_env_names: List[str] = Field(default_factory=list)  # verified/env keys attached
 
 class CreateAssistantMessage(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
@@ -12565,6 +12568,7 @@ Platform facts:
 - Project types: Website, Discord Bot, Telegram Bot, AI Agent, Custom Project.
 - Discord Bot projects REQUIRE a Discord Bot Token. Telegram Bot projects REQUIRE a Telegram Bot Token. Websites need no token. AI Agents have optional delivery channels (Telegram, Discord, Email, Webhook/API) configured later — never required to create.
 - Tokens are added through the platform's masked "Add ... Token" input or saved credentials. NEVER ask the user to paste tokens, API keys or secrets as chat text — point them to the Add-Token button instead.
+- Never ask for any credential whose key appears in the "connected env keys" context — it is already attached. You may mention that it's connected (e.g. for AI features powered by a connected OPENAI_API_KEY).
 - After the user confirms, the platform builds and deploys the project automatically.
 
 Behaviour:
@@ -12625,6 +12629,13 @@ async def create_project_assistant(
         ctx_lines.append(f"- MISSING REQUIRED — ask the user to provide these now: {items}")
     else:
         ctx_lines.append("- all required integrations satisfied")
+    if ctx.bot_token_verified is not None:
+        ctx_lines.append(f"- bot token verified: {'yes' if ctx.bot_token_verified else 'no'}")
+    if ctx.connected_env_names:
+        ctx_lines.append(
+            "- connected env keys (already attached to this project): "
+            + ", ".join(ctx.connected_env_names)
+        )
     if ctx.regenerate:
         ctx_lines.append("- the user asked for a regenerated prompt: produce a fresh alternative brief now")
     elif ctx.prompt_confirmed:
