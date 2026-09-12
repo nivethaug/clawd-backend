@@ -7817,6 +7817,35 @@ async def create_session(
 
         return SessionResponse(**session_data)
 
+class SeedSessionMessageRequest(BaseModel):
+    role: str = "user"          # user | assistant
+    content: str = Field(..., min_length=1, max_length=8000)
+
+
+@app.post("/projects/{project_id}/sessions/{session_id}/seed-message")
+async def seed_session_message(
+    project_id: int,
+    session_id: int,
+    request: SeedSessionMessageRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Insert a message row WITHOUT any LLM/agent processing.
+
+    Used by the chat-based creation flow to carry the confirmed creation
+    prompt into the project's first session — the message is stored for
+    context/history only; no model call is made.
+    """
+    _require_session_owner(session_id, authorization)
+    role = request.role if request.role in ("user", "assistant") else "user"
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+            (session_id, role, request.content[:8000]),
+        )
+        conn.commit()
+    return {"success": True, "session_id": session_id, "role": role}
+
+
 @app.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: int,
