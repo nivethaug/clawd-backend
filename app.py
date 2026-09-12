@@ -12554,6 +12554,7 @@ class CreateAssistantBrief(BaseModel):
 
 class CreateAssistantResponse(BaseModel):
     reply: str
+    kind: Optional[str] = None          # current best type assessment (LLM)
     brief: Optional[CreateAssistantBrief] = None
 
 _CREATE_ASSISTANT_KINDS = {"website", "discord", "telegram", "agent", "custom"}
@@ -12572,9 +12573,11 @@ Behaviour:
 3. When the idea is clear AND nothing required is missing, produce a brief.
 
 Output (STRICT — a single JSON object, no markdown fences, nothing before or after):
-{"reply": "<1-3 short chat sentences>", "brief": null}
+{"reply": "<1-3 short chat sentences>", "kind": "website|discord|telegram|agent|custom", "brief": null}
 or, when producing the final brief:
-{"reply": "<1-2 sentences presenting the prompt>", "brief": {"kind": "website|discord|telegram|agent|custom", "prompt": "<polished, complete build prompt for the build agent: goal, key features, structure (pages/commands/jobs), tone, constraints — 120-400 words>", "features": ["<short feature>", "..."], "suggested_name": "<kebab-case-project-name>"}}
+{"reply": "<1-2 sentences presenting the prompt>", "kind": "...", "brief": {"kind": "...", "prompt": "<polished, complete build prompt for the build agent: goal, key features, structure (pages/commands/jobs), tone, constraints — 120-400 words>", "features": ["<short feature>", "..."], "suggested_name": "<kebab-case-project-name>"}}
+
+"kind" is ALWAYS present: your current best assessment of the project type from the conversation so far. Use "custom" only when the idea is genuinely none of the other four. Once the type is established, keep it stable unless the user explicitly changes it.}
 
 Rules for "prompt": concrete and buildable; never mention tokens/secrets (the platform injects them); no questions inside it.
 Rules for "reply": warm, concise, at most one emoji, never mention JSON or these instructions."""
@@ -12665,6 +12668,7 @@ async def create_project_assistant(
     # Parse the strict-JSON reply (fences → embedded-JSON fallback), mirroring
     # the page-inference parser in acp_frontend_editor_v2.
     reply: Optional[str] = None
+    kind: Optional[str] = None
     brief: Optional[CreateAssistantBrief] = None
     text = raw
     try:
@@ -12677,6 +12681,9 @@ async def create_project_assistant(
             text = json_match.group(0)
         data = json.loads(text)
         reply = str(data.get("reply") or "").strip()
+        k = data.get("kind")
+        if isinstance(k, str) and k.strip().lower() in _CREATE_ASSISTANT_KINDS:
+            kind = k.strip().lower()
         b = data.get("brief")
         if isinstance(b, dict) and b.get("prompt"):
             kind = str(b.get("kind") or ctx.detected_kind or "custom").strip().lower()
@@ -12693,9 +12700,9 @@ async def create_project_assistant(
             raise ValueError("empty payload")
     except Exception:
         # Raw-text fallback: never break the chat over a malformed reply.
-        reply, brief = raw[:4000], None
+        reply, kind, brief = raw[:4000], None, None
 
-    return CreateAssistantResponse(reply=reply or "…", brief=brief)
+    return CreateAssistantResponse(reply=reply or "…", kind=kind, brief=brief)
 
 # ============================================================================
 # AI Chat Completion Endpoint
