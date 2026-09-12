@@ -8358,20 +8358,36 @@ async def chat_stream_endpoint(
 
                 async def durable_streaming_response():
                     """Stream DB-backed chunks produced by session_chat_worker."""
+                    import time as _time
                     after = 0
                     last_status = "queued"
+                    # SSE keepalive: long tool phases (buildpublish etc.) go
+                    # minutes without a chunk; without bytes, nginx's ~60s
+                    # proxy_read_timeout kills the connection and the UI
+                    # stops mid-run. A ': ping' comment resets the timer and
+                    # is ignored by every SSE parser.
+                    _last_emit = _time.monotonic()
+                    _KEEPALIVE_S = 10.0
                     try:
                         while True:
                             chunk_result = get_chunks(run_id, after)
                             last_status = chunk_result.get("status") or last_status
+                            emitted = False
                             for chunk in chunk_result.get("chunks", []):
                                 seq = int(chunk.get("seq", after))
                                 after = max(after, seq + 1)
                                 content = str(chunk.get("content") or "")
                                 if not content:
                                     continue
+                                emitted = True
                                 event_data = json.dumps({'choices': [{'delta': {'content': content + "\n"}}]})
                                 yield f"data: {event_data}\n\n"
+
+                            if emitted:
+                                _last_emit = _time.monotonic()
+                            elif _time.monotonic() - _last_emit >= _KEEPALIVE_S:
+                                yield ": ping\n\n"
+                                _last_emit = _time.monotonic()
 
                             if last_status in {"completed", "failed", "cancelled", "interrupted"}:
                                 break
