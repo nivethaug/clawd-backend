@@ -231,6 +231,23 @@ def register_telegram_webhook_with_retry(
             logger.info(f"✅ Webhook registration succeeded on attempt {attempt + 1}/{max_retries}")
             return True, message
         
+        # Rate-limited (429) — retryable with Telegram's retry_after hint
+        if "Too Many Requests" in message:
+            if attempt < max_retries - 1:
+                retry_after = 2
+                for m in ("retry after ", "retry_after="):
+                    if m in message:
+                        try:
+                            retry_after = int("".join(c for c in message.split(m, 1)[1][:4] if c.isdigit()) or 2)
+                        except Exception:
+                            pass
+                retry_after = max(1, min(retry_after, 30))
+                logger.warning(f"⏳ setWebhook rate-limited (attempt {attempt + 1}/{max_retries}) — waiting {retry_after}s")
+                time.sleep(retry_after)
+                continue
+            logger.error(f"❌ Webhook registration still rate-limited after {max_retries} attempts")
+            return False, message
+
         # Check if error is DNS-related (retryable)
         if "Failed to resolve host" in message or "Name or service not known" in message:
             if attempt < max_retries - 1:
@@ -293,7 +310,7 @@ def register_webhook_async(
                 logger.info(f"✅ Async webhook registration completed: {message}")
             else:
                 logger.warning(f"⚠️ Async webhook registration failed: {message}")
-                logger.info(f"ℹ️ To register manually: curl -X POST 'https://api.telegram.org/bot{bot_token}/setWebhook?url={_webhook_url(domain)}'")
+                logger.info(f"ℹ️ To register manually: curl -X POST 'https://api.telegram.org/bot$BOT_TOKEN/setWebhook?url={_webhook_url(domain)}'")
         
         except Exception as e:
             logger.error(f"❌ Async webhook registration error: {e}")
