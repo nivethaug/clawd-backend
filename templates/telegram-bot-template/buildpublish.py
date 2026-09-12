@@ -282,19 +282,43 @@ def re_register_webhook(bot_token: str, domain: str, project_id: str):
             "allowed_updates": ["message", "edited_message", "callback_query"]
         }
 
-        response = requests.post(telegram_api_url, json=payload, timeout=10)
+        # setWebhook is rate-limited (429) when called repeatedly in a short
+        # window — which happens during creation (scaffold publish +
+        # AI-enhancement publish + bot startup all register). Retry with
+        # backoff honoring Telegram's retry_after.
+        import time as _time
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            response = requests.post(telegram_api_url, json=payload, timeout=10)
 
-        if response.status_code == 200:
-            result = response.json()
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("ok"):
+                    print(f"✅ Webhook re-registered successfully")
+                    print(f"📍 URL: {webhook_url}")
+                else:
+                    error_msg = result.get("description", "Unknown error")
+                    print(f"⚠️ Webhook registration failed: {error_msg}")
+                break
 
-            if result.get("ok"):
-                print(f"✅ Webhook re-registered successfully")
-                print(f"📍 URL: {webhook_url}")
-            else:
-                error_msg = result.get("description", "Unknown error")
-                print(f"⚠️ Webhook registration failed: {error_msg}")
-        else:
+            if response.status_code == 429 and attempt < max_attempts:
+                retry_after = 3.0
+                try:
+                    retry_after = float(
+                        (response.json() or {}).get("parameters", {}).get("retry_after", 3)
+                    )
+                except Exception:
+                    pass
+                retry_after = max(1.0, min(retry_after, 15.0))
+                print(
+                    f"⏳ setWebhook rate-limited (429) — retry {attempt}/{max_attempts} "
+                    f"in {retry_after:.0f}s"
+                )
+                _time.sleep(retry_after)
+                continue
+
             print(f"⚠️ Webhook registration failed with status {response.status_code}")
+            break
 
     except requests.exceptions.Timeout:
         print("⚠️ Webhook registration timeout (non-critical)")
