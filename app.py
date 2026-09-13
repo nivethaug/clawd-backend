@@ -456,6 +456,47 @@ def persist_design_reference(project_path: str, payload: str, log_prefix: str) -
         return None
 
 
+def persist_chat_image_reference(project_path: str, attachment: dict, log_prefix: str) -> Optional[dict]:
+    """
+    Copy a dream-mode chat image INTO the project workspace so the
+    containerized agent can actually read it.
+
+    Temp chat images live on the API host (/tmp/acp_images) which the project
+    container cannot see — the same problem persist_design_reference solves
+    for design mode. Without this, dream-mode agents are pointed at a path
+    that does not exist in their workspace. The copy is registered in the
+    attachment's cleanup_paths so it is removed when the run ends.
+    Returns {"container_path", "host_path"} or None on failure.
+    """
+    if not project_path:
+        return None
+    src = attachment.get("inspection_path")
+    if not src or not os.path.exists(src):
+        return None
+    try:
+        uploads_dir = Path(project_path) / "chat-uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        image_id = uuid.uuid4().hex[:8]
+        host_path = uploads_dir / f"chat-{image_id}{Path(src).suffix or '.png'}"
+        shutil.copyfile(src, host_path)
+        from services.container_storage import to_container_path
+
+        container_path = to_container_path(str(host_path))
+        cleanup_paths = attachment.setdefault("cleanup_paths", [])
+        if str(host_path) not in cleanup_paths:
+            cleanup_paths.append(str(host_path))
+        logger.info(
+            "%s Saved chat image into project workspace %s (container: %s)",
+            log_prefix,
+            host_path,
+            container_path,
+        )
+        return {"container_path": container_path, "host_path": str(host_path)}
+    except Exception as persist_err:
+        logger.warning("%s Failed to persist chat image into project workspace: %s", log_prefix, persist_err)
+        return None
+
+
 def latest_design_reference(project_path: str, log_prefix: str) -> Optional[dict]:
     """
     Find the most recent design reference in <project>/frontend/design/ and
@@ -876,8 +917,8 @@ def append_chat_image_instruction(
     else:
         design_section = ""
         grounding_rules = (
-            "1. Treat the vision preprocessor summary as the primary visual grounding for the screenshot.\n"
-            "2. If more detail is needed, inspect the image file path with available filesystem/image tools.\n"
+            "1. Read the IMAGE FILE path below with your Read tool if it is inside your workspace — the actual image outranks any text summary.\n"
+            "2. Treat the vision preprocessor summary as supporting visual grounding when the file cannot be read.\n"
             "3. Base the page/screen identification only on the image/vision summary, not on chat history or assumptions.\n"
             "4. In your first user-visible response about this image, include:\n"
             "   - Observed screen: the page, route, or UI area visible in the screenshot, or 'unclear'.\n"
@@ -893,11 +934,23 @@ def append_chat_image_instruction(
             "or run a generic page QA unless the user explicitly asks for validation.\n"
         )
 
+    # Dream/plan mode: a project-workspace copy the agent can actually open.
+    # The temp host path below it is only a fallback for host-mode agents.
+    container_inspection = attachment.get("container_inspection_path") or ""
+    container_section = ""
+    if not design_section and container_inspection:
+        container_section = (
+            "IMAGE FILE (inside your workspace — read it with your Read tool; it renders as a visible image):\n"
+            f"{container_inspection}\n"
+            "Reading this file shows you the actual screenshot and outranks the text summary below.\n\n"
+        )
+
     return (
         f"{user_content}\n\n"
         "<IMAGE_ATTACHED_REQUIRES_VISUAL_INSPECTION>\n"
         "The user attached a screenshot/image for this request.\n\n"
         f"{design_section}"
+        f"{container_section}"
         f"Image path:\n{image_path}"
         f"{image_size}\n\n"
         f"Vision preprocessor summary:\n{vision_summary or 'Unavailable. Use the image path directly and say clearly if it cannot be read.'}\n\n"
@@ -8247,18 +8300,26 @@ async def chat_stream_endpoint(
             if request.image:
                 logger.info(f"[ACP-STREAM] Image detected, preparing inspection file...")
                 try:
-                    image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-STREAM]")
-                    # DESIGN mode: explicit user-selected mode (like plan/dream).
-                    # Image-only messages WITHOUT design mode keep the classic
-                    # explain/fix grounding — users attach screenshots to ask
-                    # questions too.
-                    design_reference = None
-                    if handler.project_type_id == 1 and getattr(request, "mode", "dream") == "design":
-                        design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-STREAM]")
-                        if design_reference:
-                            image_attachment["design_reference_path"] = design_reference["host_path"]
-                    vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-STREAM]")
-                    acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary, design_reference)
+                        image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-STREAM]")
+                        # DESIGN mode: explicit user-selected mode (like plan/dream).
+                        # Image-only messages WITHOUT design mode keep the classic
+                        # explain/fix grounding — users attach screenshots to ask
+                        # questions too.
+                        design_reference = None
+                        if handler.project_type_id == 1 and getattr(request, "mode", "dream") == "design":
+                            design_reference = persist_design_reference(str(handler.project_path), request.image, "[ACP-STREAM]")
+                            if design_reference:
+                                image_attachment["design_reference_path"] = design_reference["host_path"]
+                        vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-STREAM]")
+                        if not design_reference:
+                            # Dream/plan mode: the temp inspection path lives on
+                            # the API host, invisible to the containerized agent.
+                            # Copy the image into the project workspace so the
+                            # agent can read the actual screenshot itself.
+                            chat_reference = persist_chat_image_reference(str(handler.project_path), image_attachment, "[ACP-STREAM]")
+                            if chat_reference:
+                                image_attachment["container_inspection_path"] = chat_reference["container_path"]
+                        acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary, design_reference)
                 except Exception as img_err:
                     logger.error(f"[ACP-STREAM] Failed to save image: {img_err}")
                     acp_user_content = f"{user_content}\n\n[Image was attached but could not be saved]"
@@ -9286,6 +9347,12 @@ async def chat_endpoint(
                             if design_reference:
                                 image_attachment["design_reference_path"] = design_reference["host_path"]
                         vision_summary = await analyze_chat_image_attachment(image_attachment, user_content, "[ACP-MODE]")
+                        if not design_reference:
+                            # Same as the durable path: copy the image into the
+                            # project workspace so the agent can actually read it.
+                            chat_reference = persist_chat_image_reference(str(handler.project_path), image_attachment, "[ACP-MODE]")
+                            if chat_reference:
+                                image_attachment["container_inspection_path"] = chat_reference["container_path"]
                         acp_user_content = append_chat_image_instruction(user_content, image_attachment, vision_summary, design_reference)
                     except Exception as img_err:
                         logger.error(f"[ACP-MODE] Failed to save image: {img_err}")
