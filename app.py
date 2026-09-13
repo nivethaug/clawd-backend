@@ -8449,7 +8449,18 @@ async def chat_stream_endpoint(
                     _KEEPALIVE_S = 10.0
                     try:
                         while True:
-                            chunk_result = get_chunks(run_id, after)
+                            try:
+                                chunk_result = get_chunks(run_id, after)
+                            except Exception as poll_err:
+                                # A transient DB blip here must NOT kill the
+                                # SSE response — the run itself lives in the
+                                # DB and the worker keeps going. Log, back
+                                # off, and re-poll.
+                                logger.warning(
+                                    "[ACP-STREAM] chunk poll error run=%s: %s", run_id, poll_err
+                                )
+                                await asyncio.sleep(1.5)
+                                continue
                             last_status = chunk_result.get("status") or last_status
                             emitted = False
                             for chunk in chunk_result.get("chunks", []):
