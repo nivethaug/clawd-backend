@@ -8452,13 +8452,16 @@ async def chat_stream_endpoint(
                             try:
                                 chunk_result = get_chunks(run_id, after)
                             except Exception as poll_err:
-                                # A transient DB blip here must NOT kill the
-                                # SSE response — the run itself lives in the
-                                # DB and the worker keeps going. Log, back
-                                # off, and re-poll.
+                                # A transient DB blip must NOT kill the SSE
+                                # response — the run lives in the DB and the
+                                # worker keeps going. Log, keep the proxy
+                                # alive, back off, and re-poll.
                                 logger.warning(
                                     "[ACP-STREAM] chunk poll error run=%s: %s", run_id, poll_err
                                 )
+                                if _time.monotonic() - _last_emit >= _KEEPALIVE_S:
+                                    yield ": ping\n\n"
+                                    _last_emit = _time.monotonic()
                                 await asyncio.sleep(1.5)
                                 continue
                             last_status = chunk_result.get("status") or last_status
