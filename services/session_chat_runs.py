@@ -344,27 +344,42 @@ def mark_failed(run_id: int, status: str, error: str) -> None:
         conn.commit()
 
 
-def recover_stale_runs(stale_after_minutes: int = 20) -> int:
+def recover_stale_runs(stale_after_minutes: int = 20, project_id: Optional[int] = None) -> int:
+    """Interrupt runs that are provably dead and release what they hold.
+
+    A run is dead when its heartbeat went stale (worker stopped mid-run) or
+    when it sat 'queued' past the cutoff (no worker ever claimed it — covers
+    a crashed worker that never restarts). When project_id is given, only
+    that project's runs are touched (used by the lock self-heal on the
+    polled active-session endpoint).
+    """
     cutoff = datetime.utcnow() - timedelta(minutes=stale_after_minutes)
+    project_filter = " AND project_id = %s" if project_id is not None else ""
     recovered = 0
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT id, session_id, project_id, billing_user_id, reserved_charges, token_usage
+            SELECT id, session_id, project_id, status, billing_user_id, reserved_charges, token_usage
             FROM session_chat_runs
-            WHERE status IN ('running', 'cancel_requested')
-              AND (heartbeat_at IS NULL OR heartbeat_at < %s)
-            """,
-            (cutoff,),
+            WHERE ((status IN ('running', 'cancel_requested')
+                      AND (heartbeat_at IS NULL OR heartbeat_at < %s))
+                   OR (status = 'queued' AND created_at < %s))
+            """ + project_filter,
+            (cutoff, cutoff, project_id) if project_id is not None else (cutoff, cutoff),
         ).fetchall()
         for row in rows:
             run_id = _row_value(row, "id")
             session_id = _row_value(row, "session_id", 1)
-            project_id = _row_value(row, "project_id", 2)
+            run_project_id = _row_value(row, "project_id", 2)
+            status = _row_value(row, "status", 0) or "running"
             billing_user_id = _row_value(row, "billing_user_id", 3)
             reserved_charges = _json_loads(_row_value(row, "reserved_charges", 4), [])
             token_usage = _json_loads(_row_value(row, "token_usage", 5), None)
-            message = "Session chat was interrupted because the worker stopped before this run finished."
+            message = (
+                "Session chat was interrupted because no worker picked it up in time."
+                if status == "queued"
+                else "Session chat was interrupted because the worker stopped before this run finished."
+            )
             conn.execute(
                 """
                 UPDATE session_chat_runs
@@ -392,7 +407,7 @@ def recover_stale_runs(stale_after_minutes: int = 20) -> int:
                 SessionLockService.release_processing(int(session_id))
             except Exception as e:
                 logger.warning("[SESSION-RUN] failed to release stale processing for session %s: %s", session_id, e)
-            _release_project_lock_if_owner(project_id, session_id)
+            _release_project_lock_if_owner(run_project_id, session_id)
         conn.commit()
     if recovered:
         logger.warning("[SESSION-RUN] recovered %s stale running session chat runs", recovered)

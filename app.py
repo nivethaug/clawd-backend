@@ -7611,6 +7611,59 @@ class ActiveSessionResponse(BaseModel):
     active_session_id: Optional[int] = None
     session_name: Optional[str] = None
 
+def _self_heal_project_lock(project_id: int) -> bool:
+    """Release a project lock that no live chat backs.
+
+    Runs are the source of truth for "a chat is in progress": if the lock
+    holder has no queued/running run and isn't processing a message, the
+    lock is orphaned (durable enqueue failed after locking, API crashed
+    between lock and enqueue, or a release was missed). Called from the
+    polled active-session endpoint and the 423 path of /chat/stream, so a
+    stuck lock clears within one poll (~3s) with no extra infrastructure.
+
+    Stale-heartbeat / never-claimed runs are interrupted first (same
+    20-minute threshold the worker uses at startup), which also unblocks
+    the project when a worker died without restarting.
+
+    The per-session processing flag guards the brief window between
+    acquire_lock and create_run inside /chat/stream, and legacy in-memory
+    chats that never touch session_chat_runs.
+    """
+    try:
+        result = SessionLockService.get_active_session(project_id)
+        active_session_id = result.get("active_session_id")
+        if not active_session_id:
+            return False
+
+        from services.session_chat_runs import get_active_run_for_project, recover_stale_runs
+
+        recovered = recover_stale_runs(stale_after_minutes=20, project_id=project_id)
+
+        if get_active_run_for_project(project_id):
+            return False
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT processing FROM sessions WHERE id = ?",
+                (active_session_id,),
+            ).fetchone()
+        processing = (row.get("processing") if isinstance(row, dict) else row[0]) if row else False
+        if processing:
+            return False
+
+        release = SessionLockService.release_lock(project_id, active_session_id)
+        if release.get("released"):
+            logger.warning(
+                "[LOCK-HEAL] Auto-released orphaned project lock (project=%s, session=%s, stale_runs_recovered=%s)",
+                project_id, active_session_id, recovered,
+            )
+            return True
+        return False
+    except Exception as heal_err:
+        logger.warning("[LOCK-HEAL] self-heal failed for project %s: %s", project_id, heal_err)
+        return False
+
+
 @app.get("/projects/{project_id}/active-session", response_model=ActiveSessionResponse)
 async def get_active_session(
     project_id: int,
@@ -7630,6 +7683,10 @@ async def get_active_session(
     """
     user_id = _require_project_owner(project_id, authorization)
     result = SessionLockService.get_active_session(project_id)
+
+    # Self-heal: drop a lock nothing is running behind before reporting it.
+    if result.get("active_session_id") and _self_heal_project_lock(project_id):
+        result = SessionLockService.get_active_session(project_id)
 
     # If the lock is held by an admin-created session, hide it from
     # regular users (the session itself is invisible to them).
@@ -8034,10 +8091,14 @@ async def chat_stream_endpoint(
         # Acquire lock for this project/session
         lock_result = SessionLockService.acquire_lock(project_id, session_id)
         if not lock_result["success"]:
-            raise HTTPException(
-                status_code=423,  # Locked
-                detail={"error": lock_result["error"], "active_session_id": lock_result.get("active_session_id")}
-            )
+            # Lock may be orphaned (nothing running behind it) — heal and retry.
+            if _self_heal_project_lock(project_id):
+                lock_result = SessionLockService.acquire_lock(project_id, session_id)
+            if not lock_result["success"]:
+                raise HTTPException(
+                    status_code=423,  # Locked
+                    detail={"error": lock_result["error"], "active_session_id": lock_result.get("active_session_id")}
+                )
         # === END SESSION LOCK CHECK ===
 
         # One active conversation per project: if another session still has a
@@ -8361,6 +8422,9 @@ async def chat_stream_endpoint(
                     cleanup_chat_image_attachment(image_attachment, "[ACP-STREAM]")
                     if processing_acquired:
                         SessionLockService.release_processing(session_id)
+                    # The lock was acquired above but no run exists to release
+                    # it later — drop it now or it sticks until manual release.
+                    SessionLockService.release_lock(project_id, session_id)
                     if _chat_charged and _chat_user_id:
                         try:
                             from services.billing_service import refund_credits
@@ -9124,10 +9188,14 @@ async def chat_endpoint(
         # Acquire lock for this project/session
         lock_result = SessionLockService.acquire_lock(project_id, session_id)
         if not lock_result["success"]:
-            raise HTTPException(
-                status_code=423,  # Locked
-                detail={"error": lock_result["error"], "active_session_id": lock_result.get("active_session_id")}
-            )
+            # Lock may be orphaned (nothing running behind it) — heal and retry.
+            if _self_heal_project_lock(project_id):
+                lock_result = SessionLockService.acquire_lock(project_id, session_id)
+            if not lock_result["success"]:
+                raise HTTPException(
+                    status_code=423,  # Locked
+                    detail={"error": lock_result["error"], "active_session_id": lock_result.get("active_session_id")}
+                )
         # === END SESSION LOCK CHECK ===
 
         user_messages = [msg for msg in request.messages if msg.role == 'user']
