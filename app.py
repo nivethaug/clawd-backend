@@ -8040,6 +8040,21 @@ async def chat_stream_endpoint(
             )
         # === END SESSION LOCK CHECK ===
 
+        # One active conversation per project: if another session still has a
+        # queued/running chat run (e.g. the lock auto-released while a run
+        # finalizes), reject the send. Viewing/switching stays client-side free.
+        from services.session_chat_runs import get_active_run_for_project
+        other_active_run = get_active_run_for_project(project_id, exclude_session_id=session_id)
+        if other_active_run:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "project_chat_in_progress",
+                    "message": "Another chat in this project is still running. Wait for it to finish before sending.",
+                    "active_session_id": other_active_run["session_id"],
+                },
+            )
+
         user_messages = [msg for msg in request.messages if msg.role == 'user']
 
         if not user_messages:

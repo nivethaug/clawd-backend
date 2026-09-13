@@ -133,6 +133,42 @@ def get_active_run_for_session(session_key: str) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+def get_active_run_for_project(project_id: int, exclude_session_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Latest queued/running chat run for a project, optionally excluding one
+    session. Used to enforce one active conversation per project."""
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT id, session_id, status, created_at
+               FROM session_chat_runs
+               WHERE project_id = %s AND status IN ('queued', 'running', 'cancel_requested')
+               ORDER BY id DESC LIMIT 1""",
+            (project_id,),
+        ).fetchone()
+    if not row:
+        return None
+    run = {
+        "id": _row_value(row, "id", 0),
+        "session_id": _row_value(row, "session_id", 0),
+        "status": _row_value(row, "status", 0),
+        "created_at": _row_value(row, "created_at", 0),
+    }
+    if exclude_session_id is not None and run["session_id"] == exclude_session_id:
+        return None
+    return run
+
+
+def _release_project_lock_if_owner(project_id: Optional[int], session_id: Optional[int]) -> None:
+    """Auto-release the project session lock when a chat run reaches a
+    terminal state. release_lock is owner-checked and idempotent; the
+    owner session simply re-acquires on its next send (multi-turn)."""
+    if not project_id or not session_id:
+        return
+    try:
+        SessionLockService.release_lock(project_id, session_id)
+    except Exception as e:
+        logger.warning("[SESSION-RUN] project lock release failed (non-fatal): %s", e)
+
+
 def append_chunk(run_id: int, chunk_type: str, content: str) -> int:
     content = content or ""
     if not content:
@@ -314,7 +350,7 @@ def recover_stale_runs(stale_after_minutes: int = 20) -> int:
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT id, session_id, billing_user_id, reserved_charges, token_usage
+            SELECT id, session_id, project_id, billing_user_id, reserved_charges, token_usage
             FROM session_chat_runs
             WHERE status IN ('running', 'cancel_requested')
               AND (heartbeat_at IS NULL OR heartbeat_at < %s)
@@ -324,9 +360,10 @@ def recover_stale_runs(stale_after_minutes: int = 20) -> int:
         for row in rows:
             run_id = _row_value(row, "id")
             session_id = _row_value(row, "session_id", 1)
-            billing_user_id = _row_value(row, "billing_user_id", 2)
-            reserved_charges = _json_loads(_row_value(row, "reserved_charges", 3), [])
-            token_usage = _json_loads(_row_value(row, "token_usage", 4), None)
+            project_id = _row_value(row, "project_id", 2)
+            billing_user_id = _row_value(row, "billing_user_id", 3)
+            reserved_charges = _json_loads(_row_value(row, "reserved_charges", 4), [])
+            token_usage = _json_loads(_row_value(row, "token_usage", 5), None)
             message = "Session chat was interrupted because the worker stopped before this run finished."
             conn.execute(
                 """
@@ -355,6 +392,7 @@ def recover_stale_runs(stale_after_minutes: int = 20) -> int:
                 SessionLockService.release_processing(int(session_id))
             except Exception as e:
                 logger.warning("[SESSION-RUN] failed to release stale processing for session %s: %s", session_id, e)
+            _release_project_lock_if_owner(project_id, session_id)
         conn.commit()
     if recovered:
         logger.warning("[SESSION-RUN] recovered %s stale running session chat runs", recovered)
@@ -478,6 +516,7 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
 
         await auto_commit_selected_session_change(project_id, session_id, handler, channel_label)
         mark_completed(run_id, assistant_message_id, token_usage, has_writes)
+        _release_project_lock_if_owner(project_id, session_id)
         return {"status": "success", "message": assistant_content}
 
     except asyncio.CancelledError:
@@ -490,6 +529,7 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
                 logger.warning("[SESSION-RUN] failed to refund cancelled run %s: %s", run_id, e)
         mark_failed(run_id, "cancelled", "Session chat was cancelled.")
         append_chunk(run_id, "text", "Session chat was cancelled.")
+        _release_project_lock_if_owner(project_id, session_id)
         return {"status": "cancelled", "message": "Session chat was cancelled."}
     except Exception as e:
         logger.error("[SESSION-RUN] run %s failed: %s", run_id, e, exc_info=True)
@@ -516,6 +556,7 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
                 pass
         error_message = f"Session chat failed: {str(e)}"
         mark_failed(run_id, "failed", error_message)
+        _release_project_lock_if_owner(project_id, session_id)
         append_chunk(run_id, "text", error_message)
         try:
             with get_db() as conn:
