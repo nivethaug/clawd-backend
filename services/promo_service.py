@@ -22,7 +22,6 @@ Redemption lifecycle:
   user_id) makes both fulfillment paths idempotent.
 """
 
-import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -240,17 +239,23 @@ def ensure_lemonsqueezy_discount(promo: Dict[str, Any]) -> bool:
     if _load_ls_discount_map().get(code):
         return True
 
+    # ALWAYS cap LS-side: hosted LS checkouts expose a discount-code input,
+    # so a leaked code could be applied there directly, bypassing our
+    # per-user checks (our ledger never sees those redemptions). A hard
+    # provider-side cap bounds that blast radius; our DB stays the
+    # authoritative limiter for our own flow.
     max_redemptions = promo.get("max_redemptions")
     remaining = (
         int(max_redemptions) - int(promo.get("redeemed_count") or 0)
         if max_redemptions is not None
         else None
     )
+    ls_cap = remaining if remaining and remaining >= 1 else 1000
     result = create_discount(
         code=code,
         percent=float(promo["discount_percent"]),
         name=f"DreamAgent {code}",
-        max_redemptions=remaining if remaining and remaining >= 1 else None,
+        max_redemptions=ls_cap,
     )
     if result.get("error") or not result.get("id"):
         logger.error("[PROMO] LS discount create failed for %s: %s",
