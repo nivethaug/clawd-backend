@@ -171,16 +171,14 @@ def create_checkout_url(
                 },
                 "checkout_data": {
                     "email": user_email,
+                    # Pre-applied discount (per LS docs: discount_code is a
+                    # checkout_data child, NOT product_options).
+                    **({"discount_code": str(discount_code)} if discount_code else {}),
                     "custom": {
                         "user_id": str(user_id),
                         **(custom_data or {}),
                     },
                 },
-                **(
-                    {"product_options": {"discount_code": str(discount_code)}}
-                    if discount_code
-                    else {}
-                ),
             },
             "relationships": {
                 "store": {
