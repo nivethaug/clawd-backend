@@ -16,7 +16,7 @@ ZERO-IMPACT ISOLATION:
 """
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
@@ -61,6 +61,7 @@ class RazorpayVerifyRequest(BaseModel):
 
 class RazorpaySubscriptionRequest(BaseModel):
     plan_slug: str
+    promo_code: Optional[str] = None
 
 
 class RazorpaySubscriptionVerifyRequest(BaseModel):
@@ -325,14 +326,50 @@ async def create_razorpay_subscription(
     amount_paise = razorpay_service.usd_cents_to_inr_paise(
         int(plan["price_monthly_cents"])
     )
+
+    # Promo (percent-off, first charge only): validate server-side and mirror
+    # it as a native Razorpay coupon — Razorpay discounts only the first
+    # invoice; renewals bill the full plan amount.
+    promo_context = None
+    coupon_id = None
+    if request.promo_code:
+        from services.promo_service import (
+            PromoValidationError,
+            ensure_razorpay_coupon,
+            mark_pending_redemption,
+            validate_promo,
+        )
+        try:
+            with get_db() as conn:
+                promo_context = validate_promo(
+                    conn, request.promo_code, user_id, request.plan_slug
+                )
+        except PromoValidationError as e:
+            raise HTTPException(
+                status_code=422,
+                detail={"reason": e.reason, "message": e.message},
+            )
+        try:
+            coupon_id = ensure_razorpay_coupon(promo_context["promo"])
+        except Exception as e:
+            capture_payment_failure(
+                provider="razorpay", event="subscription_create",
+                reason="promo_coupon_error", user_id=user_id,
+                plan=request.plan_slug,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Promo is currently unavailable for this plan. Try again without the code.",
+            )
+
     try:
         rzp_plan_id = razorpay_service.ensure_razorpay_plan(
             request.plan_slug, plan.get("name", request.plan_slug), amount_paise
         )
-        sub = razorpay_service.create_subscription(
-            rzp_plan_id,
-            notes={"user_id": str(user_id), "plan_slug": request.plan_slug},
-        )
+        notes = {"user_id": str(user_id), "plan_slug": request.plan_slug}
+        if promo_context:
+            notes["promo_code"] = str(promo_context["promo"]["code"])
+        sub = razorpay_service.create_subscription(rzp_plan_id, notes=notes, coupon_id=coupon_id)
     except Exception as e:
         capture_payment_failure(
             provider="razorpay", event="subscription_create",
@@ -349,13 +386,30 @@ async def create_razorpay_subscription(
                VALUES (%s, 'razorpay', 'plan', %s, 'INR', %s, %s, 'created')""",
             (user_id, request.plan_slug, amount_paise, sub["subscription_id"]),
         )
+        if promo_context:
+            # Pending until the verify handler / webhook confirms activation.
+            mark_pending_redemption(
+                conn,
+                int(promo_context["promo"]["id"]),
+                user_id,
+                "razorpay",
+                sub["subscription_id"],
+            )
         conn.commit()
 
-    return {
+    response = {
         "subscription_id": sub["subscription_id"],
         "status": sub.get("status"),
         "key_id": razorpay_service._get_key_id(),
     }
+    if promo_context:
+        response["promo"] = {
+            "code": promo_context["promo"]["code"],
+            "discount_percent": promo_context["discount_percent"],
+            "discounted_inr_display": promo_context["discounted_inr_display"],
+            "original_inr_display": promo_context["original_inr_display"],
+        }
+    return response
 
 
 @router.post("/subscription/verify")
@@ -401,7 +455,33 @@ async def verify_razorpay_subscription(
 
     if status in ("active", "authenticated"):
         result = razorpay_service.fulfill_razorpay_subscription(entity)
+        _mark_promo_redeemed_from_notes(notes, request.razorpay_subscription_id)
         return {"success": True, "status": status, **result}
 
     return {"success": True, "status": status, "pending": True,
             "message": "Subscription pending activation; it will activate shortly."}
+
+
+def _mark_promo_redeemed_from_notes(notes: Dict[str, Any], subscription_id: str) -> None:
+    """Complete a pending promo redemption when a subscription activates.
+
+    Idempotent: mark_redeemed only transitions pending → redeemed once, so
+    the verify handler and the subscription.charged webhook can both call
+    this for the same subscription.
+    """
+    promo_code = (notes or {}).get("promo_code")
+    user_raw = (notes or {}).get("user_id")
+    if not promo_code or not user_raw:
+        return
+    try:
+        user_id = int(user_raw)
+    except (TypeError, ValueError):
+        return
+    try:
+        from services.promo_service import find_promo, mark_redeemed
+        with get_db() as conn:
+            promo = find_promo(conn, promo_code)
+            if promo:
+                mark_redeemed(conn, int(promo["id"]), user_id, subscription_id)
+    except Exception as e:
+        logger.warning("[PROMO] redemption reconcile failed for sub %s: %s", subscription_id, e)

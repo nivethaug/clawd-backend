@@ -50,6 +50,7 @@ def create_checkout_url(
     user_id: int,
     user_email: str,
     custom_data: Optional[Dict] = None,
+    custom_price_cents: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Create a LemonSqueezy checkout URL for a product variant.
 
@@ -58,6 +59,11 @@ def create_checkout_url(
         user_id: User making the purchase
         user_email: User's email (for LemonSqueezy customer record)
         custom_data: Extra metadata to pass through webhook
+        custom_price_cents: override the FIRST payment amount (USD cents).
+            For subscription variants, renewals bill the variant's normal
+            price — used for first-charge-only promo discounts. Requires
+            the variant to have custom price (PWYW) bounds enabled that
+            cover this amount.
 
     Returns:
         {"url": str, "checkout_id": str} or {"error": str}
@@ -114,6 +120,11 @@ def create_checkout_url(
                         **(custom_data or {}),
                     },
                 },
+                **(
+                    {"product_options": {"price": int(custom_price_cents)}}
+                    if custom_price_cents
+                    else {}
+                ),
             },
             "relationships": {
                 "store": {
@@ -321,6 +332,19 @@ def process_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
 
             assign_plan(conn, user_id, plan["slug"])
             conn.commit()
+
+            # Promo redemption reconciliation (first-charge-only promos):
+            # the pending row written at checkout becomes redeemed now that
+            # the subscription exists. Idempotent via mark_redeemed.
+            promo_code = custom_data.get("promo_code")
+            if promo_code:
+                try:
+                    from services.promo_service import find_promo, mark_redeemed
+                    promo = find_promo(conn, promo_code)
+                    if promo:
+                        mark_redeemed(conn, int(promo["id"]), user_id, data_id)
+                except Exception as promo_err:
+                    logger.warning("[LEMONSQUEEZY] promo reconcile failed: %s", promo_err)
 
         invalidate("all")
         logger.info(f"[LEMONSQUEZY] Assigned plan {plan['slug']} to user {user_id}")

@@ -338,17 +338,23 @@ def ensure_razorpay_plan(slug: str, name: str, amount_paise: int) -> str:
     return plan_id
 
 
-def create_subscription(plan_id: str, notes: Dict[str, str]) -> Dict[str, Any]:
+def create_subscription(plan_id: str, notes: Dict[str, str],
+                        coupon_id: Optional[str] = None) -> Dict[str, Any]:
     """Create a Razorpay subscription (monthly, 60 cycles ≈ until-cancelled).
 
     notes MUST carry user_id + plan_slug — they are the trusted linkage
     used by the subscription.charged webhook to fulfill.
+    coupon_id (optional): a Razorpay coupon applied to the subscription —
+    used for first-charge-only promo discounts (coupon duration is 1 month,
+    so renewals bill the full plan amount).
     """
     body = {
         "plan_id": plan_id,
         "total_count": SUBSCRIPTION_TOTAL_COUNT,
         "notes": {str(k): str(v) for k, v in (notes or {}).items()},
     }
+    if coupon_id:
+        body["coupon_id"] = coupon_id
     data = _api("POST", "/subscriptions", json_body=body)
     return {
         "subscription_id": data.get("id"),

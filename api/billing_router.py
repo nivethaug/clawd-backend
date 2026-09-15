@@ -207,12 +207,22 @@ async def get_credit_packs():
 # Checkout Endpoints
 # ============================================================================
 
+class PlanCheckoutRequest(BaseModel):
+    promo_code: Optional[str] = None
+
+
 @router.post("/checkout/plan/{plan_slug}")
 async def create_plan_checkout(
     plan_slug: str,
+    request: Optional[PlanCheckoutRequest] = None,
     authorization: Optional[str] = Header(None),
 ):
-    """Create a LemonSqueezy checkout URL for a plan subscription."""
+    """Create a LemonSqueezy checkout URL for a plan subscription.
+
+    Optional promo_code (percent-off, first charge only): validated
+    server-side; the checkout's FIRST payment is created at the discounted
+    custom price — renewals bill the variant's normal price.
+    """
     user_id = _get_user_id(authorization)
 
     from services.plan_cache import get_plan
@@ -229,13 +239,26 @@ async def create_plan_checkout(
         row = conn.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
         email = (dict(row) if row and not isinstance(row, dict) else row or {}).get("email", "")
 
+    # Promo validation (server-side; never trusts the client preview)
+    promo_context = None
+    promo_code = getattr(request, "promo_code", None) if request else None
+    if promo_code:
+        from services.promo_service import PromoValidationError, validate_promo
+        try:
+            with get_db() as conn:
+                promo_context = validate_promo(conn, promo_code, user_id, plan_slug)
+        except PromoValidationError as e:
+            raise HTTPException(
+                status_code=422, detail={"reason": e.reason, "message": e.message}
+            )
+
     from services.lemonsqueezy_service import create_checkout_url
     import os as _os
     # Inline check — don't trust service module (import-time caching issues on server)
     _api_key = _os.getenv('LEMONSQUEEZY_API_KEY', '')
     _store_id = _os.getenv('LEMONSQUEEZY_STORE_ID', '')
     _configured = bool(_api_key and _store_id)
-    logger.info(f"[LEMONSQUEZY] Plan checkout requested: plan={plan_slug}, variant_id={variant_id}, "
+    logger.info(f"[LEMONSQUEEZY] Plan checkout requested: plan={plan_slug}, variant_id={variant_id}, "
                 f"API_KEY={'set (' + str(len(_api_key)) + ' chars)' if _api_key else 'MISSING'}, "
                 f"STORE_ID={_store_id or 'MISSING'}, "
                 f"is_configured={_configured}")
@@ -243,21 +266,60 @@ async def create_plan_checkout(
         _audit("checkout", "provider_not_configured", user_id=user_id, plan=plan_slug, variant_id=variant_id)
         raise HTTPException(status_code=503, detail="Payment provider not configured")
 
+    custom_data = {"purchase_type": "subscription", "plan_slug": plan_slug}
+    custom_price = None
+    if promo_context:
+        custom_data["promo_code"] = str(promo_context["promo"]["code"])
+        custom_price = int(promo_context["discounted_cents"])
+
     result = create_checkout_url(
         variant_id=variant_id,
         user_id=user_id,
         user_email=email,
-        custom_data={"purchase_type": "subscription", "plan_slug": plan_slug},
+        custom_data=custom_data,
+        custom_price_cents=custom_price,
     )
 
     if result.get("error"):
         _audit("checkout", "checkout_failed", user_id=user_id, plan=plan_slug,
                variant_id=variant_id, reason=str(result.get("error"))[:120])
+        # LS rejects custom prices when variant bounds don't allow them —
+        # surface a clear promo-specific message instead of a raw API error.
+        if promo_context and "price" in str(result.get("error")).lower():
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "reason": "promo_unavailable",
+                    "message": "Promo is currently unavailable for this plan. Try again without the code.",
+                },
+            )
         raise HTTPException(status_code=502, detail=result["error"])
+
+    if promo_context:
+        from services.promo_service import mark_pending_redemption
+        try:
+            with get_db() as conn:
+                mark_pending_redemption(
+                    conn,
+                    int(promo_context["promo"]["id"]),
+                    user_id,
+                    "lemonsqueezy",
+                    None,  # subscription id only known after the webhook
+                )
+        except Exception as e:
+            logger.warning("[PROMO] failed to record pending LS redemption: %s", e)
 
     _audit("checkout", "plan_checkout_created", user_id=user_id, plan=plan_slug,
            variant_id=variant_id, checkout_id=str(result.get("checkout_id", ""))[:40])
-    return {"url": result.get("url"), "plan": plan_slug}
+    response = {"url": result.get("url"), "plan": plan_slug}
+    if promo_context:
+        response["promo"] = {
+            "code": promo_context["promo"]["code"],
+            "discount_percent": promo_context["discount_percent"],
+            "original_usd_display": promo_context["original_usd_display"],
+            "discounted_usd_display": promo_context["discounted_usd_display"],
+        }
+    return response
 
 
 @router.post("/checkout/credits")

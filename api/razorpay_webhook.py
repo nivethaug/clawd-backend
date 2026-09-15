@@ -96,9 +96,19 @@ def _process_event(event: dict) -> dict:
         )
 
     if event_name == "subscription.charged":
-        return razorpay_service.fulfill_razorpay_subscription(
+        result = razorpay_service.fulfill_razorpay_subscription(
             subscription, payment_entity=payment or None
         )
+        # Promo redemption reconciliation (idempotent — no-op when the
+        # verify handler already marked it or no promo was used).
+        sub_notes = subscription.get("notes") or {}
+        if sub_notes.get("promo_code") and subscription.get("id"):
+            try:
+                from api.razorpay_billing import _mark_promo_redeemed_from_notes
+                _mark_promo_redeemed_from_notes(sub_notes, subscription["id"])
+            except Exception as promo_err:
+                logger.warning("[WEBHOOK-RP] promo reconcile failed: %s", promo_err)
+        return result
 
     if event_name in ("subscription.halted", "subscription.cancelled",
                       "subscription.completed"):

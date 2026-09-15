@@ -1475,6 +1475,54 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added billing_config table")
 
+            # --- promo_codes (percent-off codes for subscription plans,
+            #     first charge only; managed by admins) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS promo_codes (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(40) NOT NULL UNIQUE,
+                description VARCHAR(200),
+                discount_percent NUMERIC(5,2) NOT NULL
+                    CHECK (discount_percent > 0 AND discount_percent <= 100),
+                max_redemptions INTEGER,
+                per_user_limit INTEGER NOT NULL DEFAULT 1,
+                redeemed_count INTEGER NOT NULL DEFAULT 0,
+                active BOOLEAN NOT NULL DEFAULT TRUE,
+                starts_at TIMESTAMP,
+                expires_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_promo_codes_active "
+                "ON promo_codes(active, expires_at)"
+            )
+            conn.commit()
+            logger.info("✓ Added promo_codes table with index")
+
+            # --- promo_redemptions (one row per user redemption; UNIQUE
+            #     (promo_id, user_id) makes fulfillment idempotent) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS promo_redemptions (
+                id SERIAL PRIMARY KEY,
+                promo_id INTEGER NOT NULL REFERENCES promo_codes(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                provider VARCHAR(20) NOT NULL,
+                external_subscription_id VARCHAR(120),
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE (promo_id, user_id)
+            )""")
+            conn.commit()
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_promo_redemptions_user "
+                "ON promo_redemptions(user_id, created_at DESC)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_promo_redemptions_sub "
+                "ON promo_redemptions(external_subscription_id)"
+            )
+            conn.commit()
+            logger.info("✓ Added promo_redemptions table with indexes")
+
             # ----------------------------------------------------------------
             # CONTAINER ISOLATION (Phase 3)
             # ----------------------------------------------------------------

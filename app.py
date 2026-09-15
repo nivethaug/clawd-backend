@@ -2113,6 +2113,11 @@ app.include_router(razorpay_billing_router, prefix="/api/billing/razorpay", tags
 from api.razorpay_webhook import router as razorpay_webhook_router
 app.include_router(razorpay_webhook_router, prefix="/webhooks", tags=["webhooks"])
 
+# Promo codes (percent-off subscription plans, first charge only, USD + INR).
+# Validation + admin management. See services/promo_service.py.
+from api.promo_router import router as promo_router
+app.include_router(promo_router, prefix="/api/billing/promo", tags=["billing-promo"])
+
 # Live support system (AI assistant + admin escalation) — isolated package:
 # api/support/ + services/support/, support_* tables only. See api/support/.
 from api.support.router import router as support_chat_router
