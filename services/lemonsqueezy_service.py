@@ -67,6 +67,10 @@ def create_discount(code: str, percent: float, name: str,
         )
         return {"error": "LemonSqueezy not configured"}
 
+    # Self-contained: no module constants/helpers — resilient to the file's
+    # surrounding vintage on deployed servers.
+    api_base = "https://api.lemonsqueezy.com/v1"
+
     attributes: Dict[str, Any] = {
         "name": name[:90],
         "code": code,
