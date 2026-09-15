@@ -88,8 +88,11 @@ def validate_promo(conn, code: str, user_id: int, plan_slug: str) -> Dict[str, A
         raise PromoValidationError("fully_redeemed", "This code has reached its redemption limit.")
 
     per_user_limit = int(promo.get("per_user_limit") or 1)
+    # Count REDEEMED only — an abandoned checkout leaves a 'pending' row
+    # that must not block the user from re-applying the code.
     used = conn.execute(
-        "SELECT COUNT(*) AS n FROM promo_redemptions WHERE promo_id = %s AND user_id = %s",
+        """SELECT COUNT(*) AS n FROM promo_redemptions
+           WHERE promo_id = %s AND user_id = %s AND status = 'redeemed'""",
         (promo["id"], user_id),
     ).fetchone()
     used_n = int((used.get("n") if isinstance(used, dict) else used[0]) or 0)
@@ -113,12 +116,16 @@ def validate_promo(conn, code: str, user_id: int, plan_slug: str) -> Dict[str, A
         # Guard against near-free first charges (LS min price / abuse).
         discounted_cents = 50
 
-    # INR previews reuse the exact conversion that produces real Razorpay
-    # amounts — the launch discount stacks multiplicatively with the promo.
+    # INR previews must mirror what each provider actually charges:
+    # - USD (LemonSqueezy custom price) = the discounted cents as-is.
+    # - INR (Razorpay coupon) = the percent applied to the REAL plan amount
+    #   (post launch-discount + rounding) — NOT a re-conversion of the
+    #   discounted USD, whose psychological rounding would diverge
+    #   (₹1,299 −20% = ₹1,039.20, not ₹999).
     from services.razorpay_service import inr_display, usd_cents_to_inr_paise
 
     original_inr_paise = usd_cents_to_inr_paise(original_cents)
-    discounted_inr_paise = usd_cents_to_inr_paise(discounted_cents)
+    discounted_inr_paise = int(round(original_inr_paise * (1 - percent / 100.0)))
 
     return {
         "promo": promo,

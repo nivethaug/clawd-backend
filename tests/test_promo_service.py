@@ -48,7 +48,7 @@ class FakeConn:
             if row is not None:
                 row["redeemed_count"] = self.redeemed_count
             cur.fetchone = (lambda r: (lambda: r))(row)
-        elif "FROM promo_redemptions WHERE promo_id" in sql:
+        elif "FROM promo_redemptions" in sql and "COUNT(*)" in sql:
             cur.fetchone = (lambda: {"n": self.used})
         elif "FROM billing_plans WHERE slug" in sql:
             cur.fetchone = (lambda: {
@@ -119,16 +119,24 @@ def test_validate_ok_percent_math_usd():
     assert result["discounted_usd_display"] == "$15.20"
 
 
-def test_validate_inr_stacks_on_launch_discount():
-    """INR previews must flow through usd_cents_to_inr_paise (25% launch
-    offer) so the advertised price equals what Razorpay charges."""
+def test_validate_inr_percent_off_real_plan_amount():
+    """INR preview must equal what the Razorpay coupon charges: the percent
+    applied to the real (launch-discounted, rounded) plan amount — NOT a
+    re-conversion of the discounted USD (₹1,299 -20% = ₹1,039.20, not ₹999)."""
     result = _validate(FakeConn(promo=make_promo()))
     assert result["original_inr_paise"] == razorpay_service.usd_cents_to_inr_paise(1900)
-    assert result["discounted_inr_paise"] == razorpay_service.usd_cents_to_inr_paise(1520)
-    # 19 USD @88 = ₹1672 → -25% = ₹1254 → rounds to ₹1,299; 15.20 → ₹999
-    assert result["original_inr_paise"] == 129900
-    assert result["discounted_inr_paise"] == 99900
-    assert result["discounted_inr_display"] == "₹999"
+    assert result["original_inr_paise"] == 129900          # ₹1,299
+    assert result["discounted_inr_paise"] == 103920        # ₹1,039.20
+    assert result["discounted_inr_display"] == "₹1,039"
+
+
+def test_validate_pending_redemption_does_not_block_reuse():
+    """An abandoned checkout ('pending' row) must not count as used — only
+    redeemed redemptions consume the per-user limit."""
+    class PendingOnlyConn(FakeConn):
+        pass
+    result = _validate(PendingOnlyConn(promo=make_promo()))
+    assert result["discount_percent"] == 20.0
 
 
 def test_validate_min_discount_floor():

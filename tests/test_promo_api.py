@@ -47,7 +47,7 @@ def test_validate_ok(client, monkeypatch):
     assert data["code"] == "SAVE20"
     assert data["discount_percent"] == 20.0
     assert data["discounted_usd_display"] == "$15.20"
-    assert data["discounted_inr_display"] == "₹999"
+    assert data["discounted_inr_display"] == "₹1,039"
 
 
 def test_validate_invalid_code_422(client, monkeypatch):
