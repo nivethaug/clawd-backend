@@ -55,8 +55,16 @@ def create_discount(code: str, percent: float, name: str,
     remains the authoritative per-user limiter either way.
     Returns the LS discount attributes or {"error": str}.
     """
-    api_key, store_id = _get_api_key(), _get_store_id()
+    # Inline env reads (same defensive pattern as create_checkout_url —
+    # don't trust module helpers on the server; they have bitten before).
+    api_key = os.getenv("LEMONSQUEEZY_API_KEY", "")
+    store_id = os.getenv("LEMONSQUEEZY_STORE_ID", "")
     if not api_key or not store_id:
+        logger.error(
+            "[LEMONSQUEEZY] create_discount env check failed — "
+            "API_KEY=%s chars, STORE_ID=%r",
+            len(api_key), store_id,
+        )
         return {"error": "LemonSqueezy not configured"}
 
     attributes: Dict[str, Any] = {
