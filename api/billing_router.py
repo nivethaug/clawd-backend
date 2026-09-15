@@ -570,7 +570,7 @@ async def admin_billing_stats(authorization: Optional[str] = Header(None)):
             """SELECT p.slug, p.name, COUNT(u.id) as user_count
                FROM billing_plans p
                LEFT JOIN users u ON u.plan_id = p.id
-               GROUP BY p.slug, p.name
+               GROUP BY p.slug, p.name, p.sort_order
                ORDER BY p.sort_order"""
         ).fetchall()
 

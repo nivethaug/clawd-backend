@@ -207,6 +207,10 @@ def get_operation(code: str) -> Optional[Dict[str, Any]]:
     return get_plan_cache().get_operation(code)
 
 
+def get_all_operations() -> Dict[str, Dict[str, Any]]:
+    return get_plan_cache().get_all_operations()
+
+
 def get_operation_for_type(type_id: int) -> Optional[Dict[str, Any]]:
     return get_plan_cache().get_operation_for_type(type_id)
 
