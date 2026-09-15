@@ -8,8 +8,10 @@ Scope (deliberate):
   - Razorpay (INR): a native Razorpay coupon (percent, duration 1 month) is
     created lazily per promo code and passed to subscription creation —
     Razorpay's billing engine discounts only the first invoice.
-  - LemonSqueezy (USD): the checkout is created with a custom first-order
-    price (product_options.price); renewals bill the variant's normal price.
+  - LemonSqueezy (USD): a native LS discount (duration="first") is created
+    lazily and pre-applied to the checkout via
+    checkout_data.discount_code — LS discounts only the first billing
+    cycle; renewals bill the variant's full price.
 
 Advertised = charged: preview prices returned by validate_promo() use the
 SAME conversion choke point (razorpay_service.usd_cents_to_inr_paise) that

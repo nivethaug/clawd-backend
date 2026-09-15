@@ -324,3 +324,45 @@ def test_ensure_lemonsqueezy_discount_provider_failure(monkeypatch):
     monkeypatch.setattr(plan_cache, "get_billing_config",
                         lambda key, default=None: {})
     assert ps.ensure_lemonsqueezy_discount(make_promo()) is False
+
+
+def test_checkout_payload_puts_discount_code_in_checkout_data(monkeypatch):
+    """Regression lock: discount_code must be a checkout_data child (LS docs).
+    In product_options it is silently ignored — the exact bug where the
+    promo validated but the hosted checkout charged full price."""
+    import services.lemonsqueezy_service as ls_service
+
+    captured = {}
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"data": {"id": "co_1", "attributes": {"url": "https://ls.test/co/1"}}}
+
+    import types
+    import sys
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        captured["url"] = url
+        captured["payload"] = json
+        return FakeResp()
+
+    fake_module = types.SimpleNamespace(post=_fake_post)
+    monkeypatch.setitem(sys.modules, "httpx", fake_module)
+    # create_checkout_url reads env directly (not the _get_* helpers).
+    monkeypatch.setenv("LEMONSQUEEZY_API_KEY", "lk_test")
+    monkeypatch.setenv("LEMONSQUEEZY_STORE_ID", "store_1")
+
+    result = ls_service.create_checkout_url(
+        variant_id="var_1", user_id=42, user_email="a@b.c",
+        custom_data={"purchase_type": "subscription"},
+        discount_code="SAVE20",
+    )
+    assert result["url"].endswith("/co/1")
+    attrs = captured["payload"]["data"]["attributes"]
+    assert attrs["checkout_data"]["discount_code"] == "SAVE20"
+    assert "discount_code" not in attrs.get("product_options", {})
+    # Without a code the key is absent entirely (old behavior preserved).
+    ls_service.create_checkout_url(variant_id="var_1", user_id=42, user_email="a@b.c")
+    assert "discount_code" not in captured["payload"]["data"]["attributes"]["checkout_data"]
