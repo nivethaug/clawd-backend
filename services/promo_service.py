@@ -29,8 +29,9 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# billing_config key for the promo code → Razorpay coupon id map
+# billing_config keys for the provider coupon/discount mirrors
 PROMO_COUPON_MAP_KEY = "PROMO_RAZORPAY_COUPON_MAP"
+PROMO_LS_DISCOUNT_MAP_KEY = "PROMO_LS_DISCOUNT_MAP"
 
 
 class PromoValidationError(Exception):
@@ -153,6 +154,35 @@ def _load_coupon_map() -> Dict[str, str]:
     return val if isinstance(val, dict) else {}
 
 
+def _load_ls_discount_map() -> Dict[str, str]:
+    from services.plan_cache import get_billing_config
+
+    val = get_billing_config(PROMO_LS_DISCOUNT_MAP_KEY, {})
+    return val if isinstance(val, dict) else {}
+
+
+def _save_config_map(key: str, mapping: Dict[str, str]) -> None:
+    """Persist a promo mirror map to billing_config (non-fatal on failure)."""
+    import json as _json
+
+    from database_adapter import get_db
+
+    try:
+        with get_db() as conn:
+            conn.execute(
+                """INSERT INTO billing_config (key, value)
+                   VALUES (%s, %s::jsonb)
+                   ON CONFLICT (key) DO UPDATE SET
+                     value = EXCLUDED.value, updated_at = NOW()""",
+                (key, _json.dumps(mapping)),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning("[PROMO] failed to cache %s: %s", key, e)
+    from services.plan_cache import invalidate
+    invalidate("config")
+
+
 def ensure_razorpay_coupon(promo: Dict[str, Any]) -> str:
     """Find or create the Razorpay coupon mirroring a promo code.
 
@@ -190,24 +220,47 @@ def ensure_razorpay_coupon(promo: Dict[str, Any]) -> str:
     })
     coupon_id = str(data["id"])
 
-    try:
-        with get_db() as conn:
-            mapping = _load_coupon_map()
-            mapping[code] = coupon_id
-            conn.execute(
-                """INSERT INTO billing_config (key, value)
-                   VALUES (%s, %s::jsonb)
-                   ON CONFLICT (key) DO UPDATE SET
-                     value = EXCLUDED.value, updated_at = NOW()""",
-                (PROMO_COUPON_MAP_KEY, json.dumps(mapping)),
-            )
-            conn.commit()
-    except Exception as e:
-        logger.warning("[PROMO] failed to cache coupon map: %s", e)
-
-    from services.plan_cache import invalidate
-    invalidate("config")
+    mapping = _load_coupon_map()
+    mapping[code] = coupon_id
+    _save_config_map(PROMO_COUPON_MAP_KEY, mapping)
     return coupon_id
+
+
+def ensure_lemonsqueezy_discount(promo: Dict[str, Any]) -> bool:
+    """Find or create the LemonSqueezy discount mirroring a promo code.
+
+    duration="first" discounts only the FIRST billing cycle — renewals bill
+    the variant's full price (same semantics as the Razorpay coupon).
+    Returns True when the discount exists (cached or created); False on a
+    provider error (caller surfaces a clear message).
+    """
+    from services.lemonsqueezy_service import create_discount
+
+    code = normalize_code(promo["code"])
+    if _load_ls_discount_map().get(code):
+        return True
+
+    max_redemptions = promo.get("max_redemptions")
+    remaining = (
+        int(max_redemptions) - int(promo.get("redeemed_count") or 0)
+        if max_redemptions is not None
+        else None
+    )
+    result = create_discount(
+        code=code,
+        percent=float(promo["discount_percent"]),
+        name=f"DreamAgent {code}",
+        max_redemptions=remaining if remaining and remaining >= 1 else None,
+    )
+    if result.get("error") or not result.get("id"):
+        logger.error("[PROMO] LS discount create failed for %s: %s",
+                     code, result.get("error"))
+        return False
+
+    mapping = _load_ls_discount_map()
+    mapping[code] = str(result["id"])
+    _save_config_map(PROMO_LS_DISCOUNT_MAP_KEY, mapping)
+    return True
 
 
 # ======================================================================

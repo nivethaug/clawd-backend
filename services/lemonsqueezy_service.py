@@ -42,6 +42,64 @@ def is_configured() -> bool:
 
 
 # ======================================================================
+# Discounts (promo-code mirror — first billing cycle only)
+# ======================================================================
+
+def create_discount(code: str, percent: float, name: str,
+                    max_redemptions: Optional[int] = None) -> Dict[str, Any]:
+    """Create a LemonSqueezy discount mirroring a DreamAgent promo code.
+
+    duration="first" discounts ONLY the first billing cycle — renewals bill
+    the full variant price (matches the Razorpay coupon mirror exactly).
+    Mirrors our redemption cap when the promo has one; the DreamAgent DB
+    remains the authoritative per-user limiter either way.
+    Returns the LS discount attributes or {"error": str}.
+    """
+    api_key, store_id = _get_api_key(), _get_store_id()
+    if not api_key or not store_id:
+        return {"error": "LemonSqueezy not configured"}
+
+    attributes: Dict[str, Any] = {
+        "name": name[:90],
+        "code": code,
+        "amount_percentage": float(percent),
+        "duration": "first",
+        "is_limited_redemptions": bool(max_redemptions),
+    }
+    if max_redemptions:
+        attributes["max_redemptions"] = int(max_redemptions)
+
+    try:
+        import httpx
+        resp = httpx.post(
+            f"{LEMONSQUEEZY_API_BASE}/discounts",
+            headers={
+                "Accept": "application/vnd.api+json",
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/vnd.api+json",
+            },
+            json={
+                "data": {
+                    "type": "discounts",
+                    "attributes": attributes,
+                    "relationships": {
+                        "store": {"data": {"type": "stores", "id": store_id}},
+                    },
+                }
+            },
+            timeout=15.0,
+        )
+        if resp.status_code >= 400:
+            logger.error("[LEMONSQUEEZY] discount create HTTP %s: %s",
+                         resp.status_code, resp.text[:200])
+            return {"error": f"LemonSqueezy discount API error {resp.status_code}: {resp.text[:200]}"}
+        return {"id": resp.json().get("data", {}).get("id")}
+    except Exception as e:
+        logger.error("[LEMONSQUEEZY] discount create failed: %s", e)
+        return {"error": str(e)}
+
+
+# ======================================================================
 # Checkout URL Generation
 # ======================================================================
 
@@ -50,7 +108,7 @@ def create_checkout_url(
     user_id: int,
     user_email: str,
     custom_data: Optional[Dict] = None,
-    custom_price_cents: Optional[int] = None,
+    discount_code: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a LemonSqueezy checkout URL for a product variant.
 
@@ -59,11 +117,9 @@ def create_checkout_url(
         user_id: User making the purchase
         user_email: User's email (for LemonSqueezy customer record)
         custom_data: Extra metadata to pass through webhook
-        custom_price_cents: override the FIRST payment amount (USD cents).
-            For subscription variants, renewals bill the variant's normal
-            price — used for first-charge-only promo discounts. Requires
-            the variant to have custom price (PWYW) bounds enabled that
-            cover this amount.
+        discount_code: pre-apply an LS discount (promo mirror). The
+            discount's own duration ("first") controls renewal behavior —
+            only the first billing cycle is discounted.
 
     Returns:
         {"url": str, "checkout_id": str} or {"error": str}
@@ -121,8 +177,8 @@ def create_checkout_url(
                     },
                 },
                 **(
-                    {"product_options": {"price": int(custom_price_cents)}}
-                    if custom_price_cents
+                    {"product_options": {"discount_code": str(discount_code)}}
+                    if discount_code
                     else {}
                 ),
             },

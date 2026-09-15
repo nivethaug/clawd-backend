@@ -282,3 +282,45 @@ def test_ensure_razorpay_coupon_unlimited_uses_cap(monkeypatch):
     assert body["max_count"] == 1000
     ensure_razorpay_coupon(make_promo(max_redemptions=5, redeemed_count=2))
     assert body["max_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# LemonSqueezy discount mirror + caching
+# ---------------------------------------------------------------------------
+
+def test_ensure_lemonsqueezy_discount_creates_once_and_caches(monkeypatch):
+    import services.lemonsqueezy_service as ls_service
+    import services.promo_service as ps
+
+    calls = []
+
+    def fake_create_discount(code, percent, name, max_redemptions=None):
+        calls.append({"code": code, "percent": percent, "max": max_redemptions})
+        return {"id": "ls_discount_1"}
+
+    monkeypatch.setattr(ls_service, "create_discount", fake_create_discount)
+    # Starts empty; the (no-op) save populates it like the real cache write.
+    holder = {}
+    monkeypatch.setattr(plan_cache, "get_billing_config",
+                        lambda key, default=None: holder.get(key, {})
+                        if key == ps.PROMO_LS_DISCOUNT_MAP_KEY else 88)
+    monkeypatch.setattr(ps, "_save_config_map",
+                        lambda key, mapping: holder.update({key: mapping}))
+
+    promo = make_promo()
+    assert ps.ensure_lemonsqueezy_discount(promo) is True
+    assert calls[0]["percent"] == 20.0
+    # Cached → no second provider call.
+    assert ps.ensure_lemonsqueezy_discount(promo) is True
+    assert len(calls) == 1
+
+
+def test_ensure_lemonsqueezy_discount_provider_failure(monkeypatch):
+    import services.lemonsqueezy_service as ls_service
+    import services.promo_service as ps
+
+    monkeypatch.setattr(ls_service, "create_discount",
+                        lambda **kw: {"error": "LemonSqueezy not configured"})
+    monkeypatch.setattr(plan_cache, "get_billing_config",
+                        lambda key, default=None: {})
+    assert ps.ensure_lemonsqueezy_discount(make_promo()) is False

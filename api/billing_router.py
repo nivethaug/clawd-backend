@@ -220,8 +220,9 @@ async def create_plan_checkout(
     """Create a LemonSqueezy checkout URL for a plan subscription.
 
     Optional promo_code (percent-off, first charge only): validated
-    server-side; the checkout's FIRST payment is created at the discounted
-    custom price — renewals bill the variant's normal price.
+    server-side and mirrored as a LemonSqueezy discount (duration="first")
+    that is pre-applied to the checkout — LS discounts only the first
+    billing cycle; renewals bill the variant's full price.
     """
     user_id = _get_user_id(authorization)
 
@@ -243,13 +244,24 @@ async def create_plan_checkout(
     promo_context = None
     promo_code = getattr(request, "promo_code", None) if request else None
     if promo_code:
-        from services.promo_service import PromoValidationError, validate_promo
+        from services.promo_service import (
+            PromoValidationError,
+            ensure_lemonsqueezy_discount,
+            validate_promo,
+        )
         try:
             with get_db() as conn:
                 promo_context = validate_promo(conn, promo_code, user_id, plan_slug)
         except PromoValidationError as e:
             raise HTTPException(
                 status_code=422, detail={"reason": e.reason, "message": e.message}
+            )
+        if not ensure_lemonsqueezy_discount(promo_context["promo"]):
+            _audit("checkout", "checkout_failed", user_id=user_id, plan=plan_slug,
+                   variant_id=variant_id, reason="promo_discount_error")
+            raise HTTPException(
+                status_code=502,
+                detail="Promo is currently unavailable for this plan. Try again without the code.",
             )
 
     from services.lemonsqueezy_service import create_checkout_url
@@ -267,25 +279,26 @@ async def create_plan_checkout(
         raise HTTPException(status_code=503, detail="Payment provider not configured")
 
     custom_data = {"purchase_type": "subscription", "plan_slug": plan_slug}
-    custom_price = None
+    discount_code = None
     if promo_context:
-        custom_data["promo_code"] = str(promo_context["promo"]["code"])
-        custom_price = int(promo_context["discounted_cents"])
+        promo_code_str = str(promo_context["promo"]["code"])
+        custom_data["promo_code"] = promo_code_str
+        discount_code = promo_code_str
 
     result = create_checkout_url(
         variant_id=variant_id,
         user_id=user_id,
         user_email=email,
         custom_data=custom_data,
-        custom_price_cents=custom_price,
+        discount_code=discount_code,
     )
 
     if result.get("error"):
         _audit("checkout", "checkout_failed", user_id=user_id, plan=plan_slug,
                variant_id=variant_id, reason=str(result.get("error"))[:120])
-        # LS rejects custom prices when variant bounds don't allow them —
-        # surface a clear promo-specific message instead of a raw API error.
-        if promo_context and "price" in str(result.get("error")).lower():
+        # LS rejects discount codes it doesn't recognize — surface a clear
+        # promo-specific message instead of a raw API error.
+        if promo_context and "discount" in str(result.get("error")).lower():
             raise HTTPException(
                 status_code=422,
                 detail={
