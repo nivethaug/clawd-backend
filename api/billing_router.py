@@ -240,7 +240,23 @@ async def create_plan_checkout(
         row = conn.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
         email = (dict(row) if row and not isinstance(row, dict) else row or {}).get("email", "")
 
-    # Promo validation (server-side; never trusts the client preview)
+    from services.lemonsqueezy_service import create_checkout_url
+    import os as _os
+    # Inline check — don't trust service module (import-time caching issues on server)
+    _api_key = _os.getenv('LEMONSQUEEZY_API_KEY', '')
+    _store_id = _os.getenv('LEMONSQUEEZY_STORE_ID', '')
+    _configured = bool(_api_key and _store_id)
+    logger.info(f"[LEMONSQUEEZY] Plan checkout requested: plan={plan_slug}, variant_id={variant_id}, "
+                f"API_KEY={'set (' + str(len(_api_key)) + ' chars)' if _api_key else 'MISSING'}, "
+                f"STORE_ID={_store_id or 'MISSING'}, "
+                f"is_configured={_configured}")
+    if not _configured:
+        _audit("checkout", "provider_not_configured", user_id=user_id, plan=plan_slug, variant_id=variant_id)
+        raise HTTPException(status_code=503, detail="Payment provider not configured")
+
+    # Promo validation (server-side; never trusts the client preview).
+    # Runs AFTER the provider check so a missing provider reports 503, not
+    # a misleading promo error.
     promo_context = None
     promo_code = getattr(request, "promo_code", None) if request else None
     if promo_code:
@@ -263,20 +279,6 @@ async def create_plan_checkout(
                 status_code=502,
                 detail="Promo is currently unavailable for this plan. Try again without the code.",
             )
-
-    from services.lemonsqueezy_service import create_checkout_url
-    import os as _os
-    # Inline check — don't trust service module (import-time caching issues on server)
-    _api_key = _os.getenv('LEMONSQUEEZY_API_KEY', '')
-    _store_id = _os.getenv('LEMONSQUEEZY_STORE_ID', '')
-    _configured = bool(_api_key and _store_id)
-    logger.info(f"[LEMONSQUEEZY] Plan checkout requested: plan={plan_slug}, variant_id={variant_id}, "
-                f"API_KEY={'set (' + str(len(_api_key)) + ' chars)' if _api_key else 'MISSING'}, "
-                f"STORE_ID={_store_id or 'MISSING'}, "
-                f"is_configured={_configured}")
-    if not _configured:
-        _audit("checkout", "provider_not_configured", user_id=user_id, plan=plan_slug, variant_id=variant_id)
-        raise HTTPException(status_code=503, detail="Payment provider not configured")
 
     custom_data = {"purchase_type": "subscription", "plan_slug": plan_slug}
     discount_code = None
