@@ -7991,6 +7991,96 @@ async def seed_session_message(
     return {"success": True, "session_id": session_id, "role": role}
 
 
+@app.post("/projects/{project_id}/creation-summary")
+async def get_project_creation_summary(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Turn the agent-written projectcreationstatus.md into a friendly,
+    non-technical chat message for the project's first session.
+
+    The raw report is developer-speak (file paths, build output, framework
+    terms). A single cheap GLM call rewrites it into "What you got /
+    What's next" plain English; on any LLM failure we return a
+    lightly-cleaned fallback (or null to skip seeding silently).
+    """
+    _require_project_owner(project_id, authorization)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+    project_path = (row.get("project_path") if isinstance(row, dict) else row[0]) if row else None
+    if not project_path:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    path = os.path.join(str(project_path), "projectcreationstatus.md")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            raw = f.read(30000)
+    except OSError:
+        return {"content": None}
+    if not raw.strip():
+        return {"content": None}
+
+    system_prompt = (
+        "You are DreamAgent, an AI app builder. The user's project was just built "
+        "and they are NOT technical. Rewrite the developer build report below as a "
+        "short, warm chat message in plain English:\n"
+        "1) '🎉 What you got' — 3-6 bullets describing the delivered features in "
+        "user terms (what they can see and do, not how it was coded)\n"
+        "2) '👉 What's next' — up to 4 suggested next steps phrased as things they "
+        "can simply ask for in chat\n"
+        "3) One friendly closing line inviting them to try it or ask for changes\n"
+        "Rules: absolutely no file paths, no code identifiers, no framework/build/"
+        "test jargon, no emoji besides the two section headers. Max ~180 words. "
+        "Output ONLY the message.\n\nBUILD REPORT:\n"
+    )
+
+    try:
+        import asyncio as _asyncio
+        from services.ai.openrouter_client import get_openrouter_client
+
+        client = get_openrouter_client()
+        response = await _asyncio.wait_for(
+            client.chat_completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": raw[:12000]},
+                ],
+                temperature=0.3,
+                max_tokens=600,
+            ),
+            timeout=25,
+        )
+        friendly = (client.get_text_response(response) or "").strip()
+    except Exception as llm_err:
+        logger.warning("[CREATION-SUMMARY] LLM rewrite failed: %s", llm_err)
+        friendly = ""
+
+    if friendly:
+        return {"content": friendly[:8000]}
+
+    # Fallback: strip the most technical lines so the raw report is at least
+    # skim-able; drop file paths, build output, and code identifiers.
+    cleaned_lines = []
+    for line in raw.splitlines():
+        if not line.strip():
+            cleaned_lines.append(line)
+            continue
+        low = line.lower()
+        if low.startswith(("# project creation status", "## next steps")):
+            continue
+        if any(tok in low for tok in (
+            "src/", ".tsx", ".ts:", "npm ", "build ✓", "ok:true", "mainw",
+            "route", "<", "`", ".env", "oauth", "endpoint", "component",
+        )):
+            continue
+        cleaned_lines.append(line)
+    cleaned = "\n".join(cleaned_lines).strip()
+    return {"content": (cleaned[:4000] if len(cleaned) > 200 else None)}
+
+
 @app.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: int,
