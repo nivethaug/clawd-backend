@@ -8007,12 +8007,14 @@ async def get_project_creation_summary(
     _require_project_owner(project_id, authorization)
     with get_db() as conn:
         row = conn.execute(
-            "SELECT project_path FROM projects WHERE id = ?",
+            "SELECT project_path, domain, type_id FROM projects WHERE id = ?",
             (project_id,),
         ).fetchone()
     project_path = (row.get("project_path") if isinstance(row, dict) else row[0]) if row else None
     if not project_path:
         raise HTTPException(status_code=404, detail="Project not found")
+    domain = (row.get("domain") if isinstance(row, dict) else row[1]) if row else None
+    type_id = (row.get("type_id") if isinstance(row, dict) else row[2]) if row else None
 
     path = os.path.join(str(project_path), "projectcreationstatus.md")
     try:
@@ -8058,8 +8060,27 @@ async def get_project_creation_summary(
         logger.warning("[CREATION-SUMMARY] LLM rewrite failed: %s", llm_err)
         friendly = ""
 
+    # Type-aware action line: websites get their live link; bots/agents get
+    # a "test it" invitation the session agent can actually run.
+    action_line = ""
+    public_url = _project_public_url(domain)
+    if public_url:
+        action_line = (
+            f"\n\n🌐 **Live now:** [{public_url}]({public_url}) — "
+            "open it and tell me what to change."
+        )
+    elif type_id in (2, 3):
+        action_line = (
+            "\n\n🤖 Your bot is live — say **\"test it\"** here and "
+            "I'll verify it responds end to end."
+        )
+    else:
+        action_line = (
+            "\n\n▶️ It's live — say **\"test it\"** and I'll run a quick check."
+        )
+
     if friendly:
-        return {"content": friendly[:8000]}
+        return {"content": (friendly + action_line)[:8000]}
 
     # Fallback: strip the most technical lines so the raw report is at least
     # skim-able; drop file paths, build output, and code identifiers.
@@ -8078,7 +8099,9 @@ async def get_project_creation_summary(
             continue
         cleaned_lines.append(line)
     cleaned = "\n".join(cleaned_lines).strip()
-    return {"content": (cleaned[:4000] if len(cleaned) > 200 else None)}
+    if len(cleaned) > 200:
+        return {"content": (cleaned + action_line)[:8000]}
+    return {"content": None}
 
 
 @app.delete("/sessions/{session_id}")
