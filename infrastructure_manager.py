@@ -2048,14 +2048,28 @@ class InfrastructureManager:
                 logger.warning(f"[CLONE-DB] Copy failed (clone proceeds with empty DB): {result.stderr[:300]}")
                 return
             # The app user got DB+schema grants in Phase 2, but tables restored
-            # by the superuser need explicit table-level grants.
+            # by the superuser need explicit table-level grants AND ownership —
+            # apps that ALTER TABLE at startup (e.g. ADD COLUMN migrations)
+            # fail with InsufficientPrivilege unless they OWN the tables.
             username = self.database_info.get("username")
-            if username:
+            if username and username.replace("_", "").isalnum():
                 for grant_sql in (
                     f'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "{username}";',
                     f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "{username}";',
                 ):
                     self.db_provisioner._execute_sql(grant_sql, database_name=target_db)
+                reassign_sql = (
+                    "DO $$ DECLARE r record; BEGIN "
+                    "FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP "
+                    f"EXECUTE format('ALTER TABLE public.%I OWNER TO %I', r.tablename, '{username}'); "
+                    "END LOOP; "
+                    "FOR r IN SELECT sequencename FROM pg_sequences WHERE schemaname='public' LOOP "
+                    f"EXECUTE format('ALTER SEQUENCE public.%I OWNER TO %I', r.sequencename, '{username}'); "
+                    "END LOOP; END $$;"
+                )
+                self.db_provisioner._execute_sql(reassign_sql, database_name=target_db)
+            elif username:
+                logger.warning(f"[CLONE-DB] skipping ownership reassign — unsafe username: {username!r}")
             logger.info(f"✓ [CLONE-DB] {source_db} schema copied into {target_db} — tables only, 0 data rows (grants applied)")
 
         except Exception as e:
