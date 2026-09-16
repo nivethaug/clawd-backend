@@ -7764,12 +7764,37 @@ def _self_heal_project_lock(project_id: int) -> bool:
 
         with get_db() as conn:
             row = conn.execute(
-                "SELECT processing FROM sessions WHERE id = ?",
+                "SELECT processing, processing_started_at FROM sessions WHERE id = ?",
                 (active_session_id,),
             ).fetchone()
         processing = (row.get("processing") if isinstance(row, dict) else row[0]) if row else False
+        started_at = (row.get("processing_started_at") if isinstance(row, dict) else row[1]) if row else None
         if processing:
-            return False
+            # No active run backs this flag. A LIVE send sets processing
+            # milliseconds before creating its run, so only clear flags
+            # older than a short grace window — otherwise a died-without-
+            # cleanup message blocks the session until the 90-minute
+            # acquire staleness kicks in (observed in the wild).
+            from datetime import datetime as _dt, timedelta as _td
+            stale_processing = True
+            if isinstance(started_at, _dt):
+                stale_processing = _dt.utcnow() - started_at.replace(tzinfo=None) > _td(minutes=5)
+            if not stale_processing:
+                return False
+            try:
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE sessions SET processing = FALSE WHERE id = ?",
+                        (active_session_id,),
+                    )
+                    conn.commit()
+                logger.warning(
+                    "[LOCK-HEAL] Cleared orphaned processing flag (project=%s, session=%s)",
+                    project_id, active_session_id,
+                )
+            except Exception as clear_err:
+                logger.warning("[LOCK-HEAL] processing clear failed: %s", clear_err)
+                return False
 
         release = SessionLockService.release_lock(project_id, active_session_id)
         if release.get("released"):
