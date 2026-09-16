@@ -235,6 +235,66 @@ def update_heartbeat(run_id: int) -> None:
         conn.commit()
 
 
+def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
+                           domain: str, type_id: int, creation_prompt: str) -> None:
+    """Create the project's first session at DB level and insert the chat
+    handoff directly: creation prompt (user) + formal deployment
+    confirmation with the live link (assistant). Idempotent — skipped when
+    the project already has a session. All failures are non-fatal."""
+    import uuid as _uuid
+    from database_adapter import get_db
+
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM sessions WHERE project_id = %s AND archived = 0 LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        if existing:
+            return
+        conn.execute(
+            "INSERT INTO sessions (project_id, session_key, label, channel, agent_id, created_by) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (project_id, str(_uuid.uuid4()), "Creation", "webchat", "main", user_id),
+        )
+
+        type_labels = {1: "website", 2: "Telegram bot", 3: "Discord bot", 5: "AI agent"}
+        kind_label = type_labels.get(type_id, "project")
+        live_line = (
+            f"\n\n🌐 Live at: https://{domain}" if domain
+            else (f"\n\n🤖 Your {kind_label} is deployed — test it in the Telegram app."
+                  if type_id == 2 else
+                  f"\n\n🤖 Your {kind_label} is deployed — test it in your server.")
+            if type_id in (2, 3) else "\n\n▶️ It is deployed and ready to use."
+        )
+
+        if creation_prompt:
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content) VALUES (%s, 'user', %s)",
+                (conn.execute("SELECT id FROM sessions WHERE project_id = %s AND archived = 0 "
+                              "ORDER BY id DESC LIMIT 1", (project_id,)).fetchone()[0],
+                 creation_prompt),
+            )
+            confirmation = (
+                f"✓ {name} was created and deployed successfully."
+                f"\nProject type: {kind_label}."
+                f"{live_line}"
+                f"\n\nThis session is your workspace — describe any change you need "
+                f"and it will be implemented."
+            )
+            session_row = conn.execute(
+                "SELECT id FROM sessions WHERE project_id = %s AND archived = 0 "
+                "ORDER BY id DESC LIMIT 1",
+                (project_id,),
+            ).fetchone()
+            session_id = session_row[0] if not isinstance(session_row, dict) else session_row["id"]
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content) VALUES (%s, 'assistant', %s)",
+                (session_id, confirmation[:8000]),
+            )
+        conn.commit()
+    logger.info("[PROJECT-RUN] seeded creation session for project %s", project_id)
+
+
 def mark_completed(run_id: int, has_writes: bool = False) -> None:
     with get_db() as conn:
         conn.execute(
@@ -1250,6 +1310,21 @@ def execute_run(run_id: int) -> Dict[str, Any]:
         # remote was attached — no push happened. This pushes the complete
         # project state including ACPX-generated code, builds, and configs.
         _push_to_github(run_id, project_id, project_path)
+
+        # DB-level handoff: create the project's first session and insert the
+        # creation prompt (user) + formal deployment confirmation with the
+        # live link (assistant) directly — no frontend seeding, no LLM call.
+        try:
+            _seed_creation_session(
+                project_id=project_id,
+                user_id=user_id,
+                name=name,
+                domain=payload.get("domain") or "",
+                type_id=type_id,
+                creation_prompt=(payload.get("description") or "")[:8000],
+            )
+        except Exception as seed_err:
+            logger.warning("[PROJECT-RUN] creation session seed failed: %s", seed_err)
 
         record_usage(
             user_id=user_id,
