@@ -1680,7 +1680,11 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
             "system prompt", "your instructions", "your rules", "model name",
             "what llm", "which llm", "your config", "your configuration",
             "behind the scenes", "how you work", "how do you work",
-            "api key", "your secrets", "your prompt",
+            # "your api key" — asking for DREAMAGENT'S key. Bare "api key"
+            # must NOT probe: users paste their own keys with those exact
+            # words ("api key: sk-or-v1-…"), and that must hit the
+            # credential fast-path below, not the gate LLM.
+            "your api key", "your secrets", "your prompt",
             "what model are", "are you claude", "are you gpt", "are you ai",
             "which ai are", "what are you",
         )
