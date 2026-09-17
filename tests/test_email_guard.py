@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from services.email_guard import (
+    DISPOSABLE_DOMAINS,
     DISPOSABLE_MESSAGE,
     INVALID_MESSAGE,
     is_disposable_email,
@@ -68,8 +69,16 @@ def test_known_disposable_domains_blocked():
         "guerrillamail.com", "sharklasers.com", "yopmail.com",
         "trashmail.com", "maildrop.cc", "getnada.com", "1secmail.com",
         "yzcalo.com", "mail.tm", "tempmail.plus",
+        # community-list-only entries (prove the data file loads)
+        "0-mail.com", " mailinator.net".strip(), "zippymail.info",
+        "binkmail.com", "dayrep.com", "einrot.com",
     ):
         _blocked(f"someone@{domain}")
+
+
+def test_community_list_loaded():
+    # Guard against silently running on the extras-only fallback.
+    assert len(DISPOSABLE_DOMAINS) > 5000, len(DISPOSABLE_DOMAINS)
 
 
 def test_uppercase_disposable_domain_blocked():
