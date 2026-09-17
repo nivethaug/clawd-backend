@@ -286,8 +286,11 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
                 f"\n\nThis session is your workspace — describe any change you need "
                 f"and it will be implemented."
             )
+            # Same-transaction inserts share CURRENT_TIMESTAMP — offset the
+            # confirmation so ORDER BY created_at keeps user→assistant order.
             conn.execute(
-                "INSERT INTO messages (session_id, role, content) VALUES (%s, 'assistant', %s)",
+                "INSERT INTO messages (session_id, role, content, created_at) "
+                "VALUES (%s, 'assistant', %s, CURRENT_TIMESTAMP + INTERVAL '2 milliseconds')",
                 (session_id, confirmation[:8000]),
             )
         conn.commit()

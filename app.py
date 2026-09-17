@@ -8305,7 +8305,7 @@ async def get_session_messages(
 
     with get_db() as conn:
         messages = conn.execute(
-            "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+            "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC, id ASC",
             (session_id,)
         ).fetchall()
 
