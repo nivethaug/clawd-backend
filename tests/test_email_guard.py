@@ -67,6 +67,7 @@ def test_known_disposable_domains_blocked():
         "mailinator.com", "10minutemail.com", "temp-mail.org",
         "guerrillamail.com", "sharklasers.com", "yopmail.com",
         "trashmail.com", "maildrop.cc", "getnada.com", "1secmail.com",
+        "yzcalo.com", "mail.tm", "tempmail.plus",
     ):
         _blocked(f"someone@{domain}")
 

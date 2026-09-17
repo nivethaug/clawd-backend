@@ -52,6 +52,14 @@ DISPOSABLE_DOMAINS: frozenset = frozenset({
     "fake-mail.net", "fleckens.hu", "gufum.com", "hits1.net",
     "byom.de", "elhamar.com", "fviain.com", "inboxalias.com",
     "zetmail.com", "spam4.me", "tmpmail.org", "tmpmail.net",
+    # temp-mail.io rotating domains (yzcalo.com family — flagged by
+    # check-mail.org / verifymail.io / IPQS)
+    "yzcalo.com",
+    # mail.tm service family
+    "mail.tm", "mttmm.net", "fexpost.com", "fexbox.org",
+    # other confirmed disposables
+    "tempmail.plus", "altmails.com", "cs.email", "instaemail.net",
+    "mailhazard.com", "mailbox52.ga", "summarli.com",
     "mailde.de", "mailde.info", "mail-temp.com", "mailtemp.uk",
     "instant-mail.de", "trash2009.com", "mega-z.com", "spamfree24.org",
     "keepmymail.com", "sneakemail.com", "binkmail.com", "bobmail.info",
