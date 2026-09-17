@@ -10084,27 +10084,36 @@ def require_admin(user_id: int) -> None:
 @app.post("/auth/signup", response_model=MessageResponseModel)
 async def signup(request: SignupRequest):
     """Register a new user and send verification email."""
+    from services.email_guard import is_disposable_email, normalize_email
+
+    # Block disposable/temporary domains + basic format check; normalize so
+    # Foo@X.com and foo@x.com dedupe (previously created separate accounts).
+    email = normalize_email(request.email)
+    blocked, reason = is_disposable_email(email)
+    if blocked:
+        raise HTTPException(status_code=400, detail=reason)
+
     # Check if user already exists
     with get_db() as conn:
         existing = conn.execute(
             "SELECT id FROM users WHERE email = ?",
-            (request.email,)
+            (email,)
         ).fetchone()
-        
+
         if existing:
             raise HTTPException(status_code=400, detail="Email already exists")
-        
+
         # Hash password
         password_hash = hash_password(request.password)
-        
+
         # Generate verification token
         verification_token = secrets.token_hex(32)
-        
+
         # Create user with email_verified=false
         conn.execute(
             "INSERT INTO users (email, name, password, role, subscription_tier, email_verified, verification_token) "
             "VALUES (?, ?, ?, 'user', 'free', false, ?) RETURNING id",
-            (request.email, request.name, password_hash, verification_token)
+            (email, request.name, password_hash, verification_token)
         )
         result = conn.fetchone()
         
@@ -10116,9 +10125,9 @@ async def signup(request: SignupRequest):
         conn.commit()
     
     # Send verification email (non-blocking failure)
-    email_sent = send_verification_email(request.email, verification_token, request.name)
+    email_sent = send_verification_email(email, verification_token, request.name)
     if not email_sent:
-        logger.warning(f"Failed to send verification email to {request.email}, but account created")
+        logger.warning(f"Failed to send verification email to {email}, but account created")
     
     return MessageResponseModel(
         message="Account created! Please check your email to verify your account."
@@ -10686,12 +10695,24 @@ async def google_login(request: GoogleAuthRequest):
                 role = row[4] if len(row) > 4 else "user"
                 tier = row[5] if len(row) > 5 else "free"
         else:
+            # Block disposable domains on Google signup too (Google allows
+            # custom-domain Workspace accounts, so gmail isn't the only path).
+            from services.email_guard import is_disposable_email, normalize_email
+
+            google_email = normalize_email(google_user["email"])
+            blocked, reason = is_disposable_email(google_email)
+            if blocked:
+                raise HTTPException(
+                    status_code=403,
+                    detail=reason or "Disposable email domains are not allowed.",
+                )
+
             # Create new user with no password (OAuth-only account)
             # Google emails are pre-verified, so set email_verified=true
             result = conn.execute(
                 "INSERT INTO users (email, name, password, role, subscription_tier, email_verified) "
                 "VALUES (?, ?, NULL, 'user', 'free', true) RETURNING id",
-                (google_user["email"], google_user["name"]),
+                (google_email, google_user["name"]),
             ).fetchone()
 
             if isinstance(result, dict):
