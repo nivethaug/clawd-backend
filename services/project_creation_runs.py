@@ -256,6 +256,13 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
             "VALUES (%s, %s, %s, %s, %s, %s)",
             (project_id, str(_uuid.uuid4()), "Creation", "webchat", "main", user_id),
         )
+        session_row = conn.execute(
+            "SELECT id FROM sessions WHERE project_id = %s AND archived = 0 "
+            "ORDER BY id DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        # RealDictRow (Postgres) is dict-like; SQLite path returns tuples.
+        session_id = session_row["id"] if isinstance(session_row, dict) else session_row[0]
 
         type_labels = {1: "website", 2: "Telegram bot", 3: "Discord bot", 5: "AI agent"}
         kind_label = type_labels.get(type_id, "project")
@@ -270,9 +277,7 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
         if creation_prompt:
             conn.execute(
                 "INSERT INTO messages (session_id, role, content) VALUES (%s, 'user', %s)",
-                (conn.execute("SELECT id FROM sessions WHERE project_id = %s AND archived = 0 "
-                              "ORDER BY id DESC LIMIT 1", (project_id,)).fetchone()[0],
-                 creation_prompt),
+                (session_id, creation_prompt),
             )
             confirmation = (
                 f"✓ {name} was created and deployed successfully."
@@ -281,12 +286,6 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
                 f"\n\nThis session is your workspace — describe any change you need "
                 f"and it will be implemented."
             )
-            session_row = conn.execute(
-                "SELECT id FROM sessions WHERE project_id = %s AND archived = 0 "
-                "ORDER BY id DESC LIMIT 1",
-                (project_id,),
-            ).fetchone()
-            session_id = session_row[0] if not isinstance(session_row, dict) else session_row["id"]
             conn.execute(
                 "INSERT INTO messages (session_id, role, content) VALUES (%s, 'assistant', %s)",
                 (session_id, confirmation[:8000]),
