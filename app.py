@@ -4648,7 +4648,7 @@ def cleanup_postgresql_database(db_name: str, db_user: str) -> Dict[str, Any]:
     return results
 
 
-def _cleanup_user_container_if_empty(project_id: int) -> Dict[str, Any]:
+def _cleanup_user_container_if_empty(project_id: int, user_id_hint: Optional[int] = None) -> Dict[str, Any]:
     """Remove the user's Docker container + workspace if no projects remain.
 
     Called after a project is deleted. Checks if the owning user has any
@@ -4664,25 +4664,28 @@ def _cleanup_user_container_if_empty(project_id: int) -> Dict[str, Any]:
         result["reason"] = "local mode (no containers)"
         return result
 
-    if not project_id:
+    if not project_id and not user_id_hint:
         result["reason"] = "no project_id"
         return result
 
     try:
-        # Look up the user_id for this project
-        with get_db() as conn:
-            proj_row = conn.execute(
-                "SELECT user_id FROM projects WHERE id = ?",
-                (project_id,),
-            ).fetchone()
+        user_id = user_id_hint
+        # Look up the user_id for this project (row may already be deleted in
+        # the delete flow — the hint carries it instead).
+        if not user_id:
+            with get_db() as conn:
+                proj_row = conn.execute(
+                    "SELECT user_id FROM projects WHERE id = ?",
+                    (project_id,),
+                ).fetchone()
 
-        # Project row may already be deleted at this point in the cleanup flow.
-        # If so, we can't determine the user — skip container cleanup.
-        if not proj_row:
-            result["reason"] = "project row already deleted (cannot determine user_id)"
-            return result
+            # Project row may already be deleted at this point in the cleanup flow.
+            # If so, we can't determine the user — skip container cleanup.
+            if not proj_row:
+                result["reason"] = "project row already deleted (cannot determine user_id)"
+                return result
 
-        user_id = proj_row["user_id"] if isinstance(proj_row, dict) else proj_row[0]
+            user_id = proj_row["user_id"] if isinstance(proj_row, dict) else proj_row[0]
         if not user_id:
             result["reason"] = "no user_id for project"
             return result
@@ -5172,7 +5175,9 @@ def cleanup_infrastructure(project_path: str, domain_override: str = None, backe
     # When they delete their last project, remove the container + workspace dir
     # to free resources. If they still have other projects, keep the container.
     try:
-        cleanup_results["steps"]["container"] = _cleanup_user_container_if_empty(project_id)
+        cleanup_results["steps"]["container"] = _cleanup_user_container_if_empty(
+            project_id, user_id_hint=_cleanup_user_id
+        )
     except Exception as e:
         logger.error(f"Error in container cleanup: {e}")
         cleanup_results["steps"]["container"] = {"error": str(e)}
@@ -5298,6 +5303,51 @@ def _raise_session_delete_in_progress(active_session_chat: Dict[str, Any]) -> No
     )
 
 
+class InternalCleanupRequest(BaseModel):
+    project_path: str
+    project_name: Optional[str] = None
+    domain: Optional[str] = None
+    backend_port: Optional[int] = None
+    frontend_port: Optional[int] = None
+    user_id: Optional[int] = None
+
+
+@app.post("/internal/projects/{project_id}/cleanup-infrastructure")
+async def internal_cleanup_project_infrastructure(
+    project_id: int,
+    payload: InternalCleanupRequest,
+    x_internal_secret: Optional[str] = Header(None),
+):
+    """Worker-side infrastructure cleanup for a deleted project.
+
+    The MAIN api deletes the DB rows and then forwards here (WORKER_VPS_URL)
+    when the project's files live on the worker — PM2 backend service, nginx
+    site, SSL certs, project directory, and the per-user Docker container all
+    live on THIS VPS and can only be cleaned here. The project DB itself is
+    dropped by this step too (the worker's postgres connection points at the
+    master DB).
+
+    Guarded by x-internal-secret (INTERNAL_API_SECRET on both VPSes); direct
+    calls from the main VPS are additionally allowed by internal_routes_guard.
+    """
+    if INTERNAL_API_SECRET:
+        supplied = x_internal_secret or ""
+        if not secrets.compare_digest(supplied, INTERNAL_API_SECRET):
+            raise HTTPException(status_code=403, detail="Invalid internal secret")
+
+    cleanup_results = cleanup_infrastructure(
+        payload.project_path,
+        domain_override=payload.domain or None,
+        backend_port_override=payload.backend_port,
+        frontend_port_override=payload.frontend_port,
+    )
+    container_result = _cleanup_user_container_if_empty(
+        project_id, user_id_hint=payload.user_id
+    )
+    cleanup_results["steps"]["container"] = container_result
+    return {"success": True, "results": cleanup_results}
+
+
 @app.delete("/projects/{project_id}")
 async def delete_project(
     project_id: int,
@@ -5333,6 +5383,7 @@ async def delete_project(
         project_domain = project.get('domain') or project.get('name') or ''
         project_backend_port = project.get('backend_port')
         project_frontend_port = project.get('frontend_port')
+        project_user_id = project.get('user_id')
 
         # Master DB Protection: Validate no master database is being deleted
         db_info = get_database_info()
@@ -5461,7 +5512,49 @@ async def delete_project(
         """Background task for infrastructure cleanup."""
         try:
             logger.info(f"[BG] Starting infrastructure cleanup for project {project_id}: {project_path}")
-            
+
+            # Worker-hosted projects (files only on the worker VPS): forward the
+            # whole infrastructure cleanup to the worker — PM2 backend service,
+            # nginx site, SSL certs, project directory, and the per-user Docker
+            # container all live THERE and can only be cleaned from there.
+            # DB-row deletions already happened above; the project DB itself is
+            # dropped by the worker during this forwarded cleanup (its postgres
+            # connection points at the master DB).
+            if not os.path.isdir(project_path):
+                from services.project_proxy import _get_worker_url
+
+                worker_url = _get_worker_url()
+                if worker_url:
+                    import httpx as _httpx
+
+                    headers = {}
+                    if INTERNAL_API_SECRET:
+                        headers["x-internal-secret"] = INTERNAL_API_SECRET
+                    fwd_payload = {
+                        "project_path": project_path,
+                        "project_name": project_name,
+                        "domain": project_domain,
+                        "backend_port": project_backend_port,
+                        "frontend_port": project_frontend_port,
+                        "user_id": project_user_id,
+                    }
+                    logger.info(f"[BG] Forwarding infrastructure cleanup to worker: {worker_url}/internal/projects/{project_id}/cleanup-infrastructure")
+
+                    # Sync httpx call run in a threadpool — this task runs on
+                    # the event loop (asyncio.create_task), and a blocking
+                    # post here would freeze the whole API for up to 300s.
+                    def _post_worker_cleanup():
+                        return _httpx.post(
+                            f"{worker_url}/internal/projects/{project_id}/cleanup-infrastructure",
+                            json=fwd_payload,
+                            headers=headers,
+                            timeout=300.0,
+                        )
+
+                    resp = await run_in_threadpool(_post_worker_cleanup)
+                    logger.info(f"[BG] Worker cleanup response: HTTP {resp.status_code}")
+                    return
+
             # Run cleanup in threadpool to avoid blocking
             # Pass domain/backend_port from DB so cleanup always knows what to remove
             cleanup_result = await run_in_threadpool(
@@ -6138,13 +6231,13 @@ class InternalDeleteUserDataRequest(BaseModel):
 async def internal_delete_user_data(request: InternalDeleteUserDataRequest, request_obj: Request):
     """Delete user's PM2 processes + workspace folder + nginx configs.
     Internal endpoint — runs on the worker VPS where these resources live.
+
+    Auth is handled by the shared internal_routes_guard middleware (direct
+    calls from the main VPS / localhost allowed, proxied requests blocked,
+    x-internal-secret accepted) — no extra IP check here, it would reject
+    legitimate direct calls from the main VPS's public IP.
     """
     import shutil
-    client_host = request_obj.client.host if request_obj.client else ""
-    if not (client_host.startswith("127.") or client_host.startswith("172.")
-            or client_host.startswith("10.") or client_host == "::1"):
-        raise HTTPException(status_code=403, detail="Internal endpoint")
-
     user_id = request.user_id
     project_ids = request.project_ids
     cleaned = []
@@ -6156,6 +6249,23 @@ async def internal_delete_user_data(request: InternalDeleteUserDataRequest, requ
             r = subprocess.run(["pm2", "delete", proc_name], capture_output=True, timeout=10)
             if r.returncode == 0:
                 cleaned.append(proc_name)
+
+    # 1b. Website projects: PM2 services are named after their domain, so
+    # match by cwd instead — anything running out of this user's workspace.
+    try:
+        _jlist = subprocess.run(["pm2", "jlist"], capture_output=True, timeout=20)
+        _procs = json.loads(_jlist.stdout or "[]")
+        for _proc in _procs:
+            _env = _proc.get("pm2_env") or {}
+            _cwd = _env.get("pm_cwd") or ""
+            _name = _proc.get("name") or ""
+            if _cwd.startswith(f"/workspaces/user_{user_id}/") and _name not in cleaned:
+                _r = subprocess.run(["pm2", "delete", _name], capture_output=True, timeout=10)
+                if _r.returncode == 0:
+                    cleaned.append(_name)
+    except Exception as e:
+        logger.warning(f"[DELETE-USER] PM2 jlist scan failed (non-fatal): {e}")
+
     if cleaned:
         subprocess.run(["pm2", "save"], capture_output=True, timeout=10)
 
@@ -6171,6 +6281,10 @@ async def internal_delete_user_data(request: InternalDeleteUserDataRequest, requ
     # 3. Remove nginx configs (match by proxy_pass port pattern for this user's projects)
     nginx_sites_enabled = "/etc/nginx/sites-enabled"
     nginx_sites_available = "/etc/nginx/sites-available"
+    # Digit boundary (?![0-9]) so user_5 doesn't match user_12 / user_101;
+    # still catches both "root /workspaces/user_5;" and ".../user_5/..." forms.
+    import re as _re
+    _ws_pattern = _re.compile(rf"/workspaces/user_{user_id}(?![0-9])")
     for nginx_dir in (nginx_sites_enabled, nginx_sites_available):
         if not os.path.isdir(nginx_dir):
             continue
@@ -6180,7 +6294,7 @@ async def internal_delete_user_data(request: InternalDeleteUserDataRequest, requ
                 with open(fpath, 'r') as f:
                     content = f.read()
                 # Match configs that reference this user's workspace path
-                if f"user_{user_id}" in content or f"/workspaces/user_{user_id}" in content:
+                if _ws_pattern.search(content):
                     os.remove(fpath)
                     cleaned.append(f"nginx:{fname}")
             except Exception:
@@ -6188,6 +6302,16 @@ async def internal_delete_user_data(request: InternalDeleteUserDataRequest, requ
     # Reload nginx if we removed any configs
     if any("nginx:" in c for c in cleaned):
         subprocess.run(["nginx", "-s", "reload"], capture_output=True, timeout=10)
+
+    # 4. Remove the per-user Docker container (user is fully deleted — all
+    # their projects are gone, so the container has nothing left to serve).
+    try:
+        container_result = _cleanup_user_container_if_empty(None, user_id_hint=user_id)
+        if container_result.get("cleaned"):
+            cleaned.append(f"container:user_{user_id}")
+        logger.info(f"[DELETE-USER] Container cleanup for user {user_id}: {container_result}")
+    except Exception as e:
+        logger.warning(f"[DELETE-USER] Container cleanup failed (non-fatal): {e}")
 
     logger.info(f"[DELETE-USER] Cleaned for user {user_id}: {cleaned}")
     return {"success": True, "details": f"{len(cleaned)} items removed"}
@@ -15689,22 +15813,36 @@ async def admin_delete_user(
         conn.execute("DELETE FROM users WHERE id = ?", (target_user_id,))
         conn.commit()
 
-    # Call worker API to clean PM2 processes + workspace folder + nginx
-    # (these live on the worker VPS, not accessible from the backend container)
-    worker_api_url = os.getenv("DREAMPILOT_WORKER_API_URL")
+    # Call worker API to clean PM2 processes + workspace folder + nginx +
+    # docker container (these live on the worker VPS, not on main).
+    # WORKER_VPS_URL is the primary knob; DREAMPILOT_WORKER_API_URL kept as a
+    # legacy fallback. Guarded by the shared internal_routes_guard on the
+    # worker — no XFF hop, direct call allowed; secret sent when configured.
+    from services.project_proxy import _get_worker_url
+    worker_api_url = _get_worker_url() or os.getenv("DREAMPILOT_WORKER_API_URL", "").strip().rstrip("/") or None
     if worker_api_url:
         import urllib.request as _urlreq
         import json as _json
-        try:
+        from fastapi.concurrency import run_in_threadpool as _rip
+
+        def _call_worker_delete_user_data():
             endpoint = f"{worker_api_url}/internal/delete-user-data"
             payload = _json.dumps({
                 "user_id": target_user_id,
                 "project_ids": project_ids,
             }).encode()
+            _headers = {"Content-Type": "application/json"}
+            if INTERNAL_API_SECRET:
+                _headers["x-internal-secret"] = INTERNAL_API_SECRET
             req = _urlreq.Request(endpoint, data=payload,
-                                  headers={"Content-Type": "application/json"}, method="POST")
-            with _urlreq.urlopen(req, timeout=30) as resp:
-                result = _json.loads(resp.read().decode())
+                                  headers=_headers, method="POST")
+            with _urlreq.urlopen(req, timeout=120) as resp:
+                return _json.loads(resp.read().decode())
+
+        try:
+            # Blocking urllib call — run in a threadpool so the event loop
+            # (which serves all API requests) is not frozen for up to 120s.
+            result = await _rip(_call_worker_delete_user_data)
             if result.get("success"):
                 logger.info(f"[ADMIN] Worker cleaned {result.get('details', '')} for user {target_user_id}")
             else:
