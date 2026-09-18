@@ -13314,6 +13314,85 @@ async def create_project_assistant(
     return CreateAssistantResponse(reply=reply or "…", kind=kind, brief=brief,
                                    required_tokens=required_tokens)
 
+
+# ============================================================================
+# Create-page draft persistence — one JSONB row per user. The chat-based
+# Create Project page upserts its transcript/state here (debounced) so a
+# reload restores the conversation; the draft is deleted once the project
+# is created (or on explicit reset). No secrets: raw tokens never leave
+# the client — requirement rows reference credential-vault ids only.
+# ============================================================================
+
+class CreateDraftBody(BaseModel):
+    payload: Dict[str, Any]
+
+_CREATE_DRAFT_MAX_BYTES = 131072  # 128 KB — the client trims before sending
+
+
+@app.get("/api/projects/create-draft")
+async def get_create_draft(authorization: Optional[str] = Header(None)):
+    user_id = get_user_id_from_token(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    with get_db() as conn:
+        # Opportunistic TTL sweep: abandoned drafts vanish after 14 days.
+        conn.execute(
+            "DELETE FROM create_drafts WHERE updated_at < CURRENT_TIMESTAMP - INTERVAL '14 days'"
+        )
+        row = conn.execute(
+            "SELECT payload FROM create_drafts WHERE user_id = %s", (user_id,)
+        ).fetchone()
+        conn.commit()
+    if not row:
+        return {"draft": None}
+    payload = row.get("payload") if isinstance(row, dict) else row[0]
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            payload = None
+    return {"draft": payload}
+
+
+@app.put("/api/projects/create-draft")
+async def put_create_draft(
+    body: CreateDraftBody,
+    authorization: Optional[str] = Header(None),
+):
+    user_id = get_user_id_from_token(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        blob = json.dumps(body.payload)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Draft must be JSON-serializable")
+    if len(blob.encode()) > _CREATE_DRAFT_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Draft too large")
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO create_drafts (user_id, payload, created_at, updated_at)
+            VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id) DO UPDATE SET
+                payload = EXCLUDED.payload,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, blob),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/projects/create-draft")
+async def delete_create_draft(authorization: Optional[str] = Header(None)):
+    user_id = get_user_id_from_token(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    with get_db() as conn:
+        conn.execute("DELETE FROM create_drafts WHERE user_id = %s", (user_id,))
+        conn.commit()
+    return {"ok": True}
+
 # ============================================================================
 # AI Chat Completion Endpoint
 # ============================================================================

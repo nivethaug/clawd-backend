@@ -580,6 +580,15 @@ def init_schema():
                 session_id INTEGER,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""")
+            # Create-page draft persistence — one JSONB blob per user holding
+            # the creation chat (transcript + requirements + brief). Deleted
+            # once the project is created; swept after 14 days of inactivity.
+            cur.execute("""CREATE TABLE IF NOT EXISTS create_drafts (
+                user_id BIGINT PRIMARY KEY,
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_session_chat_runs_session_status ON session_chat_runs(session_key, status, created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_session_chat_runs_queue ON session_chat_runs(status, created_at ASC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_session_chat_chunks_lookup ON session_chat_chunks(run_id, seq)")
