@@ -26,6 +26,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Running as scripts/xxx.py puts scripts/ on sys.path, not the repo root —
+# add it so `database_adapter` (and its env-based DB config) is importable.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 WORKSPACES_ROOT = Path(os.getenv("WORKSPACES_ROOT", "/workspaces"))
 CONTAINER_PREFIX = "dreamagent-user-"
 APPLY = "--apply" in sys.argv
