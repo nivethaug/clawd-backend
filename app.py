@@ -13118,6 +13118,11 @@ class CreateAssistantResponse(BaseModel):
     reply: str
     kind: Optional[str] = None          # current best type assessment (LLM)
     brief: Optional[CreateAssistantBrief] = None
+    # Extra tokens the user must attach before create (beyond the type's bot
+    # token), e.g. [{"key": "OPENROUTER_API_KEY", "label": "OpenRouter Token"}].
+    # The frontend merges these into its requirement list so the matching
+    # masked "Add ... Token" input renders and the create gate includes them.
+    required_tokens: Optional[List[Dict[str, str]]] = None
 
 _CREATE_ASSISTANT_KINDS = {"website", "discord", "telegram", "agent", "custom"}
 
@@ -13139,9 +13144,13 @@ Behaviour:
 5. When at least one clarification is answered AND the idea is clear AND nothing required is missing AND all external APIs/integrations are confirmed, produce a brief.
 
 Output (STRICT — a single JSON object, no markdown fences, nothing before or after):
-{"reply": "<1-3 short chat sentences>", "kind": "website|discord|telegram|agent|custom", "brief": null}
+{"reply": "<1-3 short chat sentences>", "kind": "website|discord|telegram|agent|custom", "brief": null, "required_tokens": null}
+or, when the user has confirmed a needed external API key (see below):
+{"reply": "<1-3 short chat sentences asking them to attach the token via the input that just opened>", "kind": "...", "brief": null, "required_tokens": [{"key": "OPENROUTER_API_KEY", "label": "OpenRouter Token"}]}
 or, when producing the final brief:
-{"reply": "<1-2 sentences presenting the prompt>", "kind": "...", "brief": {"kind": "...", "prompt": "<polished, complete build prompt for the build agent: goal, key features, structure (pages/commands/jobs), tone, constraints — 120-400 words>", "features": ["<short feature>", "..."], "suggested_name": "<kebab-case-project-name>"}}
+{"reply": "<1-2 sentences presenting the prompt>", "kind": "...", "brief": {"kind": "...", "prompt": "<polished, complete build prompt for the build agent: goal, key features, structure (pages/commands/jobs), tone, constraints — 120-400 words>", "features": ["<short feature>", "..."], "suggested_name": "<kebab-case-project-name>"}}, "required_tokens": null}
+
+"required_tokens" rules: list ONLY keys the user explicitly confirmed this project needs, that are NOT in the connected env keys, and are NOT the project type's required bot token. Allowed keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, SERPER_API_KEY, RESEND_API_KEY, COINGECKO_API_KEY, STRIPE_SECRET_KEY — label is always "<Provider> Token". NEVER invent other key names — for an API without a listed key, keep it as a brief note instead ("add <X> later in project settings"). NEVER produce a brief while required_tokens are still unattached — the platform blocks create until they're verified.
 
 "kind" is ALWAYS present: your current best assessment of the project type from the conversation so far. Use "custom" only when the idea is genuinely none of the other four. Once the type is established, keep it stable unless the user explicitly changes it.}
 
@@ -13244,6 +13253,7 @@ async def create_project_assistant(
     reply: Optional[str] = None
     kind: Optional[str] = None
     brief: Optional[CreateAssistantBrief] = None
+    required_tokens: Optional[List[Dict[str, str]]] = None
     text = raw
     try:
         if "```json" in text:
@@ -13270,13 +13280,39 @@ async def create_project_assistant(
                 features=[str(f).strip()[:80] for f in (b.get("features") or []) if str(f).strip()][:8],
                 suggested_name=str(suggested).strip()[:30] if suggested else None,
             )
+        # Extra required tokens — allowlisted server-side (never trust LLM key
+        # names), deduped against already-connected env keys, single-key
+        # catalog types only (the frontend validates each via its catalog).
+        _ALLOWED_REQUIRED_TOKENS = {
+            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+            "OPENROUTER_API_KEY", "SERPER_API_KEY", "RESEND_API_KEY",
+            "COINGECKO_API_KEY", "STRIPE_SECRET_KEY",
+        }
+        _connected = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
+        rt = data.get("required_tokens")
+        if isinstance(rt, list):
+            parsed_rt: List[Dict[str, str]] = []
+            for item in rt[:4]:
+                if not isinstance(item, dict):
+                    continue
+                key = str(item.get("key") or "").strip().upper()
+                if key not in _ALLOWED_REQUIRED_TOKENS or key in _connected:
+                    continue
+                if key in {p["key"] for p in parsed_rt}:
+                    continue
+                label = str(item.get("label") or "").strip()[:40] or (
+                    key.replace("_API_KEY", "").replace("_", " ").title() + " Token")
+                parsed_rt.append({"key": key, "label": label})
+            if parsed_rt:
+                required_tokens = parsed_rt
         if not reply and not brief:
             raise ValueError("empty payload")
     except Exception:
         # Raw-text fallback: never break the chat over a malformed reply.
         reply, kind, brief = raw[:4000], None, None
 
-    return CreateAssistantResponse(reply=reply or "…", kind=kind, brief=brief)
+    return CreateAssistantResponse(reply=reply or "…", kind=kind, brief=brief,
+                                   required_tokens=required_tokens)
 
 # ============================================================================
 # AI Chat Completion Endpoint
