@@ -264,20 +264,40 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
         # RealDictRow (Postgres) is dict-like; SQLite path returns tuples.
         session_id = session_row["id"] if isinstance(session_row, dict) else session_row[0]
 
-        type_labels = {1: "website", 2: "Telegram bot", 3: "Discord bot", 5: "AI agent"}
+        type_labels = {1: "website", 2: "Telegram bot", 3: "Discord bot", 4: "scheduler", 5: "AI agent"}
         kind_label = type_labels.get(type_id, "project")
-        live_line = (
-            f"\n\n🌐 Live at: https://{domain}" if domain
-            else (f"\n\n🤖 Your {kind_label} is deployed — test it in the Telegram app."
-                  if type_id == 2 else
-                  f"\n\n🤖 Your {kind_label} is deployed — test it in your server.")
-            if type_id in (2, 3) else "\n\n▶️ It is deployed and ready to use."
-        )
+        # Type FIRST — bot/agent projects also carry a domain (webhook host),
+        # but a "Live at" website link is only meaningful for websites.
+        if type_id == 1:
+            live_line = (
+                f"\n\n🌐 Live at: https://{domain}" if domain else "\n\n🌐 Deployed."
+            )
+        elif type_id == 2:
+            live_line = (
+                "\n\n🤖 Your Telegram bot is live — open Telegram and message "
+                "your bot to test it."
+            )
+        elif type_id == 3:
+            live_line = (
+                "\n\n🤖 Your Discord bot is live — invite it to your server "
+                "and test it."
+            )
+        else:
+            live_line = "\n\n▶️ Deployed and ready to use."
 
-        if creation_prompt:
+        # Present the concise project description as the session's opening
+        # user message — the full build brief stays in projects.description
+        # for the agent; a raw spec wall-of-text reads badly in chat.
+        concise = ""
+        desc = (creation_prompt or "").strip()
+        if desc:
+            first_para = desc.split("\n\n")[0].strip()
+            concise = first_para if len(first_para) <= 240 else first_para[:237].rstrip() + "…"
+
+        if concise:
             conn.execute(
                 "INSERT INTO messages (session_id, role, content) VALUES (%s, 'user', %s)",
-                (session_id, creation_prompt),
+                (session_id, concise),
             )
             confirmation = (
                 f"✓ {name} was created and deployed successfully."
