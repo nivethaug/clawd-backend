@@ -34,6 +34,79 @@ WORKSPACES_ROOT = Path(os.getenv("WORKSPACES_ROOT", "/workspaces"))
 CONTAINER_PREFIX = "dreamagent-user-"
 APPLY = "--apply" in sys.argv
 
+# ---------------------------------------------------------------------------
+# DB access: prefer database_adapter (needs the backend venv — it requires
+# psycopg2). Fall back to the psql CLI using the same DB_* config the app
+# uses (exported env vars, or the .env.postgres file in the repo root).
+# ---------------------------------------------------------------------------
+
+_db_cfg = None
+_db_mode = None
+
+
+def _load_db_config():
+    """Resolve DB_* settings: process env first, then .env.postgres file."""
+    global _db_cfg, _db_mode
+    if _db_cfg is not None:
+        return _db_cfg
+    cfg = {k: os.getenv(k, "") for k in ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD")}
+    env_file = Path(__file__).resolve().parent.parent / ".env.postgres"
+    if env_file.exists():
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k in cfg and not cfg[k]:
+                    cfg[k] = v
+    if not all(cfg.values()):
+        raise RuntimeError(
+            f"incomplete DB config (need DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD "
+            f"from env or {env_file})"
+        )
+    _db_cfg = cfg
+    return cfg
+
+
+def _run_psql(sql: str) -> str:
+    cfg = _load_db_config()
+    env = os.environ.copy()
+    env["PGPASSWORD"] = cfg["DB_PASSWORD"]
+    r = subprocess.run(
+        ["psql", "-h", cfg["DB_HOST"], "-p", cfg["DB_PORT"],
+         "-U", cfg["DB_USER"], "-d", cfg["DB_NAME"], "-tAc", sql],
+        capture_output=True, text=True, timeout=30, env=env,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f"psql failed: {r.stderr.strip()}")
+    return r.stdout.strip()
+
+
+def _db_user_exists(user_id: int) -> bool:
+    """True iff the users table still has this id."""
+    global _db_mode
+    try:
+        from database_adapter import get_db  # noqa: F401 — needs backend venv
+        _db_mode = "database_adapter"
+        with get_db() as conn:
+            row = conn.execute("SELECT 1 FROM users WHERE id = %s", (user_id,)).fetchone()
+        return row is not None
+    except ImportError:
+        _db_mode = "psql"
+        return _run_psql(f"SELECT 1 FROM users WHERE id = {int(user_id)}") == "1"
+
+
+def _db_delete_container_row(user_id: int) -> None:
+    try:
+        from database_adapter import get_db
+        with get_db() as conn:
+            conn.execute("DELETE FROM user_containers WHERE user_id = %s", (user_id,))
+            conn.commit()
+    except ImportError:
+        _run_psql(f"DELETE FROM user_containers WHERE user_id = {int(user_id)}")
+
 
 def list_user_containers():
     """All dreamagent-user-* containers (running + stopped) -> {user_id: name}."""
@@ -57,19 +130,11 @@ def list_user_containers():
 
 
 def user_exists(user_id: int) -> bool:
-    from database_adapter import get_db
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM users WHERE id = %s", (user_id,)
-        ).fetchone()
-    return row is not None
+    return _db_user_exists(user_id)
 
 
 def delete_container_row(user_id: int) -> None:
-    from database_adapter import get_db
-    with get_db() as conn:
-        conn.execute("DELETE FROM user_containers WHERE user_id = %s", (user_id,))
-        conn.commit()
+    _db_delete_container_row(user_id)
 
 
 def main():
@@ -81,7 +146,18 @@ def main():
         print("No dreamagent-user-* containers found. Nothing to do.")
         return
 
-    print(f"Found {len(containers)} per-user container(s).\n")
+    print(f"Found {len(containers)} per-user container(s).")
+    try:
+        _load_db_config()
+        try:
+            import database_adapter  # noqa: F401
+            _mode = "database_adapter"
+        except ImportError:
+            _mode = "psql fallback"
+        print(f"(db access: {_mode})\n")
+    except Exception as exc:
+        print(f"\nDB config incomplete: {exc}")
+        return
     orphans = []
     for user_id, (name, status) in sorted(containers.items()):
         ws = WORKSPACES_ROOT / f"user_{user_id}"
