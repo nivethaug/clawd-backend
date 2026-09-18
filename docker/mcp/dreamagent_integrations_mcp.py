@@ -91,7 +91,7 @@ _ENV = _project_env()
 _SECRET = _ENV.get("SECRET_KEY") or os.environ.get("SECRET_KEY") or ""
 _PROJECT_ID = _ENV.get("PROJECT_ID") or os.environ.get("PROJECT_ID") or ""
 
-_state: Dict[str, Any] = {"project_id": _PROJECT_ID or None, "providers": None}
+_state: Dict[str, Any] = {"project_id": _PROJECT_ID or None, "providers": None, "resolved": False, "authenticated": False}
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -131,20 +131,24 @@ def _api_post(path: str, payload: dict, timeout: int = 60) -> Dict[str, Any]:
 
 def _resolve() -> Dict[str, Any]:
     """Resolve project_id + connected providers from SECRET_KEY (cached)."""
-    if _state.get("providers") is not None and _state.get("project_id"):
+    if _state.get("resolved"):
         return _state
+    _state["authenticated"] = False
+    _state["providers"] = []
+    _state["resolve_error"] = ""
     if not _SECRET:
-        _state["providers"] = []
         _state["resolve_error"] = "No SECRET_KEY found in the project environment"
+        _state["resolved"] = True
         return _state
     try:
         info = _api_get("/api/integrations/mcp-resolve")
         _state["project_id"] = str(info.get("project_id") or _state.get("project_id") or "")
         _state["providers"] = info.get("providers") or []
+        _state["authenticated"] = True
     except Exception as e:
         log.warning("resolve failed: %s", e)
-        _state["providers"] = []
         _state["resolve_error"] = str(e)
+    _state["resolved"] = True
     return _state
 
 
@@ -192,14 +196,15 @@ TOOLS = [
 
 
 def _tool_integrations_status(_: dict) -> dict:
+    # Honest status: failure paths (no secret / resolve error) report
+    # authenticated False instead of an empty-but-true provider list.
     st = _resolve()
-    providers = st.get("providers")
-    if providers is None:
-        return {"authenticated": False, "error": st.get("resolve_error") or "no SECRET_KEY in project env"}
+    if not st.get("authenticated"):
+        return {"authenticated": False, "error": st.get("resolve_error") or "not authenticated"}
     return {
         "authenticated": True,
         "project_id": st.get("project_id"),
-        "connected_providers": providers,
+        "connected_providers": st.get("providers") or [],
         "hint": "Call integrations_request with provider=<key> to use one.",
     }
 
