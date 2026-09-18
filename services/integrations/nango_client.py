@@ -72,14 +72,21 @@ ENABLED_PROVIDERS: Dict[str, Dict[str, Any]] = {
         # "twitter" — the legacy twitter slug is OAuth 1.0a.
         "nango_provider": "twitter-v2",
     },
-    # Nango slug is singular: "google-sheet".
-    "google-sheet": {
-        "title": "Google Sheets",
-        "category": "Integrations",
-        "description": "Read and write rows in your Google spreadsheets — "
-                       "one-click Google authorization.",
-        "env_token_key": "GOOGLE_SHEETS_ACCESS_TOKEN",
-    },
+    # Google Sheets — HIDDEN until Google verifies our OAuth app (the
+    # spreadsheets scope is RESTRICTED: production use requires Google's
+    # verification + security assessment; unverified shows the scary
+    # "unsafe app" screen). Commenting out removes it from the UI list,
+    # rejects connect/proxy attempts, hides existing connections, and
+    # drops it from the agent's prompt — in one place. Restore the entry
+    # once verification is granted.
+    #
+    # "google-sheet": {            # Nango slug is singular: "google-sheet".
+    #     "title": "Google Sheets",
+    #     "category": "Integrations",
+    #     "description": "Read and write rows in your Google spreadsheets — "
+    #                    "one-click Google authorization.",
+    #     "env_token_key": "GOOGLE_SHEETS_ACCESS_TOKEN",
+    # },
     "slack": {
         "title": "Slack",
         "category": "Integrations",
