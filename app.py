@@ -11687,7 +11687,7 @@ async def list_gallery_projects(
                 """SELECT gp.id, gp.project_id, gp.user_id, gp.title, gp.description,
                           gp.frontend_url, gp.project_type, gp.thumbnail_url, gp.is_featured,
                           gp.view_count, gp.clone_count, gp.created_at, gp.updated_at,
-                          gp.published_at, gp.status,
+                          gp.published_at, gp.status, gp.required_env_keys,
                           u.name as author_name
                    FROM gallery_projects gp
                    LEFT JOIN users u ON gp.user_id = u.id
@@ -11701,7 +11701,7 @@ async def list_gallery_projects(
                 """SELECT gp.id, gp.project_id, gp.user_id, gp.title, gp.description,
                           gp.frontend_url, gp.project_type, gp.thumbnail_url, gp.is_featured,
                           gp.view_count, gp.clone_count, gp.created_at, gp.updated_at,
-                          gp.published_at, gp.status,
+                          gp.published_at, gp.status, gp.required_env_keys,
                           u.name as author_name
                    FROM gallery_projects gp
                    LEFT JOIN users u ON gp.user_id = u.id
@@ -11721,6 +11721,12 @@ async def list_gallery_projects(
         else:
             author_name = row[15] if len(row) > 15 else None
         item["author_name"] = author_name
+        raw_req = row.get("required_env_keys") if isinstance(row, dict) else (row[16] if len(row) > 16 else None)
+        try:
+            parsed_req = json.loads(raw_req) if isinstance(raw_req, str) and raw_req else []
+            item["required_env_keys"] = parsed_req if isinstance(parsed_req, list) else []
+        except Exception:
+            item["required_env_keys"] = []
         results.append(item)
 
     return {"projects": results, "limit": limit, "offset": offset}
