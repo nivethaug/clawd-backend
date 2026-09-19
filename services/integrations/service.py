@@ -333,6 +333,75 @@ def connect(
             "restarted": restarted, "swapped": bool(conflicts)}
 
 
+def materialize_for_clone(project_id: int, user_id: int, gi_ids: List[int]) -> Dict[str, Any]:
+    """Clone-time vault materialization: decrypt the CLONER's saved
+    credentials into the freshly cloned project's .env and record the
+    integration links.
+
+    Unlike connect(), there is no conflict policy and no PM2 restart —
+    this runs inside the clone worker before anything starts, on a
+    sanitized env whose key names came from the source project.
+    """
+    from services.integrations.catalog import CATALOG
+    from secure_value import decrypt_value
+    from env_manager import write_env_file
+
+    if not gi_ids:
+        return {"materialized": 0}
+    owned = _owned_gis(gi_ids, user_id)
+    if len(owned) != len(set(gi_ids)):
+        return {"error": "credential_not_found"}
+
+    # Infer each GI's catalog integration_type from its key_name.
+    key_to_type = {}
+    for d in CATALOG.values():
+        for k in d.key_names:
+            key_to_type[k] = d.type
+
+    ctx = _env_context(project_id)
+    if not ctx:
+        return {"error": "env_unavailable"}
+    env_path, _type_id, _domain = ctx
+
+    updates: Dict[str, str] = {}
+    links: List[Dict[str, Any]] = []
+    for gi_id in gi_ids:
+        gi = owned.get(gi_id)
+        if not gi:
+            continue
+        kn = (gi.get("key_name") or "").strip().upper()
+        plain = decrypt_value(gi.get("value_encrypted") or "")
+        if not kn or not plain:
+            continue
+        updates[kn] = plain
+        links.append({"gi": gi, "key": kn, "type": key_to_type.get(kn, gi.get("token_type") or "other")})
+
+    if not updates:
+        return {"error": "decrypt_failed"}
+
+    write_env_file(env_path, updates)
+
+    with get_db() as conn:
+        for link in links:
+            conn.execute(
+                """INSERT INTO project_integration_links
+                   (project_id, global_integration_id, integration_type,
+                    materialized_keys, status, linked_at, last_synced_at)
+                   VALUES (%s, %s, %s, %s, 'linked', NOW(), NOW())
+                   ON CONFLICT (project_id, global_integration_id) DO UPDATE SET
+                     status = 'linked',
+                     materialized_keys = EXCLUDED.materialized_keys,
+                     integration_type = EXCLUDED.integration_type,
+                     last_synced_at = NOW()""",
+                (project_id, link["gi"]["id"], link["type"], link["key"]),
+            )
+        conn.commit()
+
+    logger.info("[INTEGRATIONS] clone materialization: project %s got %d key(s) from %d vault credential(s)",
+                project_id, len(updates), len(links))
+    return {"materialized": len(updates), "key_names": sorted(updates)}
+
+
 def disconnect(project_id: int, user_id: int, gi_id: int) -> Dict[str, Any]:
     if not _owned_project(project_id, user_id):
         return {"error": "not_found"}

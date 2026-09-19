@@ -1275,6 +1275,35 @@ class CloneProjectRequest(BaseModel):
     discord_webhook_url: Optional[str] = None  # Discord webhook URL for scheduler
     email_to: Optional[str] = None  # Default email recipient for scheduler
     api_endpoint: Optional[str] = None  # Default API endpoint URL for scheduler
+    # Env gate: credentials the cloner supplies for the source's env keys
+    # (max 20; sensitive keys validated server-side against the required list)
+    environment_variables: Optional[List[Dict[str, str]]] = None  # [{key, value}]
+    global_integration_ids: Optional[List[int]] = None  # cloner's vault picks
+
+
+def _normalize_clone_env_vars(items: Optional[List[Dict[str, str]]]) -> List[Dict[str, str]]:
+    """Sanitize clone-provided env vars: uppercase-key regex, no system or
+    dialog-managed keys, non-empty values, dedupe, cap 20."""
+    import re as _re
+    out: List[Dict[str, str]] = []
+    seen = set()
+    for it in (items or [])[:20]:
+        if not isinstance(it, dict):
+            continue
+        k = str(it.get("key") or "").strip().upper()
+        v = str(it.get("value") or "").strip()
+        if not k or not v:
+            continue
+        if not _re.fullmatch(r"[A-Z][A-Z0-9_]*", k) or len(k) < 3:
+            continue
+        from env_manager import SYSTEM_KEYS
+        if k in SYSTEM_KEYS or k in _CLONE_DIALOG_MANAGED_KEYS:
+            continue
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append({"key": k, "value": v})
+    return out
 
 
 class CreateSessionRequest(BaseModel):
@@ -3708,6 +3737,127 @@ def _sanitize_clone_env(clone_path: str):
             logger.warning("[CLONE] Could not sanitize %s: %s", env_path, e)
 
 
+# Env keys that already have their own Clone dialog fields (bot token,
+# scheduler sender channels) — excluded from the generic required-env list.
+_CLONE_DIALOG_MANAGED_KEYS = frozenset({
+    "BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "DISCORD_TOKEN",
+    "TELEGRAM_CHAT_ID", "DISCORD_WEBHOOK_URL", "EMAIL_TO", "API_ENDPOINT",
+})
+# Written by the clone worker itself onto the clone's env.
+_CLONE_PLATFORM_KEYS = frozenset({"DOMAIN"})
+
+
+def _clone_required_env(project_id: int) -> List[Dict[str, Any]]:
+    """User env keys a cloner must provide for this source project.
+
+    Key NAMES only — values never leave this function's callers. Uses the
+    project .env (system keys already hidden by read_env_file), drops keys
+    the Clone dialog already collects, and joins registry metadata for
+    sensitivity (unknown keys default sensitive → must be provided) plus
+    the source's managed-integration links (vault-reconnectable keys).
+    """
+    try:
+        from env_manager import get_project_env_info, read_env_file
+        env_path, _tid, _dom, _name = get_project_env_info(project_id)
+    except Exception:
+        return []
+    if not env_path or not os.path.exists(env_path):
+        return []
+
+    keys: List[str] = []
+    for var in read_env_file(env_path):
+        k = var.get("key")
+        if not k or k in _CLONE_DIALOG_MANAGED_KEYS or k in _CLONE_PLATFORM_KEYS:
+            continue
+        keys.append(k)
+    if not keys:
+        return []
+
+    linked_keys = set()
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT materialized_keys FROM project_integration_links "
+                "WHERE project_id = ? AND status = 'linked'",
+                (project_id,),
+            ).fetchall()
+        for r in rows:
+            mk = (r.get("materialized_keys") if isinstance(r, dict) else r[0]) or ""
+            linked_keys.update(x.strip() for x in mk.split(",") if x.strip())
+    except Exception:
+        pass
+
+    try:
+        from env_registry_service import lookup_many
+        metas = lookup_many(keys)
+    except Exception:
+        metas = {}
+
+    # Auto-copy needs BOTH classifiers to agree the key is not a secret:
+    # the registry's is_sensitive AND env_manager's name-pattern check
+    # (read_env_file masks pattern-matching values, so a registry-non-secret
+    # with a scary name must not be promised as auto-copied).
+    from env_manager import _is_sensitive as _envmgr_sensitive
+
+    out: List[Dict[str, Any]] = []
+    for k in keys:
+        meta = metas.get(k) or {}
+        is_sensitive = bool(meta.get("is_sensitive", True))
+        auto_copy = (not is_sensitive) and (not _envmgr_sensitive(k))
+        out.append({
+            "key": k,
+            "title": meta.get("title") or k,
+            "description": meta.get("description"),
+            "docs_url": meta.get("docs_url"),
+            "is_sensitive": is_sensitive or (not auto_copy),
+            "auto_copy": auto_copy,
+            "source_integration": k in linked_keys,
+        })
+    return out
+
+
+def _write_clone_user_env(clone_path: str, source_project_id: Optional[int],
+                          env_updates: List[Dict[str, str]]) -> None:
+    """Materialize the cloner-provided env + auto-copied non-secrets into the
+    clone's type-correct .env (right after _sanitize_clone_env — platform
+    vars written later by the type-specific steps MERGE on top, never clobber)."""
+    if not env_updates and not source_project_id:
+        return
+    from env_manager import write_env_file, get_project_env_info, read_env_file
+    type_id = _project_type_id_for(source_project_id) if source_project_id else None
+    subdir = {1: "backend", 2: "telegram", 3: "discord"}.get(type_id, "")
+    clone_env = os.path.join(clone_path, subdir, ".env") if subdir else os.path.join(clone_path, ".env")
+    updates: Dict[str, str] = {str(u["key"]): str(u["value"]) for u in (env_updates or []) if u.get("value")}
+    if source_project_id:
+        # Auto-copy registry-verified non-secret values from the SOURCE env.
+        try:
+            src_env_path, *_ = get_project_env_info(source_project_id)
+            if src_env_path and os.path.exists(src_env_path):
+                for var in read_env_file(src_env_path):
+                    k = var.get("key")
+                    if k and var.get("value") and k not in updates:
+                        # only registry-verified NON-secrets carry real values
+                        # in read_env_file output — sensitive ones come back masked
+                        if not var.get("masked") and k not in _CLONE_DIALOG_MANAGED_KEYS:
+                            updates.setdefault(k, var["value"])
+        except Exception as e:
+            logger.warning("[CLONE] auto-copy non-secret env failed (non-fatal): %s", e)
+    if updates and os.path.isdir(os.path.dirname(clone_env) or clone_path):
+        write_env_file(clone_env, updates)
+        logger.info("[CLONE] wrote %d user env key(s) into %s", len(updates), clone_env)
+
+
+def _project_type_id_for(project_id: Optional[int]) -> Optional[int]:
+    if not project_id:
+        return None
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT type_id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return (row.get("type_id") if isinstance(row, dict) else row[0]) if row else None
+    except Exception:
+        return None
+
+
 def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_type_id: int,
                   source_path: str, clone_path: str, template_id: Optional[str],
                   description: Optional[str], source_domain: str = "",
@@ -3717,7 +3867,10 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                   discord_webhook_url: Optional[str] = None,
                   email_to: Optional[str] = None,
                   api_endpoint: Optional[str] = None,
-                  source_project_id: Optional[int] = None):
+                  source_project_id: Optional[int] = None,
+                  cloner_user_id: Optional[int] = None,
+                  env_updates: Optional[List[Dict[str, str]]] = None,
+                  gi_ids: Optional[List[int]] = None):
     """Background worker that copies files and provisions infrastructure for a cloned project."""
 
     try:
@@ -3729,6 +3882,25 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
 
         # Never carry the source project's secret VALUES into the clone
         _sanitize_clone_env(clone_path)
+
+        # Env gate materialization: cloner-provided credentials + auto-copied
+        # registry-verified non-secrets, BEFORE any service starts. Platform
+        # vars written by the type-specific steps below merge on top.
+        try:
+            _write_clone_user_env(clone_path, source_project_id, env_updates or [])
+        except Exception as env_err:
+            logger.warning("[CLONE] user env materialization failed (non-fatal): %s", env_err)
+
+        # Vault picks: decrypt the cloner's saved credentials into the clone
+        # env and record the integration links (no restart — nothing is
+        # running yet). Runs where the files live (worker for worker-hosted).
+        if gi_ids and cloner_user_id:
+            try:
+                from services.integrations.service import materialize_for_clone
+                res = materialize_for_clone(project_id, cloner_user_id, gi_ids)
+                logger.info("[CLONE] vault materialization for clone %s: %s", project_id, res)
+            except Exception as gi_err:
+                logger.warning("[CLONE] vault materialization failed (non-fatal): %s", gi_err)
 
         # Re-initialise git (remove copied .git if any, re-init fresh)
         git_dir = os.path.join(clone_path, ".git")
@@ -4159,6 +4331,41 @@ async def clone_project(
     if not source_path or not os.path.exists(source_path):
         raise HTTPException(status_code=400, detail=f"Source project path not found on disk: {source_path}")
 
+    # --- Env gate -----------------------------------------------------------
+    # The cloner must supply every sensitive env key the source project uses
+    # (paste or their own vault pick). No env keys → free clone. Server-side
+    # and authoritative — the dialog is convenience, not the enforcement.
+    required = _clone_required_env(project_id)
+    env_updates = _normalize_clone_env_vars(request.environment_variables)
+    gi_ids = [int(g) for g in (request.global_integration_ids or []) if str(g).isdigit()][:20]
+    gi_key_names: set = set()
+    if required and gi_ids:
+        try:
+            from services.integrations.service import _owned_gis
+            owned = _owned_gis(gi_ids, user_id)
+            for gi in owned.values():
+                kn = (gi.get("key_name") or "").strip().upper()
+                if kn:
+                    gi_key_names.add(kn)
+        except Exception as gate_err:
+            logger.warning("[CLONE] vault lookup for env gate failed: %s", gate_err)
+    provided_keys = {u["key"] for u in env_updates} | gi_key_names
+    missing = [r["key"] for r in required if not r["auto_copy"] and r["key"] not in provided_keys]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "missing_env_keys",
+                "missing": missing,
+                "message": (
+                    "This project uses credentials the clone must provide: "
+                    + ", ".join(missing)
+                    + ". Supply them in the clone dialog (paste or pick from your "
+                      "saved credentials) and try again."
+                ),
+            },
+        )
+
     # Validate / generate domain
     github = get_github_service()
     clone_domain = request.domain
@@ -4251,6 +4458,9 @@ async def clone_project(
             "email_to": request.email_to,
             "api_endpoint": request.api_endpoint,
             "source_project_id": project_id,
+            "cloner_user_id": user_id,
+            "env_updates": env_updates,
+            "gi_ids": gi_ids,
         },
         daemon=True,
     )
@@ -4279,6 +4489,31 @@ async def clone_project(
         "status": "cloning",
         "message": f"Cloning project '{source.get('name')}' as '{request.name}'. Infrastructure provisioning in background."
     }
+
+
+@app.get("/projects/{project_id}/clone-requirements")
+async def get_clone_requirements(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Env/integration keys a cloner must supply for this source project.
+
+    Key NAMES only — values never leave the server. free_clone=true when the
+    source has no user env keys (clone proceeds with zero prompts).
+    """
+    user_id = get_user_id_from_token(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    keys = _clone_required_env(project_id)
+    return {"free_clone": not keys, "keys": keys, "count": len(keys)}
 
 
 @app.get("/project-types", response_model=list[ProjectTypeResponse])

@@ -54,6 +54,7 @@ _PROXY_SUBROUTES = (
     "editor/build-publish",  # rebuild + redeploy (worker serves it)
     "env",                   # GET/PUT .env file on disk
     "clone",                 # reads source project files
+    "clone-requirements",    # reads source .env key names (values never)
     "design",                # visual patches + fast rebuild (worker has files)
 )
 
