@@ -1157,6 +1157,61 @@ def init_schema():
                     "Integrations",
                     True,
                 ),
+                # --- Template app CONFIG (not credentials) --------------------
+                # These are plain settings the app builder writes into .env
+                # (bot display name, timeouts, currency, webhook path, …).
+                # Registered NON-sensitive so the env dialog shows them as
+                # plain editable values instead of masked "reveal to edit"
+                # rows, and the clone gate auto-copies them from the source
+                # instead of demanding a paste.
+                (
+                    "BOT_NAME",
+                    "Bot Display Name",
+                    "Display name shown for the bot.",
+                    None,
+                    "Custom",
+                    False,
+                ),
+                (
+                    "API_TIMEOUT",
+                    "API Timeout (seconds)",
+                    "Timeout for outbound API calls.",
+                    None,
+                    "Custom",
+                    False,
+                ),
+                (
+                    "DEFAULT_CURRENCY",
+                    "Default Currency",
+                    "Default currency code for prices (e.g. USD, INR).",
+                    None,
+                    "Custom",
+                    False,
+                ),
+                (
+                    "WEBHOOK_PATH",
+                    "Webhook Path",
+                    "URL path the bot's webhook is served on.",
+                    None,
+                    "Custom",
+                    False,
+                ),
+                (
+                    "OWNER_TELEGRAM_ID",
+                    "Owner Telegram ID",
+                    "Numeric Telegram user id of the bot owner (notifications).",
+                    None,
+                    "Custom",
+                    False,
+                ),
+                (
+                    "ACCESS_TOKEN_EXPIRE_HOURS",
+                    "Access Token Expiry (hours)",
+                    "How long issued access tokens stay valid.",
+                    None,
+                    "Custom",
+                    False,
+                ),
             ]
             for entry in default_registry:
                 cur.execute(
