@@ -94,6 +94,13 @@ ENABLED_PROVIDERS: Dict[str, Dict[str, Any]] = {
                        "one-click Slack authorization.",
         "env_token_key": "SLACK_ACCESS_TOKEN",
     },
+    "calendly": {
+        "title": "Calendly",
+        "category": "Integrations",
+        "description": "Read your Calendly event types and scheduled meetings, and "
+                       "generate one-click booking links — one-click Calendly authorization.",
+        "env_token_key": "CALENDLY_ACCESS_TOKEN",
+    },
     # Stripe OAuth: parked — use the API-key vault entry (STRIPE_SECRET_KEY) meanwhile.
 }
 
@@ -200,6 +207,25 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
             "GET conversations.history?channel={id}",
         ],
         "gotchas": ["Bot must be invited to a channel before it can post or read there."],
+    },
+    "calendly": {
+        "capabilities": {
+            "read": "current user, event types, scheduled events, event invitees",
+            "create": "single-use scheduling links, webhook subscriptions",
+        },
+        "examples": [
+            "GET users/me",
+            "GET event_types?user={user_uri}",
+            "GET scheduled_events?user={user_uri}&max_page_size=20",
+            "GET scheduled_events/{event_uuid}/invitees",
+            "POST scheduling_links {\"max_event_count\": 1, \"max_usage_count\": 1, "
+            "\"end_time\": \"<ISO>\", \"owner\": \"<event_type_uri>\", \"owner_type\": \"EventType\"}",
+        ],
+        "gotchas": [
+            "Resources are addressed by full URIs (user/event type), not plain ids — "
+            "take them from users/me and event_types responses.",
+            "Pagination uses page_token (response.pagination.next_page_token), not page numbers.",
+        ],
     },
 }
 
