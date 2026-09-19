@@ -3746,6 +3746,17 @@ _CLONE_DIALOG_MANAGED_KEYS = frozenset({
 # Written by the clone worker itself onto the clone's env.
 _CLONE_PLATFORM_KEYS = frozenset({"DOMAIN"})
 
+# Template app CONFIG with safe platform defaults — the bot template ships
+# these; a clone fills them automatically (never from the source for other
+# users) instead of demanding a paste. BOT_NAME is NOT here: it's
+# project-specific, asked from the user (prefilled with the clone name).
+_CLONE_TEMPLATE_DEFAULTS = {
+    "API_TIMEOUT": "10",
+    "DEFAULT_CURRENCY": "USD",
+    "ACCESS_TOKEN_EXPIRE_HOURS": "24",
+    "WEBHOOK_PATH": "/webhook",
+}
+
 
 def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """User env keys a cloner must provide for this source project.
@@ -3818,7 +3829,14 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
     for k in keys:
         meta = metas.get(k) or {}
         is_sensitive = bool(meta.get("is_sensitive", True))
-        auto_copy = (not is_sensitive) and (not _envmgr_sensitive(k)) and same_owner
+        if k in _CLONE_TEMPLATE_DEFAULTS:
+            # Template config with a platform default — auto-filled at clone
+            # time for EVERYONE (defaults aren't source data).
+            auto_copy = True
+            default_value = _CLONE_TEMPLATE_DEFAULTS[k]
+        else:
+            auto_copy = (not is_sensitive) and (not _envmgr_sensitive(k)) and same_owner
+            default_value = None
         out.append({
             "key": k,
             "title": meta.get("title") or k,
@@ -3826,6 +3844,7 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
             "docs_url": meta.get("docs_url"),
             "is_sensitive": is_sensitive or (not auto_copy),
             "auto_copy": auto_copy,
+            "default_value": default_value,
             "source_integration": k in linked_keys,
         })
     return out
@@ -3871,6 +3890,10 @@ def _write_clone_user_env(clone_path: str, source_project_id: Optional[int],
                                 updates.setdefault(k, var["value"])
             except Exception as e:
                 logger.warning("[CLONE] auto-copy non-secret env failed (non-fatal): %s", e)
+        # Template config defaults — filled for EVERY clone (defaults, not
+        # source data): API_TIMEOUT, DEFAULT_CURRENCY, etc.
+        for k, dv in _CLONE_TEMPLATE_DEFAULTS.items():
+            updates.setdefault(k, dv)
     if updates and os.path.isdir(os.path.dirname(clone_env) or clone_path):
         write_env_file(clone_env, updates)
         logger.info("[CLONE] wrote %d user env key(s) into %s", len(updates), clone_env)
