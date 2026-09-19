@@ -95,3 +95,29 @@ Sanity: `curl -s -H "Authorization: Bearer <dreamagent token>" https://api.../ap
 Unset `NANGO_SECRET_KEY` in the backend `.env` + restart: nango endpoints
 503, Integrations page shows API-key cards only, scheduler injection
 no-ops. Nango containers can stay (or `docker compose down`).
+
+## 7. Adding a new provider — Calendly (worked example)
+
+Self-hosted Nango ships only the protocol template per provider; OAuth app
+credentials must be registered once, exactly like YouTube (§3-4). Shared
+credentials are a Nango Cloud feature — not available here.
+
+1. **Calendly OAuth app** (one-time): https://developer.calendly.com →
+   Create app → Web App → redirect URI `https://nango.dreamagent.cloud/oauth/callback`.
+   Copy Client ID + Client Secret. (No review/approval — instant.)
+2. **Register in Nango** (main VPS):
+   ```bash
+   NGSECRET=$(grep '^NANGO_SECRET_KEY' /root/clawd-backend/.env | cut -d= -f2)
+   CCID=<calendly client id>; CSEC=<calendly client secret>
+   curl -s http://127.0.0.1:3003/integrations \
+     -H "Authorization: Bearer $NGSECRET" -H "Content-Type: application/json" \
+     -d "{\"provider\":\"calendly\",\"unique_key\":\"calendly\",\"credentials\":{\"type\":\"OAUTH2\",\"client_id\":\"$CCID\",\"client_secret\":\"$CSEC\"}}"
+   ```
+3. **App side**: add the entry to `ENABLED_PROVIDERS` in
+   `services/integrations/nango_client.py` (+ `PROVIDER_EXTRAS` for the
+   agent prompt) — already done for calendly (commit 88d7412).
+4. **Sanity**: Integrations page → Calendly card → Connect → consent →
+   ✓ Connected. Proxy test: ask the agent (connected project) to read
+   `users/me` via the integrations proxy.
+
+Until step 2 is done, the card appears but Connect errors — expected.
