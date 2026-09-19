@@ -1316,6 +1316,9 @@ class GalleryPublishRequest(BaseModel):
     title: str
     description: str
     thumbnail_url: Optional[str] = None
+    # Env keys the OWNER marks as required for cloners (default: none —
+    # bot tokens are always required via the clone dialog's own field).
+    required_env_keys: Optional[List[str]] = None
 
 
 class GalleryUpdateRequest(BaseModel):
@@ -1323,6 +1326,7 @@ class GalleryUpdateRequest(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    required_env_keys: Optional[List[str]] = None
 
 
 class TemplateCreateRequest(BaseModel):
@@ -3791,11 +3795,27 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
         pass
 
     keys: List[str] = []
-    for var in read_env_file(env_path):
-        k = var.get("key")
-        if not k or k in _CLONE_DIALOG_MANAGED_KEYS or k in _CLONE_PLATFORM_KEYS:
-            continue
-        keys.append(k)
+    if same_owner:
+        for var in read_env_file(env_path):
+            k = var.get("key")
+            if not k or k in _CLONE_DIALOG_MANAGED_KEYS or k in _CLONE_PLATFORM_KEYS:
+                continue
+            keys.append(k)
+    else:
+        # Another user cloning: if the source's gallery listing carries an
+        # owner-curated required list, THAT list replaces the full env scan —
+        # the owner decides exactly what a cloner must provide (bot tokens
+        # are always covered by the clone dialog's own verified field).
+        curated = _gallery_required_env_keys(project_id)
+        if curated is not None:
+            keys = [k for k in curated
+                    if k not in _CLONE_DIALOG_MANAGED_KEYS and k not in _CLONE_PLATFORM_KEYS]
+        else:
+            for var in read_env_file(env_path):
+                k = var.get("key")
+                if not k or k in _CLONE_DIALOG_MANAGED_KEYS or k in _CLONE_PLATFORM_KEYS:
+                    continue
+                keys.append(k)
     if not keys:
         return []
 
@@ -12378,7 +12398,7 @@ async def get_gallery_project(gallery_id: int):
             """SELECT gp.id, gp.project_id, gp.user_id, gp.title, gp.description,
                       gp.frontend_url, gp.project_type, gp.thumbnail_url, gp.is_featured,
                       gp.view_count, gp.clone_count, gp.created_at, gp.updated_at,
-                      gp.published_at, gp.status,
+                      gp.published_at, gp.status, gp.required_env_keys,
                       u.name as author_name
                FROM gallery_projects gp
                LEFT JOIN users u ON gp.user_id = u.id
@@ -12392,9 +12412,59 @@ async def get_gallery_project(gallery_id: int):
     item = _gallery_row_to_dict(row)
     if isinstance(row, dict):
         item["author_name"] = row.get("author_name")
+        raw_req = row.get("required_env_keys")
     else:
         item["author_name"] = row[15] if len(row) > 15 else None
+        raw_req = row[16] if len(row) > 16 else None
+    try:
+        parsed_req = json.loads(raw_req) if isinstance(raw_req, str) and raw_req else []
+        item["required_env_keys"] = parsed_req if isinstance(parsed_req, list) else []
+    except Exception:
+        item["required_env_keys"] = []
     return item
+
+
+def _sanitize_gallery_required_env(keys: Optional[List[str]]) -> Optional[str]:
+    """Validate the owner-marked required env keys → JSON array string.
+
+    None passes through (update: leave unchanged); anything else is
+    uppercased-regex filtered, deduped, capped at 20, and stripped of
+    system + clone-dialog-managed keys (bot tokens are always handled by
+    the clone dialog's own verified field, never by this list)."""
+    if keys is None:
+        return None
+    import re as _re
+    import json as _json
+    from env_manager import SYSTEM_KEYS
+    out, seen = [], set()
+    for k in keys[:20]:
+        k = str(k or "").strip().upper()
+        if not _re.fullmatch(r"[A-Z][A-Z0-9_]*", k) or len(k) < 3:
+            continue
+        if k in SYSTEM_KEYS or k in _CLONE_DIALOG_MANAGED_KEYS:
+            continue
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(k)
+    return _json.dumps(out)
+
+
+def _gallery_required_env_keys(project_id: int) -> Optional[List[str]]:
+    """Owner-curated required env keys for a gallery listing (None = not curated)."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT required_env_keys FROM gallery_projects WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+    raw = (row.get("required_env_keys") if isinstance(row, dict) else row[0]) if row else None
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else None
+    except Exception:
+        return None
 
 
 @app.post("/projects/{project_id}/publish-to-gallery", status_code=201)
@@ -12434,8 +12504,8 @@ async def publish_to_gallery(
         conn.execute(
             """INSERT INTO gallery_projects
                (project_id, user_id, title, description, frontend_url, project_type, thumbnail_url,
-                status, published_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, 'public', CURRENT_TIMESTAMP) RETURNING id""",
+                status, published_at, required_env_keys)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'public', CURRENT_TIMESTAMP, %s) RETURNING id""",
             (
                 project_id,
                 user_id,
@@ -12444,6 +12514,7 @@ async def publish_to_gallery(
                 frontend_url,
                 project.get("type_id") or 1,
                 request.thumbnail_url,
+                _sanitize_gallery_required_env(request.required_env_keys) or "[]",
             ),
         )
         result = conn.fetchone()
@@ -12499,6 +12570,9 @@ async def update_gallery_listing(
         if request.thumbnail_url is not None:
             updates.append("thumbnail_url = %s")
             params.append(request.thumbnail_url)
+        if request.required_env_keys is not None:
+            updates.append("required_env_keys = %s")
+            params.append(_sanitize_gallery_required_env(request.required_env_keys) or "[]")
 
         if updates:
             updates.append("updated_at = CURRENT_TIMESTAMP")

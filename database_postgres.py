@@ -692,8 +692,12 @@ def init_schema():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     published_at TIMESTAMP,
-                    status VARCHAR(20) NOT NULL DEFAULT 'public'
+                    status VARCHAR(20) NOT NULL DEFAULT 'public',
+                    required_env_keys TEXT
                 )""")
+                # Existing deployments: add the column (owner-marked env keys
+                # a gallery cloner must supply; JSON array string).
+                cur.execute("ALTER TABLE gallery_projects ADD COLUMN IF NOT EXISTS required_env_keys TEXT")
                 conn.commit()
                 # Indexes: browse by status+recency, unique one-listing-per-project, type filter
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_gallery_projects_status ON gallery_projects(status, published_at DESC)")
