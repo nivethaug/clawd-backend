@@ -67,6 +67,14 @@ SYSTEM_KEYS = frozenset({
     "SMTP_USER",
     "SMTP_PASS",
     "SMTP_FROM",
+    # Bot-template CONFIG with safe platform defaults (API_TIMEOUT=10,
+    # DEFAULT_CURRENCY=USD, ACCESS_TOKEN_EXPIRE_HOURS=24, WEBHOOK_PATH=/webhook).
+    # Hidden from the env dialog and the clone gate; the clone worker fills
+    # defaults into .env — the app reads them, the user never manages them.
+    "API_TIMEOUT",
+    "DEFAULT_CURRENCY",
+    "ACCESS_TOKEN_EXPIRE_HOURS",
+    "WEBHOOK_PATH",
 })
 
 # Patterns that mark a visible variable as sensitive (masked by default)

@@ -1172,31 +1172,7 @@ def init_schema():
                     "Custom",
                     False,
                 ),
-                (
-                    "API_TIMEOUT",
-                    "API Timeout (seconds)",
-                    "Timeout for outbound API calls.",
-                    None,
-                    "Custom",
-                    False,
-                ),
-                (
-                    "DEFAULT_CURRENCY",
-                    "Default Currency",
-                    "Default currency code for prices (e.g. USD, INR).",
-                    None,
-                    "Custom",
-                    False,
-                ),
-                (
-                    "WEBHOOK_PATH",
-                    "Webhook Path",
-                    "URL path the bot's webhook is served on.",
-                    None,
-                    "Custom",
-                    False,
-                ),
-                (
+                                                                (
                     "OWNER_TELEGRAM_ID",
                     "Owner Telegram ID",
                     "Numeric Telegram user id of the bot owner (notifications).",
@@ -1204,15 +1180,7 @@ def init_schema():
                     "Custom",
                     False,
                 ),
-                (
-                    "ACCESS_TOKEN_EXPIRE_HOURS",
-                    "Access Token Expiry (hours)",
-                    "How long issued access tokens stay valid.",
-                    None,
-                    "Custom",
-                    False,
-                ),
-                (
+                                (
                     "CALENDLY_URL",
                     "Calendly Booking URL",
                     "Public Calendly event link shared with users for scheduling.",
@@ -1221,6 +1189,12 @@ def init_schema():
                     False,
                 ),
             ]
+            # Template-config keys moved to SYSTEM_KEYS (hidden) — remove
+            # any rows seeded by earlier deployments.
+            cur.execute(
+                "DELETE FROM env_variable_registry WHERE key_name IN "
+                "('API_TIMEOUT','DEFAULT_CURRENCY','ACCESS_TOKEN_EXPIRE_HOURS','WEBHOOK_PATH')"
+            )
             for entry in default_registry:
                 cur.execute(
                     """INSERT INTO env_variable_registry

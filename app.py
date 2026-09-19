@@ -3829,14 +3829,7 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
     for k in keys:
         meta = metas.get(k) or {}
         is_sensitive = bool(meta.get("is_sensitive", True))
-        if k in _CLONE_TEMPLATE_DEFAULTS:
-            # Template config with a platform default — auto-filled at clone
-            # time for EVERYONE (defaults aren't source data).
-            auto_copy = True
-            default_value = _CLONE_TEMPLATE_DEFAULTS[k]
-        else:
-            auto_copy = (not is_sensitive) and (not _envmgr_sensitive(k)) and same_owner
-            default_value = None
+        auto_copy = (not is_sensitive) and (not _envmgr_sensitive(k)) and same_owner
         out.append({
             "key": k,
             "title": meta.get("title") or k,
@@ -3844,7 +3837,6 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
             "docs_url": meta.get("docs_url"),
             "is_sensitive": is_sensitive or (not auto_copy),
             "auto_copy": auto_copy,
-            "default_value": default_value,
             "source_integration": k in linked_keys,
         })
     return out
