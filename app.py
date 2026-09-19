@@ -3795,28 +3795,21 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
         pass
 
     keys: List[str] = []
-    if same_owner:
+    if _in_gallery(project_id):
+        # GALLERY source: the owner's marking is the single source of truth
+        # for EVERY cloner (the owner included — the listing defines the
+        # clone experience). No marking (legacy NULL) = fully optional.
+        # Same-owner clones still auto-copy their non-secrets (below).
+        curated = _gallery_required_env_keys(project_id) or []
+        keys = [k for k in curated
+                if k not in _CLONE_DIALOG_MANAGED_KEYS and k not in _CLONE_PLATFORM_KEYS]
+    else:
+        # Non-gallery (own Projects page, templates): full env scan.
         for var in read_env_file(env_path):
             k = var.get("key")
             if not k or k in _CLONE_DIALOG_MANAGED_KEYS or k in _CLONE_PLATFORM_KEYS:
                 continue
             keys.append(k)
-    else:
-        # Another user cloning a GALLERY project: ONLY the owner-marked keys
-        # are required — the marking is the single source of truth. A listing
-        # without marking (legacy NULL) means fully optional: nothing beyond
-        # the bot-token field. Non-gallery sources (templates) keep the full
-        # scan; owners cloning their own project keep the full scan above.
-        if _in_gallery(project_id):
-            curated = _gallery_required_env_keys(project_id) or []
-            keys = [k for k in curated
-                    if k not in _CLONE_DIALOG_MANAGED_KEYS and k not in _CLONE_PLATFORM_KEYS]
-        else:
-            for var in read_env_file(env_path):
-                k = var.get("key")
-                if not k or k in _CLONE_DIALOG_MANAGED_KEYS or k in _CLONE_PLATFORM_KEYS:
-                    continue
-                keys.append(k)
     if not keys:
         return []
 
