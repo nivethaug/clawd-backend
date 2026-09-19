@@ -225,6 +225,12 @@ PROVIDER_EXTRAS: Dict[str, Dict[str, Any]] = {
             "Resources are addressed by full URIs (user/event type), not plain ids — "
             "take them from users/me and event_types responses.",
             "Pagination uses page_token (response.pagination.next_page_token), not page numbers.",
+            "Webhooks: when creating a subscription, ALWAYS generate a random signing_key, "
+            "store it in the project env as CALENDLY_WEBHOOK_SIGNING_KEY, and verify the "
+            "X-Calendly-Webhook-Signature header (HMAC-SHA256 over the raw body) in the "
+            "receiving route before trusting the event. The webhook URL must be publicly "
+            "reachable (the project's own domain), and organization-scoped subscriptions "
+            "need an organization URI from users/me (organization.uri).",
         ],
     },
 }
