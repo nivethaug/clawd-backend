@@ -3747,7 +3747,7 @@ _CLONE_DIALOG_MANAGED_KEYS = frozenset({
 _CLONE_PLATFORM_KEYS = frozenset({"DOMAIN"})
 
 
-def _clone_required_env(project_id: int) -> List[Dict[str, Any]]:
+def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """User env keys a cloner must provide for this source project.
 
     Key NAMES only — values never leave this function's callers. Uses the
@@ -3755,6 +3755,11 @@ def _clone_required_env(project_id: int) -> List[Dict[str, Any]]:
     the Clone dialog already collects, and joins registry metadata for
     sensitivity (unknown keys default sensitive → must be provided) plus
     the source's managed-integration links (vault-reconnectable keys).
+
+    Auto-copy of non-secret values applies ONLY when the cloner IS the
+    source owner — another user's clone (Gallery/template) must supply
+    every key: values like OWNER_TELEGRAM_ID are owner-specific and must
+    never leak into someone else's project.
     """
     try:
         from env_manager import get_project_env_info, read_env_file
@@ -3763,6 +3768,16 @@ def _clone_required_env(project_id: int) -> List[Dict[str, Any]]:
         return []
     if not env_path or not os.path.exists(env_path):
         return []
+
+    same_owner = False
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT user_id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if row:
+            owner_id = row.get("user_id") if isinstance(row, dict) else row[0]
+            same_owner = (cloner_user_id is not None and owner_id == cloner_user_id)
+    except Exception:
+        pass
 
     keys: List[str] = []
     for var in read_env_file(env_path):
@@ -3803,7 +3818,7 @@ def _clone_required_env(project_id: int) -> List[Dict[str, Any]]:
     for k in keys:
         meta = metas.get(k) or {}
         is_sensitive = bool(meta.get("is_sensitive", True))
-        auto_copy = (not is_sensitive) and (not _envmgr_sensitive(k))
+        auto_copy = (not is_sensitive) and (not _envmgr_sensitive(k)) and same_owner
         out.append({
             "key": k,
             "title": meta.get("title") or k,
@@ -3817,10 +3832,14 @@ def _clone_required_env(project_id: int) -> List[Dict[str, Any]]:
 
 
 def _write_clone_user_env(clone_path: str, source_project_id: Optional[int],
-                          env_updates: List[Dict[str, str]]) -> None:
+                          env_updates: List[Dict[str, str]],
+                          cloner_user_id: Optional[int] = None) -> None:
     """Materialize the cloner-provided env + auto-copied non-secrets into the
     clone's type-correct .env (right after _sanitize_clone_env — platform
-    vars written later by the type-specific steps MERGE on top, never clobber)."""
+    vars written later by the type-specific steps MERGE on top, never clobber).
+
+    Auto-copy runs ONLY for same-owner clones — another user's clone never
+    receives the source's values (OWNER_TELEGRAM_ID & co. are owner-specific)."""
     if not env_updates and not source_project_id:
         return
     from env_manager import write_env_file, get_project_env_info, read_env_file
@@ -3829,19 +3848,29 @@ def _write_clone_user_env(clone_path: str, source_project_id: Optional[int],
     clone_env = os.path.join(clone_path, subdir, ".env") if subdir else os.path.join(clone_path, ".env")
     updates: Dict[str, str] = {str(u["key"]): str(u["value"]) for u in (env_updates or []) if u.get("value")}
     if source_project_id:
-        # Auto-copy registry-verified non-secret values from the SOURCE env.
+        same_owner = False
         try:
-            src_env_path, *_ = get_project_env_info(source_project_id)
-            if src_env_path and os.path.exists(src_env_path):
-                for var in read_env_file(src_env_path):
-                    k = var.get("key")
-                    if k and var.get("value") and k not in updates:
-                        # only registry-verified NON-secrets carry real values
-                        # in read_env_file output — sensitive ones come back masked
-                        if not var.get("masked") and k not in _CLONE_DIALOG_MANAGED_KEYS:
-                            updates.setdefault(k, var["value"])
-        except Exception as e:
-            logger.warning("[CLONE] auto-copy non-secret env failed (non-fatal): %s", e)
+            with get_db() as conn:
+                row = conn.execute("SELECT user_id FROM projects WHERE id = ?", (source_project_id,)).fetchone()
+            if row:
+                owner_id = row.get("user_id") if isinstance(row, dict) else row[0]
+                same_owner = (cloner_user_id is not None and owner_id == cloner_user_id)
+        except Exception:
+            pass
+        if same_owner:
+            # Auto-copy registry-verified non-secret values from the SOURCE env.
+            try:
+                src_env_path, *_ = get_project_env_info(source_project_id)
+                if src_env_path and os.path.exists(src_env_path):
+                    for var in read_env_file(src_env_path):
+                        k = var.get("key")
+                        if k and var.get("value") and k not in updates:
+                            # only registry-verified NON-secrets carry real values
+                            # in read_env_file output — sensitive ones come back masked
+                            if not var.get("masked") and k not in _CLONE_DIALOG_MANAGED_KEYS:
+                                updates.setdefault(k, var["value"])
+            except Exception as e:
+                logger.warning("[CLONE] auto-copy non-secret env failed (non-fatal): %s", e)
     if updates and os.path.isdir(os.path.dirname(clone_env) or clone_path):
         write_env_file(clone_env, updates)
         logger.info("[CLONE] wrote %d user env key(s) into %s", len(updates), clone_env)
@@ -3884,10 +3913,11 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
         _sanitize_clone_env(clone_path)
 
         # Env gate materialization: cloner-provided credentials + auto-copied
-        # registry-verified non-secrets, BEFORE any service starts. Platform
-        # vars written by the type-specific steps below merge on top.
+        # non-secrets (same-owner clones only), BEFORE any service starts.
+        # Platform vars written by the type-specific steps below merge on top.
         try:
-            _write_clone_user_env(clone_path, source_project_id, env_updates or [])
+            _write_clone_user_env(clone_path, source_project_id, env_updates or [],
+                                  cloner_user_id=cloner_user_id)
         except Exception as env_err:
             logger.warning("[CLONE] user env materialization failed (non-fatal): %s", env_err)
 
@@ -4332,10 +4362,12 @@ async def clone_project(
         raise HTTPException(status_code=400, detail=f"Source project path not found on disk: {source_path}")
 
     # --- Env gate -----------------------------------------------------------
-    # The cloner must supply every sensitive env key the source project uses
-    # (paste or their own vault pick). No env keys → free clone. Server-side
-    # and authoritative — the dialog is convenience, not the enforcement.
-    required = _clone_required_env(project_id)
+    # The cloner must supply every env key the source project uses that isn't
+    # auto-copiable (non-secrets auto-copy ONLY for same-owner clones — another
+    # user's clone provides everything: OWNER_TELEGRAM_ID & co. are
+    # owner-specific). No env keys → free clone. Server-side and authoritative
+    # — the dialog is convenience, not the enforcement.
+    required = _clone_required_env(project_id, cloner_user_id=user_id)
     env_updates = _normalize_clone_env_vars(request.environment_variables)
     gi_ids = [int(g) for g in (request.global_integration_ids or []) if str(g).isdigit()][:20]
     gi_key_names: set = set()
@@ -4528,7 +4560,7 @@ async def get_clone_requirements(
             if not public_src:
                 raise HTTPException(status_code=403, detail="Not allowed")
 
-    keys = _clone_required_env(project_id)
+    keys = _clone_required_env(project_id, cloner_user_id=user_id)
     return {"free_clone": not keys, "keys": keys, "count": len(keys)}
 
 
