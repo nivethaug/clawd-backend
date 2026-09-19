@@ -296,6 +296,14 @@ def get_project_env_info(project_id: int) -> Tuple[str, int, Optional[str], str]
 # READ
 # ============================================================================
 
+def read_env_file_raw(path: str) -> List[Tuple[str, str]]:
+    """Raw KEY=VALUE pairs (system keys excluded, comments skipped) with NO
+    masking - for callers that apply their own sensitivity policy (e.g. the
+    registry-driven /env endpoint, where read_env_file's name-pattern
+    pre-masking would leak the mask placeholder as a "plain" value)."""
+    return [(k, v) for k, v in _parse_env_file_keys(path) if not _is_system(k)]
+
+
 def read_env_file(path: str) -> List[Dict]:
     """
     Parse a .env file into a list of variable dicts.

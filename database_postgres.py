@@ -1212,6 +1212,14 @@ def init_schema():
                     "Custom",
                     False,
                 ),
+                (
+                    "CALENDLY_URL",
+                    "Calendly Booking URL",
+                    "Public Calendly event link shared with users for scheduling.",
+                    "https://calendly.com/user/events",
+                    "Custom",
+                    False,
+                ),
             ]
             for entry in default_registry:
                 cur.execute(

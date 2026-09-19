@@ -6855,7 +6855,11 @@ async def get_project_env(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    variables = env_manager.read_env_file(env_path)
+    # Raw values + registry-driven masking. read_env_file pre-masks values by
+    # NAME pattern (TOKEN/KEY/...), so a registry-approved non-secret with a
+    # scary name (ACCESS_TOKEN_EXPIRE_HOURS) would surface the mask
+    # placeholder as its "plain" value. System keys stay excluded.
+    variables = [{"key": k, "value": v} for k, v in env_manager.read_env_file_raw(env_path)]
 
     # Merge metadata from the env_variable_registry so the UI can display
     # titles, descriptions, docs links, and categories. Runtime values
