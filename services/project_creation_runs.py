@@ -1338,7 +1338,7 @@ def execute_run(run_id: int) -> Dict[str, Any]:
                 name=name,
                 domain=payload.get("domain") or "",
                 type_id=type_id,
-                creation_prompt=(payload.get("description") or "")[:8000],
+                creation_prompt=(payload.get("description") or ""),
             )
         except Exception as seed_err:
             logger.warning("[PROJECT-RUN] creation session seed failed: %s", seed_err)
