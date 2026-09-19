@@ -3802,12 +3802,13 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
                 continue
             keys.append(k)
     else:
-        # Another user cloning: if the source's gallery listing carries an
-        # owner-curated required list, THAT list replaces the full env scan —
-        # the owner decides exactly what a cloner must provide (bot tokens
-        # are always covered by the clone dialog's own verified field).
-        curated = _gallery_required_env_keys(project_id)
-        if curated is not None:
+        # Another user cloning a GALLERY project: ONLY the owner-marked keys
+        # are required — the marking is the single source of truth. A listing
+        # without marking (legacy NULL) means fully optional: nothing beyond
+        # the bot-token field. Non-gallery sources (templates) keep the full
+        # scan; owners cloning their own project keep the full scan above.
+        if _in_gallery(project_id):
+            curated = _gallery_required_env_keys(project_id) or []
             keys = [k for k in curated
                     if k not in _CLONE_DIALOG_MANAGED_KEYS and k not in _CLONE_PLATFORM_KEYS]
         else:
@@ -12454,6 +12455,14 @@ def _sanitize_gallery_required_env(keys: Optional[List[str]]) -> Optional[str]:
         seen.add(k)
         out.append(k)
     return _json.dumps(out)
+
+
+def _in_gallery(project_id: int) -> bool:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM gallery_projects WHERE project_id = ?", (project_id,)
+        ).fetchone()
+    return bool(row)
 
 
 def _gallery_required_env_keys(project_id: int) -> Optional[List[str]]:
