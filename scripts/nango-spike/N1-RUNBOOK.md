@@ -105,13 +105,16 @@ credentials are a Nango Cloud feature — not available here.
 1. **Calendly OAuth app** (one-time): https://developer.calendly.com →
    Create app → Web App → redirect URI `https://nango.dreamagent.cloud/oauth/callback`.
    Copy Client ID + Client Secret. (No review/approval — instant.)
-2. **Register in Nango** (main VPS):
+2. **Register in Nango** (main VPS) — full guide: `docs/nango_oauth_registration.md`:
    ```bash
    NGSECRET=$(grep '^NANGO_SECRET_KEY' /root/clawd-backend/.env | cut -d= -f2)
    CCID=<calendly client id>; CSEC=<calendly client secret>
    curl -s http://127.0.0.1:3003/integrations \
      -H "Authorization: Bearer $NGSECRET" -H "Content-Type: application/json" \
-     -d "{\"provider\":\"calendly\",\"unique_key\":\"calendly\",\"credentials\":{\"type\":\"OAUTH2\",\"client_id\":\"$CCID\",\"client_secret\":\"$CSEC\",\"scopes\":[\"users:read\",\"event_types:read\",\"scheduled_events:read\",\"scheduling_links:write\",\"webhooks:read\",\"webhooks:write\"]}}" # scopes MUST be an array — a string fails with invalid_union on credentials.scopes
+     -d '{"provider":"calendly","unique_key":"calendly","credentials":{"type":"OAUTH2","client_id":"'"$CCID"'","client_secret":"'"$CSEC"'"}}'
+   # NO scopes field — our Nango schema rejects it in BOTH string and array
+   # form (invalid_union on credentials.scopes). Scopes come from the
+   # provider app's own configuration; verify on the consent screen.
    ```
 3. **App side**: add the entry to `ENABLED_PROVIDERS` in
    `services/integrations/nango_client.py` (+ `PROVIDER_EXTRAS` for the
