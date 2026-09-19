@@ -111,7 +111,7 @@ credentials are a Nango Cloud feature — not available here.
    CCID=<calendly client id>; CSEC=<calendly client secret>
    curl -s http://127.0.0.1:3003/integrations \
      -H "Authorization: Bearer $NGSECRET" -H "Content-Type: application/json" \
-     -d "{\"provider\":\"calendly\",\"unique_key\":\"calendly\",\"credentials\":{\"type\":\"OAUTH2\",\"client_id\":\"$CCID\",\"client_secret\":\"$CSEC\"}}"
+     -d "{\"provider\":\"calendly\",\"unique_key\":\"calendly\",\"credentials\":{\"type\":\"OAUTH2\",\"client_id\":\"$CCID\",\"client_secret\":\"$CSEC\",\"scopes\":[\"users:read\",\"event_types:read\",\"scheduled_events:read\",\"scheduling_links:write\",\"webhooks:read\",\"webhooks:write\"]}}" # scopes MUST be an array — a string fails with invalid_union on credentials.scopes
    ```
 3. **App side**: add the entry to `ENABLED_PROVIDERS` in
    `services/integrations/nango_client.py` (+ `PROVIDER_EXTRAS` for the
