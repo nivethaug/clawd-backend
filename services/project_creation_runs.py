@@ -285,19 +285,14 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
         else:
             live_line = "\n\n▶️ Deployed and ready to use."
 
-        # Present the concise project description as the session's opening
-        # user message — the full build brief stays in projects.description
-        # for the agent; a raw spec wall-of-text reads badly in chat.
-        concise = ""
-        desc = (creation_prompt or "").strip()
-        if desc:
-            first_para = desc.split("\n\n")[0].strip()
-            concise = first_para if len(first_para) <= 240 else first_para[:237].rstrip() + "…"
-
-        if concise:
+        # The opening user message carries the FULL build brief — it is the
+        # session agent's spec context. Never trim it here (a 240-char cap
+        # previously cut the brief off, so the agent never saw the spec).
+        full_prompt = (creation_prompt or "").strip()
+        if full_prompt:
             conn.execute(
                 "INSERT INTO messages (session_id, role, content) VALUES (%s, 'user', %s)",
-                (session_id, concise),
+                (session_id, full_prompt),
             )
             confirmation = (
                 f"✓ {name} was created and deployed successfully."
