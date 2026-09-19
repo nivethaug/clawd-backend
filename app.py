@@ -1285,6 +1285,7 @@ def _normalize_clone_env_vars(items: Optional[List[Dict[str, str]]]) -> List[Dic
     """Sanitize clone-provided env vars: uppercase-key regex, no system or
     dialog-managed keys, non-empty values, dedupe, cap 20."""
     import re as _re
+    from env_manager import SYSTEM_KEYS
     out: List[Dict[str, str]] = []
     seen = set()
     for it in (items or [])[:20]:
@@ -1296,7 +1297,6 @@ def _normalize_clone_env_vars(items: Optional[List[Dict[str, str]]]) -> List[Dic
             continue
         if not _re.fullmatch(r"[A-Z][A-Z0-9_]*", k) or len(k) < 3:
             continue
-        from env_manager import SYSTEM_KEYS
         if k in SYSTEM_KEYS or k in _CLONE_DIALOG_MANAGED_KEYS:
             continue
         if k in seen:
@@ -4507,10 +4507,26 @@ async def get_clone_requirements(
 
     with get_db() as conn:
         row = conn.execute(
-            "SELECT id FROM projects WHERE id = ?", (project_id,)
+            "SELECT id, user_id FROM projects WHERE id = ?", (project_id,)
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    # Key names are shared only with the owner, admins, or clonable public
+    # sources (gallery/template) — never with arbitrary logged-in users.
+    owner_id = row.get("user_id") if isinstance(row, dict) else row[1]
+    if owner_id != user_id:
+        try:
+            require_admin(user_id)  # raises unless admin
+        except HTTPException:
+            with get_db() as conn:
+                public_src = conn.execute(
+                    "SELECT 1 FROM gallery_projects WHERE project_id = ? "
+                    "UNION SELECT 1 FROM templates WHERE project_id = ? LIMIT 1",
+                    (project_id, project_id),
+                ).fetchone()
+            if not public_src:
+                raise HTTPException(status_code=403, detail="Not allowed")
 
     keys = _clone_required_env(project_id)
     return {"free_clone": not keys, "keys": keys, "count": len(keys)}
