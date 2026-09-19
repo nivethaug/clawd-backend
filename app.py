@@ -3794,22 +3794,32 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
     except Exception:
         pass
 
+    scanned: List[str] = []
+    for var in read_env_file(env_path):
+        k = var.get("key")
+        if not k or k in _CLONE_DIALOG_MANAGED_KEYS or k in _CLONE_PLATFORM_KEYS:
+            continue
+        scanned.append(k)
+
     keys: List[str] = []
+    required_set: set = set()
     if _in_gallery(project_id):
-        # GALLERY source: the owner's marking is the single source of truth
-        # for EVERY cloner (the owner included — the listing defines the
-        # clone experience). No marking (legacy NULL) = fully optional.
-        # Same-owner clones still auto-copy their non-secrets (below).
+        # GALLERY source: the owner's marking decides which keys are
+        # REQUIRED for every cloner (owner included). ALL other env keys are
+        # still LISTED as optional so cloners can provide them if they want
+        # and gallery editors can re-mark them. No marking = all optional.
         curated = _gallery_required_env_keys(project_id) or []
-        keys = [k for k in curated
-                if k not in _CLONE_DIALOG_MANAGED_KEYS and k not in _CLONE_PLATFORM_KEYS]
+        for k in curated:
+            if k not in _CLONE_DIALOG_MANAGED_KEYS and k not in _CLONE_PLATFORM_KEYS:
+                keys.append(k)
+                required_set.add(k)
+        for k in scanned:
+            if k not in required_set:
+                keys.append(k)
     else:
-        # Non-gallery (own Projects page, templates): full env scan.
-        for var in read_env_file(env_path):
-            k = var.get("key")
-            if not k or k in _CLONE_DIALOG_MANAGED_KEYS or k in _CLONE_PLATFORM_KEYS:
-                continue
-            keys.append(k)
+        # Non-gallery (own Projects page, templates): full env scan —
+        # everything sensitive is required (owner's non-secrets auto-copy).
+        keys = scanned
     if not keys:
         return []
 
@@ -3826,6 +3836,8 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
             linked_keys.update(x.strip() for x in mk.split(",") if x.strip())
     except Exception:
         pass
+
+    _in_gallery_flag = _in_gallery(project_id)
 
     try:
         from env_registry_service import lookup_many
@@ -3844,6 +3856,7 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
         meta = metas.get(k) or {}
         is_sensitive = bool(meta.get("is_sensitive", True))
         auto_copy = (not is_sensitive) and (not _envmgr_sensitive(k)) and same_owner
+        required = k in required_set or (not _in_gallery_flag and not auto_copy)
         out.append({
             "key": k,
             "title": meta.get("title") or k,
@@ -3851,6 +3864,7 @@ def _clone_required_env(project_id: int, cloner_user_id: Optional[int] = None) -
             "docs_url": meta.get("docs_url"),
             "is_sensitive": is_sensitive or (not auto_copy),
             "auto_copy": auto_copy,
+            "required": required,
             "source_integration": k in linked_keys,
         })
     return out
@@ -4411,7 +4425,9 @@ async def clone_project(
         except Exception as gate_err:
             logger.warning("[CLONE] vault lookup for env gate failed: %s", gate_err)
     provided_keys = {u["key"] for u in env_updates} | gi_key_names
-    missing = [r["key"] for r in required if not r["auto_copy"] and r["key"] not in provided_keys]
+    missing = [r["key"] for r in required
+               if r.get("required", True) and not r["auto_copy"]
+               and r["key"] not in provided_keys]
     if missing:
         raise HTTPException(
             status_code=400,
