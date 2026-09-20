@@ -169,9 +169,14 @@ def repair_app(name: str, cwd: str, pe: dict) -> bool:
         interp = pe.get("exec_interpreter") or pe.get("pm_exec_interpreter") or "python3"
         out_log = pe.get("pm_out_log_path") or os.path.join(cwd, "logs", "out.log")
         err_log = pe.get("pm_err_log_path") or os.path.join(cwd, "logs", "error.log")
+        # Sandbox-wrapped bots carry required ARGS after `--` (venv path +
+        # project dir) — without them the wrapper crash-loops.
+        script_args = [a for a in (pe.get("args") or []) if isinstance(a, str)]
         cmd = ["pm2", "start", script, "--name", name,
                "--interpreter", interp, "--cwd", cwd,
                "--log", out_log, "--error", err_log, "--time"]
+        if script_args:
+            cmd += ["--"] + script_args
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
                            env=clean, cwd=cwd)
     if r.returncode != 0:
@@ -226,7 +231,8 @@ def main():
         live = proc_environ(pid) if pid else {}
         leaked = real_leaks(live)
         recorded = {k for k in pe if isinstance(k, str)}
-        rec_leaked = sorted(k for k in PLATFORM_SECRET_KEYS if k in recorded)
+        rec_leaked = real_leaks({k: pe[k] for k in recorded
+                                 if isinstance(pe.get(k), (str, int, float))})
         status = "DIRTY" if (leaked or rec_leaked) else "clean"
         if status == "DIRTY":
             any_dirty = True
