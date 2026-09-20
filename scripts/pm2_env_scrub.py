@@ -138,6 +138,44 @@ def proc_environ(pid: int) -> dict:
         return {}
 
 
+def repair_app(name: str, cwd: str, pe: dict) -> bool:
+    """True env replacement: pm2 --update-env only MERGES (never removes),
+    so the leaked keys survived restarts. PM2's real replace primitive is
+    delete + start. We restart through each app's own start primitive:
+
+    - ecosystem.config.json in cwd (website backends): clean-shell
+      `pm2 start ecosystem.config.json` — the file's env block carries the
+      project's DATABASE_URL/PORT/SECRET_KEY.
+    - otherwise (bots, serve apps): start from the recorded jlist metadata
+      (script path, interpreter, logs); project values load from the
+      project's .env at runtime (bots' env_injector writes them there).
+    """
+    ecosystem = os.path.join(cwd, "ecosystem.config.json")
+    clean = clean_pm2_env()
+    subprocess.run(["pm2", "delete", name], capture_output=True, text=True,
+                   timeout=30, env=clean)
+    if os.path.isfile(ecosystem):
+        r = subprocess.run(["pm2", "start", ecosystem], capture_output=True,
+                           text=True, timeout=60, env=clean, cwd=cwd)
+    else:
+        script = pe.get("pm_exec_path") or os.path.join(cwd, "main.py")
+        interp = pe.get("exec_interpreter") or pe.get("pm_exec_interpreter") or "python3"
+        out_log = pe.get("pm_out_log_path") or os.path.join(cwd, "logs", "out.log")
+        err_log = pe.get("pm_err_log_path") or os.path.join(cwd, "logs", "error.log")
+        cmd = ["pm2", "start", script, "--name", name,
+               "--interpreter", interp, "--cwd", cwd,
+               "--log", out_log, "--error", err_log, "--time"]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                           env=clean, cwd=cwd)
+    if r.returncode != 0:
+        print(f"        -> repair FAILED: {r.stderr.strip()[:200]}")
+        return False
+    # give the process a moment to spawn, then check it's really online
+    import time as _t
+    _t.sleep(1.5)
+    return True
+
+
 def main():
     jlist = subprocess.run(["pm2", "jlist"], capture_output=True, text=True,
                            timeout=30, env=clean_pm2_env())
@@ -177,27 +215,7 @@ def main():
             print(f"        recorded env    : {', '.join(rec_leaked)}")
 
         if APPLY and status == "DIRTY":
-            keep = app_project_keys(cwd)
-            markers = _master_db_markers()
-            new_env = clean_pm2_env()
-            for k in recorded:
-                ku = k.upper()
-                if ku in keep or ku in PROJECT_MANAGED_KEYS:
-                    v = pe.get(k)
-                    if isinstance(v, (str, int, float, bool)):
-                        # Drop DB values that are actually the MASTER's
-                        # (inherited leak) — the project's own stay.
-                        if ku in ("DATABASE_URL", "DB_HOST", "DB_NAME",
-                                  "DB_USER", "DB_PASSWORD") and is_platform_db_value(
-                                ku, str(v), markers):
-                            continue
-                        new_env[k] = str(v)
-            r = subprocess.run(
-                ["pm2", "restart", name, "--update-env"],
-                capture_output=True, text=True, timeout=60,
-                env=new_env,
-            )
-            ok = r.returncode == 0
+            ok = repair_app(name, cwd, pe)
             # re-verify
             j2 = subprocess.run(["pm2", "jlist"], capture_output=True, text=True,
                                 timeout=30, env=clean_pm2_env())
@@ -207,8 +225,11 @@ def main():
                     pid2 = a2.get("pid")
             live2 = proc_environ(pid2) if pid2 else {}
             leaked2 = sorted(k for k in PLATFORM_SECRET_KEYS if k in live2)
-            print(f"        -> restart {'ok' if ok else 'FAILED'}; "
-                  f"post-verify: {'CLEAN' if not leaked2 else 'STILL LEAKS: ' + ', '.join(leaked2)}")
+            if not pid2:
+                print("        -> repair start reported ok but app has NO PID — check pm2 ls!")
+            else:
+                print(f"        -> repair {'ok' if ok else 'FAILED'}; "
+                      f"post-verify: {'CLEAN' if not leaked2 else 'STILL LEAKS: ' + ', '.join(leaked2)}")
 
     if not APPLY:
         print("\nDry run — re-run with --apply to repair dirty apps.")
