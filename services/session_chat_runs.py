@@ -169,10 +169,42 @@ def _release_project_lock_if_owner(project_id: Optional[int], session_id: Option
         logger.warning("[SESSION-RUN] project lock release failed (non-fatal): %s", e)
 
 
+# CJK detection (Han + kana + hangul + CJK punctuation) for narration filtering.
+_CJK_CHAR_RE = _re.compile("[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]")
+
+
+def _english_only_narration(text: str) -> str:
+    """Drop sentence segments containing CJK characters.
+
+    The agent is prompted English-only, but its streamed narration
+    occasionally leaks non-English sentences into customer-visible
+    progress (observed: mixed EN/zh narration mid-task). Segments between
+    sentence delimiters that contain CJK are removed line by line; pure
+    English sentences pass through untouched. Returns '' when nothing
+    English remains. NEVER use on final answers - they may contain code
+    with non-ASCII content that must be preserved verbatim."""
+    if not text or not _CJK_CHAR_RE.search(text):
+        return text
+    kept_lines: List[str] = []
+    for line in text.split("\n"):
+        if _CJK_CHAR_RE.search(line):
+            segs = _re.split(r"(?<=[.!?;])\s+|(?<=[。！？；])\s*", line)
+            line = " ".join(seg for seg in segs if seg and not _CJK_CHAR_RE.search(seg)).strip()
+        kept_lines.append(line)
+    return "\n".join(kept_lines)
+
+
 def append_chunk(run_id: int, chunk_type: str, content: str) -> int:
     content = content or ""
     if not content:
         return -1
+    # Progress narration is customer-visible streaming: strip non-English
+    # leaks before persisting (final 'text' answers are NOT filtered - they
+    # may legitimately contain code).
+    if chunk_type == "progress":
+        content = _english_only_narration(content)
+        if not content.strip():
+            return -1
     with get_db() as conn:
         row = conn.execute(
             "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM session_chat_chunks WHERE run_id = %s",
@@ -476,6 +508,11 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
             if not text:
                 continue
             chunk_type = "progress" if text.startswith("PROGRESS:") else "text"
+            if chunk_type == "progress":
+                filtered = _english_only_narration(text)
+                if not filtered.strip():
+                    continue
+                text = filtered
             append_chunk(run_id, chunk_type, text)
             chunks_for_response.append(text)
 
