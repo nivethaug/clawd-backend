@@ -233,7 +233,12 @@ def main():
         recorded = {k for k in pe if isinstance(k, str)}
         rec_leaked = real_leaks({k: pe[k] for k in recorded
                                  if isinstance(pe.get(k), (str, int, float))})
-        status = "DIRTY" if (leaked or rec_leaked) else "clean"
+        if not pid:
+            status = "DOWN"      # no process = not clean, needs restore
+        elif leaked or rec_leaked:
+            status = "DIRTY"
+        else:
+            status = "clean"
         if status == "DIRTY":
             any_dirty = True
         print(f"[{status:5}] {name}  (pid={pid}, cwd={cwd})")
