@@ -10,7 +10,10 @@ from urllib.parse import urlparse
 import env_manager
 import env_registry_service
 
-MAX_INITIAL_ENV_VARS = 2  # manual + imported Global Integrations combined at creation
+# Cap raised from 2: description-declared config keys (required_env flow)
+# legitimately exceed 2 entries — 12 covers every observed spec while still
+# bounding payload size.
+MAX_INITIAL_ENV_VARS = 12  # manual + imported globals + declared keys combined
 
 
 def normalize_initial_environment_variables(items: Any) -> List[Dict[str, str]]:
