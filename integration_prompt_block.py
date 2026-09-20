@@ -29,7 +29,7 @@ _EXCLUDE_PREFIXES = ("INTERNAL_", "SYSTEM_")
 # so automation agents can compose actions without extra lookups).
 _ENV_CAPABILITY_HINTS = {
     "OPENAI_API_KEY": "run LLM calls (api.openai.com/v1/chat/completions) inside jobs",
-    "OPENROUTER_API_KEY": "route LLM calls across models (openrouter.ai/api/v1/chat/completions)",
+    "OPENROUTER_API_KEY": "route LLM calls across models (openrouter.ai/api/v1/chat/completions). Check credits first (GET /api/v1/credits): when total_credits - total_usage <= 0, use FREE models (…:free suffix) with a fallback chain — paid models will 402.",
     "ANTHROPIC_API_KEY": "run Claude messages API",
     "GEMINI_API_KEY": "run Gemini generateContent",
     "GITHUB_TOKEN": "read/write repos, issues, PRs (api.github.com)",

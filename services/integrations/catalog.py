@@ -46,6 +46,10 @@ async def _v_openai(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
 
 
 async def _v_openrouter(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
+    """Validate the key, then probe CREDITS — a valid key with zero credits
+    402s on every paid-model call in production (observed: customer shipped
+    an app on a "verified" no-credit key). Warning only, never a failure:
+    free-tier users legitimately run free models with zero credits."""
     r = await _get("https://openrouter.ai/api/v1/key", headers=_hdr_bearer(values["OPENROUTER_API_KEY"]))
     ok = r.status_code == 200
     info = None
@@ -55,6 +59,19 @@ async def _v_openrouter(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
             info = d.get("label") or "key valid"
         except Exception:
             info = "key valid"
+        # Credit probe (fails soft: any error just skips the warning).
+        try:
+            cr = await _get("https://openrouter.ai/api/v1/credits",
+                            headers=_hdr_bearer(values["OPENROUTER_API_KEY"]))
+            if cr.status_code == 200:
+                cd = (cr.json() or {}).get("data", {}) or {}
+                total = float(cd.get("total_credits") or 0.0)
+                used = float(cd.get("total_usage") or 0.0)
+                if total - used <= 0:
+                    info = (f"{info} — no credits on this account: paid models will "
+                            f"fail with 402; free models (…:free) still work")
+        except Exception:
+            pass
     return ok, info
 
 
