@@ -304,6 +304,18 @@ def execute_task(job: dict) -> dict:
             _persist_last_state(_last_resolved)
 
         # Step 2: Route to handler
+        dry_run = bool(job.get("dry_run"))
+        if dry_run:
+            # Verifier mode: run the full resolve/route path but make NO
+            # network delivery — a test invocation can never message real
+            # users or hit real APIs.
+            chan = {"telegram": "Telegram chat", "discord": "Discord webhook",
+                    "email": f"email to {payload.get('to', '?')}",
+                    "api": f"API {payload.get('method', 'GET')} {payload.get('url', '?')}",
+                    "trade": "paper trade"}.get(task_type, task_type)
+            return {"status": "dry-run", "dry_run": True,
+                    "message": f"would send via {chan}",
+                    "resolved_payload": payload}
         if task_type == 'telegram':
             status, message = _send_telegram(payload)
         elif task_type == 'discord':

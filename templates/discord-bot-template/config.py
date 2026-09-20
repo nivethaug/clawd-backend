@@ -32,3 +32,7 @@ PROJECT_ID = os.getenv("PROJECT_ID", "1")
 # Optional: Guild ID for instant slash command sync during development.
 # Leave empty for global sync (takes up to 1 hour to propagate).
 GUILD_ID = os.getenv("GUILD_ID", "")
+
+
+# Project secret (set by the platform at creation) — gates /dev/invoke.
+SECRET_KEY = os.getenv("SECRET_KEY", "change-this-in-production")

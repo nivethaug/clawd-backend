@@ -68,6 +68,61 @@ class HealthHandler(BaseHTTPRequestHandler):
                 "path": self.path
             }).encode())
 
+    def do_POST(self):
+        """Dev verifier — agent-facing synthetic invocation.
+
+        POST /dev/invoke  (Authorization: Bearer <SECRET_KEY>)
+        body {"text": "..."} -> runs process_user_input() (the same function
+        slash commands use) in THIS process and returns the reply JSON.
+        No Discord API involvement; lets the platform agent verify changes
+        end-to-end instead of guessing from logs.
+        """
+        import hmac
+        import time
+        if self.path != '/dev/invoke':
+            self.send_response(404)
+            self.end_headers()
+            return
+        length = int(self.headers.get('Content-Length') or 0)
+        raw = self.rfile.read(length) if length else b'{}'
+        try:
+            body = json.loads(raw or b'{}')
+        except Exception:
+            body = {}
+        supplied = (self.headers.get('Authorization') or '').removeprefix('Bearer ').strip()
+        from config import SECRET_KEY
+        if not SECRET_KEY or not hmac.compare_digest(supplied, SECRET_KEY):
+            self._json(403, {"ok": False, "error": "unauthorized"})
+            return
+        text = str(body.get('text') or '').strip()
+        if not text:
+            self._json(400, {"ok": False, "error": "text is required"})
+            return
+        started = time.monotonic()
+        try:
+            from services.ai_logic import process_user_input
+            response = process_user_input(text)
+            self._json(200, {
+                "ok": True,
+                "response": str(response),
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
+            })
+        except Exception as e:
+            import traceback
+            self._json(200, {
+                "ok": False,
+                "error": f"{type(e).__name__}: {e}",
+                "trace": traceback.format_exc()[-1500:],
+            })
+
+    def _json(self, status, payload):
+        data = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def log_message(self, format, *args):
         pass  # Suppress access logs
 

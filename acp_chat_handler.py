@@ -896,6 +896,21 @@ cd {self.project_path} && python3 buildpublish.py --skip-deps
 This restarts the scheduler via the worker-api. After it completes, test the job
 immediately (Step "Run a job immediately") to verify the new code is live.
 
+## 🧪 ISOLATED DRY-RUN VERIFICATION (no messages sent, no APIs called)
+
+The executor supports a dry_run flag: the full resolve/route path runs but every
+delivery channel (telegram/discord/email/api) returns "would send" instead of
+delivering. Use it to verify executor edits BEFORE the real run:
+
+```bash
+cd {self.project_path} && echo '{{"id":0,"task_type":"<type>","dry_run":true,"payload":<your job payload>}}' | \
+python3 -c "import sys,json; from scheduler.executor import execute_task; print(json.dumps(execute_task(json.load(sys.stdin))))"
+```
+
+The bar: a claim of "working" requires (1) a dry-run (or real run-now) you
+executed, (2) the observed result JSON, (3) the job logs after. "Code compiles"
+and "scheduler restarted" are NOT verification.
+
 ---
 
 ## JOB MANAGEMENT REST API
@@ -1441,6 +1456,21 @@ cd {self.project_path} && python3 buildpublish.py --skip-deps
 ```
 
 After it completes, run the job once to verify the new code is live.
+
+## 🧪 ISOLATED DRY-RUN VERIFICATION (no messages sent, no APIs called)
+
+The executor supports a dry_run flag: the full resolve/route path runs but every
+delivery channel (telegram/discord/email/api) returns "would send" instead of
+delivering. Use it to verify executor edits BEFORE the real run:
+
+```bash
+cd {self.project_path} && echo '{{"id":0,"task_type":"<type>","dry_run":true,"payload":<your job payload>}}' | \
+python3 -c "import sys,json; from scheduler.executor import execute_task; print(json.dumps(execute_task(json.load(sys.stdin))))"
+```
+
+The bar: a claim of "working" requires (1) a dry-run (or real run-now) you
+executed, (2) the observed result JSON, (3) the job logs after. "Code compiles"
+and "scheduler restarted" are NOT verification.
 
 ---
 
@@ -2790,6 +2820,54 @@ If the user request needs website data:
 
 ---
 
+## 🧪 END-TO-END VERIFICATION (MANDATORY before saying "done"/"working")
+
+The bar: a claim of "working" requires (1) exercising the real user-facing path,
+(2) observing the expected reply, (3) reading the logs after. Webhook registered,
+PM2 online, health 200 are SETUP FACTS — none of them verifies behavior.
+
+### Tier 1 — invoke the deployed bot (the real process, real DB, real env)
+Read PORT and SECRET_KEY from the project .env, then:
+```bash
+source .env 2>/dev/null; PORT=${{PORT:-8010}}
+curl -s -X POST http://host.docker.internal:$PORT/dev/invoke   -H "Authorization: Bearer $SECRET_KEY" -H "Content-Type: application/json"   -d '{{"text": "<the exact command/message the user would send>"}}'
+```
+The JSON `response` field IS the bot's reply. Assert it. If ok:false, the
+`error`+`trace` tell you exactly which pipeline stage broke — fix THAT.
+
+### Tier 2 — 404? Self-bootstrap the route (older projects), publish, retry Tier 1
+Add to main.py (next to /health):
+```python
+@app.post("/dev/invoke")
+async def dev_invoke(request: Request):
+    import json as _json, hmac as _hmac
+    from config import SECRET_KEY
+    supplied = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+    if not _hmac.compare_digest(supplied, SECRET_KEY):
+        return Response(status_code=403, content='{{"ok":false,"error":"unauthorized"}}', media_type="application/json")
+    body = await request.json(); text = str(body.get("text") or "").strip()
+    if not text:
+        return Response(status_code=400, content='{{"ok":false,"error":"text required"}}', media_type="application/json")
+    user = None
+    try:
+        from core.database import SessionLocal
+        from utils.user_helpers import get_or_create_telegram_user
+        db = SessionLocal()
+        user = get_or_create_telegram_user(db=db, telegram_user_id=0, telegram_chat_id=0, telegram_username="verifier")
+    except Exception:
+        pass
+    from services.ai_logic import process_user_input
+    return Response(content=_json.dumps({{"ok": True, "response": str(process_user_input(text, user))}}), media_type="application/json")
+```
+Publish (buildpublish.py), then retry Tier 1.
+
+### Tier 3 — logs
+```bash
+tail -30 logs/out.log; tail -20 logs/error.log
+```
+
+Never say "tested/working" from Tier 3 alone.
+
 ## TESTING YOUR CHANGES
 
 ### Publish Changes (After changes)
@@ -3295,6 +3373,54 @@ The sandbox blocks psycopg2's C library (mmap restriction). Running
 `python3 main.py` or `python3 -c "import ..."` will crash on psycopg2.
 This is NOT a code bug — it's a sandbox limitation. The bot runs fine
 via PM2 after publishing. Do NOT try to fix psycopg2 import errors.
+
+## 🧪 END-TO-END VERIFICATION (MANDATORY before saying "done"/"working")
+
+The bar: a claim of "working" requires (1) exercising the real user-facing path,
+(2) observing the expected reply, (3) reading the logs after. Bot online,
+commands synced, health 200 are SETUP FACTS — none of them verifies behavior.
+
+### Tier 1 — invoke the deployed bot (the real process, real env)
+The bot's health server (PORT from .env) accepts a synthetic invocation:
+```bash
+source .env 2>/dev/null; PORT=${{PORT:-8010}}
+curl -s -X POST http://host.docker.internal:$PORT/dev/invoke   -H "Authorization: Bearer $SECRET_KEY" -H "Content-Type: application/json"   -d '{{"text": "<the exact command text the user would send>"}}'
+```
+The JSON `response` field IS the bot's reply. Assert it. If ok:false, the
+`error`+`trace` name the failing stage — fix THAT, not a guess.
+
+### Tier 2 — 404? Self-bootstrap the route (older projects), publish, retry Tier 1
+The template's health server (main.py HealthHandler) needs a do_POST. Add this
+method to HealthHandler (and `from config import SECRET_KEY` at its use site):
+```python
+def do_POST(self):
+    import hmac, time
+    if self.path != '/dev/invoke':
+        self.send_response(404); self.end_headers(); return
+    body = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{{}}')
+    from config import SECRET_KEY
+    supplied = (self.headers.get('Authorization') or '').removeprefix('Bearer ').strip()
+    if not hmac.compare_digest(supplied, SECRET_KEY):
+        self.send_response(403); self.end_headers(); return
+    text = str(body.get('text') or '').strip()
+    if not text:
+        self.send_response(400); self.end_headers(); return
+    from services.ai_logic import process_user_input
+    data = json.dumps({{"ok": True, "response": str(process_user_input(text))}}).encode()
+    self.send_response(200); self.send_header('Content-Type', 'application/json')
+    self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
+```
+Also add `SECRET_KEY = os.getenv("SECRET_KEY", "change-this-in-production")` to
+config.py if missing. Publish (buildpublish.py), retry Tier 1.
+
+### Tier 3 — logs + (optional) channel history as the bot
+```bash
+tail -30 logs/out.log; tail -20 logs/error.log
+# evidence of past behavior, when the bot is in a server:
+curl -s -H "Authorization: Bearer $DISCORD_TOKEN"   "https://discord.com/api/v10/channels/<CHANNEL_ID>/messages?limit=10"
+```
+
+Never say "tested/working" from Tier 3 alone.
 
 🔴 RULE ZERO: ALWAYS READ LOGS FIRST.
 Before fixing ANY issue, read logs FIRST:

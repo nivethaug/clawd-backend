@@ -18,7 +18,7 @@ from handlers.status import status
 from handlers.message import handle_message
 from utils.logger import logger
 from core.database import init_db
-from config import BOT_TOKEN, WEBHOOK_URL, WEBHOOK_PORT
+from config import BOT_TOKEN, WEBHOOK_URL, WEBHOOK_PORT, SECRET_KEY
 
 # ============================================================================
 # Pydantic Models for API Documentation
@@ -209,6 +209,87 @@ async def root() -> BotInfoResponse:
         docs="",
         version="1.0.0"
     )
+
+
+# ============================================================================
+# Dev verifier — agent-facing synthetic invocation
+# ============================================================================
+# POST /dev/invoke exercises the SAME process_user_input() the webhook uses,
+# in THIS deployed process (real DB, real env) and captures the reply without
+# touching the Telegram API. Lets the platform agent verify changes end-to-end
+# instead of guessing from logs. Gated by the project's own SECRET_KEY.
+@app.post("/dev/invoke")
+async def dev_invoke(request: Request):
+    import json as _json
+    import time as _time
+    import hmac as _hmac
+
+    supplied = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+    if not SECRET_KEY or not _hmac.compare_digest(supplied, SECRET_KEY):
+        return Response(
+            content=_json.dumps({"ok": False, "error": "unauthorized"}),
+            status_code=403,
+            media_type="application/json",
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return Response(
+            content=_json.dumps({"ok": False, "error": "body must be JSON"}),
+            status_code=400,
+            media_type="application/json",
+        )
+
+    text = str(body.get("text") or "").strip()
+    if not text:
+        return Response(
+            content=_json.dumps({"ok": False, "error": "text is required"}),
+            status_code=400,
+            media_type="application/json",
+        )
+
+    # Same user bootstrap as handlers/message.py (get-or-create), with the
+    # same graceful fallback when the DB is unavailable.
+    user = None
+    try:
+        from core.database import SessionLocal
+        from utils.user_helpers import get_or_create_telegram_user
+        db = SessionLocal()
+        user = get_or_create_telegram_user(
+            db=db,
+            telegram_user_id=int(body.get("user_id") or 0),
+            telegram_chat_id=int(body.get("chat_id") or body.get("user_id") or 0),
+            telegram_username=str(body.get("username") or "verifier"),
+        )
+    except Exception as e:
+        logger.warning(f"[dev-invoke] continuing without user context: {e}")
+
+    started = _time.monotonic()
+    try:
+        from services.ai_logic import process_user_input
+        response = process_user_input(text, user)
+        return Response(
+            content=_json.dumps({
+                "ok": True,
+                "response": str(response),
+                "elapsed_ms": int((_time.monotonic() - started) * 1000),
+            }),
+            media_type="application/json",
+        )
+    except Exception as e:
+        import traceback as _tb
+        logger.error(f"[dev-invoke] invocation failed: {e}")
+        return Response(
+            content=_json.dumps({
+                "ok": False,
+                "error": f"{type(e).__name__}: {e}",
+                "trace": _tb.format_exc()[-1500:],
+                "elapsed_ms": int((_time.monotonic() - started) * 1000),
+            }),
+            status_code=200,  # transport OK; the invocation failed — return details
+            media_type="application/json",
+        )
 
 
 if __name__ == "__main__":
