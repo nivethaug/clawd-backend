@@ -150,8 +150,15 @@ def repair_app(name: str, cwd: str, pe: dict) -> bool:
       (script path, interpreter, logs); project values load from the
       project's .env at runtime (bots' env_injector writes them there).
     """
-    ecosystem = os.path.join(cwd, "ecosystem.config.json")
     clean = clean_pm2_env()
+    if not os.path.isdir(cwd):
+        # Workspace gone (project deleted / orphan sweep) but the pm2 record
+        # lingered — a zombie. Remove the record; nothing to repair.
+        subprocess.run(["pm2", "delete", name], capture_output=True, text=True,
+                       timeout=30, env=clean)
+        print(f"        -> workspace missing (deleted project?) — zombie app removed from pm2")
+        return True
+    ecosystem = os.path.join(cwd, "ecosystem.config.json")
     subprocess.run(["pm2", "delete", name], capture_output=True, text=True,
                    timeout=30, env=clean)
     if os.path.isfile(ecosystem):
@@ -199,10 +206,25 @@ def main():
 
     print(f"Customer apps found: {len(targets)}\n")
 
+    markers = _master_db_markers()
+
+    def real_leaks(env_dict):
+        """Platform secrets EXCEPT a project's own DB values: DATABASE_URL /
+        DB_* only count as leaks when they equal the MASTER's identifiers."""
+        out = []
+        for k in PLATFORM_SECRET_KEYS:
+            v = env_dict.get(k)
+            if v is None:
+                continue
+            if k in ("DATABASE_URL", "DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD")                     and not is_platform_db_value(k, str(v), markers):
+                continue  # the project's own — legitimate
+            out.append(k)
+        return sorted(out)
+
     any_dirty = False
     for name, cwd, pid, pe in targets:
         live = proc_environ(pid) if pid else {}
-        leaked = sorted(k for k in PLATFORM_SECRET_KEYS if k in live)
+        leaked = real_leaks(live)
         recorded = {k for k in pe if isinstance(k, str)}
         rec_leaked = sorted(k for k in PLATFORM_SECRET_KEYS if k in recorded)
         status = "DIRTY" if (leaked or rec_leaked) else "clean"
@@ -215,7 +237,12 @@ def main():
             print(f"        recorded env    : {', '.join(rec_leaked)}")
 
         if APPLY and status == "DIRTY":
-            ok = repair_app(name, cwd, pe)
+            try:
+                ok = repair_app(name, cwd, pe)
+            except Exception as exc:
+                print(f"        -> repair CRASHED ({type(exc).__name__}: {exc}) — "
+                      f"app may be stopped; check pm2 ls. Continuing.")
+                ok = False
             # re-verify
             j2 = subprocess.run(["pm2", "jlist"], capture_output=True, text=True,
                                 timeout=30, env=clean_pm2_env())
@@ -224,7 +251,7 @@ def main():
                 if a2.get("name") == name:
                     pid2 = a2.get("pid")
             live2 = proc_environ(pid2) if pid2 else {}
-            leaked2 = sorted(k for k in PLATFORM_SECRET_KEYS if k in live2)
+            leaked2 = real_leaks(live2)
             if not pid2:
                 print("        -> repair start reported ok but app has NO PID — check pm2 ls!")
             else:
