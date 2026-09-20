@@ -155,7 +155,7 @@ def restart_pm2(domain: str = None, backend_port: int = None):
         print("ℹ DREAMPILOT_WORKER_API_URL not set — skipping worker-api path")
 
     # Strategy 2: direct pm2 restart (host path, no sudo)
-    if run(f"pm2 restart {app_name} --update-env"):
+    if run(f"pm2 restart {app_name}"):
         return True
 
     # Strategy 3: sudo pm2 restart (last resort — fails in sandbox/container)

@@ -6533,8 +6533,11 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
             except Exception as e:
                 logger.warning(f"[INTERNAL-RESTART] Dependency install skipped: {e}")
 
+        # Plain restart: --update-env would re-stamp the worker's FULL
+        # environment (platform secrets included) onto the customer app on
+        # every publish. Env value changes flow via the project .env file.
         restart_result = subprocess.run(
-            ["pm2", "restart", app_name, "--update-env"],
+            ["pm2", "restart", app_name],
             capture_output=True, text=True, timeout=30
         )
         if restart_result.returncode != 0:

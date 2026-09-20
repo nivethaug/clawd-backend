@@ -718,13 +718,18 @@ class ServiceManager:
 
             # logger.info(f"[SERVICE] Backend command: {' '.join(backend_cmd)}")  # Commented for cleaner logs
 
+            # Clean environment: the app's values come from the ecosystem
+            # env block + its .env — NEVER the worker's inherited backpack
+            # (platform keys leaked into customer apps this way in prod).
+            from services.pm2_env import clean_pm2_env
             result = subprocess.run(
                 backend_cmd,
                 cwd=str(backend_path),
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                env=clean_pm2_env(),
             )
 
             logger.info(f"[SERVICE] Backend stdout: {result.stdout[:200]}")
@@ -1091,6 +1096,7 @@ class ServiceManager:
                 # Use PM2 built-in serve command for SPA routing with project-local logs
                 frontend_logs_dir = project_frontend_path / "logs"
                 frontend_logs_dir.mkdir(parents=True, exist_ok=True)
+                from services.pm2_env import clean_pm2_env
                 subprocess.run(
                     [
                         "pm2", "serve", str(frontend_dist_path), str(frontend_port),
@@ -1100,7 +1106,8 @@ class ServiceManager:
                         "--time",
                     ],
                     capture_output=True,
-                    timeout=30
+                    timeout=30,
+                    env=clean_pm2_env(),
                 )
                 # logger.info(f"✓ Frontend PM2 service started with SPA routing: {app_name}")  # Commented for cleaner logs
             else:

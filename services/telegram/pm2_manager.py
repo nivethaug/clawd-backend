@@ -164,7 +164,12 @@ def start_bot_pm2(
             ]
         
         # Start PM2 with environment variables in the subprocess environment
-        process_env = os.environ.copy()
+        # Clean base — customer bots must never inherit the worker's
+        # platform secrets (os.environ.copy() leaked DB_PASSWORD,
+        # platform keys, … into every bot). Project vars come from
+        # env_vars below + the project's .env file.
+        from services.pm2_env import clean_pm2_env
+        process_env = clean_pm2_env()
         process_env.update(env_vars)
         
         result = subprocess.run(
