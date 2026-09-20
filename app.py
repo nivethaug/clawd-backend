@@ -13526,6 +13526,8 @@ class CreateAssistantContext(BaseModel):
     # Live connection state sent every turn:
     bot_token_verified: Optional[bool] = None    # required bot token verified
     connected_env_names: List[str] = Field(default_factory=list)  # verified/env keys attached
+    # Description-declared env keys still awaiting a value: [{key,label,optional}]
+    pending_env: List[Dict[str, Any]] = Field(default_factory=list)
 
 class CreateAssistantMessage(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
@@ -13550,6 +13552,13 @@ class CreateAssistantResponse(BaseModel):
     # The frontend merges these into its requirement list so the matching
     # masked "Add ... Token" input renders and the create gate includes them.
     required_tokens: Optional[List[Dict[str, str]]] = None
+    # Description-declared config env keys (SUPPORT_ROLE_ID, OWNER_TELEGRAM_ID,
+    # ...): the LLM asks for values in chat; the frontend renders input rows
+    # and hard-blocks create on non-optional entries until filled.
+    required_env: Optional[List[Dict[str, Any]]] = None
+    # Set when the user names the project conversationally (LLM-driven name
+    # flow); kebab-case, max 30 chars.
+    project_name: Optional[str] = None
 
 _CREATE_ASSISTANT_KINDS = {"website", "discord", "telegram", "agent", "custom"}
 
@@ -13565,19 +13574,25 @@ Platform facts:
 Behaviour:
 1. Chat briefly to understand the idea. Ask at most 1-2 focused questions when something important is unclear; otherwise move forward.
 2. If the platform context lists MISSING REQUIRED items, your reply asks the user to provide exactly those now (pointing to the matching Add-Token button). This takes priority over everything — NEVER produce a brief while anything required is missing (Discord/Telegram bot token must be verified BEFORE any prompt generation).
-3. Before producing a brief you MUST have asked at least ONE clarifying question (purpose, audience, key features, or commands) and received the user's answer — like a real product assistant refining the idea. Skip this only when the user has already given rich detail AND explicitly says to generate/proceed now.
-4. If the application would need ANY external API or integration (AI provider, weather, news, payments, email, maps, social, scraping, ...), CONFIRM with the user which ones to use BEFORE producing the brief — offer a short curated list when unsure. Skip asking only when the integration is already connected (it appears in the connected env keys) or is the project type's required bot token.
+3. DESCRIPTION-DECLARED ENV KEYS: users often list environment variables their app needs in the request itself (an "ENV:" list, "requires X", "(required)/(optional)" markers). For each declared key that is NOT the type's bot token, NOT in the connected env keys, and NOT one of the validated API keys (required_tokens list): ask for its VALUE naturally in your reply (one question covering the pending keys — these are regular config values like role/channel IDs, NOT secrets, so asking in chat is fine) AND include it in "required_env". Mark keys the user called optional with "optional": true. NEVER produce a brief while a non-optional required_env key is still awaited (the context lists awaited keys under "env keys awaited from user").
+4. Before producing a brief you MUST have asked at least ONE clarifying question (purpose, audience, key features, or commands) and received the user's answer — like a real product assistant refining the idea. Skip this only when the user has already given rich detail AND explicitly says to generate/proceed now.
+5. If the application would need ANY external API or integration (AI provider, weather, news, payments, email, maps, social, scraping, ...), CONFIRM with the user which ones to use BEFORE producing the brief — offer a short curated list when unsure. Skip asking only when the integration is already connected (it appears in the connected env keys) or is the project type's required bot token.
    - LLM/AI features are provider-AGNOSTIC: never assume OpenAI. If no LLM key is connected, ask which provider the user prefers (OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, ...). If one is already connected, suggest reusing it. In the final prompt use the matching env key for the CHOSEN provider (OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, ...) via os.getenv.
-5. When at least one clarification is answered AND the idea is clear AND nothing required is missing AND all external APIs/integrations are confirmed, produce a brief.
+6. PROJECT NAME: drive it conversationally. When the context says "project name: NOT SET" AND all required tokens/env keys are satisfied (or none are needed), ask what to call the project as your natural next question — not before. When the user gives a name (or you can infer one they clearly stated, e.g. "named DreamSupport"), acknowledge it naturally in your reply AND echo it in "project_name" (kebab-case, max 30 chars). Never re-ask once the context shows a name set.
+7. When at least one clarification is answered AND the idea is clear AND nothing required is missing (tokens AND non-optional env keys) AND all external APIs/integrations are confirmed AND the project has a name, produce a brief.
 
 Output (STRICT — a single JSON object, no markdown fences, nothing before or after):
-{"reply": "<1-3 short chat sentences>", "kind": "website|discord|telegram|agent|custom", "brief": null, "required_tokens": null}
+{"reply": "<1-3 short chat sentences>", "kind": "website|discord|telegram|agent|custom", "brief": null, "required_tokens": null, "required_env": null, "project_name": null}
 or, when the user has confirmed a needed external API key (see below):
-{"reply": "<1-3 short chat sentences asking them to attach the token via the input that just opened>", "kind": "...", "brief": null, "required_tokens": [{"key": "OPENROUTER_API_KEY", "label": "OpenRouter Token"}]}
+{"reply": "<1-3 short chat sentences asking them to attach the token via the input that just opened>", "kind": "...", "brief": null, "required_tokens": [{"key": "OPENROUTER_API_KEY", "label": "OpenRouter Token"}], "required_env": null, "project_name": null}
+or, when the description declares config env keys you must ask for:
+{"reply": "<natural question asking for the pending values>", "kind": "...", "brief": null, "required_tokens": null, "required_env": [{"key": "SUPPORT_ROLE_ID", "label": "Support Role ID", "question": "What role should get pinged when a human is needed?", "optional": false}], "project_name": null}
 or, when producing the final brief:
-{"reply": "<1-2 sentences presenting the prompt>", "kind": "...", "brief": {"kind": "...", "prompt": "<polished, complete build prompt for the build agent: goal, key features, structure (pages/commands/jobs), tone, constraints — 120-400 words>", "features": ["<short feature>", "..."], "suggested_name": "<kebab-case-project-name>"}}, "required_tokens": null}
+{"reply": "<1-2 sentences presenting the prompt>", "kind": "...", "brief": {"kind": "...", "prompt": "<polished, complete build prompt for the build agent: goal, key features, structure (pages/commands/jobs), tone, constraints — 120-400 words>", "features": ["<short feature>", "..."], "suggested_name": "<kebab-case-project-name>"}, "required_tokens": null, "required_env": null, "project_name": "<kebab-case-name-if-user-named-it>"}
 
 "required_tokens" rules: list ONLY keys the user explicitly confirmed this project needs, that are NOT in the connected env keys, and are NOT the project type's required bot token. Allowed keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, SERPER_API_KEY, RESEND_API_KEY, COINGECKO_API_KEY, STRIPE_SECRET_KEY — label is always "<Provider> Token". NEVER invent other key names — for an API without a listed key, keep it as a brief note instead ("add <X> later in project settings"). NEVER produce a brief while required_tokens are still unattached — the platform blocks create until they're verified.
+
+"required_env" rules: ONLY env keys the USER's own request declared (their ENV list / "requires" markers) — never invent keys. Each entry: key (UPPER_SNAKE_CASE), label (human name), question (the exact thing you asked in reply), optional (true only when the user marked it optional). Do NOT include the type's bot token, connected keys, or the validated API keys (those belong to required_tokens). Values for required_env keys are normal config (IDs, URLs) — ask in chat and the platform shows input fields; secrets still go through Add-Token, never chat.
 
 "kind" is ALWAYS present: your current best assessment of the project type from the conversation so far. Use "custom" only when the idea is genuinely none of the other four. Once the type is established, keep it stable unless the user explicitly changes it.}
 
@@ -13633,6 +13648,15 @@ async def create_project_assistant(
             "- connected env keys (already attached to this project): "
             + ", ".join(ctx.connected_env_names)
         )
+    if ctx.pending_env:
+        pending_items = ", ".join(
+            f"{e.get('key', '?')} ({'optional' if e.get('optional') else 'required'})"
+            for e in ctx.pending_env
+            if isinstance(e, dict)
+        )
+        ctx_lines.append(
+            "- env keys awaited from user (asked via chat, input fields shown): " + pending_items
+        )
     if ctx.regenerate:
         ctx_lines.append("- the user asked for a regenerated prompt: produce a fresh alternative brief now")
     elif ctx.prompt_confirmed:
@@ -13681,6 +13705,8 @@ async def create_project_assistant(
     kind: Optional[str] = None
     brief: Optional[CreateAssistantBrief] = None
     required_tokens: Optional[List[Dict[str, str]]] = None
+    required_env: Optional[List[Dict[str, Any]]] = None
+    project_name: Optional[str] = None
     text = raw
     try:
         if "```json" in text:
@@ -13732,6 +13758,48 @@ async def create_project_assistant(
                 parsed_rt.append({"key": key, "label": label})
             if parsed_rt:
                 required_tokens = parsed_rt
+
+        # Description-declared config env keys (regular values — role IDs,
+        # URLs — NOT secrets). Sanitized hard: validated-key regex, reject
+        # system/dialog-managed/template-default/allowlisted-token keys,
+        # dedupe, cap 6. Never trust LLM-invented names past these rules.
+        _ENV_FORBIDDEN = _CLONE_DIALOG_MANAGED_KEYS | {
+            "DOMAIN", "API_TIMEOUT", "DEFAULT_CURRENCY",
+            "ACCESS_TOKEN_EXPIRE_HOURS", "WEBHOOK_PATH",
+        } | _ALLOWED_REQUIRED_TOKENS
+        try:
+            from env_manager import SYSTEM_KEYS as _ENV_SYS_KEYS
+            _ENV_FORBIDDEN |= set(_ENV_SYS_KEYS)
+        except Exception:
+            pass
+        re_env = data.get("required_env")
+        if isinstance(re_env, list):
+            import re as _re2
+            parsed_env: List[Dict[str, Any]] = []
+            seen_env: set = set()
+            for item in re_env[:6]:
+                if not isinstance(item, dict):
+                    continue
+                k = str(item.get("key") or "").strip().upper()
+                if not _re2.fullmatch(r"[A-Z][A-Z0-9_]{2,}", k):
+                    continue
+                if k in _ENV_FORBIDDEN or k in _connected or k in seen_env:
+                    continue
+                seen_env.add(k)
+                parsed_env.append({
+                    "key": k,
+                    "label": str(item.get("label") or k).strip()[:60] or k,
+                    "question": str(item.get("question") or "").strip()[:200],
+                    "optional": bool(item.get("optional")),
+                })
+            if parsed_env:
+                required_env = parsed_env
+
+        # LLM-driven project name (set when the user names it conversationally)
+        pn = str(data.get("project_name") or "").strip()
+        if pn:
+            project_name = pn[:30]
+
         if not reply and not brief:
             raise ValueError("empty payload")
     except Exception:
@@ -13739,7 +13807,9 @@ async def create_project_assistant(
         reply, kind, brief = raw[:4000], None, None
 
     return CreateAssistantResponse(reply=reply or "…", kind=kind, brief=brief,
-                                   required_tokens=required_tokens)
+                                   required_tokens=required_tokens,
+                                   required_env=required_env,
+                                   project_name=project_name)
 
 
 # ============================================================================
