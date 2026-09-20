@@ -74,6 +74,41 @@ def is_customer_app(name: str, pm_id) -> bool:
     return False
 
 
+def _master_db_markers() -> dict:
+    """The worker's OWN master-DB identifiers (values, for equality checks)
+    from .env.postgres — used to drop a recorded DATABASE_URL/DB_* that is
+    actually the inherited MASTER connection, while keeping each project's
+    own (website backends legitimately carry their project DATABASE_URL)."""
+    markers = {}
+    env_file = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.postgres")
+    try:
+        with open(env_file, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                markers[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return markers
+
+
+def is_platform_db_value(key: str, value: str, markers: dict) -> bool:
+    """True when a recorded DB value equals the MASTER's (=> inherited leak,
+    not the project's own). DATABASE_URL is compared by its dbname segment."""
+    if key == "DATABASE_URL":
+        import re as _re
+        m = _re.search(r"/([A-Za-z0-9_]+)(?:\?|\s|$)", value or "")
+        dbname = m.group(1) if m else ""
+        master_name = markers.get("DB_NAME", "")
+        return bool(master_name) and dbname == master_name
+    return key in ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD") and bool(
+        markers.get(key)
+    ) and value == markers.get(key)
+
+
 def app_project_keys(pm_cwd: str) -> set:
     """Key NAMES from the project's own .env files (values never read)."""
     keys = set()
@@ -143,15 +178,20 @@ def main():
 
         if APPLY and status == "DIRTY":
             keep = app_project_keys(cwd)
+            markers = _master_db_markers()
             new_env = clean_pm2_env()
             for k in recorded:
                 ku = k.upper()
-                if ku in keep or ku in PROJECT_MANAGED_KEYS or k in pe:
-                    # value from RECORDED env (the app's own values)
-                    if ku in keep or ku in PROJECT_MANAGED_KEYS:
-                        v = pe.get(k)
-                        if isinstance(v, (str, int, float, bool)):
-                            new_env[k] = str(v)
+                if ku in keep or ku in PROJECT_MANAGED_KEYS:
+                    v = pe.get(k)
+                    if isinstance(v, (str, int, float, bool)):
+                        # Drop DB values that are actually the MASTER's
+                        # (inherited leak) — the project's own stay.
+                        if ku in ("DATABASE_URL", "DB_HOST", "DB_NAME",
+                                  "DB_USER", "DB_PASSWORD") and is_platform_db_value(
+                                ku, str(v), markers):
+                            continue
+                        new_env[k] = str(v)
             r = subprocess.run(
                 ["pm2", "restart", name, "--update-env"],
                 capture_output=True, text=True, timeout=60,
