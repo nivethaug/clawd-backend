@@ -65,11 +65,16 @@ async def _v_openrouter(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
                             headers=_hdr_bearer(values["OPENROUTER_API_KEY"]))
             if cr.status_code == 200:
                 cd = (cr.json() or {}).get("data", {}) or {}
-                total = float(cd.get("total_credits") or 0.0)
-                used = float(cd.get("total_usage") or 0.0)
-                if total - used <= 0:
-                    info = (f"{info} — no credits on this account: paid models will "
-                            f"fail with 402; free models (…:free) still work")
+                # Positive evidence only: warn when the endpoint EXPLICITLY
+                # reports total_credits and the balance is gone. Missing/
+                # unexpected shapes stay silent — a false "no credits" on
+                # every valid key would be worse than no warning.
+                if isinstance(cd, dict) and "total_credits" in cd:
+                    total = float(cd.get("total_credits") or 0.0)
+                    used = float(cd.get("total_usage") or 0.0)
+                    if total - used <= 0:
+                        info = (f"{info} — no credits on this account: paid models will "
+                                f"fail with 402; free models (…:free) still work")
         except Exception:
             pass
     return ok, info
