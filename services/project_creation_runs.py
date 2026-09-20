@@ -269,8 +269,11 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
         # Type FIRST — bot/agent projects also carry a domain (webhook host),
         # but a "Live at" website link is only meaningful for websites.
         if type_id == 1:
+            # Full public URL — domain in the DB is the bare subdomain
+            # (a bare-suffix link produced NXDOMAIN for customers).
+            from domain_config import BASE_DOMAIN as _BASE_DOMAIN
             live_line = (
-                f"\n\n🌐 Live at: https://{domain}" if domain else "\n\n🌐 Deployed."
+                f"\n\n🌐 Live at: https://{domain}.{_BASE_DOMAIN}" if domain else "\n\n🌐 Deployed."
             )
         elif type_id == 2:
             live_line = (
