@@ -13748,6 +13748,18 @@ async def create_project_assistant(
             "COINGECKO_API_KEY", "STRIPE_SECRET_KEY",
             "TELEGRAM_BOT_TOKEN", "DISCORD_WEBHOOK_URL",
         }
+        # Channel-credential gate (prompt rule enforced in code): the LLM
+        # sometimes emits channel tokens together with the channel-selection
+        # question, which auto-pops the masked input before the user has
+        # chosen anything. A channel credential may only surface AFTER the
+        # user has actually named that channel in the conversation.
+        _CHANNEL_TOKEN_GUARD = {
+            "TELEGRAM_BOT_TOKEN": ("telegram", " tg ", "botfather"),
+            "DISCORD_WEBHOOK_URL": ("discord",),
+        }
+        _user_said = " " + " ".join(
+            m.content for m in request.messages if m.role == "user"
+        ).lower() + " "
         _connected = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
         rt = data.get("required_tokens")
         if isinstance(rt, list):
@@ -13758,6 +13770,10 @@ async def create_project_assistant(
                 key = str(item.get("key") or "").strip().upper()
                 if key not in _ALLOWED_REQUIRED_TOKENS or key in _connected:
                     continue
+                if key in _CHANNEL_TOKEN_GUARD and not any(
+                    w in _user_said for w in _CHANNEL_TOKEN_GUARD[key]
+                ):
+                    continue  # user never named this channel — no popup yet
                 if key in {p["key"] for p in parsed_rt}:
                     continue
                 label = str(item.get("label") or "").strip()[:40] or (
