@@ -13812,10 +13812,14 @@ async def create_project_assistant(
                 if fn.get("name") != "request_inputs":
                     tool_out = {"error": f"unknown tool: {fn.get('name')}"}
                 else:
-                    try:
-                        args = json.loads(fn.get("arguments") or "{}")
-                    except Exception:
-                        args = {}
+                    _raw_args = fn.get("arguments")
+                    if isinstance(_raw_args, dict):
+                        args = _raw_args
+                    else:
+                        try:
+                            args = json.loads(_raw_args or "{}")
+                        except Exception:
+                            args = {}
                     accepted = _collect_request_inputs(
                         args.get("items"), connected, _user_said,
                         collected_tokens, collected_env,
@@ -13955,53 +13959,10 @@ async def create_project_assistant(
             if parsed_env:
                 required_env = parsed_env
 
-        # Channel-ask synthesis (deterministic backstop): if the user named a
-        # delivery channel in the conversation, its credential questions MUST
-        # surface whether or not the LLM emitted them — merge into whatever
-        # came back (dedupe). Same word checks as the token gate above;
-        # webhook/endpoint kept narrow because bare "api" also appears when
-        # users discuss DATA sources (e.g. "CoinGecko's public API").
-        if kind not in ("website", "discord", "telegram"):
-            _channel_token_asks = {
-                "TELEGRAM_BOT_TOKEN": (("telegram", " tg ", "botfather"), "Telegram Bot Token"),
-                "DISCORD_WEBHOOK_URL": (("discord",), "Discord Webhook URL"),
-            }
-            _channel_value_asks = {
-                "TELEGRAM_CHAT_ID": (("telegram", " tg ", "botfather"), "Telegram Chat ID",
-                                     "Which Telegram chat should receive the results (chat id)?"),
-                "EMAIL_TO": (("mail",), "Email Address",
-                             "What email address should receive the results?"),
-                "API_ENDPOINT": (("webhook", "endpoint"), "Webhook/API Endpoint",
-                                 "Which endpoint URL should receive the results?"),
-            }
-            _tok_keys = {t["key"] for t in (required_tokens or [])}
-            _add_tok = [
-                {"key": k, "label": label}
-                for k, (words, label) in _channel_token_asks.items()
-                if k not in _tok_keys and k not in _connected
-                and any(w in _user_said for w in words)
-            ]
-            if _add_tok:
-                required_tokens = (required_tokens or []) + _add_tok
-            _env_keys = {e["key"] for e in (required_env or [])}
-            _add_env = [
-                {"key": k, "label": label, "question": q, "optional": False}
-                for k, (words, label, q) in _channel_value_asks.items()
-                if k not in _env_keys and k not in _connected
-                and any(w in _user_said for w in words)
-            ]
-            if _add_env:
-                required_env = (required_env or []) + _add_env
-
-        # Tool-collected inputs merge with any JSON-declared ones (dedupe) —
-        # the request_inputs tool is the primary path; JSON fields remain a
-        # fallback for models that skip the tool.
-        for _t in collected_tokens:
-            if _t["key"] not in {p["key"] for p in (required_tokens or [])}:
-                required_tokens = (required_tokens or []) + [_t]
-        for _e in collected_env:
-            if _e["key"] not in {p["key"] for p in (required_env or [])}:
-                required_env = (required_env or []) + [_e]
+        # Channel-ask synthesis + tool-item merge happen AFTER the parse try —
+        # models replying after a tool round drop the strict-JSON format, and
+        # a parse failure must NOT discard the collected asks (that shipped
+        # "input not opened" turns with everything null). See below the except.
 
         # LLM-driven project name (set when the user names it conversationally)
         pn = str(data.get("project_name") or "").strip()
@@ -14012,7 +13973,53 @@ async def create_project_assistant(
             raise ValueError("empty payload")
     except Exception:
         # Raw-text fallback: never break the chat over a malformed reply.
+        # (reply/kind/brief default; tool-collected + synthesized asks are
+        # merged below and survive this path.)
         reply, kind, brief = raw[:4000], None, None
+
+    # Tool-collected inputs merge FIRST (the request_inputs tool is the
+    # primary path; JSON fields remain a fallback), then the channel-ask
+    # synthesis backstop — both OUTSIDE the parse try so a prose reply after
+    # a tool round keeps its asks.
+    for _t in collected_tokens:
+        if _t["key"] not in {p["key"] for p in (required_tokens or [])}:
+            required_tokens = (required_tokens or []) + [_t]
+    for _e in collected_env:
+        if _e["key"] not in {p["key"] for p in (required_env or [])}:
+            required_env = (required_env or []) + [_e]
+    _connected = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
+    _kind_eff = kind or (ctx.detected_kind or "")
+    if _kind_eff not in ("website", "discord", "telegram"):
+        _channel_token_asks = {
+            "TELEGRAM_BOT_TOKEN": (("telegram", " tg ", "botfather"), "Telegram Bot Token"),
+            "DISCORD_WEBHOOK_URL": (("discord",), "Discord Webhook URL"),
+        }
+        _channel_value_asks = {
+            "TELEGRAM_CHAT_ID": (("telegram", " tg ", "botfather"), "Telegram Chat ID",
+                                 "Which Telegram chat should receive the results (chat id)?"),
+            "EMAIL_TO": (("mail",), "Email Address",
+                         "What email address should receive the results?"),
+            "API_ENDPOINT": (("webhook", "endpoint"), "Webhook/API Endpoint",
+                             "Which endpoint URL should receive the results?"),
+        }
+        _tok_keys = {t["key"] for t in (required_tokens or [])}
+        _add_tok = [
+            {"key": k, "label": label}
+            for k, (words, label) in _channel_token_asks.items()
+            if k not in _tok_keys and k not in _connected
+            and any(w in _user_said for w in words)
+        ]
+        if _add_tok:
+            required_tokens = (required_tokens or []) + _add_tok
+        _env_keys = {e["key"] for e in (required_env or [])}
+        _add_env = [
+            {"key": k, "label": label, "question": q, "optional": False}
+            for k, (words, label, q) in _channel_value_asks.items()
+            if k not in _env_keys and k not in _connected
+            and any(w in _user_said for w in words)
+        ]
+        if _add_env:
+            required_env = (required_env or []) + _add_env
 
     return CreateAssistantResponse(reply=reply or "…", kind=kind, brief=brief,
                                    required_tokens=required_tokens,
