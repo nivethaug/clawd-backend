@@ -168,6 +168,22 @@ async def _v_slack_webhook(values: Dict[str, str]) -> Tuple[bool, Optional[str]]
     return (r.status_code == 200), ("webhook valid" if r.status_code == 200 else None)
 
 
+async def _v_discord_webhook(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
+    # GET on a Discord webhook returns its metadata WITHOUT delivering a
+    # message (POST would ping the channel) — a safe live check.
+    import re as _re
+
+    url = (values.get("DISCORD_WEBHOOK_URL") or "").strip()
+    if not _re.match(
+        r"^https://(?:discord|discordapp)\.com/api/webhooks/\d+/[\w-]+$", url
+    ):
+        return False, "not a Discord webhook URL (copy it from channel Settings → Integrations)"
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        r = await client.get(url)
+    ok = r.status_code == 200
+    return ok, ("webhook valid" if ok else None)
+
+
 async def _v_coingecko(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
     r = await _get(
         "https://api.coingecko.com/api/v3/ping",
@@ -223,6 +239,7 @@ _VALIDATORS = {
     "razorpay": _v_razorpay,
     "resend": _v_resend,
     "slack_webhook": _v_slack_webhook,
+    "discord-webhook": _v_discord_webhook,
     "coingecko": _v_coingecko,
     "serper": _v_serper,
     "youtube": _v_youtube,
@@ -307,6 +324,14 @@ CATALOG: Dict[str, IntegrationDef] = {
             docs_url="https://api.slack.com/messaging/webhooks",
             description="Post messages to a Slack channel via incoming webhook.",
             validator="slack_webhook", icon_hint="slack",
+        ),
+        IntegrationDef(
+            type="discord-webhook", title="Discord Webhook", category="Bots",
+            key_names=["DISCORD_WEBHOOK_URL"],
+            docs_url="https://support.discord.com/hc/en-us/articles/228383668",
+            description="Post messages to a Discord channel via incoming webhook "
+                        "(agent/scheduler delivery channel).",
+            validator="discord-webhook", icon_hint="discord",
         ),
         IntegrationDef(
             type="coingecko", title="CoinGecko", category="Integrations",
