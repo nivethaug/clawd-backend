@@ -13613,6 +13613,33 @@ _CREATE_INPUT_TOOL = {
     },
 }
 
+_CREATE_BRIEF_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "propose_brief",
+        "description": (
+            "Submit the final build brief once the idea is complete (type "
+            "known, all inputs collected, name known). The platform shows it "
+            "to the user as a confirmation card. Call this INSTEAD of writing "
+            "the brief in your reply text; your reply is just 1-2 sentences "
+            "presenting it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": sorted(_CREATE_ASSISTANT_KINDS)},
+                "prompt": {
+                    "type": "string",
+                    "description": "Polished, complete build prompt for the build agent: goal, key features, structure (pages/commands/jobs), tone, constraints — 120-400 words.",
+                },
+                "features": {"type": "array", "items": {"type": "string"}},
+                "suggested_name": {"type": "string"},
+            },
+            "required": ["kind", "prompt"],
+        },
+    },
+}
+
 
 def _collect_request_inputs(
     items: Any,
@@ -13683,6 +13710,8 @@ INPUT COLLECTION TOOL — request_inputs: when you need a value from the user (e
 - After calling the tool, still write your natural short reply (acknowledge + what the fields are for) — do NOT repeat the individual value requests in text.
 - NEVER claim a value is provided, attached, or connected unless the Live platform context explicitly says so. If the context lists it as MISSING REQUIRED, it is still missing — the user must fill the input field.
 - The JSON fields "required_tokens"/"required_env" are replaced by this tool — do not set them.
+
+BRIEF TOOL — propose_brief: when the idea is complete (type known, inputs collected or declined, name known), CALL propose_brief(kind, prompt, features, suggested_name) with the polished build prompt. The platform shows the confirmation card. Do NOT write the brief in your reply text and do NOT use the JSON "brief" field — your reply is just 1-2 sentences presenting it. A tool call and a final JSON reply must never be mixed in one turn: call the tool OR emit the JSON, never both.
 
 Output (STRICT — a single JSON object, no markdown fences, nothing before or after):
 {"reply": "<1-3 short chat sentences>", "kind": "website|discord|telegram|agent|custom", "brief": null, "required_tokens": null, "required_env": null, "project_name": null}
@@ -13776,6 +13805,7 @@ async def create_project_assistant(
     convo: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}] + list(history)
     collected_tokens: List[Dict[str, str]] = []
     collected_env: List[Dict[str, Any]] = []
+    collected_brief: Dict[str, Any] = {}
     connected = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
     usage_tot = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     raw = ""
@@ -13789,7 +13819,7 @@ async def create_project_assistant(
                 # GLM-5.3-flash thinking cannot be disabled (effort=low instead)
                 # — leave headroom for reasoning tokens + the brief JSON.
                 max_tokens=2000,
-                tools=[_CREATE_INPUT_TOOL],
+                tools=[_CREATE_INPUT_TOOL, _CREATE_BRIEF_TOOL],
             )
             _u = client.get_usage(response)
             for _k in usage_tot:
@@ -13809,7 +13839,32 @@ async def create_project_assistant(
             })
             for tc in tool_calls:
                 fn = tc.get("function") or {}
-                if fn.get("name") != "request_inputs":
+                if fn.get("name") == "propose_brief":
+                    _raw_args = fn.get("arguments")
+                    if isinstance(_raw_args, dict):
+                        args = _raw_args
+                    else:
+                        try:
+                            args = json.loads(_raw_args or "{}")
+                        except Exception:
+                            args = {}
+                    _pk = str(args.get("kind") or "").strip().lower()
+                    _pp = str(args.get("prompt") or "").strip()
+                    if _pk not in _CREATE_ASSISTANT_KINDS:
+                        _pk = "custom"
+                    collected_brief.update({
+                        "kind": _pk,
+                        "prompt": _pp[:6000],
+                        "features": [str(f).strip()[:80] for f in (args.get("features") or []) if str(f).strip()][:8],
+                        "suggested_name": str(args.get("suggested_name") or "").strip()[:30] or None,
+                    })
+                    tool_out = {
+                        "accepted": True,
+                        "note": ("Brief recorded — the confirmation card is shown to "
+                                 "the user. Do NOT repeat the brief in your reply "
+                                 "text; just present it in 1-2 sentences."),
+                    }
+                elif fn.get("name") != "request_inputs":
                     tool_out = {"error": f"unknown tool: {fn.get('name')}"}
                 else:
                     _raw_args = fn.get("arguments")
@@ -13976,6 +14031,18 @@ async def create_project_assistant(
         # (reply/kind/brief default; tool-collected + synthesized asks are
         # merged below and survive this path.)
         reply, kind, brief = raw[:4000], None, None
+
+    # A brief delivered via the propose_brief tool beats a lost/absent JSON
+    # brief (models replying in prose after tool rounds). The parsed-JSON
+    # brief still wins when both exist.
+    if collected_brief.get("prompt") and not brief:
+        brief = CreateAssistantBrief(
+            kind=collected_brief.get("kind") or "custom",
+            prompt=collected_brief["prompt"],
+            features=collected_brief.get("features") or [],
+            suggested_name=collected_brief.get("suggested_name"),
+        )
+        kind = brief.kind
 
     # Tool-collected inputs merge FIRST (the request_inputs tool is the
     # primary path; JSON fields remain a fallback), then the channel-ask
