@@ -2830,10 +2830,16 @@ PM2 online, health 200 are SETUP FACTS — none of them verifies behavior.
 Read PORT and SECRET_KEY from the project .env, then:
 ```bash
 source .env 2>/dev/null; PORT=${{PORT:-8010}}
-curl -s -X POST http://host.docker.internal:$PORT/dev/invoke   -H "Authorization: Bearer $SECRET_KEY" -H "Content-Type: application/json"   -d '{{"text": "<the exact command/message the user would send>"}}'
+curl -s -X POST http://host.docker.internal:$PORT/dev/invoke   -H "Authorization: Bearer $SECRET_KEY" -H "Content-Type: application/json"   -d '{{"text": "<the exact command/message the user would send>", "chat_id": "<the user's real chat id>", "user_id": "<the user's real id>"}}'
 ```
-The JSON `response` field IS the bot's reply. Assert it. If ok:false, the
-`error`+`trace` tell you exactly which pipeline stage broke — fix THAT.
+The JSON `response` field IS the bot's reply — assert it. ALWAYS pass the
+real chat_id/user_id (from the user's report, the DB, or bot logs): bots
+with per-chat state silently search an EMPTY store without them, and the
+fallback reply then looks like correct behavior.
+The `stage` field names WHICH pipeline stage produced the reply —
+`fallback:*` / `*_not_found` / `llm_*` values mean the primary path
+degraded even when the reply text sounds fine. If ok:false, the
+`error`+`trace` tell you exactly which stage broke — fix THAT.
 
 ### Tier 2 — 404? Self-bootstrap the route (older projects), publish, retry Tier 1
 Add to main.py (next to /health):
@@ -2848,18 +2854,22 @@ async def dev_invoke(request: Request):
     body = await request.json(); text = str(body.get("text") or "").strip()
     if not text:
         return Response(status_code=400, content='{{"ok":false,"error":"text required"}}', media_type="application/json")
+    ctx = {{k: str(body.get(k) or "").strip() for k in ("chat_id", "user_id") if str(body.get(k) or "").strip()}}
     user = None
     try:
         from core.database import SessionLocal
         from utils.user_helpers import get_or_create_telegram_user
         db = SessionLocal()
-        user = get_or_create_telegram_user(db=db, telegram_user_id=0, telegram_chat_id=0, telegram_username="verifier")
+        user = get_or_create_telegram_user(db=db, telegram_user_id=int(body.get("user_id") or 0), telegram_chat_id=int(body.get("chat_id") or 0), telegram_username="verifier")
     except Exception:
         pass
-    from services.ai_logic import process_user_input
-    return Response(content=_json.dumps({{"ok": True, "response": str(process_user_input(text, user))}}), media_type="application/json")
+    from services import ai_logic
+    reply = ai_logic.process_user_input(text, user, ctx or None)
+    return Response(content=_json.dumps({{"ok": True, "response": str(reply), "stage": dict(getattr(ai_logic, "LAST_STAGE", {{"name": "unknown"}}))}}), media_type="application/json")
 ```
-Publish (buildpublish.py), then retry Tier 1.
+Publish (buildpublish.py), then retry Tier 1. If the project's ai_logic
+has no LAST_STAGE convention yet, add it: set_stage("fallback:<reason>")
+on every fallback return path so the invoke reply can name its stage.
 
 ### Tier 3 — logs
 ```bash
@@ -3384,9 +3394,17 @@ commands synced, health 200 are SETUP FACTS — none of them verifies behavior.
 The bot's health server (PORT from .env) accepts a synthetic invocation:
 ```bash
 source .env 2>/dev/null; PORT=${{PORT:-8010}}
-curl -s -X POST http://host.docker.internal:$PORT/dev/invoke   -H "Authorization: Bearer $SECRET_KEY" -H "Content-Type: application/json"   -d '{{"text": "<the exact command text the user would send>"}}'
+curl -s -X POST http://host.docker.internal:$PORT/dev/invoke   -H "Authorization: Bearer $SECRET_KEY" -H "Content-Type: application/json"   -d '{{"text": "<the exact command text the user would send>", "guild_id": "<the user's real guild id>", "user_id": "<the user's real id>"}}'
 ```
-The JSON `response` field IS the bot's reply. Assert it. If ok:false, the
+The JSON `response` field IS the bot's reply — assert it. ALWAYS pass the
+real guild_id (from the user's report, the DB, or
+`curl -s -H "Authorization: Bearer $DISCORD_TOKEN" "https://discord.com/api/v10/users/@me/guilds"`):
+bots with per-guild state (knowledge bases, per-server configs) silently
+search an EMPTY store without it, and the fallback reply then looks like
+correct behavior.
+The `stage` field names WHICH pipeline stage produced the reply —
+`fallback:*` / `*_not_found` / `llm_*` values mean the primary path
+degraded even when the reply text sounds fine. If ok:false, the
 `error`+`trace` name the failing stage — fix THAT, not a guess.
 
 ### Tier 2 — 404? Self-bootstrap the route (older projects), publish, retry Tier 1
@@ -3405,13 +3423,17 @@ def do_POST(self):
     text = str(body.get('text') or '').strip()
     if not text:
         self.send_response(400); self.end_headers(); return
-    from services.ai_logic import process_user_input
-    data = json.dumps({{"ok": True, "response": str(process_user_input(text))}}).encode()
+    ctx = {{k: str(body.get(k) or '').strip() for k in ('guild_id', 'channel_id', 'user_id') if str(body.get(k) or '').strip()}}
+    from services import ai_logic
+    reply = ai_logic.process_user_input(text, ctx or None)
+    data = json.dumps({{"ok": True, "response": str(reply), "stage": dict(getattr(ai_logic, "LAST_STAGE", {{"name": "unknown"}}))}}).encode()
     self.send_response(200); self.send_header('Content-Type', 'application/json')
     self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
 ```
 Also add `SECRET_KEY = os.getenv("SECRET_KEY", "change-this-in-production")` to
-config.py if missing. Publish (buildpublish.py), retry Tier 1.
+config.py if missing. If the project's ai_logic has no LAST_STAGE convention
+yet, add it: set_stage("fallback:<reason>") on every fallback return path so
+the invoke reply can name its stage. Publish (buildpublish.py), retry Tier 1.
 
 ### Tier 3 — logs + (optional) channel history as the bot
 ```bash

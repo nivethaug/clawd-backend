@@ -72,8 +72,17 @@ class HealthHandler(BaseHTTPRequestHandler):
         """Dev verifier — agent-facing synthetic invocation.
 
         POST /dev/invoke  (Authorization: Bearer <SECRET_KEY>)
-        body {"text": "..."} -> runs process_user_input() (the same function
-        slash commands use) in THIS process and returns the reply JSON.
+        body {"text": "...", "guild_id": "...", "channel_id": "...",
+              "user_id": "..."} -> runs process_user_input() (the same
+        function slash commands use) in THIS process and returns the reply
+        JSON plus the pipeline stage that produced it.
+
+        Context ids are OPTIONAL but load-bearing: bots that keep per-guild
+        or per-channel state (knowledge bases, configs) MUST be invoked with
+        the real ids, or the handler silently searches an empty store and
+        the fallback reply looks like correct behavior. Pass the guild the
+        user actually reported the problem from.
+
         No Discord API involvement; lets the platform agent verify changes
         end-to-end instead of guessing from logs.
         """
@@ -98,13 +107,25 @@ class HealthHandler(BaseHTTPRequestHandler):
         if not text:
             self._json(400, {"ok": False, "error": "text is required"})
             return
+        # Per-guild/per-channel state lookups need the REAL ids — without
+        # them handlers fall back to defaults and search empty stores.
+        ctx = {
+            k: str(body.get(k) or '').strip()
+            for k in ('guild_id', 'channel_id', 'user_id')
+            if str(body.get(k) or '').strip()
+        }
         started = time.monotonic()
         try:
-            from services.ai_logic import process_user_input
-            response = process_user_input(text)
+            from services import ai_logic
+            response = ai_logic.process_user_input(text, ctx or None)
             self._json(200, {
                 "ok": True,
                 "response": str(response),
+                # Which pipeline stage produced the reply — "fallback:*" /
+                # "*_not_found" means the primary path degraded; a plain
+                # fallback STRING reply is not proof the bot works.
+                "stage": dict(ai_logic.LAST_STAGE),
+                "context": ctx,
                 "elapsed_ms": int((time.monotonic() - started) * 1000),
             })
         except Exception as e:
@@ -113,6 +134,8 @@ class HealthHandler(BaseHTTPRequestHandler):
                 "ok": False,
                 "error": f"{type(e).__name__}: {e}",
                 "trace": traceback.format_exc()[-1500:],
+                "context": ctx,
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
             })
 
     def _json(self, status, payload):

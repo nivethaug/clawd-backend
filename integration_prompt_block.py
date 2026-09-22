@@ -29,7 +29,20 @@ _EXCLUDE_PREFIXES = ("INTERNAL_", "SYSTEM_")
 # so automation agents can compose actions without extra lookups).
 _ENV_CAPABILITY_HINTS = {
     "OPENAI_API_KEY": "run LLM calls (api.openai.com/v1/chat/completions) inside jobs",
-    "OPENROUTER_API_KEY": "route LLM calls across models (openrouter.ai/api/v1/chat/completions). Check credits first (GET /api/v1/credits): when total_credits - total_usage <= 0, use FREE models (…:free suffix) with a fallback chain — paid models will 402.",
+    "OPENROUTER_API_KEY": (
+        "route LLM calls across models (openrouter.ai/api/v1/chat/completions). "
+        "Check credits first (GET /api/v1/credits): when total_credits - total_usage <= 0, "
+        "use FREE models (…:free suffix) with a fallback chain — paid models will 402. "
+        "MODEL CHOICE: never hardcode a slug you haven't verified live — fetch "
+        "GET /api/v1/models and pick from that list, then smoke-test ONE completion "
+        "before wiring the model in (dead slugs 400 instantly and code that swallows "
+        "the error looks like 'no answer'). "
+        "REASONING MODELS (…flash/glm-4.7/o-series style) spend tokens THINKING before "
+        "the answer: set max_tokens >= 4x the expected answer length and timeout >= 20s; "
+        "if the call succeeds but content is empty, retry once with reasoning disabled "
+        "(or read the reasoning field) — an empty completion is a budget failure, not 'I "
+        "don't know'."
+    ),
     "ANTHROPIC_API_KEY": "run Claude messages API",
     "GEMINI_API_KEY": "run Gemini generateContent",
     "GITHUB_TOKEN": "read/write repos, issues, PRs (api.github.com)",

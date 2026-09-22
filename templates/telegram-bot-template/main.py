@@ -265,14 +265,28 @@ async def dev_invoke(request: Request):
     except Exception as e:
         logger.warning(f"[dev-invoke] continuing without user context: {e}")
 
+    # Per-chat state lookups need the REAL ids — without them handlers fall
+    # back to defaults and search empty stores (invoke without chat context
+    # has produced false "no data" verdicts on live bots).
+    ctx = {
+        k: str(body.get(k) or "").strip()
+        for k in ("chat_id", "user_id")
+        if str(body.get(k) or "").strip()
+    }
+
     started = _time.monotonic()
     try:
-        from services.ai_logic import process_user_input
-        response = process_user_input(text, user)
+        from services import ai_logic
+        response = ai_logic.process_user_input(text, user, ctx or None)
         return Response(
             content=_json.dumps({
                 "ok": True,
                 "response": str(response),
+                # Which pipeline stage produced the reply — "fallback:*" /
+                # "*_not_found" means the primary path degraded; a plain
+                # fallback STRING reply is not proof the bot works.
+                "stage": dict(ai_logic.LAST_STAGE),
+                "context": ctx,
                 "elapsed_ms": int((_time.monotonic() - started) * 1000),
             }),
             media_type="application/json",
@@ -285,6 +299,7 @@ async def dev_invoke(request: Request):
                 "ok": False,
                 "error": f"{type(e).__name__}: {e}",
                 "trace": _tb.format_exc()[-1500:],
+                "context": ctx,
                 "elapsed_ms": int((_time.monotonic() - started) * 1000),
             }),
             status_code=200,  # transport OK; the invocation failed — return details

@@ -23,8 +23,15 @@ async def ask_handler(interaction: discord.Interaction, query: str):
     """
     logger.info(f"Processing query from {interaction.user}: {query[:100]}")
 
+    # Same context shape /dev/invoke passes, so prod and verifier exercise
+    # identical code paths — per-guild state lookups stay consistent.
+    ctx = {
+        "guild_id": str(interaction.guild_id or ""),
+        "channel_id": str(interaction.channel_id or ""),
+        "user_id": str(interaction.user.id or ""),
+    }
     try:
-        response = process_user_input(query)
+        response = process_user_input(query, ctx)
         logger.info(f"Response ({len(response)} chars): {response[:100]}...")
         await interaction.response.send_message(response)
     except Exception as e:

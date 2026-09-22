@@ -37,7 +37,13 @@ async def handle_message(update, context):
     # Process message (with or without user context)
     try:
         user_input = update.message.text
-        response = process_user_input(user_input, user)
+        # Same context shape /dev/invoke passes, so prod and verifier
+        # exercise identical code paths — per-chat state stays consistent.
+        ctx = {
+            "chat_id": str(chat_id or ""),
+            "user_id": str(user_id or ""),
+        }
+        response = process_user_input(user_input, user, ctx)
         await update.message.reply_text(response)
     except Exception as e:
         from utils.logger import logger
