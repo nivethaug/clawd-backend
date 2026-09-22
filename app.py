@@ -13562,6 +13562,97 @@ class CreateAssistantResponse(BaseModel):
 
 _CREATE_ASSISTANT_KINDS = {"website", "discord", "telegram", "agent", "custom"}
 
+# ── Create-assistant input tool ─────────────────────────────────────────
+# The assistant collects user values (email address, chat id, endpoint,
+# allowed tokens) by CALLING request_inputs — the platform pops the input
+# fields and returns a tool result, so the model acts instead of
+# describing. Replaces the old hope-the-JSON-contains-it protocol (the
+# JSON fields still parse as a fallback).
+_CREATE_ALLOWED_TOKENS = {
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY", "SERPER_API_KEY", "RESEND_API_KEY",
+    "COINGECKO_API_KEY", "STRIPE_SECRET_KEY",
+    "TELEGRAM_BOT_TOKEN", "DISCORD_WEBHOOK_URL",
+}
+_CREATE_CHANNEL_TOKEN_GUARD = {
+    "TELEGRAM_BOT_TOKEN": ("telegram", " tg ", "botfather"),
+    "DISCORD_WEBHOOK_URL": ("discord",),
+}
+_CREATE_CHANNEL_VALUE_KEYS = {"EMAIL_TO", "TELEGRAM_CHAT_ID", "API_ENDPOINT"}
+_CREATE_ASKABLE_KEYS = sorted(_CREATE_ALLOWED_TOKENS | _CREATE_CHANNEL_VALUE_KEYS)
+_CREATE_INPUT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "request_inputs",
+        "description": (
+            "Pop input fields in the user's chat UI to collect values. Call "
+            "this INSTEAD of asking for the values in your reply text — the "
+            "fields appear under your message and the user fills them there. "
+            "Put ALL items you currently need in ONE call. Delivery-channel "
+            "credentials (TELEGRAM_BOT_TOKEN, DISCORD_WEBHOOK_URL) only after "
+            "the user names that channel."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": {"type": "string", "enum": _CREATE_ASKABLE_KEYS},
+                            "label": {"type": "string"},
+                            "question": {"type": "string"},
+                        },
+                        "required": ["key", "label", "question"],
+                    },
+                },
+            },
+            "required": ["items"],
+        },
+    },
+}
+
+
+def _collect_request_inputs(
+    items: Any,
+    connected: set,
+    user_said: str,
+    out_tokens: List[Dict[str, str]],
+    out_env: List[Dict[str, Any]],
+) -> List[str]:
+    """Validate one request_inputs tool call; append accepted items.
+
+    Same rules as the JSON path: allowlisted keys only, never connected
+    keys, channel credentials only after the user named the channel.
+    Returns the accepted key list for the tool result.
+    """
+    accepted: List[str] = []
+    seen = {t["key"] for t in out_tokens} | {e["key"] for e in out_env}
+    for item in (items or [])[:6]:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip().upper()
+        if key not in _CREATE_ASKABLE_KEYS or key in seen:
+            continue
+        if str(key) in {str(c).strip().upper() for c in connected}:
+            continue
+        if key in _CREATE_CHANNEL_TOKEN_GUARD and not any(
+            w in user_said for w in _CREATE_CHANNEL_TOKEN_GUARD[key]
+        ):
+            continue
+        label = str(item.get("label") or "").strip()[:40] or (
+            key.replace("_API_KEY", "").replace("_", " ").title()
+        )
+        question = str(item.get("question") or "").strip()[:200]
+        if key in _CREATE_CHANNEL_VALUE_KEYS:
+            out_env.append({"key": key, "label": label, "question": question, "optional": False})
+        else:
+            out_tokens.append({"key": key, "label": label})
+        seen.add(key)
+        accepted.append(key)
+    return accepted
+
 _CREATE_ASSISTANT_SYSTEM = """You are DreamAgent's project creation assistant — a friendly expert that turns an idea into a ready-to-build project through conversation.
 
 Platform facts:
@@ -13586,6 +13677,12 @@ Behaviour:
    Chosen channel TOKENS follow the required_tokens gate (no brief until attached); email/chat-id/endpoint follow the required_env gate. Record every chosen channel in the brief's Integrations section so the build agent wires them. If the user declines all channels, proceed without them — configurable later.
 7. PROJECT NAME: drive it conversationally. When the context says "project name: NOT SET" AND all required tokens/env keys are satisfied (or none are needed), ask what to call the project as your natural next question — not before. When the user gives a name (or you can infer one they clearly stated, e.g. "named DreamSupport"), acknowledge it naturally in your reply AND echo it in "project_name" (kebab-case, max 30 chars). Never re-ask once the context shows a name set.
 8. When at least one clarification is answered AND the idea is clear AND nothing required is missing (tokens AND non-optional env keys) AND all external APIs/integrations are confirmed AND the project has a name, produce a brief.
+
+INPUT COLLECTION TOOL — request_inputs: when you need a value from the user (email address, Telegram chat id, webhook endpoint, or an allowed API/delivery token), CALL the request_inputs tool with ALL items you currently need in one call, instead of asking for them in text alone. The platform pops the input fields under your message and the user fills them there. Rules:
+- Only keys from the tool's enum — it rejects anything else. Delivery-channel credentials (TELEGRAM_BOT_TOKEN, DISCORD_WEBHOOK_URL) only AFTER the user names that channel.
+- After calling the tool, still write your natural short reply (acknowledge + what the fields are for) — do NOT repeat the individual value requests in text.
+- NEVER claim a value is provided, attached, or connected unless the Live platform context explicitly says so. If the context lists it as MISSING REQUIRED, it is still missing — the user must fill the input field.
+- The JSON fields "required_tokens"/"required_env" are replaced by this tool — do not set them.
 
 Output (STRICT — a single JSON object, no markdown fences, nothing before or after):
 {"reply": "<1-3 short chat sentences>", "kind": "website|discord|telegram|agent|custom", "brief": null, "required_tokens": null, "required_env": null, "project_name": null}
@@ -13670,24 +13767,80 @@ async def create_project_assistant(
 
     system_prompt = _CREATE_ASSISTANT_SYSTEM + "\n\nLive platform context:\n" + "\n".join(ctx_lines)
 
+    # Tool loop: the model may call request_inputs to pop input fields; each
+    # call gets a ground-truth tool result, then it replies. Max 3 rounds;
+    # a model that never calls tools behaves exactly like the old path.
+    _user_said = " " + " ".join(
+        m.content for m in request.messages if m.role == "user"
+    ).lower() + " "
+    convo: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}] + list(history)
+    collected_tokens: List[Dict[str, str]] = []
+    collected_env: List[Dict[str, Any]] = []
+    connected = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
+    usage_tot = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    raw = ""
     try:
         from services.ai.openrouter_client import get_openrouter_client
         client = get_openrouter_client()
-        response = await client.chat_completion(
-            messages=[{"role": "system", "content": system_prompt}] + history,
-            temperature=0.3,
-            # GLM-5.3-flash thinking cannot be disabled (effort=low instead)
-            # — leave headroom for reasoning tokens + the brief JSON.
-            max_tokens=2000,
-        )
+        for _round in range(3):
+            response = await client.chat_completion(
+                messages=convo,
+                temperature=0.3,
+                # GLM-5.3-flash thinking cannot be disabled (effort=low instead)
+                # — leave headroom for reasoning tokens + the brief JSON.
+                max_tokens=2000,
+                tools=[_CREATE_INPUT_TOOL],
+            )
+            _u = client.get_usage(response)
+            for _k in usage_tot:
+                usage_tot[_k] += int(_u.get(_k, 0) or 0)
+            try:
+                msg = response["choices"][0]["message"] or {}
+            except (KeyError, IndexError):
+                msg = {}
+            tool_calls = msg.get("tool_calls") or []
+            raw = str(msg.get("content") or "").strip()
+            if not tool_calls:
+                break
+            convo.append({
+                "role": "assistant",
+                "content": msg.get("content") or "",
+                "tool_calls": tool_calls,
+            })
+            for tc in tool_calls:
+                fn = tc.get("function") or {}
+                if fn.get("name") != "request_inputs":
+                    tool_out = {"error": f"unknown tool: {fn.get('name')}"}
+                else:
+                    try:
+                        args = json.loads(fn.get("arguments") or "{}")
+                    except Exception:
+                        args = {}
+                    accepted = _collect_request_inputs(
+                        args.get("items"), connected, _user_said,
+                        collected_tokens, collected_env,
+                    )
+                    tool_out = {
+                        "accepted": accepted,
+                        "note": (
+                            "Input fields are now shown under your message — the "
+                            "user fills them there. Do NOT re-ask for these values "
+                            "in text. Never claim a value is provided or connected "
+                            "unless the platform context says so."
+                        ),
+                    }
+                convo.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id") or "",
+                    "content": json.dumps(tool_out),
+                })
     except ValueError as e:
         raise HTTPException(status_code=503, detail=f"Assistant unavailable: {e}")
     except Exception as e:
         logger.error("[CREATE-ASSISTANT] LLM call failed: %s: %s", type(e).__name__, e)
         raise HTTPException(status_code=502, detail="Assistant backend error")
 
-    raw = (client.get_text_response(response) or "").strip()
-    usage = client.get_usage(response)
+    usage = usage_tot
 
     try:
         from services.token_tracker import record_usage
@@ -13742,24 +13895,8 @@ async def create_project_assistant(
         # Extra required tokens — allowlisted server-side (never trust LLM key
         # names), deduped against already-connected env keys, single-key
         # catalog types only (the frontend validates each via its catalog).
-        _ALLOWED_REQUIRED_TOKENS = {
-            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
-            "OPENROUTER_API_KEY", "SERPER_API_KEY", "RESEND_API_KEY",
-            "COINGECKO_API_KEY", "STRIPE_SECRET_KEY",
-            "TELEGRAM_BOT_TOKEN", "DISCORD_WEBHOOK_URL",
-        }
-        # Channel-credential gate (prompt rule enforced in code): the LLM
-        # sometimes emits channel tokens together with the channel-selection
-        # question, which auto-pops the masked input before the user has
-        # chosen anything. A channel credential may only surface AFTER the
-        # user has actually named that channel in the conversation.
-        _CHANNEL_TOKEN_GUARD = {
-            "TELEGRAM_BOT_TOKEN": ("telegram", " tg ", "botfather"),
-            "DISCORD_WEBHOOK_URL": ("discord",),
-        }
-        _user_said = " " + " ".join(
-            m.content for m in request.messages if m.role == "user"
-        ).lower() + " "
+        _ALLOWED_REQUIRED_TOKENS = _CREATE_ALLOWED_TOKENS
+        _CHANNEL_TOKEN_GUARD = _CREATE_CHANNEL_TOKEN_GUARD
         _connected = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
         rt = data.get("required_tokens")
         if isinstance(rt, list):
@@ -13855,6 +13992,16 @@ async def create_project_assistant(
             ]
             if _add_env:
                 required_env = (required_env or []) + _add_env
+
+        # Tool-collected inputs merge with any JSON-declared ones (dedupe) —
+        # the request_inputs tool is the primary path; JSON fields remain a
+        # fallback for models that skip the tool.
+        for _t in collected_tokens:
+            if _t["key"] not in {p["key"] for p in (required_tokens or [])}:
+                required_tokens = (required_tokens or []) + [_t]
+        for _e in collected_env:
+            if _e["key"] not in {p["key"] for p in (required_env or [])}:
+                required_env = (required_env or []) + [_e]
 
         # LLM-driven project name (set when the user names it conversationally)
         pn = str(data.get("project_name") or "").strip()
