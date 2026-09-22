@@ -896,6 +896,21 @@ cd {self.project_path} && python3 buildpublish.py --skip-deps
 This restarts the scheduler via the worker-api. After it completes, test the job
 immediately (Step "Run a job immediately") to verify the new code is live.
 
+## 📊 DATA HONESTY (NON-NEGOTIABLE)
+
+Numbers shown to the user must come from a REAL source in the code: an API
+response, the database, or a file you read. Scores, rankings, percentages,
+counts, and metrics computed from proxies (autocomplete suggestions, keyword
+shape, word patterns, guesses) may be shown ONLY when clearly labeled as
+estimates ("rough signal based on X — not search volume"), never presented
+as measured demand, competition, or usage. If the user asks for capability
+that needs data you don't have (search volumes, market data, analytics),
+say exactly what is missing and which integration would provide it — NEVER
+fake it with plausible-looking numbers. Users make business decisions on
+these values.
+
+---
+
 ## 🧪 ISOLATED DRY-RUN VERIFICATION (no messages sent, no APIs called)
 
 The executor supports a dry_run flag: the full resolve/route path runs but every
@@ -1456,6 +1471,21 @@ cd {self.project_path} && python3 buildpublish.py --skip-deps
 ```
 
 After it completes, run the job once to verify the new code is live.
+
+## 📊 DATA HONESTY (NON-NEGOTIABLE)
+
+Numbers shown to the user must come from a REAL source in the code: an API
+response, the database, or a file you read. Scores, rankings, percentages,
+counts, and metrics computed from proxies (autocomplete suggestions, keyword
+shape, word patterns, guesses) may be shown ONLY when clearly labeled as
+estimates ("rough signal based on X — not search volume"), never presented
+as measured demand, competition, or usage. If the user asks for capability
+that needs data you don't have (search volumes, market data, analytics),
+say exactly what is missing and which integration would provide it — NEVER
+fake it with plausible-looking numbers. Users make business decisions on
+these values.
+
+---
 
 ## 🧪 ISOLATED DRY-RUN VERIFICATION (no messages sent, no APIs called)
 
