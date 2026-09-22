@@ -274,6 +274,11 @@ def _send_email(payload: dict) -> Tuple[str, str]:
     """Send an email via SMTP (supports plain text and HTML)."""
     if not SMTP_HOST or not SMTP_USER:
         return ('failed', 'SMTP not configured')
+    if not SMTP_PASS:
+        return ('failed',
+                'SMTP password missing in project env — the mail server '
+                'rejects unauthenticated relay (554 Access denied). '
+                'Re-save the email channel so the env regenerates.')
 
     from_addr = SMTP_FROM or SMTP_USER
     to_addr = payload.get('to', EMAIL_TO)
