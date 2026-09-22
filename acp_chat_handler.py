@@ -2864,7 +2864,10 @@ async def dev_invoke(request: Request):
     except Exception:
         pass
     from services import ai_logic
-    reply = ai_logic.process_user_input(text, user, ctx or None)
+    try:
+        reply = ai_logic.process_user_input(text, user, ctx or None)
+    except TypeError:
+        reply = ai_logic.process_user_input(text, user)  # older signature without ctx
     return Response(content=_json.dumps({{"ok": True, "response": str(reply), "stage": dict(getattr(ai_logic, "LAST_STAGE", {{"name": "unknown"}}))}}), media_type="application/json")
 ```
 Publish (buildpublish.py), then retry Tier 1. If the project's ai_logic
@@ -3425,7 +3428,10 @@ def do_POST(self):
         self.send_response(400); self.end_headers(); return
     ctx = {{k: str(body.get(k) or '').strip() for k in ('guild_id', 'channel_id', 'user_id') if str(body.get(k) or '').strip()}}
     from services import ai_logic
-    reply = ai_logic.process_user_input(text, ctx or None)
+    try:
+        reply = ai_logic.process_user_input(text, ctx or None)
+    except TypeError:
+        reply = ai_logic.process_user_input(text)  # older signature without ctx
     data = json.dumps({{"ok": True, "response": str(reply), "stage": dict(getattr(ai_logic, "LAST_STAGE", {{"name": "unknown"}}))}}).encode()
     self.send_response(200); self.send_header('Content-Type', 'application/json')
     self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
