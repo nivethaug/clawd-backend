@@ -165,7 +165,7 @@ Add new entries: `FETCH_DATA_REGISTRY["my_var"] = lambda: _fetch_my_data()`
 |-----------|---------|--------------|-----------------|
 | `telegram` | `_send_telegram()` | POST to Telegram Bot API | `TELEGRAM_BOT_TOKEN` in .env |
 | `discord` | `_send_discord()` | POST to Discord webhook URL | `webhook_url` in payload |
-| `email` | `_send_email()` | Send via SMTP | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` in .env |
+| `email` | `_send_email()` | Send via the platform delivery API | `EMAIL_TO` in .env |
 | `api` | `_call_api()` | HTTP request to any URL | `url` in payload |
 | `trade` | `_execute_trade()` | Paper trade placeholder | None |
 
@@ -180,10 +180,7 @@ Add new entries: `FETCH_DATA_REGISTRY["my_var"] = lambda: _fetch_my_data()`
 | `BACKEND_URL` | Backend API URL for job_manager | Auto-injected by worker |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token | Only for telegram tasks |
 | `DISCORD_BOT_TOKEN` | Discord bot token | Only for discord tasks |
-| `SMTP_HOST` | SMTP server | Only for email tasks |
-| `SMTP_PORT` | SMTP port (default: 587) | Only for email tasks |
-| `SMTP_USER` | SMTP username | Only for email tasks |
-| `SMTP_PASS` | SMTP password | Only for email tasks |
+| `EMAIL_TO` | Default recipient | Only for email tasks |
 
 **No DATABASE_URL** — jobs are stored in the main dreampilot DB, managed centrally.
 
@@ -397,7 +394,7 @@ scheduler-template/
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `Unknown task_type: X` | No route for task_type in `execute_task()` | Add `elif task_type == 'X':` route |
-| `SMTP not configured` | Missing SMTP_* vars in .env | Set SMTP_HOST, SMTP_USER, SMTP_PASS |
+| `Delivery API error` | Backend unreachable | Check BACKEND_URL / retry |
 | `TELEGRAM_BOT_TOKEN not configured` | Missing token in .env | Set TELEGRAM_BOT_TOKEN |
 | `Unknown fetch key: X` | Not in FETCH_DATA_REGISTRY | Add entry to registry in executor.py |
 | Job created but never runs | task_type mismatch | Ensure create() task_type matches execute_task() route |

@@ -27,12 +27,10 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 # Channel: Discord
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
-# Channel: Email (SMTP auto-injected from backend .env, only EMAIL_TO per-project)
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_USER = os.getenv("SMTP_USER", "support@dreamagent.cloud")
-SMTP_PASS = os.getenv("SMTP_PASS", "")
-SMTP_FROM = os.getenv("SMTP_FROM", "dreamagent@dreamagent.cloud")  # From alias
+# Channel: Email — send via the platform's internal delivery API
+# (POST {BACKEND_URL}/internal/email/send). Only EMAIL_TO is
+# project-specific; the relay credentials live platform-side and are
+# never exposed to this project.
 EMAIL_TO = os.getenv("EMAIL_TO", "")
 
 # Channel: API

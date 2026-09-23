@@ -33,17 +33,14 @@ Required interface:
 
 import json
 import logging
-import smtplib
 from typing import Tuple
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 import requests
 
 from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
     DISCORD_WEBHOOK_URL,
-    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, EMAIL_TO,
+    EMAIL_TO,
     API_ENDPOINT,
 )
 from services import api_client
