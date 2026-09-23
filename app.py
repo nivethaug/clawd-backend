@@ -13811,19 +13811,43 @@ async def create_project_assistant(
     raw = ""
     try:
         from services.ai.openrouter_client import get_openrouter_client
-        # CREATE_ASSISTANT_MODEL scopes a model to THIS chat only — the
-        # prompt assistant and page inference keep PROMPT_ASSISTANT_MODEL.
-        client = get_openrouter_client(
-            model=os.getenv("CREATE_ASSISTANT_MODEL") or None)
+        # Create-chat model is scoped to THIS chat only (prompt assistant and
+        # page inference keep PROMPT_ASSISTANT_MODEL). Default: glm-4.7-flash
+        # (faster than 5.3, validated on this account), one-shot fallback to
+        # glm-5.3-flash if the primary errors — both env-overridable.
+        _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "z-ai/glm-4.7-flash")
+        _create_fb = os.getenv("CREATE_ASSISTANT_FALLBACK_MODEL", "z-ai/glm-5.3-flash")
+        client = get_openrouter_client(model=_create_model)
+        fallback_client = (
+            get_openrouter_client(model=_create_fb)
+            if _create_fb and _create_fb != _create_model else None
+        )
+        _fb_used = False
         for _round in range(3):
-            response = await client.chat_completion(
-                messages=convo,
-                temperature=0.3,
-                # GLM-5.3-flash thinking cannot be disabled (effort=low instead)
-                # — leave headroom for reasoning tokens + the brief JSON.
-                max_tokens=2000,
-                tools=[_CREATE_INPUT_TOOL, _CREATE_BRIEF_TOOL],
-            )
+            try:
+                response = await client.chat_completion(
+                    messages=convo,
+                    temperature=0.3,
+                    max_tokens=2000,
+                    tools=[_CREATE_INPUT_TOOL, _CREATE_BRIEF_TOOL],
+                )
+            except Exception as _fb_err:
+                if fallback_client and not _fb_used:
+                    _fb_used = True
+                    logger.warning(
+                        "[CREATE-ASSISTANT] model %s failed (%s: %s) — falling back to %s",
+                        _create_model, type(_fb_err).__name__, _fb_err,
+                        _create_fb,
+                    )
+                    client = fallback_client
+                    response = await client.chat_completion(
+                        messages=convo,
+                        temperature=0.3,
+                        max_tokens=2000,
+                        tools=[_CREATE_INPUT_TOOL, _CREATE_BRIEF_TOOL],
+                    )
+                else:
+                    raise
             _u = client.get_usage(response)
             for _k in usage_tot:
                 usage_tot[_k] += int(_u.get(_k, 0) or 0)

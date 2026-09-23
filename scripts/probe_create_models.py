@@ -16,14 +16,11 @@ import time
 
 import httpx
 
-# gemini-2.0-flash is DELISTED on OpenRouter (verified via public
-# /api/v1/models, 2026-09-23) — the current stable flash is 2.5.
+# GLM-only per decision 2026-09-23: gemini removed (data-policy risk),
+# glm-4.7-flash is the create-chat default with glm-5.3-flash fallback.
 CANDIDATES = [
-    "google/gemini-2.5-flash",      # recommended: stable, best tool-calling, 0.30/2.50 per M
-    "google/gemini-2.5-flash-lite", # cheapest: 0.10/0.40 per M
-    "google/gemini-3-flash-preview",
-    "z-ai/glm-4.7-flash",           # GLM fallback
-    "z-ai/glm-5.3-flash",           # incumbent
+    "z-ai/glm-4.7-flash",   # create-chat default
+    "z-ai/glm-5.3-flash",   # fallback
 ]
 
 TOOLS = [{
