@@ -13929,6 +13929,12 @@ async def create_project_assistant(
             raw = str(msg.get("content") or "").strip()
             if not tool_calls:
                 break
+            # One-round fast path: when the model writes its reply text
+            # ALONGSIDE the tool call, accept it as the final reply (the
+            # inputs were processed below) instead of burning a second
+            # model round just to restate it.
+            if raw:
+                break
             convo.append({
                 "role": "assistant",
                 "content": msg.get("content") or "",
