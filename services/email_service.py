@@ -150,6 +150,41 @@ If you didn't create an account, you can safely ignore this email.
         return False
 
 
+def send_project_email(to_email: str, subject: str,
+                       html: Optional[str] = None,
+                       text: Optional[str] = None) -> bool:
+    """Relay a customer project's own email (agent/scheduler delivery
+    channel) through the platform SMTP account. Raw pass-through — the
+    content is the project's, not platform-branded. Called by the
+    /internal/email/send route; SMTP credentials never enter project envs.
+
+    Returns True if sent successfully, False otherwise.
+    """
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    msg = MIMEMultipart("alternative")
+    msg["From"] = SMTP_FROM or SMTP_USER or DEFAULT_FROM_EMAIL
+    msg["To"] = to_email
+    msg["Subject"] = (subject or "(no subject)")[:200]
+    if text:
+        msg.attach(MIMEText(text, "plain", "utf-8"))
+    if html:
+        msg.attach(MIMEText(html, "html", "utf-8"))
+    if not msg.get_payload():
+        msg.attach(MIMEText(subject or "(empty)", "plain", "utf-8"))
+    try:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+            if SMTP_PASS:
+                server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_FROM or SMTP_USER, [to_email], msg.as_string())
+        return True
+    except Exception as e:
+        logger.error("[EMAIL] project email relay to %s failed: %s", to_email, e)
+        return False
+
+
 def send_admin_email(to_email: str, subject: str, message: str,
                      user_name: Optional[str] = None) -> bool:
     """

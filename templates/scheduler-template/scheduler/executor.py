@@ -275,48 +275,44 @@ def _send_discord(payload: dict) -> Tuple[str, str]:
 
 
 def _send_email(payload: dict) -> Tuple[str, str]:
-    """Send an email via SMTP (supports plain text and HTML)."""
-    if not SMTP_HOST or not SMTP_USER:
-        return ('failed', 'SMTP not configured')
-    if not SMTP_PASS:
-        return ('failed',
-                'SMTP password missing in project env — the mail server '
-                'rejects unauthenticated relay (554 Access denied). '
-                'Re-save the email channel so the env regenerates.')
-
-    from_addr = SMTP_FROM or SMTP_USER
+    """Send email via the platform's internal delivery API. The sandbox
+    never touches SMTP credentials — the backend relays with its own
+    platform-side config (per-project rate limit applies)."""
     # 'or' (not .get default): an EMPTY-STRING 'to' in the payload must
     # still fall back to the EMAIL_TO channel env (job 77 incident).
     to_addr = payload.get('to') or EMAIL_TO
-    subject = payload.get('subject', 'Scheduler Notification')
+    subject = payload.get('subject', 'Notification')
     body = payload.get('body', payload.get('text', ''))
     html = payload.get('html', '')
-
     if not to_addr:
         return ('failed', 'Missing "to" address in payload')
-
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-        if SMTP_PASS:
-            server.login(SMTP_USER, SMTP_PASS)
-
-        if html:
-            # HTML email
-            msg = MIMEMultipart()
-            msg['From'] = from_addr
-            msg['To'] = to_addr
-            msg['Subject'] = subject
-            msg.attach(MIMEText(html, 'html'))
-        else:
-            # Plain text email
-            msg = MIMEText(body)
-            msg['Subject'] = subject
-            msg['From'] = from_addr
-            msg['To'] = to_addr
-
-        server.sendmail(from_addr, to_addr, msg.as_string())
-
-    return ('success', f'Email sent to {to_addr}')
-
+    if not subject:
+        return ('failed', 'Missing subject')
+    if not body and not html:
+        return ('failed', 'Missing email body')
+    backend_url = os.getenv("BACKEND_URL", "https://api.dreamagent.cloud").rstrip("/")
+    try:
+        import requests
+        resp = requests.post(
+            f"{backend_url}/internal/email/send",
+            json={
+                "project_id": int(os.getenv("PROJECT_ID", "0") or 0),
+                "to": to_addr,
+                "subject": subject,
+                "text": body,
+                "html": html,
+            },
+            timeout=30,
+        )
+    except Exception as e:
+        return ('failed', f'Delivery API unreachable: {e}')
+    if resp.status_code == 200 and resp.json().get("success"):
+        return ('success', f'Email sent to {to_addr}')
+    try:
+        detail = resp.json().get("error") or resp.text[:200]
+    except Exception:
+        detail = resp.text[:200]
+    return ('failed', f'Delivery API error ({resp.status_code}): {detail}')
 
 def _call_api(payload: dict) -> Tuple[str, str]:
     """Call an external API endpoint."""

@@ -115,8 +115,11 @@ def inject_scheduler_env(
         lines.append(f"SMTP_HOST={smtp_host}")
         lines.append(f"SMTP_PORT={smtp_port}")
         lines.append(f"SMTP_USER={smtp_user}")
-        if smtp_pass:
-            lines.append(f"SMTP_PASS={smtp_pass}")
+        # SMTP_PASS is deliberately NOT injected: new executor templates send
+        # via the /internal/email/send API (platform-side relay credentials).
+        # Legacy smtplib executors get the password through the execution-
+        # engine SMTP self-heal instead — the platform secret never lands in
+        # a project env from here.
         lines.append(f"SMTP_FROM={smtp_from}")
         lines.append(f"EMAIL_TO={email_to}")
 

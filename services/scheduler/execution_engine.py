@@ -150,6 +150,16 @@ def _ensure_platform_smtp(project_path: str) -> None:
             continue
         if "EMAIL_TO=" not in content or "SMTP_PASS=" in content:
             continue
+        # LEGACY-ONLY: old executors send via smtplib and NEED the relay
+        # password; new-style executors call the internal delivery API and
+        # must never receive it (platform secret stays out of project envs).
+        executor_path = os.path.join(os.path.dirname(env_path), "executor.py")
+        try:
+            with open(executor_path, encoding="utf-8") as f:
+                if "import smtplib" not in f.read():
+                    continue
+        except OSError:
+            continue
         block = ["", "# Platform SMTP (self-healed — project predates relay config)"]
         block += [f"{k}={smtp[k]}" for k in
                   ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM")

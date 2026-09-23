@@ -2082,6 +2082,60 @@ async def internal_routes_guard(request: Request, call_next):
         return JSONResponse({"detail": "Not Found"}, status_code=404)
     return await call_next(request)
 
+# ---------------------------------------------------------------------------
+# Internal email delivery API — customer projects send email through the
+# platform relay WITHOUT ever holding SMTP credentials. Called by the
+# scheduler/agent executor templates (sandbox egress NATs to the worker IP,
+# allowed by internal_routes_guard like every /internal route). Abuse is
+# damped with a per-project hourly send cap.
+# ---------------------------------------------------------------------------
+_PROJECT_EMAIL_RATE: Dict[int, List[float]] = {}
+PROJECT_EMAIL_HOURLY_LIMIT = int(os.getenv("PROJECT_EMAIL_HOURLY_LIMIT", "60"))
+
+
+@app.post("/internal/email/send")
+async def internal_email_send(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    project_id = int(body.get("project_id") or 0)
+    to = str(body.get("to") or "").strip()
+    subject = str(body.get("subject") or "").strip()
+    html = body.get("html")
+    text = str(body.get("text") or "")
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    if not to or "@" not in to:
+        raise HTTPException(status_code=400, detail="valid 'to' address is required")
+    if not subject:
+        raise HTTPException(status_code=400, detail="subject is required")
+    if not html and not text:
+        raise HTTPException(status_code=400, detail="html or text is required")
+    subject = subject[:200]
+
+    import time as _time  # module scope has no time import — local is the file's pattern
+    now = _time.time()
+    window = [t for t in _PROJECT_EMAIL_RATE.get(project_id, []) if now - t < 3600]
+    if len(window) >= PROJECT_EMAIL_HOURLY_LIMIT:
+        logger.warning(
+            "[PROJECT-EMAIL] rate limit hit for project %s (%d/h)", project_id, len(window)
+        )
+        return JSONResponse(status_code=429, content={
+            "success": False,
+            "error": f"email rate limit exceeded ({PROJECT_EMAIL_HOURLY_LIMIT}/hour per project)",
+        })
+    window.append(now)
+    _PROJECT_EMAIL_RATE[project_id] = window
+
+    from services.email_service import send_project_email
+    ok = send_project_email(to_email=to, subject=subject, html=html, text=text)
+    if not ok:
+        raise HTTPException(status_code=502, detail="SMTP relay failed")
+    logger.info("[PROJECT-EMAIL] project %s -> %s | %s", project_id, to, subject[:60])
+    return {"success": True}
+
+
 # Explicit 404 for the bare chat-image directory paths. StaticFiles would
 # 404 them anyway (html=False = no directory listing), but this registers
 # BEFORE the mount so the behavior is guaranteed regardless of framework
