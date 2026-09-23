@@ -13,6 +13,10 @@ AI agents can:
 2. Add new task_type handlers
 3. Add new template variables to FETCH_DATA_REGISTRY
 
+Job creation notes (email tasks):
+    - Omit the "to" field entirely (EMAIL_TO from .env is used), or pass a
+      real address. NEVER pass "to": "" — it fails every run.
+
 Required interface:
     execute_task(job: dict) -> dict
 
@@ -281,7 +285,9 @@ def _send_email(payload: dict) -> Tuple[str, str]:
                 'Re-save the email channel so the env regenerates.')
 
     from_addr = SMTP_FROM or SMTP_USER
-    to_addr = payload.get('to', EMAIL_TO)
+    # 'or' (not .get default): an EMPTY-STRING 'to' in the payload must
+    # still fall back to the EMAIL_TO channel env (job 77 incident).
+    to_addr = payload.get('to') or EMAIL_TO
     subject = payload.get('subject', 'Scheduler Notification')
     body = payload.get('body', payload.get('text', ''))
     html = payload.get('html', '')
