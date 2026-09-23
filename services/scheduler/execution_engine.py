@@ -105,20 +105,20 @@ def _ensure_platform_smtp(project_path: str) -> None:
     the missing SMTP lines so the executor can authenticate (otherwise the
     relay answers 554 Client host rejected / Access denied).
 
+    Agent/scheduler projects keep their .env in the SCHEDULER SUBDIRECTORY
+    (<project>/scheduler/.env — where env_injector writes it), not the
+    project root; both locations are checked.
+
     Values are parsed from the backend .env FILE directly — the daemon's
     own environment stays free of SMTP secrets (the _PROJECT_SOURCED_KEYS
     boundary is untouched). Idempotent and failure-tolerant.
     """
-    env_path = os.path.join(project_path, ".env")
-    if not os.path.exists(env_path):
+    if not project_path:
         return
-    try:
-        with open(env_path, encoding="utf-8") as f:
-            content = f.read()
-    except OSError:
-        return
-    if "EMAIL_TO=" not in content or "SMTP_PASS=" in content:
-        return
+    candidates = [
+        os.path.join(project_path, ".env"),
+        os.path.join(project_path, "scheduler", ".env"),
+    ]
     backend_env = os.environ.get("CLAWD_BACKEND_ENV", "/root/clawd-backend/.env")
     smtp = {}
     try:
@@ -135,21 +135,31 @@ def _ensure_platform_smtp(project_path: str) -> None:
         return
     if not smtp.get("SMTP_PASS"):
         logger.warning(
-            "[SMTP-HEAL] %s has EMAIL_TO but no SMTP_PASS and the backend "
-            ".env has no relay password — email jobs will keep failing 554",
-            project_path,
+            "[SMTP-HEAL] backend .env (%s) has no relay password — email "
+            "jobs will keep failing 554 until it is added",
+            backend_env,
         )
         return
-    block = ["", "# Platform SMTP (self-healed — project predates relay config)"]
-    block += [f"{k}={smtp[k]}" for k in
-              ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM")
-              if k in smtp]
-    try:
-        with open(env_path, "a", encoding="utf-8") as f:
-            f.write("\n" + "\n".join(block) + "\n")
-        logger.info("[SMTP-HEAL] appended platform SMTP block to %s", env_path)
-    except OSError as e:
-        logger.warning("[SMTP-HEAL] could not write %s: %s", env_path, e)
+    for env_path in candidates:
+        if not os.path.exists(env_path):
+            continue
+        try:
+            with open(env_path, encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            continue
+        if "EMAIL_TO=" not in content or "SMTP_PASS=" in content:
+            continue
+        block = ["", "# Platform SMTP (self-healed — project predates relay config)"]
+        block += [f"{k}={smtp[k]}" for k in
+                  ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM")
+                  if k in smtp]
+        try:
+            with open(env_path, "a", encoding="utf-8") as f:
+                f.write("\n" + "\n".join(block) + "\n")
+            logger.info("[SMTP-HEAL] appended platform SMTP block to %s", env_path)
+        except OSError as e:
+            logger.warning("[SMTP-HEAL] could not write %s: %s", env_path, e)
 
 
 def execute_job(project: dict, job: dict) -> dict:
