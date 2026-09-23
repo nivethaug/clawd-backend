@@ -4225,6 +4225,42 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             except Exception as pm2_err:
                 logger.warning(f"[CLONE] PM2 start failed (non-fatal): {pm2_err}")
 
+            # Provision nginx + DNS for the bot's public API subdomain. The
+            # CREATION flow does this (telegram/worker.py Steps 6+8); clones
+            # skipped it, so the webhook host never resolved — Telegram
+            # answered "Failed to resolve host" (incident: project 2086,
+            # dreamlead clone). Same primitives as creation, same order.
+            try:
+                from infrastructure_manager import NginxConfigurator
+                nginx = NginxConfigurator()
+                api_domain = f"{clone_domain}-api"
+                # Same generator for both bot types (discord/worker.py:254
+                # uses it too) — a bot API reverse-proxy conf on -api.
+                _cd, _cfg = nginx.generate_telegram_bot_config(api_domain, port)
+                if nginx.install_config(api_domain, _cfg):
+                    if nginx.reload_nginx():
+                        logger.info(f"[CLONE] Nginx installed + reloaded for {api_domain}")
+                    else:
+                        logger.warning(f"[CLONE] Nginx installed but reload failed for {api_domain}")
+                else:
+                    logger.warning(f"[CLONE] Nginx config install failed for {api_domain}")
+            except Exception as nginx_err:
+                logger.warning(f"[CLONE] Nginx provisioning failed (non-fatal): {nginx_err}")
+
+            try:
+                from infrastructure_manager import DNSProvisioner
+                from domain_config import BASE_DOMAIN, SERVER_IP
+                dns = DNSProvisioner()
+                if dns.dns_skill_available:
+                    if dns.create_a_record(f"{clone_domain}-api", BASE_DOMAIN, SERVER_IP):
+                        logger.info(f"[CLONE] DNS A record created for {clone_domain}-api")
+                    else:
+                        logger.warning(f"[CLONE] DNS record creation failed for {clone_domain}-api")
+                else:
+                    logger.info("[CLONE] DNS token unavailable — record skipped")
+            except Exception as dns_err:
+                logger.warning(f"[CLONE] DNS provisioning failed (non-fatal): {dns_err}")
+
             with get_db() as conn:
                 conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("ready", project_id))
                 conn.commit()
