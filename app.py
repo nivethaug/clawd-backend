@@ -4248,11 +4248,16 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 logger.warning(f"[CLONE] Nginx provisioning failed (non-fatal): {nginx_err}")
 
             try:
+                # NOTE: attribute access, NOT `from domain_config import
+                # BASE_DOMAIN` — a function-local import would shadow the
+                # MODULE-level BASE_DOMAIN for the WHOLE function and break
+                # later references (line ~4054 GitHub email) with
+                # UnboundLocalError (live: project 2088).
+                import domain_config as _dc
                 from infrastructure_manager import DNSProvisioner
-                from domain_config import BASE_DOMAIN, SERVER_IP
                 dns = DNSProvisioner()
                 if dns.dns_skill_available:
-                    if dns.create_a_record(f"{clone_domain}-api", BASE_DOMAIN, SERVER_IP):
+                    if dns.create_a_record(f"{clone_domain}-api", _dc.BASE_DOMAIN, _dc.SERVER_IP):
                         logger.info(f"[CLONE] DNS A record created for {clone_domain}-api")
                     else:
                         logger.warning(f"[CLONE] DNS record creation failed for {clone_domain}-api")
