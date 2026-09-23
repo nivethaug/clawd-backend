@@ -13811,7 +13811,10 @@ async def create_project_assistant(
     raw = ""
     try:
         from services.ai.openrouter_client import get_openrouter_client
-        client = get_openrouter_client()
+        # CREATE_ASSISTANT_MODEL scopes a model to THIS chat only — the
+        # prompt assistant and page inference keep PROMPT_ASSISTANT_MODEL.
+        client = get_openrouter_client(
+            model=os.getenv("CREATE_ASSISTANT_MODEL") or None)
         for _round in range(3):
             response = await client.chat_completion(
                 messages=convo,

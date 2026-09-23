@@ -347,8 +347,15 @@ class OpenRouterClient:
 _client: Optional[OpenRouterClient] = None
 
 
-def get_openrouter_client() -> OpenRouterClient:
-    """Get or create OpenRouter client singleton."""
+def get_openrouter_client(model: Optional[str] = None) -> OpenRouterClient:
+    """Get or create OpenRouter client singleton.
+
+    With ``model`` set, returns a DEDICATED client for that model instead of
+    the shared singleton — lets one surface (create chat) run a different
+    model without touching the others sharing PROMPT_ASSISTANT_MODEL.
+    """
+    if model:
+        return OpenRouterClient(model=model)
     global _client
     if _client is None:
         _client = OpenRouterClient()
