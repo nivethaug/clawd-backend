@@ -16,12 +16,14 @@ import time
 
 import httpx
 
+# gemini-2.0-flash is DELISTED on OpenRouter (verified via public
+# /api/v1/models, 2026-09-23) — the current stable flash is 2.5.
 CANDIDATES = [
-    "z-ai/glm-4.7-flash",     # current recommendation — validated on this key
-    "z-ai/glm-5.3-flash",     # incumbent
-    "google/gemini-2.0-flash",
-    "openai/gpt-4.1-mini",
-    "anthropic/claude-3.5-haiku",
+    "google/gemini-2.5-flash",      # recommended: stable, best tool-calling, 0.30/2.50 per M
+    "google/gemini-2.5-flash-lite", # cheapest: 0.10/0.40 per M
+    "google/gemini-3-flash-preview",
+    "z-ai/glm-4.7-flash",           # GLM fallback
+    "z-ai/glm-5.3-flash",           # incumbent
 ]
 
 TOOLS = [{
