@@ -287,11 +287,16 @@ def _send_email(payload: dict) -> Tuple[str, str]:
         return ('failed', 'Missing subject')
     if not body and not html:
         return ('failed', 'Missing email body')
-    backend_url = os.getenv("BACKEND_URL", "https://api.dreamagent.cloud").rstrip("/")
+    # Worker API first — reachable from the sandbox via host.docker.internal
+    # (same path buildpublish uses for pm2-restart; no nginx involved).
+    # BACKEND_URL is only the fallback for environments without the worker
+    # API (requires a manual /internal proxy route on the public host).
+    base_url = (os.environ.get("DREAMPILOT_WORKER_API_URL")
+                or os.getenv("BACKEND_URL", "https://api.dreamagent.cloud")).rstrip("/")
     try:
         import requests
         resp = requests.post(
-            f"{backend_url}/internal/email/send",
+            f"{base_url}/internal/email/send",
             json={
                 "project_id": int(os.getenv("PROJECT_ID", "0") or 0),
                 "to": to_addr,
