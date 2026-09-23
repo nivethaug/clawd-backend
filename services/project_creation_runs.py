@@ -305,6 +305,22 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
     import uuid as _uuid
     from database_adapter import get_db
 
+    # LLM summary BEFORE opening the DB transaction — the call can take up
+    # to ~25s and must never hold the connection/transaction open (pool
+    # exhaustion under concurrent creations).
+    website_summary = None
+    if type_id == 1 and project_path:
+        try:
+            with open(os.path.join(str(project_path), "projectcreationstatus.md"),
+                      "r", encoding="utf-8", errors="replace") as f:
+                raw_status = f.read(30000)
+            website_summary = summarize_creation_status(raw_status)
+        except Exception as summary_err:
+            logger.info(
+                "[PROJECT-RUN] creation summary skipped for %s: %s",
+                project_id, summary_err,
+            )
+
     with get_db() as conn:
         existing = conn.execute(
             "SELECT id FROM sessions WHERE project_id = %s AND archived = 0 LIMIT 1",
@@ -361,34 +377,16 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
             confirmation = (
                 f"✓ {name} was created and deployed successfully."
                 f"\nProject type: {kind_label}."
+                f"{live_line}\n\n{website_summary}\n\n"
+                f"This session is your workspace — describe any change you need "
+                f"and it will be implemented."
+                if website_summary else
+                f"✓ {name} was created and deployed successfully."
+                f"\nProject type: {kind_label}."
                 f"{live_line}"
                 f"\n\nThis session is your workspace — describe any change you need "
                 f"and it will be implemented."
             )
-            # Website completions get an LLM summary of the build status file
-            # (delivered vs deferred features) between the deterministic
-            # header and footer — the customer sees what's real vs "wire it
-            # next" at minute one, not by surprise (Content Studio incident).
-            # Any failure keeps the static confirmation above.
-            if type_id == 1 and project_path:
-                try:
-                    with open(os.path.join(str(project_path), "projectcreationstatus.md"),
-                              "r", encoding="utf-8", errors="replace") as f:
-                        raw_status = f.read(30000)
-                    summary = summarize_creation_status(raw_status)
-                    if summary:
-                        confirmation = (
-                            f"✓ {name} was created and deployed successfully."
-                            f"\nProject type: {kind_label}."
-                            f"{live_line}\n\n{summary}\n\n"
-                            f"This session is your workspace — describe any change you need "
-                            f"and it will be implemented."
-                        )
-                except Exception as summary_err:
-                    logger.info(
-                        "[PROJECT-RUN] creation summary skipped for %s: %s",
-                        project_id, summary_err,
-                    )
             # Same-transaction inserts share CURRENT_TIMESTAMP — offset the
             # confirmation so ORDER BY created_at keeps user→assistant order.
             conn.execute(
