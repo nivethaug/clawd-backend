@@ -20,6 +20,10 @@ AI agents can:
 Job creation notes (email tasks):
     - Omit the "to" field entirely (EMAIL_TO from .env is used), or pass a
       real address. NEVER pass "to": "" — it fails every run.
+    - Your handler returns the email as result["email"] = {"to": ...,
+      "subject": ..., "text"/"html": ...} — the scheduler daemon relays it
+      host-side. NEVER use smtplib/SMTP_* — relay credentials are
+      platform-side and not in this environment.
 
 Required interface:
     execute_task(job: dict) -> dict
@@ -317,12 +321,13 @@ def execute_task(job: dict) -> dict:
             return {"status": "dry-run", "dry_run": True,
                     "message": f"would send via {chan}",
                     "resolved_payload": payload}
+        email = None
         if task_type == 'telegram':
             status, message = _send_telegram(payload)
         elif task_type == 'discord':
             status, message = _send_discord(payload)
         elif task_type == 'email':
-            status, message = _send_email(payload)
+            status, message, email = _build_email(payload)
         elif task_type == 'api':
             status, message = _call_api(payload)
         elif task_type == 'trade':
@@ -330,7 +335,10 @@ def execute_task(job: dict) -> dict:
         else:
             status, message = 'failed', f'Unknown task_type: {task_type}'
 
-        return {"status": status, "message": message}
+        result = {"status": status, "message": message}
+        if status == 'success' and email:
+            result["email"] = email  # the daemon relays this host-side
+        return result
 
     except Exception as e:
         logger.error(f"Task execution error ({task_type}): {e}")
@@ -378,10 +386,11 @@ def _send_discord(payload: dict) -> Tuple[str, str]:
     return ('success', 'Discord message sent')
 
 
-def _send_email(payload: dict) -> Tuple[str, str]:
-    """Send email via the platform's internal delivery API. The sandbox
-    never touches SMTP credentials — the backend relays with its own
-    platform-side config (per-project rate limit applies)."""
+def _build_email(payload: dict) -> Tuple[str, str, dict]:
+    """Build the email intent for the platform to deliver. The scheduler
+    daemon performs the actual SMTP send host-side — relay credentials are
+    platform-side and never in this project's environment. Return
+    (status, message, email_dict)."""
     # 'or' (not .get default): an EMPTY-STRING 'to' in the payload must
     # still fall back to the EMAIL_TO channel env (job 77 incident).
     to_addr = payload.get('to') or EMAIL_TO
@@ -389,39 +398,13 @@ def _send_email(payload: dict) -> Tuple[str, str]:
     body = payload.get('body', payload.get('text', ''))
     html = payload.get('html', '')
     if not to_addr:
-        return ('failed', 'Missing "to" address in payload')
+        return ('failed', 'Missing "to" address in payload', {})
     if not subject:
-        return ('failed', 'Missing subject')
+        return ('failed', 'Missing subject', {})
     if not body and not html:
-        return ('failed', 'Missing email body')
-    # Worker API first — reachable from the sandbox via host.docker.internal
-    # (same path buildpublish uses for pm2-restart; no nginx involved).
-    # BACKEND_URL is only the fallback for environments without the worker
-    # API (requires a manual /internal proxy route on the public host).
-    base_url = (os.environ.get("DREAMPILOT_WORKER_API_URL")
-                or os.getenv("BACKEND_URL", "https://api.dreamagent.cloud")).rstrip("/")
-    try:
-        import requests
-        resp = requests.post(
-            f"{base_url}/internal/email/send",
-            json={
-                "project_id": int(os.getenv("PROJECT_ID", "0") or 0),
-                "to": to_addr,
-                "subject": subject,
-                "text": body,
-                "html": html,
-            },
-            timeout=30,
-        )
-    except Exception as e:
-        return ('failed', f'Delivery API unreachable: {e}')
-    if resp.status_code == 200 and resp.json().get("success"):
-        return ('success', f'Email sent to {to_addr}')
-    try:
-        detail = resp.json().get("error") or resp.text[:200]
-    except Exception:
-        detail = resp.text[:200]
-    return ('failed', f'Delivery API error ({resp.status_code}): {detail}')
+        return ('failed', 'Missing email body', {})
+    return ('success', f'Email queued to {to_addr}',
+            {'to': to_addr, 'subject': subject, 'text': body, 'html': html})
 
 def _call_api(payload: dict) -> Tuple[str, str]:
     """Call an external API endpoint."""

@@ -34,6 +34,7 @@ AI agents modify each project's executor.py, not this file.
 
 import json
 import logging
+import time
 import os
 import subprocess
 from typing import Any, Dict, Optional
@@ -48,6 +49,11 @@ _SANDBOX_SCRIPT = os.path.join(_BACKEND_ROOT, "scripts", "scheduler-sandbox.sh")
 
 # Shared venv — same env var convention as services/discord/pm2_manager.py:15
 # and services/telegram/pm2_manager.py. Default matches the prod worker VPS.
+from dotenv import load_dotenv
+load_dotenv()  # backend .env — provides the platform SMTP credentials used
+               # by daemon-side email delivery (relay happens HERE, host-side,
+               # so sandboxes never hold or send with platform credentials)
+
 _SHARED_VENV = os.getenv("SHARED_VENV_PATH", "/root/dreampilot/dreampilotvenv")
 
 # Per-job hard timeout (seconds). Matches the previous future.result(timeout=120)
@@ -202,8 +208,65 @@ def execute_job(project: dict, job: dict) -> dict:
         logger.warning("[SMTP-HEAL] unexpected error for %s: %s", project_path, e)
 
     if _USE_SANDBOX:
-        return _execute_in_sandbox(project_id, project_path, job)
-    return _execute_in_process(project_id, project_path, job)
+        result = _execute_in_sandbox(project_id, project_path, job)
+    else:
+        result = _execute_in_process(project_id, project_path, job)
+
+    # Daemon-side email delivery: the executor returns email INTENTS
+    # (result['email'] / result['emails']); this daemon relays them through
+    # the platform SMTP. Host-side send = proven auth path; sandboxes never
+    # touch SMTP or hold relay credentials.
+    try:
+        _deliver_result_emails(project_id, result or {})
+    except Exception as e:
+        logger.warning("[EMAIL] daemon-side delivery failed for project %s: %s", project_id, e)
+    return result or {"status": "failed", "message": "no result"}
+
+
+_PROJECT_EMAIL_HOURLY_LIMIT = int(os.getenv("PROJECT_EMAIL_HOURLY_LIMIT", "60"))
+_PROJECT_EMAIL_RATE: dict = {}
+
+
+def _deliver_result_emails(project_id: int, result: dict) -> None:
+    """Relay email intents returned by the executor (result['email'] single
+    or result['emails'] list). Failures downgrade the job status when nothing
+    was delivered; partial success is reported in the message."""
+    emails = []
+    if isinstance(result.get("email"), dict):
+        emails.append(result["email"])
+    for e in (result.get("emails") or []):
+        if isinstance(e, dict):
+            emails.append(e)
+    emails = emails[:10]
+    if not emails:
+        return
+    from services.email_service import send_project_email
+    now = time.time()
+    window = [t for t in _PROJECT_EMAIL_RATE.get(project_id, []) if now - t < 3600]
+    sent, errors = 0, []
+    for em in emails:
+        if len(window) >= _PROJECT_EMAIL_HOURLY_LIMIT:
+            errors.append("hourly email rate limit reached")
+            continue
+        to = str(em.get("to") or "").strip()
+        if not to or "@" not in to:
+            errors.append("invalid recipient")
+            continue
+        window.append(now)
+        if send_project_email(to_email=to,
+                              subject=str(em.get("subject") or "(no subject)"),
+                              html=em.get("html"), text=em.get("text")):
+            sent += 1
+        else:
+            errors.append(f"relay failed for {to}")
+    _PROJECT_EMAIL_RATE[project_id] = window
+    if errors and sent == 0:
+        result["status"] = "failed"
+        result["message"] = (str(result.get("message") or "")
+                             + " | email delivery failed: " + "; ".join(errors))[:500]
+    elif sent:
+        result["message"] = (str(result.get("message") or "")
+                             + f" | email delivered ({sent}/{len(emails)})")[:600]
 
 
 # ---------------------------------------------------------------------------

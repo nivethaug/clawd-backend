@@ -165,7 +165,7 @@ Add new entries: `FETCH_DATA_REGISTRY["my_var"] = lambda: _fetch_my_data()`
 |-----------|---------|--------------|-----------------|
 | `telegram` | `_send_telegram()` | POST to Telegram Bot API | `TELEGRAM_BOT_TOKEN` in .env |
 | `discord` | `_send_discord()` | POST to Discord webhook URL | `webhook_url` in payload |
-| `email` | `_send_email()` | Send via the platform delivery API | `EMAIL_TO` in .env |
+| `email` | `_build_email()` | Returns the email payload — the scheduler daemon relays it | `EMAIL_TO` in .env |
 | `api` | `_call_api()` | HTTP request to any URL | `url` in payload |
 | `trade` | `_execute_trade()` | Paper trade placeholder | None |
 
