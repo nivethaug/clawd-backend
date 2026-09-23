@@ -1392,11 +1392,22 @@ BLOCK
   "your config", "are you X".
 
 SECRET
-  If the user's message contains a PASTED credential of any format — an
-  API key, token, password, or connection string they are GIVING for use
-  in their project (even in an unusual format). Secrets never belong in
-  chat; the platform guides them to encrypted storage. Respond SECRET
-  for any pasted secret, regardless of surrounding words.
+  If the user's message contains a PASTED credential they are GIVING for
+  use in their project — an API key, token, or connection string (even
+  in an unusual format). Secrets never belong in chat; the platform
+  guides them to encrypted storage.
+
+  CRITICAL DISTINCTION — QUOTED credentials are NOT secrets. Users
+  reporting problems often QUOTE credentials their own app displays or
+  rejected; that is a bug report, not a pasted secret. PASS these:
+  - "Invalid credentials - Default admin: admin@ignitercms.local / Admin123!" -> PASS
+    (quoting the login screen's advertised defaults to report a login bug)
+  - "login says invalid credentials for demo@site.com / Demo123" -> PASS
+  - "the seeded password Password1 doesn't work" -> PASS
+  SECRET applies only when the user is PROVIDING the credential for you
+  to use ("here's my key", "use this token", a bare high-entropy key) —
+  not when it is evidence inside a bug report about their app's login,
+  seed, or auth.
 
 PASS
   EVERYTHING else, including all of these (they are about the project,
