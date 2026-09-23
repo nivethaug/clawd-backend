@@ -14028,9 +14028,17 @@ async def create_project_assistant(
             raise ValueError("empty payload")
     except Exception:
         # Raw-text fallback: never break the chat over a malformed reply.
-        # (reply/kind/brief default; tool-collected + synthesized asks are
-        # merged below and survive this path.)
-        reply, kind, brief = raw[:4000], None, None
+        # GLM's most common malformation is unescaped inner quotes
+        # ('the name "btcalert" is locked in') — extract the reply sentence
+        # textually so the user sees the message, never a raw JSON blob.
+        reply = raw[:4000]
+        _m = re.search(r'"reply"\s*:\s*"((?:[^"\]|\.)*)"', raw)
+        if _m:
+            try:
+                reply = json.loads('"' + _m.group(1) + '"')
+            except Exception:
+                reply = _m.group(1)
+        kind, brief = None, None
 
     # A brief delivered via the propose_brief tool beats a lost/absent JSON
     # brief (models replying in prose after tool rounds). The parsed-JSON
