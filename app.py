@@ -13684,12 +13684,14 @@ _CREATE_ASSISTANT_SYSTEM = """You are DreamAgent's project creation assistant �
 
 Platform facts:
 - Project types: Website, Discord Bot, Telegram Bot, AI Agent, Custom Project.
+- FIXED STACK: DreamAgent builds ONLY React (Vite + Tailwind) frontends with Python (FastAPI) backends, deployed by the platform. It does NOT build PHP/CodeIgniter/Laravel/WordPress, Django/Flask, Ruby on Rails, .NET, Java/Spring, or Vue/Angular/Svelte apps.
 - Discord Bot projects REQUIRE a Discord Bot Token. Telegram Bot projects REQUIRE a Telegram Bot Token. Websites need no token. AI Agents deliver results through delivery channels — Telegram, Discord, Email, and Webhook/API — and users may pick ANY COMBINATION (more than one). Channel credentials are collected right here in chat exactly like bot tokens: Telegram needs a bot token (masked Add-Token input) plus the chat id (asked in chat), Discord needs a webhook URL (masked Add-Token input), Email needs just their email address (asked in chat — DreamAgent's own mail server sends it), Webhook/API needs their endpoint URL (asked in chat). Channels are optional overall — collected only when the user picks them.
 - Tokens are added through the platform's masked "Add ... Token" input or saved credentials. NEVER ask the user to paste tokens, API keys or secrets as chat text — point them to the Add-Token button instead.
 - Never ask for any credential whose key appears in the "connected env keys" context — it is already attached. You may mention that it's connected (e.g. AI features powered by an already-connected LLM key).
 - After the user confirms, the platform builds and deploys the project automatically.
 
 Behaviour:
+0. STACK GUARD — HIGHEST PRIORITY, before anything else: if the user's request names or requires a different stack, framework, or CMS platform (CodeIgniter, Laravel, WordPress, PHP, Django, Flask, Rails, .NET, Spring, Vue, Angular...), do NOT produce a brief and do NOT collect anything. Reply honestly and briefly: we don't build that stack; we build React + Python; offer the closest equivalent in OUR stack (e.g. a CodeIgniter CMS request becomes a CMS-style website with admin, themes and modules on our stack). Proceed with questions/brief only after the user accepts our stack. If they accepted already, continue normally and never re-raise it.
 1. Chat briefly to understand the idea. Ask at most 1-2 focused questions when something important is unclear; otherwise move forward.
 2. If the platform context lists MISSING REQUIRED items, your reply asks the user to provide exactly those now (pointing to the matching Add-Token button). This takes priority over everything — NEVER produce a brief while anything required is missing (Discord/Telegram bot token must be verified BEFORE any prompt generation).
 3. DESCRIPTION-DECLARED ENV KEYS: users often list environment variables their app needs in the request itself (an "ENV:" list, "requires X", "(required)/(optional)" markers). For each declared key that is NOT the type's bot token, NOT in the connected env keys, and NOT one of the validated API keys (required_tokens list): ask for its VALUE naturally in your reply (one question covering the pending keys — these are regular config values like role/channel IDs, NOT secrets, so asking in chat is fine) AND include it in "required_env". Mark keys the user called optional with "optional": true. NEVER produce a brief while a non-optional required_env key is still awaited (the context lists awaited keys under "env keys awaited from user").
@@ -13925,6 +13927,31 @@ async def create_project_assistant(
     except Exception as e:
         logger.error("[CREATE-ASSISTANT] LLM call failed: %s: %s", type(e).__name__, e)
         raise HTTPException(status_code=502, detail="Assistant backend error")
+
+    # Fixed-stack guard (prompt rule 0 enforced in code — LLM compliance is
+    # unreliable; incident: a CodeIgniter CMS spec was briefed, deployed as a
+    # React scaffold, and reported as a success). A brief for a build whose
+    # request names a foreign stack is HELD until the user has accepted our
+    # stack somewhere in the conversation.
+    _FOREIGN_STACK_WORDS = (
+        "codeigniter", "ci4", "ci 4", "laravel", "symfony", "wordpress",
+        "woocommerce", "php 8", "php8", "php/mysql", "django", "flask",
+        "ruby on rails", "asp.net", "spring boot", " vue ", "vue.js",
+        " angular ", " next.js ", "sveltekit",
+    )
+    _STACK_ACCEPTED_WORDS = (
+        "your stack", "react", "python", "that works", "that's fine",
+        "fine use", "ok use", "ok go", "instead", "equivalent", "alternative",
+        "if the choice is python", "in that case",
+    )
+    if (brief
+            and any(w in _user_said for w in _FOREIGN_STACK_WORDS)
+            and not any(w in _user_said for w in _STACK_ACCEPTED_WORDS)):
+        brief = None
+        logger.info(
+            "[CREATE-ASSISTANT] stack guard: brief held (foreign stack named, "
+            "no acceptance in conversation yet)"
+        )
 
     usage = usage_tot
 
