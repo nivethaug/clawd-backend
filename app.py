@@ -13817,8 +13817,11 @@ async def create_project_assistant(
         # page inference keep PROMPT_ASSISTANT_MODEL). Default: glm-4.7-flash
         # (faster than 5.3, validated on this account), one-shot fallback to
         # glm-5.3-flash if the primary errors — both env-overridable.
-        _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "z-ai/glm-4.7-flash")
-        _create_fb = os.getenv("CREATE_ASSISTANT_FALLBACK_MODEL", "z-ai/glm-5.3-flash")
+        _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "z-ai/glm-5.3-flash")
+        # glm-4.7-flash tried and rejected for this flow (2026-09-23). Fallback
+        # defaults to the primary (disabled) — set CREATE_ASSISTANT_FALLBACK_MODEL
+        # to re-enable a safety net.
+        _create_fb = os.getenv("CREATE_ASSISTANT_FALLBACK_MODEL", _create_model)
         client = get_openrouter_client(model=_create_model)
         fallback_client = (
             get_openrouter_client(model=_create_fb)
