@@ -100,7 +100,11 @@ class OpenRouterClient:
         #   (empty-body error passthrough, observed live on the stream path).
         #   Use effort=low instead: near-zero reasoning tokens, validated
         #   against the z.ai API.
-        if "glm-5.3-flash" in (self.model or "").lower():
+        model_l = (self.model or "").lower()
+        if "glm" in model_l or "z-ai/" in model_l:
+            # GLM family: thinking can't be fully disabled without provider
+            # 400s (observed on 5.3-flash); effort=low validated live on both
+            # glm-5.3-flash and glm-4.7-flash (DreamSupport, 2026-09-22).
             payload["reasoning"] = {"effort": "low"}
         else:
             payload["reasoning"] = {"enabled": False}
