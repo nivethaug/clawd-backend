@@ -14032,7 +14032,8 @@ async def create_project_assistant(
         # ('the name "btcalert" is locked in') — extract the reply sentence
         # textually so the user sees the message, never a raw JSON blob.
         reply = raw[:4000]
-        _m = re.search(r'"reply"\s*:\s*"((?:[^"\]|\.)*)"', raw)
+        _m = (re.search(r'"reply"\s*:\s*"(.*)",\s*"kind"', raw, re.DOTALL)
+                 or re.search(r'"reply"\s*:\s*"((?:[^"\\]|\\.)*)"', raw))
         if _m:
             try:
                 reply = json.loads('"' + _m.group(1) + '"')
