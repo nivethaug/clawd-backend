@@ -235,8 +235,69 @@ def update_heartbeat(run_id: int) -> None:
         conn.commit()
 
 
+_CREATION_SUMMARY_SYSTEM_PROMPT = (
+    "You are DreamAgent, an AI app builder. The user's project was just built "
+    "and they are NOT technical. Rewrite the developer build report below as a "
+    "short, warm chat message in plain English:\n"
+    "1) '🎉 What you got' — 3-6 bullets describing the delivered features in "
+    "user terms (what they can see and do, not how it was coded)\n"
+    "2) '👉 What's next' — up to 4 suggested next steps phrased as things they "
+    "can simply ask for in chat; deferred features become invitations like "
+    "\"say 'wire it' and I'll connect it\"\n"
+    "3) One friendly closing line inviting them to try it or ask for changes\n"
+    "Rules: absolutely no file paths, no code identifiers, no framework/build/"
+    "test jargon, no emoji besides the two section headers. Max ~180 words. "
+    "Output ONLY the message.\n\nBUILD REPORT:\n"
+)
+
+
+async def summarize_creation_status_async(status_text: str) -> Optional[str]:
+    """LLM rewrite of projectcreationstatus.md into a friendly chat summary.
+
+    Shared by the worker's session seeding (sync wrapper below) and the
+    /creation-summary endpoint. Returns None on any failure — callers fall
+    back to their static/plain variants. Never raises.
+    """
+    text = (status_text or "").strip()
+    if not text:
+        return None
+    try:
+        from services.ai.openrouter_client import get_openrouter_client
+
+        client = get_openrouter_client()
+        response = await asyncio.wait_for(
+            client.chat_completion(
+                messages=[
+                    {"role": "system", "content": _CREATION_SUMMARY_SYSTEM_PROMPT},
+                    {"role": "user", "content": text[:12000]},
+                ],
+                temperature=0.3,
+                max_tokens=600,
+            ),
+            timeout=25,
+        )
+        friendly = (client.get_text_response(response) or "").strip()
+        return friendly or None
+    except Exception as e:
+        logger.warning("[CREATION-SUMMARY] LLM rewrite failed: %s", e)
+        return None
+
+
+def summarize_creation_status(status_text: str) -> Optional[str]:
+    """Sync wrapper for sync callers (creation runner thread). No running
+    loop in that context; if one exists (misuse from async), returns None
+    so the caller keeps its static fallback."""
+    try:
+        asyncio.get_running_loop()
+        return None  # async context — use summarize_creation_status_async
+    except RuntimeError:
+        pass
+    return asyncio.run(summarize_creation_status_async(status_text))
+
+
 def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
-                           domain: str, type_id: int, creation_prompt: str) -> None:
+                           domain: str, type_id: int, creation_prompt: str,
+                           project_path: str = "") -> None:
     """Create the project's first session at DB level and insert the chat
     handoff directly: creation prompt (user) + formal deployment
     confirmation with the live link (assistant). Idempotent — skipped when
@@ -304,6 +365,30 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
                 f"\n\nThis session is your workspace — describe any change you need "
                 f"and it will be implemented."
             )
+            # Website completions get an LLM summary of the build status file
+            # (delivered vs deferred features) between the deterministic
+            # header and footer — the customer sees what's real vs "wire it
+            # next" at minute one, not by surprise (Content Studio incident).
+            # Any failure keeps the static confirmation above.
+            if type_id == 1 and project_path:
+                try:
+                    with open(os.path.join(str(project_path), "projectcreationstatus.md"),
+                              "r", encoding="utf-8", errors="replace") as f:
+                        raw_status = f.read(30000)
+                    summary = summarize_creation_status(raw_status)
+                    if summary:
+                        confirmation = (
+                            f"✓ {name} was created and deployed successfully."
+                            f"\nProject type: {kind_label}."
+                            f"{live_line}\n\n{summary}\n\n"
+                            f"This session is your workspace — describe any change you need "
+                            f"and it will be implemented."
+                        )
+                except Exception as summary_err:
+                    logger.info(
+                        "[PROJECT-RUN] creation summary skipped for %s: %s",
+                        project_id, summary_err,
+                    )
             # Same-transaction inserts share CURRENT_TIMESTAMP — offset the
             # confirmation so ORDER BY created_at keeps user→assistant order.
             conn.execute(
@@ -1333,7 +1418,8 @@ def execute_run(run_id: int) -> Dict[str, Any]:
 
         # DB-level handoff: create the project's first session and insert the
         # creation prompt (user) + formal deployment confirmation with the
-        # live link (assistant) directly — no frontend seeding, no LLM call.
+        # live link (assistant) directly. Website confirmations carry an
+        # LLM summary of projectcreationstatus.md (delivered vs deferred).
         try:
             _seed_creation_session(
                 project_id=project_id,
@@ -1342,6 +1428,7 @@ def execute_run(run_id: int) -> Dict[str, Any]:
                 domain=payload.get("domain") or "",
                 type_id=type_id,
                 creation_prompt=(payload.get("description") or ""),
+                project_path=project_path,
             )
         except Exception as seed_err:
             logger.warning("[PROJECT-RUN] creation session seed failed: %s", seed_err)

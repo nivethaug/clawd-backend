@@ -8630,37 +8630,10 @@ async def get_project_creation_summary(
     if not raw.strip():
         return {"content": None}
 
-    system_prompt = (
-        "You are DreamAgent, an AI app builder. The user's project was just built "
-        "and they are NOT technical. Rewrite the developer build report below as a "
-        "short, warm chat message in plain English:\n"
-        "1) '🎉 What you got' — 3-6 bullets describing the delivered features in "
-        "user terms (what they can see and do, not how it was coded)\n"
-        "2) '👉 What's next' — up to 4 suggested next steps phrased as things they "
-        "can simply ask for in chat\n"
-        "3) One friendly closing line inviting them to try it or ask for changes\n"
-        "Rules: absolutely no file paths, no code identifiers, no framework/build/"
-        "test jargon, no emoji besides the two section headers. Max ~180 words. "
-        "Output ONLY the message.\n\nBUILD REPORT:\n"
-    )
-
     try:
-        import asyncio as _asyncio
-        from services.ai.openrouter_client import get_openrouter_client
+        from services.project_creation_runs import summarize_creation_status_async
 
-        client = get_openrouter_client()
-        response = await _asyncio.wait_for(
-            client.chat_completion(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": raw[:12000]},
-                ],
-                temperature=0.3,
-                max_tokens=600,
-            ),
-            timeout=25,
-        )
-        friendly = (client.get_text_response(response) or "").strip()
+        friendly = (await summarize_creation_status_async(raw) or "").strip()
     except Exception as llm_err:
         logger.warning("[CREATION-SUMMARY] LLM rewrite failed: %s", llm_err)
         friendly = ""

@@ -1810,6 +1810,13 @@ Project Description in this run.
 3. Auth UI through the EXISTING `src/services/database.ts` service layer —
    those template endpoints already work
 
+**Connected-integration exception:** if a verified key for an integration the
+description requires is ALREADY configured (see AVAILABLE EXTERNAL
+INTEGRATIONS above), wire ONE real backend call for the primary feature
+through the existing service pattern — then mark deeper polish PENDING.
+Defer-with-mock only when the required key is NOT connected. Never ship a
+mock for a feature whose key is already in the project env.
+
 **Defer — each becomes one PENDING line in the status file:**
 - Any new backend endpoint, service, model, or migration (backend ships as-is)
 - Features whose API has no backend route (AI generation, external APIs,
