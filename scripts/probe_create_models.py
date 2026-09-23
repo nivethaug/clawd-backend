@@ -16,11 +16,12 @@ import time
 
 import httpx
 
-# GLM-only per decision 2026-09-23: gemini removed (data-policy risk),
-# glm-4.7-flash is the create-chat default with glm-5.3-flash fallback.
 CANDIDATES = [
-    "z-ai/glm-4.7-flash",   # create-chat default
-    "z-ai/glm-5.3-flash",   # fallback
+    "z-ai/glm-4.7-flash",           # current create-chat default (2.2s in last probe)
+    "z-ai/glm-5.3-flash",           # fallback
+    "google/gemini-2.5-flash",      # fast output, controllable thinking
+    "google/gemini-2.5-flash-lite", # cheapest
+    "google/gemini-3-flash-preview",
 ]
 
 TOOLS = [{
