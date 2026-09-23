@@ -13931,31 +13931,6 @@ async def create_project_assistant(
         logger.error("[CREATE-ASSISTANT] LLM call failed: %s: %s", type(e).__name__, e)
         raise HTTPException(status_code=502, detail="Assistant backend error")
 
-    # Fixed-stack guard (prompt rule 0 enforced in code — LLM compliance is
-    # unreliable; incident: a CodeIgniter CMS spec was briefed, deployed as a
-    # React scaffold, and reported as a success). A brief for a build whose
-    # request names a foreign stack is HELD until the user has accepted our
-    # stack somewhere in the conversation.
-    _FOREIGN_STACK_WORDS = (
-        "codeigniter", "ci4", "ci 4", "laravel", "symfony", "wordpress",
-        "woocommerce", "php 8", "php8", "php/mysql", "django", "flask",
-        "ruby on rails", "asp.net", "spring boot", " vue ", "vue.js",
-        " angular ", " next.js ", "sveltekit",
-    )
-    _STACK_ACCEPTED_WORDS = (
-        "your stack", "react", "python", "that works", "that's fine",
-        "fine use", "ok use", "ok go", "instead", "equivalent", "alternative",
-        "if the choice is python", "in that case",
-    )
-    if (brief
-            and any(w in _user_said for w in _FOREIGN_STACK_WORDS)
-            and not any(w in _user_said for w in _STACK_ACCEPTED_WORDS)):
-        brief = None
-        logger.info(
-            "[CREATE-ASSISTANT] stack guard: brief held (foreign stack named, "
-            "no acceptance in conversation yet)"
-        )
-
     usage = usage_tot
 
     try:
@@ -14109,6 +14084,33 @@ async def create_project_assistant(
             suggested_name=collected_brief.get("suggested_name"),
         )
         kind = brief.kind
+
+    # Fixed-stack guard (prompt rule 0 enforced in code — LLM compliance is
+    # unreliable; incident: a CodeIgniter CMS spec was briefed, deployed as a
+    # React scaffold, and reported as a success). A brief for a build whose
+    # request names a foreign stack is HELD until the user has accepted our
+    # stack somewhere in the conversation. Runs AFTER brief initialization
+    # (parse + collected_brief) — placement here previously 500'd the
+    # endpoint (UnboundLocalError, 2026-09-23).
+    _FOREIGN_STACK_WORDS = (
+        "codeigniter", "ci4", "ci 4", "laravel", "symfony", "wordpress",
+        "woocommerce", "php 8", "php8", "php/mysql", "django", "flask",
+        "ruby on rails", "asp.net", "spring boot", " vue ", "vue.js",
+        " angular ", " next.js ", "sveltekit",
+    )
+    _STACK_ACCEPTED_WORDS = (
+        "your stack", "react", "python", "that works", "that's fine",
+        "fine use", "ok use", "ok go", "instead", "equivalent", "alternative",
+        "if the choice is python", "in that case",
+    )
+    if (brief
+            and any(w in _user_said for w in _FOREIGN_STACK_WORDS)
+            and not any(w in _user_said for w in _STACK_ACCEPTED_WORDS)):
+        brief = None
+        logger.info(
+            "[CREATE-ASSISTANT] stack guard: brief held (foreign stack named, "
+            "no acceptance in conversation yet)"
+        )
 
     # Tool-collected inputs merge FIRST (the request_inputs tool is the
     # primary path; JSON fields remain a fallback), then the channel-ask
