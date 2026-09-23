@@ -4230,6 +4230,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
             # skipped it, so the webhook host never resolved — Telegram
             # answered "Failed to resolve host" (incident: project 2086,
             # dreamlead clone). Same primitives as creation, same order.
+            port = 8000 + (project_id % 1000)
             try:
                 from infrastructure_manager import NginxConfigurator
                 nginx = NginxConfigurator()
