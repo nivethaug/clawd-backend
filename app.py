@@ -9310,9 +9310,9 @@ async def chat_stream_endpoint(
                     _gate_type_id = handler.project_type_id if handler else None
                     if _gate_is_scheduler:
                         # Pass no project_path → simple mode, no ai_index tool
-                        direct_response = await check_message_gate(acp_user_content, _gate_project_name, None, _gate_type_id, session_key)
+                        direct_response = await check_message_gate(acp_user_content, _gate_project_name, None, _gate_type_id, request.session_key)
                     else:
-                        direct_response = await check_message_gate(acp_user_content, _gate_project_name, _gate_project_path, _gate_type_id, session_key)
+                        direct_response = await check_message_gate(acp_user_content, _gate_project_name, _gate_project_path, _gate_type_id, request.session_key)
                 except Exception as gate_err:
                     logger.warning(f"[ACP-STREAM] Gate failed (non-fatal, fail-open): {gate_err}")
             
