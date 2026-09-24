@@ -6779,6 +6779,49 @@ class InternalRestartRequest(BaseModel):
     expect_port: Optional[int] = None  # if set, health-check this port after restart
 
 
+def _resurrect_telegram_bot(app_name: str) -> bool:
+    """Self-heal for `{domain}-bot` Telegram PM2 processes that vanished
+    (typically PM2 daemon resurrection without `pm2 save`). Looks the
+    project up by domain and re-registers it via the standard
+    start_bot_pm2 path, then saves the PM2 dump so it survives.
+    """
+    if not app_name.endswith("-bot"):
+        return False
+    domain = app_name[:-4]
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, project_path, project_type_id FROM projects WHERE domain = %s",
+                (domain,),
+            ).fetchone()
+        if not row:
+            logger.warning(f"[INTERNAL-RESTART] resurrect: no project with domain '{domain}'")
+            return False
+        row = dict(row)
+        if row.get("project_type_id") != 2:
+            logger.warning(f"[INTERNAL-RESTART] resurrect: project {row['id']} is not a telegram bot")
+            return False
+        pid = row["id"]
+        base = row.get("project_path") or ""
+        bot_path = os.path.join(base, "telegram")
+        if not os.path.isfile(os.path.join(bot_path, "main.py")):
+            bot_path = base
+        if not os.path.isfile(os.path.join(bot_path, "main.py")):
+            logger.warning(f"[INTERNAL-RESTART] resurrect: main.py not found under {base}")
+            return False
+        from services.telegram.pm2_manager import start_bot_pm2
+        ok, msg = start_bot_pm2(pid, bot_path, 8000 + (pid % 1000), domain)
+        if ok:
+            subprocess.run(["pm2", "save"], capture_output=True, timeout=10)
+            logger.info(f"[INTERNAL-RESTART] resurrect ✓ project {pid} as {app_name}: {msg}")
+            return True
+        logger.warning(f"[INTERNAL-RESTART] resurrect failed for project {pid}: {msg}")
+        return False
+    except Exception as e:
+        logger.warning(f"[INTERNAL-RESTART] resurrect error for {app_name}: {e}")
+        return False
+
+
 @app.post("/internal/pm2-restart")
 async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Request):
     """Restart a PM2 app by name. Internal endpoint — not public-facing.
@@ -6839,11 +6882,22 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
             ["pm2", "restart", app_name],
             capture_output=True, text=True, timeout=30
         )
+        resurrected = False
         if restart_result.returncode != 0:
-            logger.error(f"[INTERNAL-RESTART] PM2 restart failed: {restart_result.stderr[:500]}")
-            return {"success": False, "error": restart_result.stderr[:500]}
+            _err = (restart_result.stderr or "") + (restart_result.stdout or "")
+            logger.error(f"[INTERNAL-RESTART] PM2 restart failed: {_err[:500]}")
+            # A missing `{domain}-bot` process means the bot died and was
+            # dropped from PM2 — restart would fail forever while publishes
+            # report success. Re-register it from DB instead.
+            if "not found" in _err.lower() and app_name.endswith("-bot"):
+                resurrected = _resurrect_telegram_bot(app_name)
+            if not resurrected:
+                return {"success": False, "error": _err[:500]}
 
-        logger.info(f"[INTERNAL-RESTART] ✓ PM2 app '{app_name}' restarted")
+        if resurrected:
+            logger.info(f"[INTERNAL-RESTART] ✅ PM2 app '{app_name}' was missing — resurrected from DB")
+        else:
+            logger.info(f"[INTERNAL-RESTART] ✓ PM2 app '{app_name}' restarted")
 
         # If caller specified a port, health-check it (wait for backend to come up)
         if request.expect_port:
