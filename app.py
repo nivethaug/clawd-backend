@@ -4344,10 +4344,16 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
 
                 if source_type_id == 2:
                     from services.telegram.pm2_manager import start_bot_pm2
-                    pm2_name = f"tg-bot-{project_id}"
+                    _id_fallback = f"tg-bot-{project_id}"
                 else:
                     from services.discord.pm2_manager import start_bot_pm2
-                    pm2_name = f"dc-bot-{project_id}"
+                    _id_fallback = f"dc-bot-{project_id}"
+
+                # start_bot_pm2 registers as {domain}-bot when a domain is
+                # passed (it is) — log the REAL process name, not the
+                # project_id fallback, or ops greps for a name that
+                # doesn't exist in PM2.
+                _pm2_actual = f"{clone_domain}-bot" if clone_domain else _id_fallback
 
                 start_bot_pm2(
                     project_id=project_id,
@@ -4356,7 +4362,7 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                     domain=clone_domain,
                     bot_token=bot_token,
                 )
-                logger.info(f"[CLONE] PM2 started: {pm2_name}")
+                logger.info(f"[CLONE] PM2 started: {_pm2_actual}")
             except Exception as pm2_err:
                 logger.warning(f"[CLONE] PM2 start failed (non-fatal): {pm2_err}")
 
