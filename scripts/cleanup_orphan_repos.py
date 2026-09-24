@@ -59,6 +59,22 @@ def repo_name_from_url(url: str) -> str:
     return (url or "").rstrip("/").split("/")[-1].replace(".git", "").strip().lower()
 
 
+def _env_from_pm2():
+    """Fallback: pull DB_* vars from the running worker-api's PM2 environment
+    (`pm2 env` prints `KEY: value` lines). Real environment always wins."""
+    try:
+        r = subprocess.run(["pm2", "env", "clawd-worker-api"],
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            return
+        for line in r.stdout.splitlines():
+            m = re.match(r"^([A-Z_][A-Z0-9_]*):\s*(.*)$", line)
+            if m and m.group(1).startswith("DB_") and m.group(2).strip():
+                os.environ.setdefault(m.group(1), m.group(2).strip())
+    except Exception:
+        pass
+
+
 def load_live_projects() -> dict:
     """repo_name (lower) -> human-readable reason it must be kept."""
     from dotenv import load_dotenv
@@ -69,11 +85,14 @@ def load_live_projects() -> dict:
             load_dotenv(env_path)
 
     if not os.getenv("DB_HOST") or not os.getenv("DB_PASSWORD"):
-        print("ERROR: DB_HOST / DB_PASSWORD not found in any .env — the worker\n"
-              "likely gets them from its PM2 environment. Re-run like this:\n"
+        _env_from_pm2()
+
+    if not os.getenv("DB_HOST") or not os.getenv("DB_PASSWORD"):
+        print("ERROR: DB_HOST / DB_PASSWORD not found in any .env and could not\n"
+              "be read from `pm2 env clawd-worker-api`. Export them manually:\n"
               "\n"
-              "  export $(pm2 env 76 | grep -E '^DB_' | xargs) \\\n"
-              "    && venv/bin/python scripts/cleanup_orphan_repos.py\n")
+              "  pm2 env clawd-worker-api | grep DB_     # see the values\n"
+              "  export DB_HOST=... DB_PASSWORD=... etc.\n")
         sys.exit(2)
 
     from database_postgres import get_db
