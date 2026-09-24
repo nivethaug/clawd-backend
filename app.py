@@ -5948,6 +5948,45 @@ async def internal_cleanup_project_infrastructure(
     return {"success": True, "results": cleanup_results}
 
 
+def _gh_delete_repo_fallback(repo_name: str) -> bool:
+    """Direct gh-CLI repository deletion — same semantics as
+    GitHubService.delete_repository.
+
+    Exists because the deployed worker once loaded a github_service module
+    whose class lacked delete_repository (AttributeError → repo orphaned on
+    every project delete). The delete path uses the real method when present
+    and this fallback when it isn't, so a stale module can never orphan a
+    repo again.
+    """
+    import subprocess as _sp
+    if "/" not in repo_name:
+        try:
+            r = _sp.run(["gh", "api", "user", "--jq", ".login"],
+                        capture_output=True, text=True, timeout=15)
+            owner = r.stdout.strip()
+            if r.returncode != 0 or not owner:
+                logger.error("[GITHUB] fallback: cannot resolve owner for bare repo name")
+                return False
+            repo_name = f"{owner}/{repo_name}"
+        except Exception as e:
+            logger.error(f"[GITHUB] fallback owner lookup failed: {e}")
+            return False
+    try:
+        r = _sp.run(["gh", "repo", "delete", repo_name, "--yes"],
+                    capture_output=True, text=True, timeout=60)
+    except Exception as e:
+        logger.error(f"[GITHUB] fallback failed for {repo_name}: {e}")
+        return False
+    if r.returncode == 0:
+        return True
+    out = (r.stderr or "") + (r.stdout or "")
+    if "not found" in out.lower() or "does not exist" in out.lower():
+        logger.info(f"[GITHUB] fallback: {repo_name} already gone (treated as success)")
+        return True
+    logger.error(f"[GITHUB] fallback failed for {repo_name}: {out[:300]}")
+    return False
+
+
 @app.delete("/projects/{project_id}")
 async def delete_project(
     project_id: int,
@@ -6064,8 +6103,20 @@ async def delete_project(
                 repo_name = repo_url.split("github.com/")[-1].strip("/")
                 logger.info(f"[GITHUB] Attempting to delete repository: {repo_name}")
                 logger.info(f"[GITHUB] Full repo_url from DB: {repo_url}")
-                
-                if github.delete_repository(repo_name):
+
+                # Method if the loaded module has it; direct-gh fallback if a
+                # stale github_service is shadowing the repo copy. The warning
+                # names the offending file so the shadow can be removed.
+                _delete_repo = getattr(github, "delete_repository", None)
+                if _delete_repo is None:
+                    import github_service as _gs_mod
+                    logger.warning(
+                        "[GITHUB] delete_repository missing on loaded module "
+                        f"({_gs_mod.__file__}) — using direct gh fallback"
+                    )
+                    _delete_repo = _gh_delete_repo_fallback
+
+                if _delete_repo(repo_name):
                     logger.info(f"[GITHUB] ✓ Repository deleted: {repo_name}")
                 else:
                     logger.warning(f"[GITHUB] ✗ Failed to delete repository: {repo_name}")
