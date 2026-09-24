@@ -20,7 +20,9 @@ BASE_DOMAIN = os.getenv("DREAM_DOMAIN", "dreamagent.cloud")
 # ---------------------------------------------------------------------------
 
 # Public IP of the origin server (used for DNS A records).
-SERVER_IP = os.getenv("SERVER_IP", "195.200.14.37")
+# Project subdomain A records must point at the WORKER (projects deploy,
+# serve and relay there). This default must never be the platform/main IP.
+SERVER_IP = os.getenv("SERVER_IP", "187.55.225.39")  # worker VPS
 
 # Wildcard SSL certificate paths (LetsEncrypt / certbot layout).
 WILDCARD_SSL_CERT = f"/etc/letsencrypt/live/{BASE_DOMAIN}/fullchain.pem"

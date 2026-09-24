@@ -45,7 +45,8 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 # Fallback only; real IP is resolved dynamically via _get_server_ip()
-SERVER_IP_FALLBACK = "195.200.14.37"
+# Projects deploy and serve on the WORKER — project DNS must point there.
+SERVER_IP_FALLBACK = "187.55.225.39"  # worker VPS
 
 # Valid statuses
 STATUS_PENDING = "pending"
