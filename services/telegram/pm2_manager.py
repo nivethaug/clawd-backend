@@ -184,6 +184,14 @@ def start_bot_pm2(
         if result.returncode == 0:
             logger.info(f"✅ PM2 process started: {process_name}")
             logger.info(f"PM2 output: {result.stdout[:200]}")
+            # Persist the PM2 dump immediately — without this, a daemon
+            # restart (reboot / pm2 update) resurrects only saved processes
+            # and silently drops this bot (exactly what happened to
+            # dreamlead-z95we3-bot: process gone, publishes kept "succeeding").
+            try:
+                subprocess.run(["pm2", "save"], capture_output=True, timeout=10)
+            except Exception as save_err:
+                logger.warning(f"pm2 save after start failed (non-fatal): {save_err}")
             return True, f"Bot started as {process_name}"
         
         else:
