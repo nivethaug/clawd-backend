@@ -22,4 +22,7 @@ curl -s -X PUT \
     -d "{\"overwrite\":true,\"zone\":[{\"name\":\"_acme-challenge\",\"records\":[],\"ttl\":300,\"type\":\"TXT\"}]}" \
     > /dev/null
 
+# Reset the accumulated validation tokens — a fresh renewal starts clean.
+rm -f "/var/lib/letsencrypt-hooks/tokens.${DOMAIN}.txt" 2>/dev/null
+
 exit 0
