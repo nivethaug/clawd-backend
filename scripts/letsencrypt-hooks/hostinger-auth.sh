@@ -31,7 +31,8 @@ STATE="${STATE_DIR}/tokens.${DOMAIN}.txt"
 echo "$TOKEN" >> "$STATE"
 
 # Build the combined TXT record set (unique tokens from this validation round)
-TOKENS_JSON=$(sort -u "$STATE" | python3 -c 'import json,sys; print(json.dumps([t.strip() for t in sys.stdin if t.strip()]))')
+# Hostinger v1 API expects record OBJECTS: [{"content": "..."}] — not strings.
+TOKENS_JSON=$(sort -u "$STATE" | python3 -c 'import json,sys; print(json.dumps([{"content": t.strip()} for t in sys.stdin if t.strip()]))')
 
 STATUS=$(curl -s -o /tmp/acme-dns-out.json -w "%{http_code}" -X PUT \
     "https://developers.hostinger.com/api/dns/v1/zones/${DOMAIN}" \
