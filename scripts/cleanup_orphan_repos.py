@@ -119,8 +119,8 @@ def load_live_projects() -> dict:
     return wanted
 
 
-def load_github_repos() -> list:
-    out = run_gh(["repo", "list", "--limit", "500",
+def load_github_repos(limit: int = 2000) -> list:
+    out = run_gh(["repo", "list", "--limit", str(limit),
                   "--json", "nameWithOwner,name,isPrivate,updatedAt,pushedAt"])
     repos = json.loads(out or "[]")
     for r in repos:
@@ -145,6 +145,8 @@ def main():
                     help="Actually delete orphan repos (default: dry run)")
     ap.add_argument("--exclude", nargs="*", default=[],
                     help="Extra repo names to protect from deletion")
+    ap.add_argument("--limit", type=int, default=2000,
+                    help="Max repos to list from GitHub (default 2000)")
     args = ap.parse_args()
 
     print("Loading live projects from DB ...")
@@ -152,7 +154,10 @@ def main():
     print(f"  {len(wanted)} repo names referenced by live projects")
 
     print("Listing GitHub repos ...")
-    repos = load_github_repos()
+    repos = load_github_repos(args.limit)
+    if len(repos) >= args.limit:
+        print(f"  ⚠️ hit the --limit ({args.limit}) — listing is TRUNCATED, "
+              "raise --limit or there are orphan repos beyond it")
     owner = repos[0]["nameWithOwner"].split("/")[0] if repos else "unknown"
     print(f"  {len(repos)} repos under {owner}\n")
 
