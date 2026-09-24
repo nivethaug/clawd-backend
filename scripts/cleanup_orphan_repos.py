@@ -25,6 +25,7 @@ Safety:
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -61,7 +62,20 @@ def repo_name_from_url(url: str) -> str:
 def load_live_projects() -> dict:
     """repo_name (lower) -> human-readable reason it must be kept."""
     from dotenv import load_dotenv
-    load_dotenv(REPO_ROOT / ".env")
+    # Try the usual suspects; the worker's DB env may live only in the
+    # PM2 environment (ecosystem file), not in a repo .env.
+    for env_path in (REPO_ROOT / ".env", Path.cwd() / ".env", Path("/root/.env")):
+        if env_path.exists():
+            load_dotenv(env_path)
+
+    if not os.getenv("DB_HOST") or not os.getenv("DB_PASSWORD"):
+        print("ERROR: DB_HOST / DB_PASSWORD not found in any .env — the worker\n"
+              "likely gets them from its PM2 environment. Re-run like this:\n"
+              "\n"
+              "  export $(pm2 env 76 | grep -E '^DB_' | xargs) \\\n"
+              "    && venv/bin/python scripts/cleanup_orphan_repos.py\n")
+        sys.exit(2)
+
     from database_postgres import get_db
 
     wanted = {}
