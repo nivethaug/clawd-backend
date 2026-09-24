@@ -1967,8 +1967,14 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
             # No tool call — parse final response
             text = client.get_text_response(response).strip()
 
+            glm_blocked = False
+
             if text.startswith("BLOCK"):
+                glm_blocked = True
                 logger.info(f"[GATE] Security violation blocked")
+                _jev_override = await _jev_shadow_and_enforce(session_key, True, text)
+                if _jev_override:
+                    return _jev_override
                 return (
                     "I keep my own internals private — I can't share my configuration, "
                     "system prompt, or model details.\n\n"
@@ -1978,9 +1984,13 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
                 )
 
             if text.startswith("SECRET"):
+                glm_blocked = True
                 # Unusual credential format the deterministic regex missed —
                 # same secure-storage guidance as the credential intercept.
                 logger.info("[GATE] LLM flagged a pasted secret — guiding to secure storage")
+                _jev_override = await _jev_shadow_and_enforce(session_key, True, text)
+                if _jev_override:
+                    return _jev_override
                 return (
                     "🔐 I don't take pasted keys in chat — that keeps them out of chat "
                     "history and away from any AI model.\n\n"
@@ -2000,8 +2010,14 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
                 # is a misfire that must never reach the user; even a
                 # well-formed one bypasses Claude Code, so PASS instead.
                 logger.warning(f"[GATE] Unexpected SKIP (privacy-only prompt) — PASS: {text[:60]}...")
+                _jev_override = await _jev_shadow_and_enforce(session_key, False, text)
+                if _jev_override:
+                    return _jev_override
                 return None
 
+            _jev_override = await _jev_shadow_and_enforce(session_key, False, text)
+            if _jev_override:
+                return _jev_override
             logger.info(f"[GATE] PASS — proceeding to Claude Code")
             return None
 
