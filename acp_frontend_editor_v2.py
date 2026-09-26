@@ -2043,9 +2043,13 @@ is in the project env. Defer-with-mock only when the required key is NOT
 connected.
 
 **Defer — each becomes one PENDING line in the status file:**
-- Any new backend endpoint, service, model, or migration (backend ships as-is)
-- Features whose API has no backend route (AI generation, external APIs,
-  uploads, payments): build the full UI on mock responses, mark PENDING
+- Any backend endpoint beyond the MINIMAL BACKEND BUDGET above (service
+  layers, models, extra routes) — the budgeted 2 GET + 1 write ARE built
+- Features whose required key is NOT connected (AI generation, external
+  APIs, uploads, payments): build the UI around the designed empty/error
+  state — an honest runtime warning when used, NEVER fake successful
+  content. When the key IS connected, the core write endpoint calls it for
+  real (see the exception above).
 - Storage infrastructure, teams, subscriptions, marketplace, bulk management
   (Storage infrastructure = caches, queues, search indexing, migrations —
   NOT persistence. Persistence is covered by the MINIMAL BACKEND BUDGET
