@@ -2673,6 +2673,9 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
     raw_initial_env = [
         item.model_dump() if hasattr(item, "model_dump") else item
         for item in (request.environment_variables or [])
+        # UI-choice pseudo-keys shape the brief, never the app's env
+        if str((item.key if hasattr(item, "key") else (item or {}).get("key")) or "").upper()
+        not in ("REAL_DATA_PAGES", "SAVE_TARGET")
     ]
 
     # ── Global Integrations import (server-side; values never transit client) ──
@@ -13928,6 +13931,8 @@ class CreateAssistantContext(BaseModel):
     connected_env_names: List[str] = Field(default_factory=list)  # verified/env keys attached
     # Description-declared env keys still awaiting a value: [{key,label,optional}]
     pending_env: List[Dict[str, Any]] = Field(default_factory=list)
+    # UI-choice answers made this turn (page pickers / save target): [{key,value}]
+    choice_answers: List[Dict[str, Any]] = Field(default_factory=list)
 
 class CreateAssistantMessage(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
@@ -14098,7 +14103,7 @@ Behaviour:
 4. Before producing a brief you MUST have asked at least ONE clarifying question (purpose, audience, key features, or commands) and received the user's answer — like a real product assistant refining the idea. Skip this only when the user has already given rich detail AND explicitly says to generate/proceed now.
 5. If the application would need ANY external API or integration (AI provider, weather, news, payments, email, maps, social, scraping, ...), CONFIRM with the user which ones to use BEFORE producing the brief — offer a short curated list when unsure. Skip asking only when the integration is already connected (it appears in the connected env keys) or is the project type's required bot token.
    - LLM/AI features are provider-AGNOSTIC: never assume OpenAI. If no LLM key is connected, ask which provider the user prefers (OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, ...). If one is already connected, suggest reusing it. In the final prompt use the matching env key for the CHOSEN provider (OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, ...) via os.getenv.
-5b. WEBSITE PAGE-INTEGRATION CHOICE (ask once, in ONE message, for website ideas with 3+ pages): (a) which pages should get REAL backend data first — SUGGEST the two best-fit read pages based on the project idea (e.g. for a content tool: Library and Settings) and let the user confirm or swap (the platform budget is max 2 read pages + 1 core write action — the write goes to the app's primary feature automatically); (b) for the remaining pages ask: "show sample data, or an honest 'No records found' empty state?" — RECOMMEND the empty state. Record both choices in the brief's Backend section: chosen integrated pages, and 'Remaining pages style: empty-state|sample-data'. If the user is in a hurry ("just build it"), default to your suggestions + empty-state style and say so in one line.
+5b. WEBSITE PAGE-INTEGRATION CHOICE (for website ideas with 3+ pages): instead of asking in prose, CALL request_inputs with TWO special items rendered as UI controls: (a) {"key": "REAL_DATA_PAGES", "type": "pages", "options": [<the app's pages> + "Login/Signup"], "question": "Pick up to 2 pages for real saved data (suggestions: <your two best-fit pages>)"} — a checkbox list, max 2, your suggestions named in the question; ALWAYS include "Login/Signup" as an option (if chosen, it becomes one of the two real-data pages via the template's existing auth service — no custom auth backend). (b) {"key": "SAVE_TARGET", "type": "choice", "options": [<primary saveable things, e.g. "Library drafts", "Settings preferences", ...>], "question": "Which one thing should the app SAVE first?"} — single pick; that feature gets the one write endpoint. Both answers go into the brief's Backend section (chosen real-data pages + save target + remaining-pages style per the rules below). One message, both items together. If the user is in a hurry ("just build it"), default to your suggestions and say so in one line — no popup.
 6. AGENT DELIVERY CHANNELS: when the idea involves recurring output (daily reports, alerts, digests, keyword lists, notifications, monitoring), ask which channel(s) the user wants — list the four options (Telegram / Discord / Email / Webhook-API) and that ANY COMBINATION works, e.g. "email me daily AND ping Discord when something important is found". CRITICAL TIMING: the channel-selection question itself MUST go out with required_tokens null and required_env null — emitting a channel credential with the question pops a masked input before the user has chosen anything. Only in the turn AFTER the user names a channel do you collect what it needs, exactly like bot tokens:
    - Telegram → include {"key": "TELEGRAM_BOT_TOKEN", "label": "Telegram Bot Token"} in "required_tokens" (the masked Add-Token input opens — same flow as bot projects) AND ask for the chat id in chat, emitting {"key": "TELEGRAM_CHAT_ID", ...} in "required_env".
    - Discord → include {"key": "DISCORD_WEBHOOK_URL", "label": "Discord Webhook URL"} in "required_tokens" (masked input; the user copies it from their channel Settings → Integrations).
@@ -14196,6 +14201,18 @@ async def create_project_assistant(
         )
         ctx_lines.append(
             "- env keys awaited from user (asked via chat, input fields shown): " + pending_items
+        )
+    if ctx.choice_answers:
+        # UI pickers the user already answered — bake these into the brief's
+        # Backend section (they are choices, not secrets).
+        choices = "; ".join(
+            f"{e.get('key', '?')} = {e.get('value', '')}"
+            for e in ctx.choice_answers
+            if isinstance(e, dict)
+        )
+        ctx_lines.append(
+            "- USER UI CHOICES (authoritative — put these in the brief's "
+            "Backend section verbatim): " + choices
         )
     if ctx.regenerate:
         ctx_lines.append("- the user asked for a regenerated prompt: produce a fresh alternative brief now")
@@ -14603,12 +14620,28 @@ async def create_project_assistant(
                 if k in _ENV_FORBIDDEN or k in _connected or k in seen_env:
                     continue
                 seen_env.add(k)
-                parsed_env.append({
+                _item: Dict[str, Any] = {
                     "key": k,
                     "label": str(item.get("label") or k).strip()[:60] or k,
                     "question": str(item.get("question") or "").strip()[:200],
                     "optional": bool(item.get("optional")),
-                })
+                }
+                # UI-choice items (page selection / save target): the model
+                # supplies the option list; the frontend renders checkboxes
+                # (max enforced) or radios instead of a text input.
+                _itype = str(item.get("type") or "").strip().lower()
+                if _itype in ("pages", "choice"):
+                    _opts = [
+                        str(o).strip()[:40]
+                        for o in (item.get("options") or [])
+                        if str(o).strip()
+                    ][:8]
+                    if _opts:
+                        _item["type"] = _itype
+                        _item["options"] = _opts
+                        if _itype == "pages":
+                            _item["max"] = max(1, min(int(item.get("max") or 2), 2))
+                parsed_env.append(_item)
             if parsed_env:
                 required_env = parsed_env
 

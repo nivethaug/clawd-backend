@@ -2035,12 +2035,16 @@ Project Description in this run.
   persistence — the two GETs + one write above ARE that persistence,
   minimally. localStorage stays for ephemeral UI state only.
 
-**Connected-integration exception:** if a verified key for an integration the
-description requires is ALREADY configured (see AVAILABLE EXTERNAL
-INTEGRATIONS above), the ONE core write endpoint must make a real call
-through it (existing service pattern) — never a mock for a feature whose key
-is in the project env. Defer-with-mock only when the required key is NOT
-connected.
+**Connected-integration exception:** EVERY verified key for an integration
+the description requires and that is ALREADY configured (see AVAILABLE
+EXTERNAL INTEGRATIONS above) must be wired — one real endpoint per
+connected+required integration through the existing service pattern (for a
+typical app that is still just ONE: the core write). Never ship a mock for
+any feature whose key is in the project env. Defer-with-mock only when a
+required key is NOT connected. If the brief names chosen REAL_DATA_PAGES /
+SAVE_TARGET choices, the 2 GET endpoints serve the chosen pages and the
+write endpoint serves the chosen save target (a chosen Login/Signup page
+uses the template's existing auth service, not a custom backend).
 
 **Defer — each becomes one PENDING line in the status file:**
 - Any backend endpoint beyond the MINIMAL BACKEND BUDGET above (service
