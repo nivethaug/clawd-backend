@@ -1714,6 +1714,80 @@ _GATE_JEV_BLOCK_CANNED = (
 _JEV_FAIL_COUNTER = {"consecutive": 0}
 _JEV_DISABLED = {"until_restart": False}
 
+# --- create-chat env-popup guard: JEV semantic layer (additive-only) -------
+# Catches the class regex cannot: a brief that semantically requires an
+# unconnected credential in wording no keyword list anticipates ("you'll
+# need to link your OpenRouter account in settings"). Runs ONLY when the
+# regex layers didn't fire AND a brief was proposed — <=1 call per creation.
+# Modes: off | shadow (log-only, default) | enforce. JEV may only ADD a
+# fire; it can never cancel a regex fire. 5 consecutive JEV failures disable
+# the layer until restart (regex unaffected).
+_CREATE_ENV_GUARD_JEV = os.getenv("CREATE_ENV_GUARD_JEV", "shadow").strip().lower()
+_ENV_JEV_FIRE_THRESHOLD = float(os.getenv("ENV_JEV_FIRE_THRESHOLD", "0.85"))
+_ENV_JEV_FAIL_COUNTER = {"consecutive": 0}
+_ENV_JEV_DISABLED = {"until_restart": False}
+
+
+def _build_env_jev_payload(corpus: str, connected: set) -> Dict[str, Any]:
+    """Pure builder for the env-guard decisions call (unit-testable)."""
+    connected_note = (
+        f" Already connected (do NOT count these): {', '.join(sorted(connected))}."
+        if connected else "")
+    return {
+        "model": _GATE_JEV_MODEL,
+        "state": (corpus[:3000] + connected_note)[:3200],
+        "questions": {
+            "brief_requires_credential": {
+                "type": "noul",
+                "instructions": (
+                    "Does this assistant reply / project brief require an "
+                    "external API credential, key, or token that the user "
+                    "must supply for the app to work, and that is not "
+                    "already connected?"),
+                "criteria": {
+                    "true": (
+                        "The brief names an integration the app calls at "
+                        "runtime (e.g. OpenRouter, Stripe, a bot token) and "
+                        "the key must come from the user; or the reply "
+                        "defers key setup to the user ('link your account', "
+                        "'add your key in settings')"),
+                    "not_for": (
+                        "Credentials mentioned NEGATIVELY in security notes "
+                        "('we never store your card details'); credentials "
+                        "listed as already connected; purely UI or "
+                        "localStorage features; mock/sample-data "
+                        "disclosures"),
+                    "false": "No external credential is needed",
+                },
+            },
+        },
+    }
+
+
+def _parse_env_jev(data: Dict[str, Any]) -> float:
+    """Pure parser: decisions response -> probability float (0 on absence)."""
+    answers = (data.get("data") or {}).get("answers") or data.get("answers") or {}
+    return float((answers.get("brief_requires_credential") or {}).get("noul", 0) or 0)
+
+
+async def _env_guard_jev_check(corpus: str, connected: set) -> float:
+    """One decisions call -> probability. Raises on any failure — the caller
+    owns fallback and the breaker."""
+    import httpx as _httpx
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("no OPENROUTER_API_KEY")
+    payload = _build_env_jev_payload(corpus, connected)
+    async with _httpx.AsyncClient(timeout=_GATE_JEV_TIMEOUT) as client:
+        resp = await client.post(
+            "https://openrouter.ai/api/alpha/decisions",
+            headers={"Authorization": f"Bearer {api_key}",
+                     "Content-Type": "application/json"},
+            json=payload,
+        )
+        resp.raise_for_status()
+        return _parse_env_jev(resp.json())
+
 
 def _jev_gate_available() -> bool:
     return not _JEV_DISABLED["until_restart"] and bool(os.getenv("OPENROUTER_API_KEY"))
@@ -14351,6 +14425,51 @@ async def create_project_assistant(
                 "Do not include keys the platform context already lists as "
                 "connected. Reply with the JSON only."
             )
+        # ---- Layer 2: JEV semantic check (additive-only) -----------------
+        # Runs ONLY when the regex layers passed, a brief was proposed, and
+        # the layer is enabled. Shadow = log-only (default); enforce lets a
+        # >=threshold JEV verdict trigger the SAME corrective as the regex
+        # layers. JEV can never cancel a regex fire.
+        if (
+            _guard_msg is None
+            and _CREATE_ENV_GUARD_JEV not in ("off", "")
+            and not _ENV_JEV_DISABLED["until_restart"]
+            and collected_brief.get("prompt")
+        ):
+            try:
+                _jev_prob = await _env_guard_jev_check(
+                    _guard_corpus, _connected_set)
+                _ENV_JEV_FAIL_COUNTER["consecutive"] = 0
+                _jev_fire = _jev_prob >= _ENV_JEV_FIRE_THRESHOLD
+                logger.info(
+                    "[ENV-GUARD-SHADOW] regex=skip jev=%s prob=%.2f mode=%s",
+                    "fire" if _jev_fire else "pass", _jev_prob,
+                    _CREATE_ENV_GUARD_JEV)
+                if _jev_fire and _CREATE_ENV_GUARD_JEV == "enforce":
+                    _guard_why = (
+                        "jev: brief semantically requires an unconnected "
+                        "credential (no regex shape matched)")
+                    _guard_msg = (
+                        "SYSTEM-INTEGRITY CORRECTION: your project needs an API "
+                        "key / credential from the user (detected in the brief), "
+                        'but your JSON\'s "required_env" is empty — the input '
+                        "popup will NOT appear and the user cannot provide it. "
+                        "Re-emit the COMPLETE JSON now with \"required_env\" "
+                        "populated with one object per missing key: "
+                        '{"key": "<EXACT_KEY_NAME>", "label": "<short label>", '
+                        '"question": "<one clear ask for the value>", '
+                        '"optional": false}. Do not include keys the platform '
+                        "context already lists as connected. Reply with the "
+                        "JSON only."
+                    )
+            except Exception as _jev_err:
+                _ENV_JEV_FAIL_COUNTER["consecutive"] += 1
+                if _ENV_JEV_FAIL_COUNTER["consecutive"] >= 5:
+                    _ENV_JEV_DISABLED["until_restart"] = True
+                logger.info(
+                    "[ENV-GUARD-SHADOW] jev error (%d consecutive): %s",
+                    _ENV_JEV_FAIL_COUNTER["consecutive"], _jev_err)
+
         if _guard_msg:
             logger.warning(
                 "[CREATE-ASSISTANT] env-popup guard: %s — corrective re-ask",
