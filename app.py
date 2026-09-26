@@ -14140,13 +14140,15 @@ async def create_project_assistant(
     try:
         from services.ai.openrouter_client import get_openrouter_client
         # Create-chat model is scoped to THIS chat only (prompt assistant and
-        # page inference keep PROMPT_ASSISTANT_MODEL). Default: gemini-2.5-
-        # flash-lite — probe 2026-09-26: 3/3 tool calls, 0.43s tool latency
-        # (vs glm-5.3-flash 3.88s) at 2x per-turn cost (pennies per creation).
-        # One-shot fallback: glm-5.3-flash (proven tool loop). Both
-        # env-overridable; note .env CREATE_ASSISTANT_* lines shadow these
-        # defaults (dotenv last-wins).
-        _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "google/gemini-2.5-flash-lite")
+        # page inference keep PROMPT_ASSISTANT_MODEL). Default: qwen3.7-flash —
+        # probe 2026-09-26: 3/3 tool calls, cheapest per real turn. Gemini
+        # 2.5-flash-lite was fastest (0.43s tool latency) but rejected live
+        # 2026-09-26: narrated the env popup instead of filling required_env
+        # (format-discipline miss; glm-4.7-flash died the same way).
+        # One-shot fallback: glm-5.3-flash (proven tool loop; the popup
+        # guards were tuned on it). Both env-overridable; .env
+        # CREATE_ASSISTANT_* lines shadow these defaults (dotenv last-wins).
+        _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "qwen/qwen3.7-flash")
         _create_fb = os.getenv("CREATE_ASSISTANT_FALLBACK_MODEL", "z-ai/glm-5.3-flash")
         client = get_openrouter_client(model=_create_model)
         fallback_client = (
