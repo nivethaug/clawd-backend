@@ -77,6 +77,115 @@ BUILD_TIMEOUT = 3000  # 30 minutes
 # Claude Code Agent settings
 CLAUDE_TIMEOUT = int(os.getenv("CLAUDE_TIMEOUT", "3000"))  # 21 minutes default
 
+# ============================================================
+# Deterministic post-build smoke gate (route/link diff + stub lint)
+# ============================================================
+# Catches the two shipped-false-positive classes statically, in <1s, with
+# no browser and no LLM round on the happy path:
+#   1. Nav links pointing at routes that don't exist (the /studio vs
+#      /repurpose-studio 404 incident). HTTP checks can't see SPA routes —
+#      a source diff can.
+#   2. Save/success claims with no persistence call anywhere in the file
+#      (the "Saved to Content Library" blank-cards incident).
+# Kill-switch: ACPX_SMOKE_JOURNEY=0 disables the gate entirely.
+_SMOKE_GATE_ENABLED = os.getenv("ACPX_SMOKE_JOURNEY", "1").lower() not in {"0", "false", "no", "off"}
+
+_ROUTE_PATH_RE = re.compile(r'path=["\']([^"\']*)["\']')
+_LINK_TARGET_RE = re.compile(r'(?:\bto|\bhref)=\{?\s*["\'](/[^"\'#?]*)["\']')
+_SAVE_CLAIM_RE = re.compile(r'["\'`][^"\'`]*\bsaved\b[^"\'`]*["\'`]', re.IGNORECASE)
+_PERSISTENCE_MARKS = (
+    "localStorage.setItem", "sessionStorage.setItem", "fetch(", "axios.post",
+    "axios.put", ".post(", ".put(", ".patch(", "supabase.", "indexedDB",
+)
+
+
+def _norm_seg(p: str) -> str:
+    """Normalise a route/link path for comparison ('/Studio/' -> 'studio')."""
+    return p.strip().strip("/").lower()
+
+
+def _smoke_gate_issues(src_path: Path) -> List[str]:
+    """Route-vs-links diff + save-claim lint over the frontend source.
+
+    Returns a list of human-readable issues (empty = clean). Pure regex,
+    filesystem-only, <1s on typical builds.
+    """
+    issues: List[str] = []
+    app_tsx = src_path / "App.tsx"
+    try:
+        app_text = app_tsx.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return issues  # no App.tsx (or unreadable) — nothing to diff against
+
+    declared = {_norm_seg(m) for m in _ROUTE_PATH_RE.findall(app_text)}
+    declared.discard("*")  # wildcard not-found catcher, not a target
+    declared.add("")       # root
+
+    def link_ok(target: str) -> bool:
+        t = _norm_seg(target)
+        if t in declared:
+            return True
+        # Dynamic segments: declared "users/:id" accepts link "/users/5".
+        first = t.split("/")[0] if t else ""
+        return any(d.split("/")[0] == first and ":" in d for d in declared)
+
+    # --- 1. nav links with no matching route ---
+    link_hits: List[str] = []
+    for f in sorted(src_path.rglob("*.tsx")):
+        if f.name == "App.tsx":
+            continue
+        try:
+            text = f.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        rel = f.relative_to(src_path)
+        for m in _LINK_TARGET_RE.finditer(text):
+            tgt = m.group(1)
+            if not link_ok(tgt):
+                link_hits.append(f"{rel}: links to {tgt or '/'} (no matching route)")
+    if link_hits:
+        routes_list = ", ".join(sorted(r or "/" for r in declared))
+        issues.append(
+            f"Broken internal links ({len(link_hits)}): "
+            + "; ".join(link_hits[:6])
+            + f" — declared routes: {routes_list}"
+        )
+
+    # --- 2. save claims with no persistence call in the same file ---
+    stub_hits: List[str] = []
+    for f in sorted(src_path.rglob("*.tsx")):
+        if f.name == "App.tsx":
+            continue
+        try:
+            text = f.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        if _SAVE_CLAIM_RE.search(text) and not any(m in text for m in _PERSISTENCE_MARKS):
+            stub_hits.append(str(f.relative_to(src_path)))
+    if stub_hits:
+        issues.append(
+            "Save/success claims with no persistence call in the same file "
+            f"(verify or fix): {', '.join(stub_hits[:6])}"
+        )
+    return issues
+
+
+def _smoke_gate_fix_prompt(gate_issues: List[str]) -> str:
+    """Compact corrective prompt for the bounded one-round fix."""
+    return (
+        "POST-BUILD SMOKE-GATE FIXES — mechanical, script-verified. Keep "
+        "changes minimal; no redesign.\n\n"
+        + "\n".join(f"- {i}" for i in gate_issues)
+        + "\n\nFix rules:\n"
+        "1) Broken links: point the LINK at an existing route (preferred) or "
+        "add the missing route in src/App.tsx. Do not delete features.\n"
+        "2) Save claims: either make the write real (localStorage.setItem is "
+        "enough for V1) or make the message honest (e.g. 'sample data — not "
+        "saved yet'). A success message with no write is a bug.\n"
+        "Do not touch anything else. Do not rewrite pages."
+    )
+
+
 PROMPT_API_SOURCE_GATE = """\
 ## API SOURCE AND ACCESSIBILITY GATE - MANDATORY
 
@@ -1238,6 +1347,54 @@ class ACPFrontendEditorV2:
                 logger.warning(f"[CLAUDE-AGENT] Page-existence guard failed (non-fatal): {guard_err}")
 
             # =============================================
+            # DETERMINISTIC SMOKE GATE (route/link diff + stub lint)
+            # <1s, no browser, no LLM on the happy path. One bounded
+            # corrective round only when a real defect is detected; the
+            # result is recorded in the status file the creation summary
+            # reads (feeds its evidence rules).
+            # =============================================
+            if _SMOKE_GATE_ENABLED:
+                try:
+                    gate_issues = _smoke_gate_issues(self.frontend_src_path)
+                    if gate_issues:
+                        logger.warning(
+                            "[SMOKE-GATE] %d issue(s) — one corrective round: %s",
+                            len(gate_issues), gate_issues[:3],
+                        )
+                        print(f"⚠️ SMOKE-GATE: {gate_issues[:3]}", flush=True)
+                        try:
+                            await self._run_claude_agent(
+                                _smoke_gate_fix_prompt(gate_issues))
+                        except Exception as run_err:
+                            logger.warning(
+                                "[SMOKE-GATE] corrective round failed (non-fatal): %s", run_err)
+                        remaining = _smoke_gate_issues(self.frontend_src_path)
+                        if remaining:
+                            issues.append(
+                                f"Smoke-gate unresolved after fix round: {remaining[:3]}")
+                            _route_note = (
+                                f"route-check: failed — {len(remaining)} unresolved "
+                                "(some links may 404 or saves may be cosmetic)")
+                            status = "partial_success"
+                        else:
+                            _route_note = f"route-check: fixed ({len(gate_issues)})"
+                    else:
+                        _route_note = "route-check: pass"
+                    # Append the authoritative machine line to the status
+                    # file the summary LLM reads.
+                    try:
+                        _sf = self.project_path / "projectcreationstatus.md"
+                        if _sf.exists():
+                            with open(_sf, "a", encoding="utf-8") as _fh:
+                                _fh.write(f"\n- {_route_note}\n")
+                    except Exception:
+                        pass
+                    logger.info(f"[SMOKE-GATE] {_route_note}")
+                    print(f"SMOKE-GATE: {_route_note}", flush=True)
+                except Exception as gate_err:
+                    logger.warning(f"[SMOKE-GATE] gate failed (non-fatal): {gate_err}")
+
+            # =============================================
             # FINAL RESULT (3-state outcome)
             # =============================================
             
@@ -1823,6 +1980,18 @@ mock for a feature whose key is already in the project env.
   uploads, payments): build the full UI on mock responses, mark PENDING
 - Storage infrastructure, teams, subscriptions, marketplace, bulk management
 
+**Data honesty (mandatory — the UI must not lie):**
+- A success confirmation ("Saved", "Added to library", …) may only appear
+  after a REAL write in that code path (localStorage.setItem is enough for
+  V1). A confirmation with no write is a bug, not a placeholder.
+- Sample/mock data is allowed, but list it under PENDING as sample so the
+  user-facing summary can disclose it honestly.
+- Never render blank or template cards as if they were user data — show an
+  honest empty state ("No drafts yet") instead.
+- Every nav link and dashboard button must point at a route that actually
+  exists in `src/App.tsx` — the platform runs a script that diffs links vs
+  routes after you finish and a mismatch triggers a fix round.
+
 **Image rule (mandatory):** never ship an unverified external image. Before
 building, extract every image URL you used and curl-check them ALL in ONE
 batched command:
@@ -1847,6 +2016,9 @@ index update. Use exactly these section names:
    e.g. "Wire video generation to a backend endpoint with the user's OpenRouter key"
 ## KNOWN ISSUES — build warnings, mock behaviors, TODOs
 ## NEXT STEPS — the single most important pending edit
+
+The platform appends a machine-verified `route-check:` line after you finish
+(link/route diff result) — treat it as authoritative for navigation claims.
 
 ---
 
@@ -2302,9 +2474,11 @@ Note the port you end up using — you need it in the next step.
 
 ---
 
-## STEP 7 — QUICK HTTP VERIFICATION
+## STEP 7 — QUICK HTTP VERIFICATION (FALLBACK)
 
-After serving, verify the app loads correctly using curl/Node.js (no browser or Chrome DevTools available).
+This is the FALLBACK check — it runs when the PRIMARY browser verification
+(POST-BUILD VERIFICATION above) already ran, or when chrome-devtools tools
+are unavailable. Verify the app loads correctly using curl/Node.js.
 
 **1. Verify the served page is not the starter scaffold:**
 ```bash
@@ -2327,7 +2501,7 @@ http.get('http://localhost:' + process.argv[1] + '/', (res) => {{
 kill $(lsof -t -i:$PORT)
 ```
 
-That is all. Do NOT attempt to open a browser, use Chrome DevTools, Puppeteer, or any browser automation tool. These are not available.
+That is all. Do not open additional browser pages for this fallback check — the PRIMARY browser verification (or its one-fix round) already ran above; these steps are HTTP-only by design.
 ---
 
 ## STEP 8 — UPDATE AI INDEX
