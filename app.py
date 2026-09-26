@@ -14282,10 +14282,22 @@ async def create_project_assistant(
         _req_env_populated = bool(re.search(r'"required_env"\s*:\s*\[\s*\{', raw))
         _prose_ask = bool(
             re.search(r"\b(api[_ -]?key|environment variable|env var)\b", raw, re.I)
-            and re.search(r"\b(provide|enter|paste|add|configure|share)\b", raw, re.I)
+            and re.search(r"\b(provide|enter|paste|add|configure|share|connected|wire)\b", raw, re.I)
         )
-        _already = re.search(r"already (connected|provided|configured|saved)", raw, re.I)
-        if not _req_env_populated and not _already and (_unconnected_creds or _prose_ask):
+        # "already connected" only suppresses the prose branch when the
+        # platform context ACTUALLY lists connected keys — models have been
+        # observed fabricating the claim (qwen: "I see you have an
+        # OPENROUTER_API_KEY already connected" with an empty connections
+        # panel). Token-level evidence always wins: an unconnected cred key
+        # fires regardless of any claimed connection.
+        _already = (
+            bool(re.search(r"already (connected|provided|configured|saved)", raw, re.I))
+            and bool(_connected_set)
+        )
+        _should_fire = bool(_unconnected_creds) or (
+            _prose_ask and not _already
+        )
+        if not _req_env_populated and _should_fire:
             _detail = (
                 f"credential key(s) {sorted(_unconnected_creds)}" if _unconnected_creds
                 else "an API key / environment variable"
@@ -14300,7 +14312,9 @@ async def create_project_assistant(
                     "SYSTEM-INTEGRITY CORRECTION: your response references "
                     f"{_detail} that the project needs, but your JSON's "
                     '"required_env" is empty — the input popup will NOT '
-                    "appear and the user cannot provide the key. Re-emit the COMPLETE "
+                    "appear and the user cannot provide the key. Do NOT claim "
+                    "a credential is already connected unless the platform "
+                    "context lists it. Re-emit the COMPLETE "
                     'JSON now, identical except "required_env" populated with one '
                     "object per missing key: "
                     '{"key": "<EXACT_KEY_NAME>", "label": "<short label>", '
