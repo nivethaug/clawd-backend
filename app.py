@@ -14140,9 +14140,10 @@ async def create_project_assistant(
     try:
         from services.ai.openrouter_client import get_openrouter_client
         # Create-chat model is scoped to THIS chat only (prompt assistant and
-        # page inference keep PROMPT_ASSISTANT_MODEL). Default: glm-4.7-flash
-        # (faster than 5.3, validated on this account), one-shot fallback to
-        # glm-5.3-flash if the primary errors — both env-overridable.
+        # page inference keep PROMPT_ASSISTANT_MODEL). Default: glm-5.3-flash
+        # (4.7-flash was tried 2026-09-23 and rejected — weak tool-calling;
+        # user confirmed 2026-09-26). One-shot fallback available via
+        # CREATE_ASSISTANT_FALLBACK_MODEL (disabled by default).
         _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "z-ai/glm-5.3-flash")
         # glm-4.7-flash tried and rejected for this flow (2026-09-23). Fallback
         # defaults to the primary (disabled) — set CREATE_ASSISTANT_FALLBACK_MODEL
