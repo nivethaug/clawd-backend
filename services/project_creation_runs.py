@@ -281,7 +281,15 @@ async def summarize_creation_status_async(status_text: str) -> Optional[str]:
     try:
         from services.ai.openrouter_client import get_openrouter_client
 
-        client = get_openrouter_client()
+        # Same model family as create chat (qwen3.7-flash). glm-5.3-flash
+        # intermittently burned the WHOLE completion budget on reasoning
+        # tokens (600/600, empty text -> static fallback), and a fresh
+        # per-call client also sidesteps the asyncio.run loop-staleness
+        # class entirely. CREATION_SUMMARY_MODEL overrides if needed.
+        import os as _os
+        _summary_model = _os.getenv(
+            "CREATION_SUMMARY_MODEL", "qwen/qwen3.7-flash")
+        client = get_openrouter_client(model=_summary_model)
         response = await asyncio.wait_for(
             client.chat_completion(
                 messages=[
