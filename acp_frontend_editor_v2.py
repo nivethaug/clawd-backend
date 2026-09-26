@@ -2033,6 +2033,12 @@ mock for a feature whose key is already in the project env.
 - Features whose API has no backend route (AI generation, external APIs,
   uploads, payments): build the full UI on mock responses, mark PENDING
 - Storage infrastructure, teams, subscriptions, marketplace, bulk management
+  (Storage infrastructure = caches, queues, search indexing, migrations —
+  NOT the simple persistence a brief explicitly requests. If the brief
+  specifies backend endpoints and storage — e.g. "/api/library CRUD" or
+  "JSON file storage for persistence" — build them; that is core scope,
+  never deferred, and user data NEVER lives only in localStorage when the
+  brief asks for backend persistence)
 
 **Data honesty (mandatory — the UI must not lie):**
 - A success confirmation ("Saved", "Added to library", …) may only appear
