@@ -104,6 +104,58 @@ def _norm_seg(p: str) -> str:
     return p.strip().strip("/").lower()
 
 
+def _integration_wiring_issues(project_root: Path, goal: str) -> List[str]:
+    """Enforce the V1 'connected-integration exception' deterministically:
+    a credential key present in the project env whose service the project
+    needs MUST be referenced by name somewhere in the backend source.
+    Live miss 2026-09-26 (project 2096): OPENROUTER_API_KEY in env, OpenRouter
+    the core feature, backend shipped sample text — the build agent deferred
+    despite the prompt's 'never ship a mock' clause. Key NAMES only; values
+    are never read or logged."""
+    issues: List[str] = []
+    keys: set = set()
+    for ef in (project_root / "backend" / ".env", project_root / ".env"):
+        try:
+            if not ef.exists():
+                continue
+            for line in ef.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k = line.split("=", 1)[0].strip()
+                    if re.fullmatch(
+                            r"[A-Z][A-Z0-9_]{2,}_(API_KEY|TOKEN|SECRET|KEY)", k):
+                        keys.add(k)
+        except Exception:
+            continue
+    if not keys:
+        return issues
+    backend = project_root / "backend"
+    if not backend.is_dir():
+        return issues  # no backend (frontend-only path) — nothing to wire
+    corpus = ""
+    for f in sorted(backend.rglob("*.py"))[:400]:
+        try:
+            corpus += f.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+    # NOTE: an empty corpus (no/blank backend) still proceeds — zero source
+    # with a required key is the MOST not-wired state, not a pass.
+    goal_l = (goal or "").lower()
+    for k in sorted(keys):
+        if k in corpus:
+            continue  # referenced by name — wired
+        service = (k.replace("_API_KEY", "").replace("_TOKEN", "")
+                    .replace("_SECRET", "").replace("_KEY", "")).lower()
+        if service and service in goal_l:
+            issues.append(
+                f"Integration not wired: {k} is in the project env and the "
+                f"project needs {service}, but the backend never references "
+                f"it. Wire ONE real call (os.getenv(\"{k}\")) for the primary "
+                "feature through the existing service pattern — or an honest "
+                "fallback with a runtime warning. Never a silent mock.")
+    return issues
+
+
 def _smoke_gate_issues(src_path: Path) -> List[str]:
     """Route-vs-links diff + save-claim lint over the frontend source.
 
@@ -1356,6 +1408,8 @@ class ACPFrontendEditorV2:
             if _SMOKE_GATE_ENABLED:
                 try:
                     gate_issues = _smoke_gate_issues(self.frontend_src_path)
+                    gate_issues += _integration_wiring_issues(
+                        self.project_path, goal_description)
                     if gate_issues:
                         logger.warning(
                             "[SMOKE-GATE] %d issue(s) — one corrective round: %s",
