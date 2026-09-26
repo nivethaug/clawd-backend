@@ -56,6 +56,12 @@ class OpenRouterClient:
         self.model = model or PROMPT_ASSISTANT_MODEL
         self.api_base = OPENROUTER_BASE_URL.rstrip("/")
         self._client: Optional[httpx.AsyncClient] = None
+        # Loop the cached client was created on. asyncio.run() callers
+        # (creation worker's sync wrappers) close their loop on exit without
+        # aclosing the client — is_closed stays False but the transport is
+        # bound to the dead loop, so the NEXT asyncio.run() would hit
+        # "Event loop is closed" at request time. Recreate on loop change.
+        self._client_loop = None
 
         if not self.api_key:
             logger.warning("[OPENROUTER-CLIENT] OPENROUTER_API_KEY not configured - API calls will fail")
@@ -72,8 +78,21 @@ class OpenRouterClient:
         return headers
 
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        loop = asyncio.get_running_loop()
+        stale = (
+            self._client is not None
+            and not self._client.is_closed
+            and self._client_loop is not loop
+        )
+        if stale:
+            # Best-effort close; aclose on a dead loop can itself raise.
+            try:
+                await self._client.aclose()
+            except Exception:
+                pass
+        if self._client is None or self._client.is_closed or stale:
             self._client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
+            self._client_loop = loop
         return self._client
 
     def _build_payload(
