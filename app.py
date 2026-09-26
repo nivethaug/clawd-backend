@@ -13984,7 +13984,10 @@ _CREATE_CHANNEL_TOKEN_GUARD = {
     "DISCORD_WEBHOOK_URL": ("discord",),
 }
 _CREATE_CHANNEL_VALUE_KEYS = {"EMAIL_TO", "TELEGRAM_CHAT_ID", "API_ENDPOINT"}
-_CREATE_ASKABLE_KEYS = sorted(_CREATE_ALLOWED_TOKENS | _CREATE_CHANNEL_VALUE_KEYS)
+# UI-choice pickers (render as chips, never ship as app env)
+_CREATE_CHOICE_KEYS = {"REAL_DATA_PAGES", "SAVE_TARGET"}
+_CREATE_ASKABLE_KEYS = sorted(
+    _CREATE_ALLOWED_TOKENS | _CREATE_CHANNEL_VALUE_KEYS | _CREATE_CHOICE_KEYS)
 _CREATE_INPUT_TOOL = {
     "type": "function",
     "function": {
@@ -14077,6 +14080,28 @@ def _collect_request_inputs(
             key.replace("_API_KEY", "").replace("_", " ").title()
         )
         question = str(item.get("question") or "").strip()[:200]
+        if key in _CREATE_CHOICE_KEYS:
+            # Picker items: keep type/options/max so the frontend renders
+            # chips (not a text input). No options = useless picker: reject.
+            opts = [
+                str(o).strip()[:40]
+                for o in (item.get("options") or [])
+                if str(o).strip()
+            ][:8]
+            if not opts:
+                continue
+            env_item = {
+                "key": key, "label": label, "question": question,
+                "optional": False,
+                "type": "pages" if key == "REAL_DATA_PAGES" else "choice",
+                "options": opts,
+            }
+            if key == "REAL_DATA_PAGES":
+                env_item["max"] = 2
+            out_env.append(env_item)
+            seen.add(key)
+            accepted.append(key)
+            continue
         if key in _CREATE_CHANNEL_VALUE_KEYS:
             out_env.append({"key": key, "label": label, "question": question, "optional": False})
         else:
