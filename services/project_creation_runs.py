@@ -289,7 +289,11 @@ async def summarize_creation_status_async(status_text: str) -> Optional[str]:
                     {"role": "user", "content": text[:12000]},
                 ],
                 temperature=0.3,
-                max_tokens=600,
+                # 1500 not 600: glm-5.3-flash sometimes burns the ENTIRE
+                # budget on reasoning tokens (observed 600/600 reasoning,
+                # zero visible text -> empty summary -> static fallback).
+                # Headroom keeps the message alive even at 2x reasoning.
+                max_tokens=1500,
             ),
             timeout=25,
         )
