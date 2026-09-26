@@ -2021,12 +2021,26 @@ Project Description in this run.
 3. Auth UI through the EXISTING `src/services/database.ts` service layer —
    those template endpoints already work
 
+**MINIMAL BACKEND BUDGET (hard cap — keeps creation fast):**
+- At most **TWO GET endpoints** — one per primary read page (e.g.
+  `GET /api/library`, `GET /api/settings`), returning REAL saved data from
+  simple JSON-file storage (no database, no migrations, no auth backend).
+- At most **ONE core write endpoint** (a single POST or PUT) for the app's
+  single most important feature — e.g. `POST /api/generate` calling a
+  connected integration key, or `POST /api/library` to save an item.
+- Every other endpoint the brief lists (full CRUD, extra resources,
+  secondary features) is DEFERRED to edit sessions — the brief's fuller
+  API list is the roadmap, NOT the V1 scope.
+- User data NEVER lives only in localStorage when the brief asks for backend
+  persistence — the two GETs + one write above ARE that persistence,
+  minimally. localStorage stays for ephemeral UI state only.
+
 **Connected-integration exception:** if a verified key for an integration the
 description requires is ALREADY configured (see AVAILABLE EXTERNAL
-INTEGRATIONS above), wire ONE real backend call for the primary feature
-through the existing service pattern — then mark deeper polish PENDING.
-Defer-with-mock only when the required key is NOT connected. Never ship a
-mock for a feature whose key is already in the project env.
+INTEGRATIONS above), the ONE core write endpoint must make a real call
+through it (existing service pattern) — never a mock for a feature whose key
+is in the project env. Defer-with-mock only when the required key is NOT
+connected.
 
 **Defer — each becomes one PENDING line in the status file:**
 - Any new backend endpoint, service, model, or migration (backend ships as-is)
@@ -2034,11 +2048,9 @@ mock for a feature whose key is already in the project env.
   uploads, payments): build the full UI on mock responses, mark PENDING
 - Storage infrastructure, teams, subscriptions, marketplace, bulk management
   (Storage infrastructure = caches, queues, search indexing, migrations —
-  NOT the simple persistence a brief explicitly requests. If the brief
-  specifies backend endpoints and storage — e.g. "/api/library CRUD" or
-  "JSON file storage for persistence" — build them; that is core scope,
-  never deferred, and user data NEVER lives only in localStorage when the
-  brief asks for backend persistence)
+  NOT persistence. Persistence is covered by the MINIMAL BACKEND BUDGET
+  above; the brief's fuller endpoint list beyond that budget is the roadmap
+  for edit sessions, never a reason to exceed the cap)
 
 **Data honesty (mandatory — the UI must not lie):**
 - A success confirmation ("Saved", "Added to library", …) may only appear
