@@ -2056,13 +2056,30 @@ connected.
 - A success confirmation ("Saved", "Added to library", …) may only appear
   after a REAL write in that code path (localStorage.setItem is enough for
   V1). A confirmation with no write is a bug, not a placeholder.
-- Sample/mock data is allowed, but list it under PENDING as sample so the
-  user-facing summary can disclose it honestly.
+- Sample/mock data is allowed only where the brief says so, and must be
+  listed under PENDING as sample so the user-facing summary can disclose it
+  honestly.
 - Never render blank or template cards as if they were user data — show an
   honest empty state ("No drafts yet") instead.
 - Every nav link and dashboard button must point at a route that actually
   exists in `src/App.tsx` — the platform runs a script that diffs links vs
   routes after you finish and a mismatch triggers a fix round.
+
+**Empty states for pages without backend integration (DESIGNED, not blank):**
+Pages the brief marks as not-yet-integrated (or where the user chose
+empty-state style) MUST render a proper empty state instead of sample data
+or a blank section — one reusable component, styled to the app's theme:
+- centered card: small info icon (lucide `Info`, muted color), the heading
+  "No records found", one support line: "This page isn't connected to a
+  backend yet — ask in chat to connect it." plus a subtle secondary note of
+  what WILL appear here once connected (e.g. "Your saved drafts will appear
+  here")
+- rounded-xl, subtle border, muted background, generous spacing — it should
+  look intentional, never broken
+- If the user explicitly chose sample-data style for that page: show 3-5
+  representative items WITH a visible "Sample data" badge on the page.
+- When the brief doesn't state a style: empty state (never silent sample
+  data).
 
 **Image rule (mandatory):** never ship an unverified external image. Before
 building, extract every image URL you used and curl-check them ALL in ONE
