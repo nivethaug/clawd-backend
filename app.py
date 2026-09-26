@@ -14116,7 +14116,7 @@ Platform facts:
 - Project types: Website, Discord Bot, Telegram Bot, AI Agent, Custom Project.
 - FIXED STACK: DreamAgent builds ONLY React (Vite + Tailwind) frontends with Python (FastAPI) backends, deployed by the platform. It does NOT build PHP/CodeIgniter/Laravel/WordPress, Django/Flask, Ruby on Rails, .NET, Java/Spring, or Vue/Angular/Svelte apps.
 - Discord Bot projects REQUIRE a Discord Bot Token. Telegram Bot projects REQUIRE a Telegram Bot Token. Websites need no token. AI Agents deliver results through delivery channels — Telegram, Discord, Email, and Webhook/API — and users may pick ANY COMBINATION (more than one). Channel credentials are collected right here in chat exactly like bot tokens: Telegram needs a bot token (masked Add-Token input) plus the chat id (asked in chat), Discord needs a webhook URL (masked Add-Token input), Email needs just their email address (asked in chat — DreamAgent's own mail server sends it), Webhook/API needs their endpoint URL (asked in chat). Channels are optional overall — collected only when the user picks them.
-- Tokens are added through the platform's masked "Add ... Token" input or saved credentials. NEVER ask the user to paste tokens, API keys or secrets as chat text — point them to the Add-Token button instead.
+- Tokens are added through the platform's masked "Add ... Token" input or saved credentials. When an external API key/token the project needs is NOT connected, emit it in "required_tokens" IMMEDIATELY in that same reply (the Add-Token popup opens) — never narrate the ask, never defer it to "the final setup section" or "later", and never ask its value in chat text. The FINAL SETUP section is ONLY for the page-integration pickers (rule 5b).
 - Never ask for any credential whose key appears in the "connected env keys" context — it is already attached. You may mention that it's connected (e.g. AI features powered by an already-connected LLM key).
 - After the user confirms, the platform builds and deploys the project automatically.
 
@@ -14411,7 +14411,7 @@ async def create_project_assistant(
         _unconnected_creds = {k for k in _cred_keys if k not in _connected_set}
         _req_env_populated = bool(re.search(r'"required_env"\s*:\s*\[\s*\{', raw))
         _prose_ask = bool(
-            re.search(r"\b(api[_ -]?key|environment variable|env var)\b", _guard_corpus, re.I)
+            re.search(r"\b(api[_ -]?key|api[_ -]?token|bot[_ -]?token|access[_ -]?token|environment variable|env var|add[_ -]?token)\b", _guard_corpus, re.I)
             and re.search(r"\b(provide|enter|paste|add|configure|share|connected|wire)\b", _guard_corpus, re.I)
         )
         # "already connected" only suppresses the prose branch when the
@@ -14458,20 +14458,24 @@ async def create_project_assistant(
                 f"credential key(s) {sorted(_unconnected_creds)}" if _unconnected_creds
                 else "an API key / environment variable"
             )
-            _guard_why = f"reply references {_detail} but required_env empty"
+            _guard_why = f"reply references {_detail} but no input field emitted"
             _guard_msg = (
                 "SYSTEM-INTEGRITY CORRECTION: your response references "
-                f"{_detail} that the project needs, but your JSON's "
-                '"required_env" is empty — the input popup will NOT '
-                "appear and the user cannot provide the key. Do NOT claim "
-                "a credential is already connected unless the platform "
-                "context lists it. Re-emit the COMPLETE "
-                'JSON now, identical except "required_env" populated with one '
-                "object per missing key: "
-                '{"key": "<EXACT_KEY_NAME>", "label": "<short label>", '
-                '"question": "<one clear ask for the value>", "optional": false}. '
-                "Do not include keys the platform context already lists as "
-                "connected. Reply with the JSON only."
+                f"{_detail} that the project needs, but you are NARRATING "
+                "the ask — no input field will appear, so the user cannot "
+                "provide it. Do NOT claim a credential is connected unless "
+                "the platform context lists it. Re-emit the COMPLETE JSON "
+                "now, choosing the RIGHT field: if the credential is a "
+                "masked secret (API key / token — anything the user gets "
+                'from a provider), set "required_tokens" to '
+                '[{"key": "<EXACT_KEY_NAME>", "label": "<short label>"}] '
+                "(the Add-Token input opens); if it is a regular config "
+                'value, set "required_env" to [{"key": "<EXACT_KEY_NAME>", '
+                '"label": "<short label>", "question": "<one clear ask>", '
+                '"optional": false}]. Never defer a credential ask to "later" '
+                "or ask for its value in chat text. Do not include keys the "
+                "platform context already lists as connected. Reply with "
+                "the JSON only."
             )
         # ---- Layer 2: JEV semantic check (additive-only) -----------------
         # Runs ONLY when the regex layers passed, a brief was proposed, and
@@ -14498,15 +14502,17 @@ async def create_project_assistant(
                         "jev: brief semantically requires an unconnected "
                         "credential (no regex shape matched)")
                     _guard_msg = (
-                        "SYSTEM-INTEGRITY CORRECTION: your project needs an API "
-                        "key / credential from the user (detected in the brief), "
-                        'but your JSON\'s "required_env" is empty — the input '
-                        "popup will NOT appear and the user cannot provide it. "
-                        "Re-emit the COMPLETE JSON now with \"required_env\" "
-                        "populated with one object per missing key: "
-                        '{"key": "<EXACT_KEY_NAME>", "label": "<short label>", '
-                        '"question": "<one clear ask for the value>", '
-                        '"optional": false}. Do not include keys the platform '
+                        "SYSTEM-INTEGRITY CORRECTION: your project needs a "
+                        "credential from the user (detected in the brief) but "
+                        "you are not emitting an input field for it. Re-emit "
+                        "the COMPLETE JSON now, choosing the RIGHT field: a "
+                        'masked secret (API key / token) goes in '
+                        '"required_tokens" as [{"key": "<EXACT_KEY_NAME>", '
+                        '"label": "<short label>"}] (Add-Token input); a '
+                        'regular config value goes in "required_env" as '
+                        '[{"key": ..., "label": ..., "question": ..., '
+                        '"optional": false}]. Never narrate a credential ask '
+                        "or defer it to later. Do not include keys the platform "
                         "context already lists as connected. Reply with the "
                         "JSON only."
                     )
