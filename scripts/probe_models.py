@@ -27,6 +27,7 @@ REPO = Path(__file__).resolve().parent.parent
 DEFAULT_MODELS = [
     "z-ai/glm-5.3-flash",
     "qwen/qwen3.7-flash",
+    "deepseek/deepseek-v4.1-flash",
     "deepseek/deepseek-v4-flash",
     "google/gemini-2.5-flash-lite",
     "bytedance-seed/seed-1.6-flash",
