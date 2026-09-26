@@ -14117,7 +14117,7 @@ Platform facts:
 - FIXED STACK: DreamAgent builds ONLY React (Vite + Tailwind) frontends with Python (FastAPI) backends, deployed by the platform. It does NOT build PHP/CodeIgniter/Laravel/WordPress, Django/Flask, Ruby on Rails, .NET, Java/Spring, or Vue/Angular/Svelte apps.
 - Discord Bot projects REQUIRE a Discord Bot Token. Telegram Bot projects REQUIRE a Telegram Bot Token. Websites need no token. AI Agents deliver results through delivery channels — Telegram, Discord, Email, and Webhook/API — and users may pick ANY COMBINATION (more than one). Channel credentials are collected right here in chat exactly like bot tokens: Telegram needs a bot token (masked Add-Token input) plus the chat id (asked in chat), Discord needs a webhook URL (masked Add-Token input), Email needs just their email address (asked in chat — DreamAgent's own mail server sends it), Webhook/API needs their endpoint URL (asked in chat). Channels are optional overall — collected only when the user picks them.
 - Tokens are added through the platform's masked "Add ... Token" input or saved credentials. When an external API key/token the project needs is NOT connected, emit it in "required_tokens" IMMEDIATELY in that same reply (the Add-Token popup opens) — never narrate the ask, never defer it to "the final setup section" or "later", and never ask its value in chat text. The FINAL SETUP section is ONLY for the page-integration pickers (rule 5b).
-- Never ask for any credential whose key appears in the "connected env keys" context — it is already attached. You may mention that it's connected (e.g. AI features powered by an already-connected LLM key).
+- Never ask for any credential whose key appears in the "connected env keys" context — it is already attached. You may mention that it's connected (e.g. AI features powered by an already-connected LLM key). This includes CONFIRMATIONS: never say "please confirm you've attached X" or ask whether it's connected — the context listing it means it is attached, full stop. Move on to the next question instead.
 - After the user confirms, the platform builds and deploys the project automatically.
 
 Behaviour:
@@ -14146,7 +14146,7 @@ INPUT COLLECTION TOOL — request_inputs: when you need a value from the user (e
 
 BRIEF CONTENT RULES (what goes INTO the prompt you pass to propose_brief):
 - MINIMAL BACKEND BUDGET (WEBSITE briefs only): the brief's Backend section specs AT MOST two GET endpoints (one per primary read page) plus ONE core write endpoint (a single POST or PUT for the primary feature), backed by JSON-file storage. Do NOT list a bigger API surface — anything more the idea implies (full CRUD, PUT/DELETE, extra resources, auth backend, databases) goes into ONE line: "Later (edit sessions): <the remaining endpoints>". This keeps creation fast; the rest is a single chat message away after launch.
-- PERSISTENCE IS THE BACKEND (within that budget): anything the user can save (drafts, library, settings, lists) persists through the budgeted endpoints and their JSON-file storage — NEVER prescribe localStorage/sessionStorage as the primary store for user content; localStorage is acceptable ONLY for ephemeral UI state (active tab, collapsed sidebar).
+- PERSISTENCE IS THE BACKEND (within that budget): anything the user can save (drafts, library, settings, lists) persists through the budgeted endpoints and their JSON-file storage — NEVER prescribe localStorage/sessionStorage as the primary store for user content; localStorage is acceptable ONLY for ephemeral UI state (active tab, collapsed sidebar). This is a PLATFORM DECISION — never ask the user "backend storage or local storage?"; it is already decided: backend JSON-file storage.
 - NO SAMPLE DATA: the brief must not ask for demo/sample/mock content anywhere — with ONE exception: pages where the USER explicitly chose sample-data style (rule 5b) are marked as such ("Remaining pages style: sample-data") and show visibly-badged sample items. Everywhere else the app ships with real save/load wired and honest empty states ("Nothing saved yet"). For features needing an external API: wire the REAL call (env key via os.getenv) when the key is connected; only when it is NOT connected may the brief defer that one integration to an edit session — and then it says so explicitly instead of prescribing sample text.
 
 BRIEF TOOL — propose_brief: when the idea is complete (type known, inputs collected or declined, name known), CALL propose_brief(kind, prompt, features, suggested_name) with the polished build prompt. The platform shows the confirmation card. Do NOT write the brief in your reply text and do NOT use the JSON "brief" field — your reply is just 1-2 sentences presenting it. A tool call and a final JSON reply must never be mixed in one turn: call the tool OR emit the JSON, never both.
@@ -14432,7 +14432,7 @@ async def create_project_assistant(
         # right after "Token verified ✅"). Sentence-level match: connected
         # key's friendly name + an ask verb in the same sentence.
         _asked_connected = []
-        _askverbs = r"\b(attach|provide|enter|paste|share|add[ -]?token)\b"
+        _askverbs = r"\b(attached?|provided?|entered?|pasted?|shared?|confirmed?|verif(?:y|ied)|add[ -]?token)\b"
         for _k2 in sorted(_connected_set):
             _fr = re.escape(_k2.replace("_", " "))
             for _sent in re.split(r"[.!?\n]", _guard_corpus):
@@ -14442,7 +14442,38 @@ async def create_project_assistant(
 
         _guard_why = None
         _guard_msg = None
-        if _asked_connected:
+        # (b2) Persistence-ask suppressor: the model asking the user
+        # "backend storage or local storage?" — persistence is a PLATFORM
+        # decision (minimal backend budget: JSON-file storage), never a
+        # question.
+        _persistence_ask = bool(
+            re.search(r"\blocal\s*storage\b|\blocalstorage\b", _guard_corpus, re.I)
+            and re.search(r"\b(backend|server|database)\b", _guard_corpus, re.I)
+        )
+        _asked_connected = []
+        _askverbs = r"\b(attached?|provided?|entered?|pasted?|shared?|confirmed?|verif(?:y|ied)|add[ -]?token)\b"
+        for _k2 in sorted(_connected_set):
+            _fr = re.escape(_k2.replace("_", " "))
+            for _sent in re.split(r"[.!?\n]", _guard_corpus):
+                if re.search(_fr, _sent, re.I) and re.search(_askverbs, _sent, re.I):
+                    _asked_connected.append(_k2)
+                    break
+
+        _guard_why = None
+        _guard_msg = None
+        if _persistence_ask:
+            _guard_why = "persistence-ask: Backend-vs-LocalStorage question in prose"
+            _guard_msg = (
+                "PLATFORM DECISION CORRECTION: persistence is NOT a user "
+                "question. The platform persists user content server-side "
+                "with simple JSON-file storage per the minimal backend "
+                "budget. Do not ask Backend-vs-LocalStorage. Re-emit the "
+                "COMPLETE JSON without that question; if the Content "
+                "Library needs saving, the brief specifies the backend "
+                "endpoints (e.g. POST /api/library) with JSON-file storage. "
+                "Reply with the JSON only."
+            )
+        elif _asked_connected:
             _guard_why = f"re-asks for already-connected {_asked_connected}"
             _guard_msg = (
                 "PLATFORM CONTEXT CORRECTION: "
