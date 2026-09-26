@@ -14297,32 +14297,58 @@ async def create_project_assistant(
         _should_fire = bool(_unconnected_creds) or (
             _prose_ask and not _already
         )
-        if not _req_env_populated and _should_fire:
+        # (b) Re-ask suppressor: the model asking the user to attach a key
+        # that the platform context ALREADY lists as connected (qwen did it
+        # right after "Token verified ✅"). Sentence-level match: connected
+        # key's friendly name + an ask verb in the same sentence.
+        _asked_connected = []
+        _askverbs = r"\b(attach|provide|enter|paste|share|add[ -]?token)\b"
+        for _k2 in sorted(_connected_set):
+            _fr = re.escape(_k2.replace("_", " "))
+            for _sent in re.split(r"[.!?\n]", raw):
+                if re.search(_fr, _sent, re.I) and re.search(_askverbs, _sent, re.I):
+                    _asked_connected.append(_k2)
+                    break
+
+        _guard_why = None
+        _guard_msg = None
+        if _asked_connected:
+            _guard_why = f"re-asks for already-connected {_asked_connected}"
+            _guard_msg = (
+                "PLATFORM CONTEXT CORRECTION: "
+                f"{_asked_connected} already attached to this project and verified — "
+                "the platform context lists them as connected env keys. Do NOT ask "
+                "the user to attach or provide them again. Re-emit the COMPLETE JSON "
+                "treating those keys as connected (no required_env entry for them), "
+                "and adjust the reply text to reference them as already connected. "
+                "Reply with the JSON only."
+            )
+        elif not _req_env_populated and _should_fire:
             _detail = (
                 f"credential key(s) {sorted(_unconnected_creds)}" if _unconnected_creds
                 else "an API key / environment variable"
             )
-            logger.warning(
-                "[CREATE-ASSISTANT] env-popup guard: reply references %s but "
-                "required_env is empty — corrective re-ask", _detail,
+            _guard_why = f"reply references {_detail} but required_env empty"
+            _guard_msg = (
+                "SYSTEM-INTEGRITY CORRECTION: your response references "
+                f"{_detail} that the project needs, but your JSON's "
+                '"required_env" is empty — the input popup will NOT '
+                "appear and the user cannot provide the key. Do NOT claim "
+                "a credential is already connected unless the platform "
+                "context lists it. Re-emit the COMPLETE "
+                'JSON now, identical except "required_env" populated with one '
+                "object per missing key: "
+                '{"key": "<EXACT_KEY_NAME>", "label": "<short label>", '
+                '"question": "<one clear ask for the value>", "optional": false}. '
+                "Do not include keys the platform context already lists as "
+                "connected. Reply with the JSON only."
             )
-            convo.append({
-                "role": "user",
-                "content": (
-                    "SYSTEM-INTEGRITY CORRECTION: your response references "
-                    f"{_detail} that the project needs, but your JSON's "
-                    '"required_env" is empty — the input popup will NOT '
-                    "appear and the user cannot provide the key. Do NOT claim "
-                    "a credential is already connected unless the platform "
-                    "context lists it. Re-emit the COMPLETE "
-                    'JSON now, identical except "required_env" populated with one '
-                    "object per missing key: "
-                    '{"key": "<EXACT_KEY_NAME>", "label": "<short label>", '
-                    '"question": "<one clear ask for the value>", "optional": false}. '
-                    "Do not include keys the platform context already lists as "
-                    "connected. Reply with the JSON only."
-                ),
-            })
+        if _guard_msg:
+            logger.warning(
+                "[CREATE-ASSISTANT] env-popup guard: %s — corrective re-ask",
+                _guard_why,
+            )
+            convo.append({"role": "user", "content": _guard_msg})
             _corr = await client.chat_completion(
                 messages=convo, temperature=0.0, max_tokens=2000,
             )
