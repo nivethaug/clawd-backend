@@ -14265,6 +14265,65 @@ async def create_project_assistant(
         logger.error("[CREATE-ASSISTANT] LLM call failed: %s: %s", type(e).__name__, e)
         raise HTTPException(status_code=502, detail="Assistant backend error")
 
+    # ---- Env-popup integrity guard (model-agnostic self-heal) -------------
+    # Three models have now failed this the same way: the reply/brief
+    # references a credential the project needs, but required_env comes back
+    # empty — the input popup never renders and the customer cannot provide
+    # the key. Two failure shapes: prose narration without the payload
+    # ("provide your API key…" — Gemini) and silent omission (brief mentions
+    # the key token, required_env stays null — qwen). One corrective re-ask,
+    # then accept whatever returns (fail-open). Keys already connected are
+    # excluded — a brief may legitimately mention them as integration notes.
+    try:
+        _cred_keys = set(re.findall(
+            r"\b[A-Z][A-Z0-9_]{2,}_(?:API_KEY|TOKEN|SECRET|KEY)\b", raw))
+        _connected_set = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
+        _unconnected_creds = {k for k in _cred_keys if k not in _connected_set}
+        _req_env_populated = bool(re.search(r'"required_env"\s*:\s*\[\s*\{', raw))
+        _prose_ask = bool(
+            re.search(r"\b(api[_ -]?key|environment variable|env var)\b", raw, re.I)
+            and re.search(r"\b(provide|enter|paste|add|configure|share)\b", raw, re.I)
+        )
+        _already = re.search(r"already (connected|provided|configured|saved)", raw, re.I)
+        if not _req_env_populated and not _already and (_unconnected_creds or _prose_ask):
+            _detail = (
+                f"credential key(s) {sorted(_unconnected_creds)}" if _unconnected_creds
+                else "an API key / environment variable"
+            )
+            logger.warning(
+                "[CREATE-ASSISTANT] env-popup guard: reply references %s but "
+                "required_env is empty — corrective re-ask", _detail,
+            )
+            convo.append({
+                "role": "user",
+                "content": (
+                    "SYSTEM-INTEGRITY CORRECTION: your response references "
+                    f"{_detail} that the project needs, but your JSON's "
+                    '"required_env" is empty — the input popup will NOT '
+                    "appear and the user cannot provide the key. Re-emit the COMPLETE "
+                    'JSON now, identical except "required_env" populated with one '
+                    "object per missing key: "
+                    '{"key": "<EXACT_KEY_NAME>", "label": "<short label>", '
+                    '"question": "<one clear ask for the value>", "optional": false}. '
+                    "Do not include keys the platform context already lists as "
+                    "connected. Reply with the JSON only."
+                ),
+            })
+            _corr = await client.chat_completion(
+                messages=convo, temperature=0.0, max_tokens=2000,
+            )
+            _cu = client.get_usage(_corr)
+            for _k in usage_tot:
+                usage_tot[_k] += int(_cu.get(_k, 0) or 0)
+            try:
+                _craw = str((_corr["choices"][0]["message"] or {}).get("content") or "").strip()
+            except (KeyError, IndexError):
+                _craw = ""
+            if _craw:
+                raw = _craw
+    except Exception as _guard_err:
+        logger.warning("[CREATE-ASSISTANT] env-popup guard error (non-fatal): %s", _guard_err)
+
     usage = usage_tot
 
     try:
