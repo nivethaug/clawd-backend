@@ -3258,26 +3258,56 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
             return False
 
     def _domain_resolves(self, domain: str) -> bool:
-        """Check if domain resolves (DNS propagation check)."""
+        """Check if domain resolves PUBLICLY (DNS propagation check).
+
+        Queries public resolvers (1.1.1.1, 8.8.8.8) via dig — the VPS's
+        local resolver can see a fresh record long before customer networks
+        do, and customers may hold a cached negative (NXDOMAIN) answer from
+        queries made BEFORE the record existed. An authoritative empty
+        answer means not-yet-propagated (do NOT fall back to local, which
+        would false-pass). Local socket lookup is only used when dig is
+        unavailable.
+        """
         try:
+            import subprocess as _sp
+
+            dig_ok = False
+            for resolver in ("1.1.1.1", "8.8.8.8"):
+                try:
+                    r = _sp.run(
+                        ["dig", "+short", f"@{resolver}", domain, "A"],
+                        capture_output=True, text=True, timeout=8,
+                    )
+                    if r.returncode != 0:
+                        continue  # dig problem — try next, then local fallback
+                    dig_ok = True
+                    answer = (r.stdout or "").strip()
+                    if answer:
+                        logger.info(
+                            f"[DNS] ✓ {domain} resolves via {resolver}: "
+                            f"{answer.splitlines()[0]}"
+                        )
+                        return True
+                    logger.info(f"[DNS] {domain} not visible at {resolver} yet (not propagated)")
+                    return False  # authoritative empty answer — NOT propagated
+                except Exception:
+                    continue
+
+            if dig_ok:
+                return False
+
+            # dig unavailable — legacy local check (may pass before public
+            # propagation; better than failing verification entirely).
             import socket
-            
-            logger.info(f"[DNS] Checking if domain resolves: {domain}")
-            
-            # Simple DNS check with 5-second timeout
+            logger.info(f"[DNS] dig unavailable — local resolver check for {domain}")
             socket.setdefaulttimeout(5)
-            
             try:
                 socket.gethostbyname(domain)
-                logger.info(f"[DNS] ✓ Domain {domain} resolves successfully")
+                logger.info(f"[DNS] ✓ Domain {domain} resolves (local resolver fallback)")
                 return True
             except socket.gaierror:
                 logger.warning(f"[DNS] ⚠️ Domain {domain} does not resolve yet (may need more time)")
                 return False
-            except Exception as e:
-                logger.error(f"[DNS] ❌ DNS resolution error: {e}")
-                return False
-
         except Exception as e:
             logger.error(f"[DNS] ❌ DNS resolution check failed: {e}")
             return False
