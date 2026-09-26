@@ -14113,6 +14113,10 @@ INPUT COLLECTION TOOL — request_inputs: when you need a value from the user (e
 - NEVER claim a value is provided, attached, or connected unless the Live platform context explicitly says so. If the context lists it as MISSING REQUIRED, it is still missing — the user must fill the input field.
 - The JSON fields "required_tokens"/"required_env" are replaced by this tool — do not set them.
 
+BRIEF CONTENT RULES (what goes INTO the prompt you pass to propose_brief):
+- PERSISTENCE IS THE BACKEND: anything the user can save (drafts, library, settings, posts, lists, history) must persist through the BACKEND — FastAPI endpoints plus a simple store (JSON file or SQLite). NEVER prescribe localStorage/sessionStorage as the primary store for user content in the brief; localStorage is acceptable ONLY for ephemeral UI state (active tab, collapsed sidebar). The brief lists the persistence endpoints (e.g. GET/POST/PUT/DELETE /api/library).
+- NO SAMPLE DATA: the brief must not ask for demo/sample/mock content anywhere. The app ships with real save/load wired and honest empty states ("Nothing saved yet"). For features needing an external API: wire the REAL call (env key via os.getenv) when the key is connected; only when it is NOT connected may the brief defer that one integration to an edit session — and then it says so explicitly instead of prescribing sample text.
+
 BRIEF TOOL — propose_brief: when the idea is complete (type known, inputs collected or declined, name known), CALL propose_brief(kind, prompt, features, suggested_name) with the polished build prompt. The platform shows the confirmation card. Do NOT write the brief in your reply text and do NOT use the JSON "brief" field — your reply is just 1-2 sentences presenting it. A tool call and a final JSON reply must never be mixed in one turn: call the tool OR emit the JSON, never both.
 
 Output (STRICT — a single JSON object, no markdown fences, nothing before or after):
