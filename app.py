@@ -14275,14 +14275,22 @@ async def create_project_assistant(
     # then accept whatever returns (fail-open). Keys already connected are
     # excluded — a brief may legitimately mention them as integration notes.
     try:
+        # Detection corpus: raw reply text PLUS the collected brief. Models
+        # using native tool-calls (qwen) put the brief in propose_brief's
+        # ARGUMENTS, not the message content — scanning raw alone missed the
+        # credential token living in the brief prompt (live miss 2026-09-26
+        # 18:01: brief referenced OPENROUTER_API_KEY, no popup, guard silent).
+        _guard_corpus = raw + "\n" + str(collected_brief.get("prompt") or "")
+        _guard_corpus += " " + " ".join(
+            str(f) for f in (collected_brief.get("features") or []))
         _cred_keys = set(re.findall(
-            r"\b[A-Z][A-Z0-9_]{2,}_(?:API_KEY|TOKEN|SECRET|KEY)\b", raw))
+            r"\b[A-Z][A-Z0-9_]{2,}_(?:API_KEY|TOKEN|SECRET|KEY)\b", _guard_corpus))
         _connected_set = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
         _unconnected_creds = {k for k in _cred_keys if k not in _connected_set}
         _req_env_populated = bool(re.search(r'"required_env"\s*:\s*\[\s*\{', raw))
         _prose_ask = bool(
-            re.search(r"\b(api[_ -]?key|environment variable|env var)\b", raw, re.I)
-            and re.search(r"\b(provide|enter|paste|add|configure|share|connected|wire)\b", raw, re.I)
+            re.search(r"\b(api[_ -]?key|environment variable|env var)\b", _guard_corpus, re.I)
+            and re.search(r"\b(provide|enter|paste|add|configure|share|connected|wire)\b", _guard_corpus, re.I)
         )
         # "already connected" only suppresses the prose branch when the
         # platform context ACTUALLY lists connected keys — models have been
@@ -14291,7 +14299,7 @@ async def create_project_assistant(
         # panel). Token-level evidence always wins: an unconnected cred key
         # fires regardless of any claimed connection.
         _already = (
-            bool(re.search(r"already (connected|provided|configured|saved)", raw, re.I))
+            bool(re.search(r"already (connected|provided|configured|saved)", _guard_corpus, re.I))
             and bool(_connected_set)
         )
         _should_fire = bool(_unconnected_creds) or (
@@ -14305,7 +14313,7 @@ async def create_project_assistant(
         _askverbs = r"\b(attach|provide|enter|paste|share|add[ -]?token)\b"
         for _k2 in sorted(_connected_set):
             _fr = re.escape(_k2.replace("_", " "))
-            for _sent in re.split(r"[.!?\n]", raw):
+            for _sent in re.split(r"[.!?\n]", _guard_corpus):
                 if re.search(_fr, _sent, re.I) and re.search(_askverbs, _sent, re.I):
                     _asked_connected.append(_k2)
                     break
