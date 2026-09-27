@@ -14886,10 +14886,31 @@ async def create_project_assistant(
             )
 
         if _guard_msg:
-            logger.warning(
-                "[CREATE-ASSISTANT] env-popup guard: %s — corrective re-ask",
-                _guard_why,
-            )
+            # Kill-switch for the CHAIN (distinct from the judge-JEV layer at
+            # :1725): default ON — off only via env. Modes: on (default,
+            # corrective fires) | shadow (log the detection, ship the reply
+            # uncorrected) | off (silent). The old comment claimed this was
+            # env-disable-able but nothing read the var — the chain was
+            # hardwired on; now it's switchable with the same default.
+            _chain_mode = os.getenv("CREATE_ENV_GUARD_JEV", "on").strip().lower()
+            if _chain_mode in {"off", "0", "false", "no"}:
+                logger.info(
+                    "[CREATE-ASSISTANT] guard %s suppressed (chain off via env)",
+                    _guard_why,
+                )
+                _guard_msg = None
+            elif _chain_mode == "shadow":
+                logger.warning(
+                    "[CREATE-ASSISTANT] guard %s SHADOW — logged, no corrective",
+                    _guard_why,
+                )
+                _guard_msg = None
+            else:
+                logger.warning(
+                    "[CREATE-ASSISTANT] env-popup guard: %s — corrective re-ask",
+                    _guard_why,
+                )
+        if _guard_msg:
             convo.append({"role": "user", "content": _guard_msg})
             _corr = await client.chat_completion(
                 messages=convo, temperature=0.0, max_tokens=2000,
