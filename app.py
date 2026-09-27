@@ -14431,12 +14431,23 @@ async def create_project_assistant(
         # .env): same GLM model straight from api.z.ai with effort=low —
         # no OpenRouter shared-pool 429s. Fallback stays on OpenRouter so a
         # z.ai outage degrades to the proven path instead of a dead turn.
-        if os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai":
+        # Without ZAI_API_KEY the client would silently send the OpenRouter
+        # key to z.ai (401 every call, 12:36 live) — refuse the switch
+        # instead and stay on the normal primary.
+        if (
+            os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai"
+            and (os.getenv("ZAI_API_KEY") or "").strip()
+        ):
             from services.ai.openrouter_client import get_zai_client
             client = get_zai_client()
             logger.info(
                 "[CREATE-ASSISTANT] primary provider: direct z.ai (model=%s)", client.model)
         else:
+            if os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai":
+                logger.error(
+                    "[CREATE-ASSISTANT] CREATE_ASSISTANT_PROVIDER=zai but "
+                    "ZAI_API_KEY is empty/missing — staying on OpenRouter "
+                    "primary. Add the real key to .env and restart.")
             client = get_openrouter_client(model=_create_model)
         fallback_client = (
             get_openrouter_client(model=_create_fb)
