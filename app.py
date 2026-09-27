@@ -14874,7 +14874,13 @@ async def create_project_assistant(
             "DELIVERY ROUND: every gate is satisfied and the project is "
             "named. Reply with the COMPLETE JSON now — the entire polished "
             'build prompt inside the "brief" field (kind, prompt 120-400 '
-            "words, features, suggested_name) — and \"project_name\": \""
+            "words, features, suggested_name) with its REQUIRED sections: "
+            'a "Backend Contract" section (concrete relative /api/... '
+            "paths, method + payload per endpoint — never base URLs, never "
+            "localhost) and, when integrations were confirmed, an "
+            '"Integrations & external APIs" section naming each one, its '
+            "purpose, and the env key it reads via os.getenv — and "
+            "\"project_name\": \""
             + (ctx.project_name or "the user's stated name") + "\". "
             "No announcement, no questions, no credential narration, no "
             "storage questions. JSON only."
