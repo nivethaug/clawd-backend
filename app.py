@@ -14590,14 +14590,19 @@ async def create_project_assistant(
             re.search(r"\b(api[_ -]?key|api[_ -]?token|bot[_ -]?token|"
                       r"access[_ -]?token|environment variable|env var|"
                       r"add[_ -]?token)\b", _guard_corpus, re.I)
-            and re.search(r"\b(provide|enter|paste|add|configure|share|"
+            and re.search(r"\b(provide|enter|paste|add|attach|configure|share|"
                           r"connected|wire)\b", _guard_corpus, re.I)
         )
 
         # ---- dropped-in-consolidation computations (restored) -------------
-        # b2 support: connected key + ask verb in the same sentence
+        # b2 support: connected key + ask verb in the same sentence.
+        # Live miss 13:15: "please attach your OpenRouter API key using the
+        # 'Add Token' button" — (a) the verb search lacked re.I so the
+        # capitalized "Add Token" never matched, (b) 'attached?' matches only
+        # "attache"/"attached", never "attach". Both fixed here.
         _asked_connected = []
-        _askverbs = r"\b(attached?|provided?|entered?|pasted?|shared?|confirmed?|verif(?:y|ied)|add[ -]?token)\b"
+        _askverbs = (r"\b(attach(?:ed)?|provided?|entered?|pasted?|shared?|"
+                     r"confirmed?|verif(?:y|ied)|add[ -]?token)\b")
         for _k2 in sorted(_connected_set):
             _fr = re.escape(_k2.replace("_", " "))
             for _sent in re.split(r"[.!?\n]", _guard_corpus):
@@ -14722,12 +14727,22 @@ async def create_project_assistant(
                 "Reply with the JSON only."
             )
         # ---- b5: brief-promise -----------------------------------------------
-        elif re.search(
+        # Also catches the "Here is the build brief" presentation WITH NO
+        # brief behind it (13:14 live: announcement text, no tool call, no
+        # JSON brief, no confirm card — flow stalled). The gates make it
+        # safe for the legitimate presentation: a real propose_brief call
+        # fills collected_brief, a JSON delivery matches the "brief": {.
+        elif (
+            not collected_brief
+            and not re.search(r'"brief"\s*:\s*\{', raw)
+            and re.search(
                 r"(?:let me|i can|i'?ll|i will|now i can)\s+"
                 r"(?:now\s+|then\s+|go ahead and\s+)?"
                 r"(?:put together|prepare|draft|write|create|build|generate)"
-                r"[^.]*brief",
-                _guard_corpus, re.I):
+                r"[^.]*brief"
+                r"|\bhere(?:'s| is)\b[^.]{0,60}\bbrief\b",
+                _guard_corpus, re.I)
+        ):
             _guard_why = "brief-promise: model announced the brief instead of producing it"
             _guard_msg = (
                 "ACTION CORRECTION: do NOT promise the brief for later — "
