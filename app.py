@@ -14810,6 +14810,46 @@ async def create_project_assistant(
                 _craw = ""
             if _craw:
                 raw = _craw
+            # Stubborn brief-announcement: one corrective wasn't enough
+            # (2:41 live: "Here's your build brief:" -> brief:null shipped,
+            # project_name null too). Second chance on the FALLBACK model
+            # (glm-5.3-flash, proven tool loop) — brief-promise shape only,
+            # and only when still nothing was delivered.
+            if (_guard_why and _guard_why.startswith("brief-promise")
+                    and fallback_client is not None
+                    and not re.search(r'"brief"\s*:\s*\{', raw)
+                    and not collected_brief):
+                _fb_msg = (
+                    "FINAL DELIVERY CORRECTION: your last two replies "
+                    "ANNOUNCED the brief without producing it. Reply with "
+                    "the COMPLETE JSON now — the entire polished build "
+                    "prompt inside the \"brief\" field (kind, prompt, "
+                    "features, suggested_name) — and echo the project "
+                    "name in \"project_name\". No announcement text. "
+                    "JSON only."
+                )
+                convo.append({"role": "user", "content": _fb_msg})
+                try:
+                    _fb = await fallback_client.chat_completion(
+                        messages=convo, temperature=0.0, max_tokens=2500,
+                    )
+                    _fbu = fallback_client.get_usage(_fb)
+                    for _k in usage_tot:
+                        usage_tot[_k] += int(_fbu.get(_k, 0) or 0)
+                    _fbraw = str(
+                        (_fb["choices"][0]["message"] or {}).get("content") or ""
+                    ).strip()
+                    if _fbraw:
+                        raw = _fbraw
+                    logger.info(
+                        "[CREATE-ASSISTANT] brief-promise fallback-model retry fired (%s)",
+                        "delivered" if re.search(r'"brief"\s*:\s*\{', raw) else "still empty",
+                    )
+                except Exception as _fb_err:
+                    logger.warning(
+                        "[CREATE-ASSISTANT] fallback-model brief retry failed (non-fatal): %s",
+                        _fb_err,
+                    )
     except Exception as _guard_err:
         logger.warning("[CREATE-ASSISTANT] env-popup guard error (non-fatal): %s", _guard_err)
 
