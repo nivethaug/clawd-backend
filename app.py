@@ -14357,7 +14357,12 @@ async def create_project_assistant(
         _key for _, _key in _CREATE_PROVIDER_WORDS
     } | {"GROQ_API_KEY"}
     _create_ai_provider_pending = (
-        bool(re.search(r"\b(?:ai|a\.i\.)\b", _create_user_corpus))
+        # AI-intent variants: ai / A.I. / A.I / A/i / llm / gpt / artificial
+        # intelligence — "A/i" (22:00 live) slipped the a\.i\. pattern and
+        # the brief shipped over the pending provider question.
+        bool(re.search(
+            r"\b(?:ai|a\.i\.?|a[/\\]i|llm|gpt|artificial intelligence)\b",
+            _create_user_corpus))
         and not any(k in _create_connected_upper for k in _all_provider_keys)
         and not _create_unconnected_provider_keys
         and not re.search(
