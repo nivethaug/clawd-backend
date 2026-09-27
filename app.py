@@ -14346,16 +14346,48 @@ async def create_project_assistant(
         and _key not in _create_connected_upper
     }
     _create_unconnected_provider = bool(_create_unconnected_provider_keys)
+    # AI WITHOUT PROVIDER (21:52 live): an AI feature with NO named provider
+    # passes every hard gate — nothing tracked, nothing injectable — so the
+    # READY-TO-BRIEF nudge force-briefed over the unanswered provider
+    # question, and the model's "I've opened the Add-Token input" was pure
+    # narration (no provider named -> injection can't fire either). While an
+    # AI-intent idea has NO provider key connected and NO provider named,
+    # the provider question is an ACTIVE gate.
+    _all_provider_keys = {
+        _key for _, _key in _CREATE_PROVIDER_WORDS
+    } | {"GROQ_API_KEY"}
+    _create_ai_provider_pending = (
+        bool(re.search(r"\b(?:ai|a\.i\.)\b", _create_user_corpus))
+        and not any(k in _create_connected_upper for k in _all_provider_keys)
+        and not _create_unconnected_provider_keys
+        and not re.search(
+            r"\b(?:no ai|without ai|skip the ai|drop the ai|not using ai|don'?t (?:need|want) ai)\b",
+            _create_user_corpus)
+        and not ctx.prompt_confirmed
+    )
     # Injection set (deterministic required_tokens fix-up): narrower than the
     # suppression set — "resend" is a common verb, popping a Resend key ask on
     # "please resend that" would be a user-visible false positive.
     _create_injectable_keys = _create_unconnected_provider_keys - {"RESEND_API_KEY"}
     _create_ready_to_brief = False
+    if _create_ai_provider_pending:
+        ctx_lines.append(
+            "- AI FEATURE WITHOUT PROVIDER — the idea needs an AI key, no provider "
+            "is named, and none is connected. Ask the user NOW which provider they "
+            "prefer (OpenAI, Anthropic, Google Gemini, OpenRouter, Groq). NEVER say "
+            "an input 'is open' or 'just opened' unless you actually emit that "
+            "provider's key in \"required_tokens\" IN THE SAME REPLY — a claim "
+            "without the emission opens nothing. After the user names a provider, "
+            "emit its key in required_tokens (the popup then really opens). No "
+            "brief until a provider key is connected or the user explicitly "
+            "declines the AI feature."
+        )
     if (
         ctx.detected_kind
         and not ctx.missing_required
         and not _create_chat_pending
         and not _create_unconnected_provider
+        and not _create_ai_provider_pending
         and not _create_edit_intent
         # regenerate turns KEEP the flag armed: a brief existed to regenerate,
         # so the hard gates were satisfied by definition. Suppressing it left
