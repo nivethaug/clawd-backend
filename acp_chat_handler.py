@@ -2343,6 +2343,7 @@ Project Root: `{self.project_path}`
 **Project Details:**
 - Frontend URL: `https://{self.frontend_domain}`
 - Backend URL: `https://{self.backend_domain}`
+- API wiring: the frontend's `src/lib/api-config.ts` already points every `getApiUrl("/api/...")` call at the Backend URL above (the `{domain}` placeholder was auto-replaced when the domain was assigned). Route ALL new frontend fetches through it — never relative `/api` paths (they 404 on the frontend domain) and never a hardcoded base URL of your own.
 
 ---
 
