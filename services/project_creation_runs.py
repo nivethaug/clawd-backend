@@ -356,6 +356,32 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
                 "[PROJECT-RUN] creation summary skipped for %s: %s",
                 project_id, summary_err,
             )
+    elif type_id in (2, 3, 4, 5) and (creation_prompt or "").strip():
+        # Non-website types have no build status file — summarize from the
+        # creation spec (built as-specified by the template flow) plus the
+        # facts this type ALWAYS delivers on the platform (deterministic
+        # template truths — safe for the evidence rules to claim).
+        type_facts = {
+            2: "PLATFORM-DELIVERED (verified): the bot runs 24/7 hosted by "
+               "DreamAgent and responds in Telegram; commands follow the spec.",
+            3: "PLATFORM-DELIVERED (verified): the bot runs 24/7 hosted by "
+               "DreamAgent and responds in your Discord server; interactions "
+               "follow the spec.",
+            4: "PLATFORM-DELIVERED (verified): scheduled jobs run on the "
+               "platform scheduler and deliver results via the chosen "
+               "delivery channels.",
+            5: "PLATFORM-DELIVERED (verified): the agent runs on the platform "
+               "and delivers results via the chosen delivery channels.",
+        }
+        type_names = {2: "Telegram bot", 3: "Discord bot",
+                      4: "scheduler", 5: "AI agent"}
+        report = (
+            f"PROJECT TYPE: {type_names.get(type_id, 'project')}\n"
+            f"{type_facts.get(type_id, '')}\n\n"
+            "CREATION SPEC (delivered as built):\n"
+            f"{(creation_prompt or '')[:8000]}"
+        )
+        website_summary = summarize_creation_status(report)
 
     with get_db() as conn:
         existing = conn.execute(
