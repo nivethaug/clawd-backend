@@ -293,27 +293,46 @@ async def summarize_creation_status_async(status_text: str) -> Optional[str]:
         # tokens (600/600, empty text -> static fallback), and a fresh
         # per-call client also sidesteps the asyncio.run loop-staleness
         # class entirely. CREATION_SUMMARY_MODEL overrides if needed.
+        # Fallback chain mirrors create chat (10:22 live: qwen 429 on the
+        # shared pool — without a fallback the summary silently degraded
+        # to the static variant whenever that happened).
         import os as _os
         _summary_model = _os.getenv(
             "CREATION_SUMMARY_MODEL", "qwen/qwen3.7-flash")
-        client = get_openrouter_client(model=_summary_model)
-        response = await asyncio.wait_for(
-            client.chat_completion(
-                messages=[
-                    {"role": "system", "content": _CREATION_SUMMARY_SYSTEM_PROMPT},
-                    {"role": "user", "content": text[:12000]},
-                ],
-                temperature=0.3,
-                # 1500 not 600: glm-5.3-flash sometimes burns the ENTIRE
-                # budget on reasoning tokens (observed 600/600 reasoning,
-                # zero visible text -> empty summary -> static fallback).
-                # Headroom keeps the message alive even at 2x reasoning.
-                max_tokens=1500,
-            ),
-            timeout=25,
-        )
-        friendly = (client.get_text_response(response) or "").strip()
-        return friendly or None
+        _summary_fb = _os.getenv(
+            "CREATION_SUMMARY_FALLBACK_MODEL", "z-ai/glm-5.3-flash")
+        for _model in filter(None, dict.fromkeys([_summary_model, _summary_fb])):
+            try:
+                client = get_openrouter_client(model=_model)
+                response = await asyncio.wait_for(
+                    client.chat_completion(
+                        messages=[
+                            {"role": "system", "content": _CREATION_SUMMARY_SYSTEM_PROMPT},
+                            {"role": "user", "content": text[:12000]},
+                        ],
+                        temperature=0.3,
+                        # 1500 not 600: glm-5.3-flash sometimes burns the
+                        # ENTIRE budget on reasoning tokens (observed 600/600
+                        # reasoning, zero visible text -> empty summary ->
+                        # static fallback). Headroom keeps the message alive
+                        # even at 2x reasoning.
+                        max_tokens=1500,
+                    ),
+                    timeout=25,
+                )
+                friendly = (client.get_text_response(response) or "").strip()
+                if friendly:
+                    if _model != _summary_model:
+                        logger.info(
+                            "[CREATION-SUMMARY] served by fallback %s", _model)
+                    return friendly
+                logger.warning(
+                    "[CREATION-SUMMARY] model %s returned empty text", _model)
+            except Exception as _me:
+                logger.warning(
+                    "[CREATION-SUMMARY] model %s failed: %s", _model, _me)
+                continue
+        return None
     except Exception as e:
         logger.warning("[CREATION-SUMMARY] LLM rewrite failed: %s", e)
         return None
