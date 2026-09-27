@@ -14310,21 +14310,31 @@ async def create_project_assistant(
     _create_user_corpus = " ".join(
         m.content for m in request.messages if m.role == "user"
     ).lower()
-    _create_unconnected_provider = any(
-        re.search(rf"\b{_kw}\b", _create_user_corpus)
-        and _key not in _create_connected_upper
-        for _kw, _key in (
-            ("openrouter", "OPENROUTER_API_KEY"),
-            ("openai", "OPENAI_API_KEY"),
-            ("anthropic", "ANTHROPIC_API_KEY"),
-            ("claude", "ANTHROPIC_API_KEY"),
-            ("gemini", "GEMINI_API_KEY"),
-            ("serper", "SERPER_API_KEY"),
-            ("resend", "RESEND_API_KEY"),
-            ("stripe", "STRIPE_SECRET_KEY"),
-            ("coingecko", "COINGECKO_API_KEY"),
-        )
+    # Provider keywords → env key. Suppression set is broad (a false hit only
+    # delays the nudge); the INJECTION set below is narrower because injecting
+    # a token ask is user-visible — "resend" (verb) must not pop a Resend key.
+    _CREATE_PROVIDER_WORDS = (
+        ("openrouter", "OPENROUTER_API_KEY"),
+        ("openai", "OPENAI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("claude", "ANTHROPIC_API_KEY"),
+        ("gemini", "GEMINI_API_KEY"),
+        ("serper", "SERPER_API_KEY"),
+        ("resend", "RESEND_API_KEY"),
+        ("stripe", "STRIPE_SECRET_KEY"),
+        ("coingecko", "COINGECKO_API_KEY"),
     )
+    _create_unconnected_provider_keys = {
+        _key
+        for _kw, _key in _CREATE_PROVIDER_WORDS
+        if re.search(rf"\b{_kw}\b", _create_user_corpus)
+        and _key not in _create_connected_upper
+    }
+    _create_unconnected_provider = bool(_create_unconnected_provider_keys)
+    # Injection set (deterministic required_tokens fix-up): narrower than the
+    # suppression set — "resend" is a common verb, popping a Resend key ask on
+    # "please resend that" would be a user-visible false positive.
+    _create_injectable_keys = _create_unconnected_provider_keys - {"RESEND_API_KEY"}
     if (
         ctx.detected_kind
         and not ctx.missing_required
@@ -14600,13 +14610,21 @@ async def create_project_assistant(
             and re.search(r"\b(backend|server|database)\b", _guard_corpus, re.I)
         )
         # env-popup trigger: unconnected credential tokens OR a prose ask
-        # that isn't a legitimate already-connected mention
+        # that isn't a legitimate already-connected mention. Keys the
+        # platform is about to inject deterministically (provider named by
+        # the user, not connected) are EXCLUDED — the input field WILL open,
+        # so narration around it is correct behavior, not a miss (07:29 live
+        # run burned its corrective round exactly here).
         _already = (
             bool(re.search(r"already (connected|provided|configured|saved)", _guard_corpus, re.I))
             and bool(_connected_set)
         )
-        _should_fire = bool(_unconnected_creds) or (
+        _platform_inject = {
+            k for k in _create_injectable_keys if k not in _connected_set}
+        _rest_creds = _unconnected_creds - _platform_inject
+        _should_fire = bool(_rest_creds) or (
             _prose_ask and not _already
+            and bool(_rest_creds or not _platform_inject)
         )
 
         # ---- b6: false-connected-claim (highest priority) ------------------
@@ -14997,6 +15015,32 @@ async def create_project_assistant(
         if _e["key"] not in {p["key"] for p in (required_env or [])}:
             required_env = (required_env or []) + [_e]
     _connected = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
+    # Deterministic provider-key injection: the platform KNOWS the user's
+    # text names a provider whose key isn't connected (same detector the
+    # nudge suppresses on and the guard skips). Waiting for the model to
+    # emit it burned a corrective round every fresh session (07:24 b6
+    # false-claim, 07:29 narration — popup not opening on the first reply).
+    # Injecting here means the Add-Token input ALWAYS opens on the turn the
+    # need is named, model cooperation optional.
+    _CREATE_PROVIDER_LABELS = {
+        "OPENROUTER_API_KEY": "OpenRouter Token",
+        "OPENAI_API_KEY": "OpenAI API Key",
+        "ANTHROPIC_API_KEY": "Anthropic API Key",
+        "GEMINI_API_KEY": "Gemini API Key",
+        "SERPER_API_KEY": "Serper API Key",
+        "STRIPE_SECRET_KEY": "Stripe Secret Key",
+        "COINGECKO_API_KEY": "CoinGecko API Key",
+    }
+    _tok_keys_inj = {t["key"] for t in (required_tokens or [])}
+    for _pk in sorted(_create_injectable_keys):
+        if _pk in _CREATE_PROVIDER_LABELS and _pk not in _tok_keys_inj:
+            required_tokens = (required_tokens or []) + [
+                {"key": _pk, "label": _CREATE_PROVIDER_LABELS[_pk]}
+            ]
+            logger.info(
+                "[CREATE-ASSISTANT] injected required token %s "
+                "(provider named by user, not connected)", _pk,
+            )
     _kind_eff = kind or (ctx.detected_kind or "")
     if _kind_eff not in ("website", "discord", "telegram"):
         _channel_token_asks = {
