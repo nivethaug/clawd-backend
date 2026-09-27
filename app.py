@@ -14316,6 +14316,7 @@ async def create_project_assistant(
     _CREATE_PROVIDER_WORDS = (
         ("openrouter", "OPENROUTER_API_KEY"),
         ("openai", "OPENAI_API_KEY"),
+        ("chatgpt", "OPENAI_API_KEY"),
         ("anthropic", "ANTHROPIC_API_KEY"),
         ("claude", "ANTHROPIC_API_KEY"),
         ("gemini", "GEMINI_API_KEY"),
