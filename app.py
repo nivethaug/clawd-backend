@@ -14285,6 +14285,39 @@ async def create_project_assistant(
             "- USER UI CHOICES (authoritative — put these in the brief's "
             "Backend section verbatim): " + choices
         )
+    # READY-TO-BRIEF nudge: the 07:19:55 live run showed the model ANNOUNCING
+    # the brief ("let me put together...") on the exact turn the name arrived —
+    # it had no per-turn signal that every gate just flipped satisfied (rule 8
+    # is static; the name lands in ctx only AFTER the model echoes it, so a
+    # name-gated line would fire a turn late). Trigger is name-independent;
+    # the text handles both name states.
+    _create_chat_pending = any(
+        isinstance(e, dict)
+        and str(e.get("key", "")).strip().upper() not in _CREATE_CHOICE_KEYS
+        and not e.get("optional")
+        for e in (ctx.pending_env or [])
+    )
+    if (
+        ctx.detected_kind
+        and not ctx.missing_required
+        and not _create_chat_pending
+        and not ctx.regenerate
+        and not ctx.prompt_confirmed
+    ):
+        if ctx.project_name:
+            ctx_lines.append(
+                "- READY TO BRIEF — ALL hard gates satisfied (type known, no missing "
+                f"tokens/env keys, name set: '{ctx.project_name}'). Your reply THIS TURN "
+                "must CALL propose_brief with the complete build prompt. Do NOT announce, "
+                "promise, or describe the brief in text; no further questions."
+            )
+        else:
+            ctx_lines.append(
+                "- READY TO BRIEF — all hard gates satisfied EXCEPT the project name "
+                "(context: NOT SET). If the user's latest message names the project, this "
+                "reply MUST call propose_brief using exactly that name. Otherwise ask ONLY "
+                "the name question. Never announce or promise the brief either way."
+            )
     if ctx.regenerate:
         ctx_lines.append("- the user asked for a regenerated prompt: produce a fresh alternative brief now")
     elif ctx.prompt_confirmed:
