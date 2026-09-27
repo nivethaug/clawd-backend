@@ -2009,6 +2009,12 @@ Step 3: mcp__chrome-devtools__close_page
 ```
 **Pass**: `api.called === true`, `api.status === 200`, `api.hasData === true`, `ui.visibleCount > 0`, `binding === "PASS"`.
 Elements existing in the DOM after the API call is NOT enough — at least one bound UI element must be visible and on-screen. `binding` now requires visibility, not just presence.
+
+**REAL-DATA ROUND-TRIP (mandatory for backend/data-integration tasks — 15:07 live false positive: backend curl-200s were reported as "all endpoints work live" while the app itself showed no data and generation failed):**
+- A fresh backend starts with an EMPTY store — reading it proves nothing. FIRST create a real record through the app's own flow (submit the form / trigger the save action from the page), THEN run the intercept check above and require the record YOU created to be in the response and rendered in the UI.
+- `hasData` must be true because of data you just created in this verification — not because of anything pre-existing.
+- For AI-generation endpoints: quote a snippet of the ACTUAL model output in your final reply. A canned/mock/cached string is a FAILED verification, never a passed one. If the provider key rejects a model, probe alternatives and wire one that works — do not ship a mock.
+- Backend-only checks (curl to the backend domain, local unit calls) are NEVER sufficient for these tasks — the pass condition is the FRONTEND page on the live domain completing the round-trip.
  
 ---
  
@@ -2089,13 +2095,14 @@ curl -s -o /dev/null -w "%{{http_code}}" https://{self.frontend_domain}/TARGET_P
      - If it succeeds → verification complete → respond to user.
      - If it fails → go to step 4.
 4. **Fall back to curl** on the live URL — check pages return 200.
-   - If curl returns 200 → verification complete → respond to user.
+   - If curl returns 200 → the SITE IS UP. For Tier 1/2 tasks (visual/structural) that is enough.
+   - ⚠️ **For Tier 3 tasks (API/data integration) curl is NOT verification** — it only proves the pages serve. Report honestly: "site is up; the data round-trip could not be verified because the browser check failed — here is what I confirmed and what remains unverified." NEVER say "verified", "all endpoints work", or "changes are ready" for a data task on curl evidence alone.
 5. **STOP.** Do NOT loop. Do NOT retry. Do NOT re-read files.
 
 **Max 1 verification attempt total** — either Chrome DevTools OR curl, not both unless Chrome fails.
 After verification (successful or failed) → respond to the user immediately.
 
-If Chrome DevTools fails 1 time, STOP retrying. Use curl to confirm the site is up, then tell the user the changes are live. Do NOT loop on Chrome retries.
+If Chrome DevTools fails 1 time, STOP retrying. Use curl to confirm the site is up, then tell the user the changes are live WITH the honest caveat above for data tasks. Do NOT loop on Chrome retries.
 
 {design_verify_section}
 ---
@@ -2116,6 +2123,9 @@ If Chrome DevTools fails 1 time, STOP retrying. Use curl to confirm the site is 
 ❌ NEVER try to run the backend locally to test — it's already running on the server via PM2
 ❌ NEVER rely on code review alone — ACTUAL testing is required
 ❌ NEVER test on localhost — always test on the LIVE site only
+❌ NEVER recycle verification sentences — every "verified/working/live" claim in your final reply must be written from THIS turn's latest test evidence. If a sentence could have been written before this phase's changes existed (e.g. "empty state ready" reused from the UI phase), rewrite it from the current state (15:20 live false positive: a stale UI-phase line was pasted into the backend-phase wrap-up)
+❌ NEVER claim "all endpoints work" from backend-only evidence (curl to the backend domain, local calls) when the task was data integration — the frontend round-trip is the pass condition
+❌ NEVER report a mock, canned, or cached response as a working AI/external integration — quote the real output or report the check failed
 {design_screenshot_rules}
  
 ## ✅ REQUIRED WORKFLOW (NO EXCEPTIONS)
