@@ -14240,8 +14240,12 @@ async def create_project_assistant(
         ctx_lines.append(f"- bot token verified: {'yes' if ctx.bot_token_verified else 'no'}")
     if ctx.connected_env_names:
         ctx_lines.append(
-            "- connected env keys (already attached to this project): "
+            "- CONNECTED INTEGRATIONS (by name, already attached to this "
+            "project and VERIFIED — available for immediate use): "
             + ", ".join(ctx.connected_env_names)
+            + ". NEVER ask the user to attach, paste, confirm, or provide "
+            "any of these — they are connected. If a feature needs one, "
+            "treat it as configured and say so in one line."
         )
     if ctx.pending_env:
         pending_items = ", ".join(
