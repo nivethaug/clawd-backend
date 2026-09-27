@@ -14296,9 +14296,8 @@ async def create_project_assistant(
         _mc = str(_m.get("content") or "")
         _mt = [t.get("function", {}).get("name") for t in (_m.get("tool_calls") or [])]
         logger.info(
-            "[CREATE-LLM] msg[%d] role=%s chars=%d tools=%s head=%r",
-            _mi, _m.get("role"), len(_mc), _mt or "-",
-            _mc[:160].replace("\n", " "),
+            "[CREATE-LLM] msg[%d] role=%s chars=%d tools=%s content=%r",
+            _mi, _m.get("role"), len(_mc), _mt or "-", _mc,
         )
     collected_tokens: List[Dict[str, str]] = []
     collected_env: List[Dict[str, Any]] = []
