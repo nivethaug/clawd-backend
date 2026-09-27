@@ -14281,7 +14281,20 @@ async def create_project_assistant(
                 getattr(request, "pending_env", None),
                 getattr(request, "missing_required", None),
                 ctx.connected_env_names, ctx.bot_token_verified)
-    system_prompt = _CREATE_ASSISTANT_SYSTEM + "\n\nLive platform context:\n" + "\n".join(ctx_lines)
+    # SPLIT PROMPT (prompt-cache): the system message carries the STATIC
+    # guidelines only — byte-identical every turn, so OpenRouter's prompt
+    # cache hits all ~4.2K tokens of it on every call. The per-turn "Live
+    # platform context" (connected integrations, awaited keys, UI choices)
+    # rides as a trailing user message instead: inside the system prompt it
+    # invalidated the whole cached prefix whenever any context line changed
+    # (logs showed cached_tokens flipping 4480 <-> 0 turn to turn). End
+    # position = static system + untouched history prefix stay cacheable.
+    system_prompt = _CREATE_ASSISTANT_SYSTEM
+    _ctx_user_msg = (
+        "Live platform context (injected by the platform — not written by "
+        "the user). Reply to the conversation above using this context:\n"
+        + "\n".join(ctx_lines)
+    )
 
     # Tool loop: the model may call request_inputs to pop input fields; each
     # call gets a ground-truth tool result, then it replies. Max 3 rounds;
@@ -14289,7 +14302,11 @@ async def create_project_assistant(
     _user_said = " " + " ".join(
         m.content for m in request.messages if m.role == "user"
     ).lower() + " "
-    convo: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}] + list(history)
+    convo: List[Dict[str, Any]] = (
+        [{"role": "system", "content": system_prompt}]
+        + list(history)
+        + [{"role": "user", "content": _ctx_user_msg}]
+    )
 
     # TURN TRACE: every message sent to the LLM this turn (role, size, head)
     for _mi, _m in enumerate(convo):
