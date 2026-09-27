@@ -14471,6 +14471,31 @@ async def create_project_assistant(
                           r"connected|wire)\b", _guard_corpus, re.I)
         )
 
+        # ---- dropped-in-consolidation computations (restored) -------------
+        # b2 support: connected key + ask verb in the same sentence
+        _asked_connected = []
+        _askverbs = r"\b(attached?|provided?|entered?|pasted?|shared?|confirmed?|verif(?:y|ied)|add[ -]?token)\b"
+        for _k2 in sorted(_connected_set):
+            _fr = re.escape(_k2.replace("_", " "))
+            for _sent in re.split(r"[.!?\n]", _guard_corpus):
+                if re.search(_fr, _sent, re.I) and re.search(_askverbs, _sent, re.I):
+                    _asked_connected.append(_k2)
+                    break
+        # persistence question ("backend storage or local storage?")
+        _persistence_ask = bool(
+            re.search(r"\blocal\s*storage\b|\blocalstorage\b", _guard_corpus, re.I)
+            and re.search(r"\b(backend|server|database)\b", _guard_corpus, re.I)
+        )
+        # env-popup trigger: unconnected credential tokens OR a prose ask
+        # that isn't a legitimate already-connected mention
+        _already = (
+            bool(re.search(r"already (connected|provided|configured|saved)", _guard_corpus, re.I))
+            and bool(_connected_set)
+        )
+        _should_fire = bool(_unconnected_creds) or (
+            _prose_ask and not _already
+        )
+
         # ---- b6: false-connected-claim (highest priority) ------------------
         _claim_ref = _claim_claim.search(_guard_corpus)
         _guard_why = None
@@ -14503,6 +14528,19 @@ async def create_project_assistant(
                 "(no required_env entry for them), and adjust the reply text "
                 "to reference them as already connected. Reply with the JSON "
                 "only."
+            )
+        # ---- b2: persistence-ask ----------------------------------------------
+        elif _persistence_ask:
+            _guard_why = "persistence-ask: Backend-vs-LocalStorage question in prose"
+            _guard_msg = (
+                "PLATFORM DECISION CORRECTION: persistence is NOT a user "
+                "question. The platform persists user content server-side "
+                "with simple JSON-file storage per the minimal backend "
+                "budget. Do not ask Backend-vs-LocalStorage. Re-emit the "
+                "COMPLETE JSON without that question; if the Content "
+                "Library needs saving, the brief specifies the backend "
+                "endpoints (e.g. POST /api/library) with JSON-file storage. "
+                "Reply with the JSON only."
             )
         # ---- b3: picker-prose ------------------------------------------------
         elif re.search(
