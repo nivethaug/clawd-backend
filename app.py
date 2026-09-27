@@ -14116,7 +14116,8 @@ def _collect_request_inputs(
                 continue
             env_item = {
                 "key": key, "label": label, "question": question,
-                "optional": False,
+                # optional: pickers never block the brief (deadlock 11:06)
+                "optional": True,
                 "type": "pages" if key == "REAL_DATA_PAGES" else "choice",
                 "options": opts,
             }
@@ -14791,6 +14792,10 @@ async def create_project_assistant(
                     if _opts:
                         _item["type"] = _itype
                         _item["options"] = _opts
+                        # optional=True: pickers are FINAL-SETUP, never a
+                        # brief gate — early emission must not block the
+                        # brief card (invisible-picker deadlock 11:06).
+                        _item["optional"] = True
                         if _itype == "pages":
                             _item["max"] = max(1, min(int(item.get("max") or 2), 2))
                 parsed_env.append(_item)
