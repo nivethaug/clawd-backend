@@ -44,17 +44,26 @@ class OpenRouterClient:
         self,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
+        base_url: Optional[str] = None,
     ):
         """
-        Initialize OpenRouter client.
+        Initialize OpenRouter-compatible chat client.
 
         Args:
-            api_key: OpenRouter API key (defaults to OPENROUTER_API_KEY env var)
+            api_key: API key (defaults to OPENROUTER_API_KEY env var)
             model: Model name (defaults to PROMPT_ASSISTANT_MODEL env var)
+            base_url: OpenAI-compatible base URL override. Direct Z.ai
+                (https://api.z.ai/api/paas/v4) speaks the same chat/
+                completions shape, accepts reasoning.effort, and takes a
+                ZAI_API_KEY — lets create-chat bypass OpenRouter's shared
+                pool entirely.
         """
         self.api_key = api_key or OPENROUTER_API_KEY
         self.model = model or PROMPT_ASSISTANT_MODEL
-        self.api_base = OPENROUTER_BASE_URL.rstrip("/")
+        self.api_base = (base_url or OPENROUTER_BASE_URL).rstrip("/")
+        # Log tag follows the endpoint so direct-z.ai lines are greppable
+        # separately from OpenRouter lines.
+        self._tag = "ZAI-CLIENT" if "z.ai" in self.api_base else "OPENROUTER-CLIENT"
         self._client: Optional[httpx.AsyncClient] = None
         # Loop the cached client was created on. asyncio.run() callers
         # (creation worker's sync wrappers) close their loop on exit without
@@ -64,7 +73,7 @@ class OpenRouterClient:
         self._client_loop = None
 
         if not self.api_key:
-            logger.warning("[OPENROUTER-CLIENT] OPENROUTER_API_KEY not configured - API calls will fail")
+            logger.warning("[%s] API key not configured - API calls will fail", self._tag)
 
     def _headers(self) -> Dict[str, str]:
         headers = {
@@ -171,7 +180,7 @@ class OpenRouterClient:
         )
         attempts = max(1, int(max_retries if max_retries is not None else MAX_RETRIES))
         logger.debug(
-            "[OPENROUTER-CLIENT] Calling OpenRouter with %s messages, model=%s, tools=%s, attempts=%s",
+            "[%s] Calling chat API with %s messages, model=%s, tools=%s, attempts=%s", self._tag,
             len(messages),
             self.model,
             len(tools or []),
@@ -194,12 +203,12 @@ class OpenRouterClient:
                 usage = data.get("usage", {})
 
                 logger.info(
-                    "[OPENROUTER-CLIENT] Response received in %sms (model=%s, tokens=%s)",
+                    "[%s] Response received in %sms (model=%s, tokens=%s)", self._tag,
                     latency_ms,
                     data.get("model", self.model),
                     usage,
                 )
-                logger.debug(f"[OPENROUTER-CLIENT] Full response: {json.dumps(data, indent=2)}")
+                logger.debug(f"[{self._tag}] Full response: {json.dumps(data, indent=2)}")
                 return data
 
             except httpx.TimeoutException as e:
@@ -212,14 +221,14 @@ class OpenRouterClient:
                 body = e.response.text
 
                 if status_code in {401, 403}:
-                    logger.error("[OPENROUTER-CLIENT] Invalid or unauthorized API key: HTTP %s", status_code)
+                    logger.error("[%s] Invalid or unauthorized API key: HTTP %s", self._tag, status_code)
                     raise
 
                 if status_code == 429:
-                    logger.warning("[OPENROUTER-CLIENT] Rate limited on attempt %s/%s: %s", attempt, attempts, body)
+                    logger.warning("[%s] Rate limited on attempt %s/%s: %s", self._tag, attempt, attempts, body)
                 elif status_code in RETRYABLE_STATUSES:
                     logger.warning(
-                        "[OPENROUTER-CLIENT] Retryable provider error HTTP %s on attempt %s/%s: %s",
+                        "[%s] Retryable provider error HTTP %s on attempt %s/%s: %s", self._tag,
                         status_code,
                         attempt,
                         attempts,
@@ -379,3 +388,31 @@ def get_openrouter_client(model: Optional[str] = None) -> OpenRouterClient:
     if _client is None:
         _client = OpenRouterClient()
     return _client
+
+
+_zai_client: Optional[OpenRouterClient] = None
+
+
+def get_zai_client(model: Optional[str] = None) -> OpenRouterClient:
+    """Direct Z.ai (GLM) chat client — bypasses OpenRouter entirely.
+
+    Same OpenAI-compatible wire format (chat/completions), same
+    reasoning.effort control the GLM path already uses (effort=low:
+    near-zero reasoning tokens, validated). Env:
+      ZAI_API_KEY    (required for live calls)
+      ZAI_BASE_URL   default https://api.z.ai/api/paas/v4
+      ZAI_MODEL      default glm-5.3-flash
+    Create-chat opts in with CREATE_ASSISTANT_PROVIDER=zai; its
+    fallback stays on OpenRouter, so a z.ai outage degrades to the
+    proven path instead of failing the turn.
+    """
+    global _zai_client
+    base = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4")
+    mdl = model or os.getenv("ZAI_MODEL", "glm-5.3-flash")
+    key = os.getenv("ZAI_API_KEY", "")
+    if model:
+        # Dedicated per-model client (mirrors get_openrouter_client)
+        return OpenRouterClient(api_key=key or None, model=mdl, base_url=base)
+    if _zai_client is None:
+        _zai_client = OpenRouterClient(api_key=key or None, model=mdl, base_url=base)
+    return _zai_client

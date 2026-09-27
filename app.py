@@ -14427,7 +14427,17 @@ async def create_project_assistant(
         # CREATE_ASSISTANT_* lines shadow these defaults (dotenv last-wins).
         _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "qwen/qwen3.7-flash")
         _create_fb = os.getenv("CREATE_ASSISTANT_FALLBACK_MODEL", "z-ai/glm-5.3-flash")
-        client = get_openrouter_client(model=_create_model)
+        # Optional direct-Z.ai primary (CREATE_ASSISTANT_PROVIDER=zai in
+        # .env): same GLM model straight from api.z.ai with effort=low —
+        # no OpenRouter shared-pool 429s. Fallback stays on OpenRouter so a
+        # z.ai outage degrades to the proven path instead of a dead turn.
+        if os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai":
+            from services.ai.openrouter_client import get_zai_client
+            client = get_zai_client()
+            logger.info(
+                "[CREATE-ASSISTANT] primary provider: direct z.ai (model=%s)", client.model)
+        else:
+            client = get_openrouter_client(model=_create_model)
         fallback_client = (
             get_openrouter_client(model=_create_fb)
             if _create_fb and _create_fb != _create_model else None
