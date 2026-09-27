@@ -14160,7 +14160,7 @@ Behaviour:
    - Webhook/API → ask for the endpoint URL in chat, emitting {"key": "API_ENDPOINT", ...} in "required_env".
    Chosen channel TOKENS follow the required_tokens gate (no brief until attached); email/chat-id/endpoint follow the required_env gate. Record every chosen channel in the brief's Integrations section so the build agent wires them. If the user declines all channels, proceed without them — configurable later.
 7. PROJECT NAME: drive it conversationally. When the context says "project name: NOT SET" AND all required tokens/env keys are satisfied (or none are needed), ask what to call the project as your natural next question — not before. When the user gives a name (or you can infer one they clearly stated, e.g. "named DreamSupport"), acknowledge it naturally in your reply AND echo it in "project_name" (kebab-case, max 30 chars). Never re-ask once the context shows a name set.
-8. When at least one clarification is answered AND the idea is clear AND nothing required is missing (tokens AND non-optional env keys) AND all external APIs/integrations are confirmed AND the project has a name, produce a brief.
+8. When at least one clarification is answered AND the idea is clear AND nothing required is missing (tokens AND non-optional env keys) AND all external APIs/integrations are confirmed AND the project has a name, produce a brief. NEVER announce or promise the brief ("let me put together the build brief") — either CALL propose_brief in THIS reply or ask the one thing still missing. A promise ends the turn with nothing delivered and stalls the conversation.
 
 INPUT COLLECTION TOOL — request_inputs: when you need a value from the user (email address, Telegram chat id, webhook endpoint, or an allowed API/delivery token), CALL the request_inputs tool with ALL items you currently need in one call, instead of asking for them in text alone. The platform pops the input fields under your message and the user fills them there. Rules:
 - Only keys from the tool's enum — it rejects anything else. Delivery-channel credentials (TELEGRAM_BOT_TOKEN, DISCORD_WEBHOOK_URL) only AFTER the user names that channel.
@@ -14503,7 +14503,26 @@ async def create_project_assistant(
             r"once you fill|fill\s+(?:those|these)\s+in[^.]*brief|"
             r"pickers?[^.]*(?:then|before)[^.]*brief",
             _guard_corpus, re.I))
-        if _picker_wait:
+        # (b5) Brief-promise suppressor: the model ENDS its turn promising
+        # the brief ("Let me put together the build brief for you") instead
+        # of calling propose_brief — nothing arrives and the user must nudge
+        # (live stall 11:03).
+        _brief_promise = bool(re.search(
+            r"let me (?:put together|prepare|draft|write|create|build)[^.]*brief",
+            _guard_corpus, re.I))
+        if _brief_promise:
+            _guard_why = "brief-promise: model announced the brief instead of producing it"
+            _guard_msg = (
+                "ACTION CORRECTION: do NOT promise the brief for later — "
+                "produce it NOW. If every gate is satisfied (idea clear, "
+                "required tokens verified, non-optional env keys answered, "
+                "integrations confirmed, project named), CALL propose_brief "
+                "in THIS reply with the polished build prompt; your visible "
+                "text is just 1-2 sentences presenting it. If a gate is "
+                "still missing, ask for exactly that one thing instead. "
+                "Re-emit the COMPLETE JSON now. Reply with the JSON only."
+            )
+        elif _picker_wait:
             _guard_why = "picker-wait: model waiting for picks before the brief (deadlock)"
             _guard_msg = (
                 "DEADLOCK CORRECTION: do NOT wait for the user's page/save "
