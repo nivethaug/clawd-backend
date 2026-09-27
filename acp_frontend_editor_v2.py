@@ -2031,9 +2031,9 @@ Project Description in this run.
   endpoints that do not exist yet — that is intentional and correct.
 - **API BASE URL — MANDATORY: every fetch in the service layer MUST go
   through the template's existing `src/lib/api-config.ts` helper —
-  `import { getApiUrl } from "@/lib/api-config"` and call
+  `import {{ getApiUrl }} from "@/lib/api-config"` and call
   `getApiUrl("/api/<endpoint>")` with your endpoint path. That file's
-  API_BASE_URL is a `{domain}` placeholder the platform AUTO-REPLACES with
+  API_BASE_URL is a `{{domain}}` placeholder the platform AUTO-REPLACES with
   this project's real backend domain at deployment (never edit that file —
   it is protected). NEVER use relative `/api/...` paths (they 404 on the
   frontend domain — live incident 15:07: the whole app's data flow was dead
