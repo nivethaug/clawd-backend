@@ -3652,6 +3652,27 @@ import re as _re_chat_filter
 _CHAT_TOOL_TOKEN_RE = _re_chat_filter.compile(r"(?:^|\s)TOOL:[A-Za-z0-9_\-]+(?=\s|$)")
 
 
+def _clean_live_chunks(chunks):
+    """Filter chunks for LIVE polling — unlike _clean_chat_chunks this KEEPS
+    PROGRESS: lines: the frontend streaming parser renders them as the
+    active/recent progress steps instead of an endless "Thinking..." bubble.
+    Only true noise is dropped (TOOL: telemetry, JSON envelopes, dumps)."""
+    out = []
+    for raw in chunks or []:
+        t = str(raw or "").strip()
+        if not t or t in ("null", "{}", "[]", "---"):
+            continue
+        if t.startswith("PROGRESS:"):
+            out.append(t)
+            continue
+        if (t.startswith(("TOOL:", "{", "[", "```"))
+                or "z.ai built-in tool" in t.lower()
+                or "analyze_image" in t.lower()):
+            continue
+        out.append(t)
+    return out
+
+
 def _clean_chat_chunks(chunks):
     """Filter chat chunks before saving to DB or returning to the UI.
 
@@ -10291,7 +10312,9 @@ async def chat_chunks(
                 return {"chunks": [], "total": 0, "active": False}
             durable = get_run_chunks(int(run["id"]), after)
             raw_chunks = [str(c.get("content") or "") for c in durable.get("chunks", [])]
-            filtered = _clean_chat_chunks(raw_chunks)
+            # LIVE view: keep PROGRESS lines (frontend renders them); the
+            # saved-message path uses _clean_chat_chunks separately.
+            filtered = _clean_live_chunks(raw_chunks)
             return {
                 "chunks": filtered,
                 "total": durable.get("total", 0),
@@ -10315,8 +10338,9 @@ async def chat_chunks(
     all_chunks = getattr(handler, '_last_query_chunks', []) or []
     new_chunks = all_chunks[after:] if after < len(all_chunks) else []
 
-    # Use the shared chunk filter so live polling sees clean content too.
-    filtered = _clean_chat_chunks(new_chunks)
+    # Live view keeps PROGRESS lines so the UI shows real activity instead
+    # of "Thinking..." during tool-heavy turns.
+    filtered = _clean_live_chunks(new_chunks)
 
     return {
         "chunks": filtered,
