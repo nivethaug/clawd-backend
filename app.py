@@ -14793,7 +14793,7 @@ async def create_project_assistant(
                 # behind it. All three fabrication phrasings, same gate.
                 r"|\bhere(?:'s| is)\b[^.]{0,60}\bbrief\b"
                 r"|\bbrief\b[^.]{0,40}\bis ready\b"
-                r"|\bcard\b[^.]{0,60}\bshould be showing\b",
+                r"|\bcard\b[^.]{0,60}\bshould be (?:showing|appearing|on screen)\b",
                 _guard_corpus, re.I)
         ):
             _guard_why = "brief-promise: model announced the brief instead of producing it"
