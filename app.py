@@ -14485,7 +14485,32 @@ async def create_project_assistant(
 
         _guard_why = None
         _guard_msg = None
-        if _persistence_ask:
+        # (b3) Picker-prose suppressor: the model asking the page-selection
+        # / save-target questions in CHAT TEXT (rule 5b forbids it — the
+        # pickers render as chips in the final create section). Live miss
+        # 10:53: "could you pick up to 2 pages for real saved data ... and
+        # tell me which one thing to save first?"
+        _picker_prose = bool(re.search(
+            r"pick up to\s+(?:two|2)\s+pages|real\s+saved\s+data|"
+            r"which\s+one\s+thing[^?]*save|pages?\s+for\s+real\s+data",
+            _guard_corpus, re.I))
+        if _picker_prose:
+            _guard_why = "picker-prose: page/save questions asked in chat text"
+            _guard_msg = (
+                "PLATFORM UI CORRECTION: NEVER ask the page-selection or "
+                "save-target questions in chat text — the platform renders "
+                "them as pickers in the final create section automatically. "
+                "Write the brief on your two best-fit page assumptions and "
+                "emit the picker items as typed required_env entries "
+                '({"key": "REAL_DATA_PAGES", "type": "pages", "options": '
+                "[...pages..., \"Login/Signup\"]} and {\"key\": "
+                "\"SAVE_TARGET\", \"type\": \"choice\", \"options\": "
+                "[...]}) in the SAME reply that presents the brief. The "
+                "user's picks are injected into the build automatically. "
+                "Re-emit the COMPLETE JSON now without the prose questions. "
+                "Reply with the JSON only."
+            )
+        elif _persistence_ask:
             _guard_why = "persistence-ask: Backend-vs-LocalStorage question in prose"
             _guard_msg = (
                 "PLATFORM DECISION CORRECTION: persistence is NOT a user "
