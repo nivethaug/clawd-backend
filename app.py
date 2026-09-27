@@ -14342,7 +14342,11 @@ async def create_project_assistant(
         and not ctx.missing_required
         and not _create_chat_pending
         and not _create_unconnected_provider
-        and not ctx.regenerate
+        # regenerate turns KEEP the flag armed: a brief existed to regenerate,
+        # so the hard gates were satisfied by definition. Suppressing it left
+        # the delivery round disarmed exactly there (18:4x live: "Here is the
+        # refreshed build brief" shipped with brief:null off the regenerate
+        # button — b5's chain alone couldn't close it).
         and not ctx.prompt_confirmed
     ):
         _create_ready_to_brief = True
@@ -14933,11 +14937,14 @@ async def create_project_assistant(
     # ("Here is the build brief for AIStudio.", brief:null). First-match-wins
     # + one corrective per turn means a multi-violation reply always leaks
     # one. When the READY TO BRIEF nudge fired and STILL nothing was
-    # delivered, one hard delivery round on the fallback model (glm-5.3-
-    # flash, proven tool loop) — regardless of which guard consumed the turn.
+    # delivered, one hard delivery round with the prefilled skeleton —
+    # regardless of which guard consumed the turn. Uses the EFFECTIVE
+    # client (`client` — the primary, or the fallback if the primary
+    # errored): with glm-5.3-flash primary that's the proven 12:47
+    # deliverer; the old fallback-only choice would re-ask qwen (18:4x
+    # regenerate miss).
     if (
         _create_ready_to_brief
-        and fallback_client is not None
         and not (collected_brief and collected_brief.get("prompt"))
         and not re.search(r'"brief"\s*:\s*\{', raw)
     ):
@@ -14964,11 +14971,11 @@ async def create_project_assistant(
             "storage questions. JSON only."
         )
         try:
-            _dr = await fallback_client.chat_completion(
+            _dr = await client.chat_completion(
                 messages=convo + [{"role": "user", "content": _dr_msg}],
                 temperature=0.0, max_tokens=2500,
             )
-            _dru = fallback_client.get_usage(_dr)
+            _dru = client.get_usage(_dr)
             for _k in usage_tot:
                 usage_tot[_k] += int(_dru.get(_k, 0) or 0)
             _drraw = str(
