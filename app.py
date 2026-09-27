@@ -14512,21 +14512,27 @@ async def create_project_assistant(
         # the brief ("Let me put together the build brief for you") instead
         # of calling propose_brief — nothing arrives and the user must nudge
         # (live stall 11:03).
-        _brief_promise = bool(re.search(
+        # Skip when propose_brief was ALREADY called this turn (the brief
+        # is collected; the promise text is just its presentation).
+        _brief_promise = (
+            not collected_brief.get("prompt")
+            and bool(re.search(
             r"(?:let me|i can|i'?ll|i will|now i can)\\s+"
             r"(?:now\\s+|then\\s+|go ahead and\\s+)?"
             r"(?:put together|prepare|draft|write|create|build|generate)"
             r"[^.]*brief",
-            _guard_corpus, re.I))
+            _guard_corpus, re.I)))
         if _brief_promise:
             _guard_why = "brief-promise: model announced the brief instead of producing it"
             _guard_msg = (
                 "ACTION CORRECTION: do NOT promise the brief for later — "
                 "produce it NOW. If every gate is satisfied (idea clear, "
                 "required tokens verified, non-optional env keys answered, "
-                "integrations confirmed, project named), CALL propose_brief "
-                "in THIS reply with the polished build prompt; your visible "
-                "text is just 1-2 sentences presenting it. If a gate is "
+                "integrations confirmed, project named), emit the COMPLETE "
+                "polished build prompt in the JSON \"brief\" field NOW (this "
+                "correction round has no tools — the JSON field IS the "
+                "delivery channel); your \"reply\" text is just 1-2 sentences "
+                "presenting it. If a gate is "
                 "still missing, ask for exactly that one thing instead. "
                 "If the user already gave a project name, echo it in project_name — never "
 "revert to the description title or re-ask. "
