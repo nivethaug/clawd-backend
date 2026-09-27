@@ -14310,6 +14310,20 @@ async def create_project_assistant(
     _create_user_corpus = " ".join(
         m.content for m in request.messages if m.role == "user"
     ).lower()
+    # 19:17 live: user asked for page-name corrections on a delivered card —
+    # the model correctly asked WHICH tweaks, but the READY-TO-BRIEF nudge /
+    # delivery round would treat "gates satisfied" as "deliver NOW" and dump
+    # the UNEDITED brief as a redundant card. Edit-intent turns stay
+    # conversational; the net re-engages on the next plain turn (by then the
+    # corrections are in context and a re-brief is correct).
+    _latest_user_msg = next(
+        (m.content for m in reversed(request.messages) if m.role == "user"), ""
+    )
+    _create_edit_intent = bool(re.search(
+        r"\b(corrections?|tweaks?|rename|adjust|changes? to|change the|"
+        r"change some|edit|modify|instead of)\b",
+        _latest_user_msg, re.I,
+    ))
     # Provider keywords → env key. Suppression set is broad (a false hit only
     # delays the nudge); the INJECTION set below is narrower because injecting
     # a token ask is user-visible — "resend" (verb) must not pop a Resend key.
@@ -14342,6 +14356,7 @@ async def create_project_assistant(
         and not ctx.missing_required
         and not _create_chat_pending
         and not _create_unconnected_provider
+        and not _create_edit_intent
         # regenerate turns KEEP the flag armed: a brief existed to regenerate,
         # so the hard gates were satisfied by definition. Suppressing it left
         # the delivery round disarmed exactly there (18:4x live: "Here is the
@@ -14945,6 +14960,7 @@ async def create_project_assistant(
     # regenerate miss).
     if (
         _create_ready_to_brief
+        and not _create_edit_intent
         and not (collected_brief and collected_brief.get("prompt"))
         and not re.search(r'"brief"\s*:\s*\{', raw)
     ):
