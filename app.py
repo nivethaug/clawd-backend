@@ -14149,7 +14149,7 @@ Behaviour:
 0. STACK GUARD — HIGHEST PRIORITY, before anything else: if the user's request names or requires a different stack, framework, or CMS platform (CodeIgniter, Laravel, WordPress, PHP, Django, Flask, Rails, .NET, Spring, Vue, Angular...), do NOT produce a brief and do NOT collect anything. Reply honestly and briefly: we don't build that stack; we build React + Python; offer the closest equivalent in OUR stack (e.g. a CodeIgniter CMS request becomes a CMS-style website with admin, themes and modules on our stack). Proceed with questions/brief only after the user accepts our stack. If they accepted already, continue normally and never re-raise it.
 1. Chat briefly to understand the idea. Ask at most 1-2 focused questions when something important is unclear; otherwise move forward.
 2. If the platform context lists MISSING REQUIRED items, your reply asks the user to provide exactly those now (pointing to the matching Add-Token button). This takes priority over everything — NEVER produce a brief while anything required is missing (Discord/Telegram bot token must be verified BEFORE any prompt generation).
-3. DESCRIPTION-DECLARED ENV KEYS: users often list environment variables their app needs in the request itself (an "ENV:" list, "requires X", "(required)/(optional)" markers). For each declared key that is NOT the type's bot token, NOT in the connected env keys, and NOT one of the validated API keys (required_tokens list): ask for its VALUE naturally in your reply (one question covering the pending keys — these are regular config values like role/channel IDs, NOT secrets, so asking in chat is fine) AND include it in "required_env". Mark keys the user called optional with "optional": true. NEVER produce a brief while a non-optional required_env key is still awaited (the context lists awaited keys under "env keys awaited from user").
+3. DESCRIPTION-DECLARED ENV KEYS: users often list environment variables their app needs in the request itself (an "ENV:" list, "requires X", "(required)/(optional)" markers). For each declared key that is NOT the type's bot token, NOT in the connected env keys, and NOT one of the validated API keys (required_tokens list): ask for its VALUE naturally in your reply (one question covering the pending keys — these are regular config values like role/channel IDs, NOT secrets, so asking in chat is fine) AND include it in "required_env". Mark keys the user called optional with "optional": true. NEVER produce a brief while a non-optional required_env key is still awaited (the context lists awaited keys under "env keys awaited from user"). EXCEPTION: the UI PICKER keys (REAL_DATA_PAGES / SAVE_TARGET, shown in the context as "UI PICKERS already scheduled") are NOT gates — never ask them in chat text, never wait for answers, they never block the brief; the platform renders them in the final Confirm&create card.
 4. Before producing a brief you MUST have asked at least ONE clarifying question (purpose, audience, key features, or commands) and received the user's answer — like a real product assistant refining the idea. Skip this only when the user has already given rich detail AND explicitly says to generate/proceed now.
 5. If the application would need ANY external API or integration (AI provider, weather, news, payments, email, maps, social, scraping, ...), CONFIRM with the user which ones to use BEFORE producing the brief — offer a short curated list when unsure. Skip asking only when the integration is already connected (it appears in the connected env keys) or is the project type's required bot token.
    - LLM/AI features are provider-AGNOSTIC: never assume OpenAI. If no LLM key is connected, ask which provider the user prefers (OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, ...). If one is already connected, suggest reusing it. In the final prompt use the matching env key for the CHOSEN provider (OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, ...) via os.getenv.
@@ -14248,14 +14248,31 @@ async def create_project_assistant(
             "treat it as configured and say so in one line."
         )
     if ctx.pending_env:
-        pending_items = ", ".join(
-            f"{e.get('key', '?')} ({'optional' if e.get('optional') else 'required'})"
-            for e in ctx.pending_env
-            if isinstance(e, dict)
-        )
-        ctx_lines.append(
-            "- env keys awaited from user (asked via chat, input fields shown): " + pending_items
-        )
+        # Split chat-asked keys from UI-picker keys: labeling REAL_DATA_PAGES /
+        # SAVE_TARGET as "asked via chat" contradicted rule 5b and made the
+        # model prose-ask them every run (picker-prose guard fired, +1
+        # corrective round each turn). Pickers get their own never-ask line.
+        chat_items, picker_items = [], []
+        for e in ctx.pending_env:
+            if not isinstance(e, dict):
+                continue
+            _item = f"{e.get('key', '?')} ({'optional' if e.get('optional') else 'required'})"
+            if str(e.get("key", "")).strip().upper() in _CREATE_CHOICE_KEYS:
+                picker_items.append(_item)
+            else:
+                chat_items.append(_item)
+        if chat_items:
+            ctx_lines.append(
+                "- env keys awaited from user (asked via chat, input fields shown): "
+                + ", ".join(chat_items)
+            )
+        if picker_items:
+            ctx_lines.append(
+                "- UI PICKERS already scheduled (render automatically in the final "
+                "Confirm&create card AFTER the brief — the user answers them there). "
+                "NEVER ask these in chat text, NEVER wait for them, they NEVER block "
+                "the brief: " + ", ".join(picker_items)
+            )
     if ctx.choice_answers:
         # UI pickers the user already answered — bake these into the brief's
         # Backend section (they are choices, not secrets).
