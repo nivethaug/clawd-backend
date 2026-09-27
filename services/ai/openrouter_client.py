@@ -45,6 +45,7 @@ class OpenRouterClient:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         base_url: Optional[str] = None,
+        timeout: Optional[float] = None,
     ):
         """
         Initialize OpenRouter-compatible chat client.
@@ -64,6 +65,7 @@ class OpenRouterClient:
         # Log tag follows the endpoint so direct-z.ai lines are greppable
         # separately from OpenRouter lines.
         self._tag = "ZAI-CLIENT" if "z.ai" in self.api_base else "OPENROUTER-CLIENT"
+        self._timeout = float(timeout) if timeout else DEFAULT_TIMEOUT
         self._client: Optional[httpx.AsyncClient] = None
         # Loop the cached client was created on. asyncio.run() callers
         # (creation worker's sync wrappers) close their loop on exit without
@@ -100,7 +102,7 @@ class OpenRouterClient:
             except Exception:
                 pass
         if self._client is None or self._client.is_closed or stale:
-            self._client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
+            self._client = httpx.AsyncClient(timeout=self._timeout)
             self._client_loop = loop
         return self._client
 
@@ -213,7 +215,7 @@ class OpenRouterClient:
 
             except httpx.TimeoutException as e:
                 last_error = e
-                logger.warning("[OPENROUTER-CLIENT] Timeout on attempt %s/%s", attempt, attempts)
+                logger.warning("[%s] Timeout on attempt %s/%s", self._tag, attempt, attempts)
 
             except httpx.HTTPStatusError as e:
                 last_error = e
@@ -235,11 +237,11 @@ class OpenRouterClient:
                         body,
                     )
                 else:
-                    logger.error("[OPENROUTER-CLIENT] HTTP error %s: %s", status_code, body)
+                    logger.error("[%s] HTTP error %s: %s", self._tag, status_code, body)
                     raise
 
             except Exception as e:
-                logger.error(f"[OPENROUTER-CLIENT] Unexpected error: {e}")
+                logger.error(f"[{self._tag}] Unexpected error: {e}")
                 raise
 
             if attempt < attempts:
@@ -278,7 +280,7 @@ class OpenRouterClient:
         _http_start = _time.monotonic()
 
         try:
-            async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
                 async with client.stream(
                     "POST",
                     f"{self.api_base}/chat/completions",
@@ -414,5 +416,8 @@ def get_zai_client(model: Optional[str] = None) -> OpenRouterClient:
         # Dedicated per-model client (mirrors get_openrouter_client)
         return OpenRouterClient(api_key=key or None, model=mdl, base_url=base)
     if _zai_client is None:
-        _zai_client = OpenRouterClient(api_key=key or None, model=mdl, base_url=base)
+        _zai_client = OpenRouterClient(
+            api_key=key or None, model=mdl, base_url=base,
+            timeout=float(os.getenv("ZAI_TIMEOUT", "120")),
+        )
     return _zai_client

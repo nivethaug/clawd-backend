@@ -14467,7 +14467,12 @@ async def create_project_assistant(
                     _fb_used = True
                     logger.warning(
                         "[CREATE-ASSISTANT] model %s failed (%s: %s) — falling back to %s",
-                        _create_model, type(_fb_err).__name__, _fb_err,
+                        # client.model, not _create_model: with the direct
+                        # z.ai provider the failing primary is glm-5.3-flash
+                        # while _create_model still says qwen (12:40 live
+                        # logged "qwen failed" for a z.ai timeout).
+                        getattr(client, "model", _create_model),
+                        type(_fb_err).__name__, _fb_err,
                         _create_fb,
                     )
                     client = fallback_client
