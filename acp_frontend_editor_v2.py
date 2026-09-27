@@ -1408,8 +1408,10 @@ class ACPFrontendEditorV2:
             if _SMOKE_GATE_ENABLED:
                 try:
                     gate_issues = _smoke_gate_issues(self.frontend_src_path)
-                    gate_issues += _integration_wiring_issues(
-                        self.project_path, goal_description)
+                    # NOTE: _integration_wiring_issues is intentionally NOT
+                    # called — creation is UI-only now; the backend session
+                    # (auto-run in the first session) is where wiring lives
+                    # and is enforced by the edit-side verification addons.
                     if gate_issues:
                         logger.warning(
                             "[SMOKE-GATE] %d issue(s) — one corrective round: %s",
@@ -2021,30 +2023,23 @@ Project Description in this run.
 3. Auth UI through the EXISTING `src/services/database.ts` service layer —
    those template endpoints already work
 
-**MINIMAL BACKEND BUDGET (hard cap — keeps creation fast):**
-- At most **TWO GET endpoints** — one per primary read page (e.g.
-  `GET /api/library`, `GET /api/settings`), returning REAL saved data from
-  simple JSON-file storage (no database, no migrations, no auth backend).
-- At most **ONE core write endpoint** (a single POST or PUT) for the app's
-  single most important feature — e.g. `POST /api/generate` calling a
-  connected integration key, or `POST /api/library` to save an item.
-- Every other endpoint the brief lists (full CRUD, extra resources,
-  secondary features) is DEFERRED to edit sessions — the brief's fuller
-  API list is the roadmap, NOT the V1 scope.
-- User data NEVER lives only in localStorage when the brief asks for backend
-  persistence — the two GETs + one write above ARE that persistence,
-  minimally. localStorage stays for ephemeral UI state only.
-
-**Connected-integration exception:** EVERY verified key for an integration
-the description requires and that is ALREADY configured (see AVAILABLE
-EXTERNAL INTEGRATIONS above) must be wired — one real endpoint per
-connected+required integration through the existing service pattern (for a
-typical app that is still just ONE: the core write). Never ship a mock for
-any feature whose key is in the project env. Defer-with-mock only when a
-required key is NOT connected. If the brief names chosen REAL_DATA_PAGES /
-SAVE_TARGET choices, the 2 GET endpoints serve the chosen pages and the
-write endpoint serves the chosen save target (a chosen Login/Signup page
-uses the template's existing auth service, not a custom backend).
+**UI-ONLY CREATION (backend comes later, automatically):**
+- Build the COMPLETE UI: all required pages, navigation, theme, responsive
+  behavior — plus the frontend API SERVICE LAYER (a small `api.ts`/service
+  module with functions calling the brief's endpoint paths, with proper
+  loading / empty / error states). The API layer is a CONTRACT: it calls
+  endpoints that do not exist yet — that is intentional and correct.
+- Do NOT implement any backend endpoints, do NOT wire any integrations, do
+  NOT create backend services or storage at creation. The platform
+  AUTO-RUNS the backend build in the project's first session right after
+  creation (it receives the same brief + the user's page choices).
+- Data views show the designed empty state ("No records found — this page
+  connects to its backend in the first session") — never fake successful
+  API responses, never fake saved data.
+- localStorage ONLY for ephemeral UI state (active tab, collapsed sidebar).
+- The PAGE INTEGRATION CHOICES section of the goal (if present) is for the
+  LATER backend session — acknowledge it in the status file, do not act on
+  it here.
 
 **Defer — each becomes one PENDING line in the status file:**
 - Any backend endpoint beyond the MINIMAL BACKEND BUDGET above (service
@@ -2054,11 +2049,9 @@ uses the template's existing auth service, not a custom backend).
   state — an honest runtime warning when used, NEVER fake successful
   content. When the key IS connected, the core write endpoint calls it for
   real (see the exception above).
+- The ENTIRE backend (all endpoints, services, storage, integration
+  wiring) — implemented automatically in the project's first session
 - Storage infrastructure, teams, subscriptions, marketplace, bulk management
-  (Storage infrastructure = caches, queues, search indexing, migrations —
-  NOT persistence. Persistence is covered by the MINIMAL BACKEND BUDGET
-  above; the brief's fuller endpoint list beyond that budget is the roadmap
-  for edit sessions, never a reason to exceed the cap)
 
 **Data honesty (mandatory — the UI must not lie):**
 - A success confirmation ("Saved", "Added to library", …) may only appear

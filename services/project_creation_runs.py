@@ -261,14 +261,13 @@ _CREATION_SUMMARY_SYSTEM_PROMPT = (
     "they were tested. No invented numbers, stats, or test results.\n"
     "- If the report says data is sample/placeholder or persistence is "
     "browser-only, state that plainly in 'What's next'.\n"
-    "- BACKEND STATE MUST BE EXPLICIT: 'What you got' names the backend "
-    "endpoints actually delivered and verified (per the minimal backend "
-    "budget: at most 2 GET + 1 core write, JSON-file storage) — e.g. 'a "
-    "working /api/generate endpoint using your connected OpenRouter key'. "
-    "'What's next' lists the concrete REMAINING backend work as edit-session "
-    "continuations (e.g. 'full library CRUD — PUT and DELETE endpoints', "
-    "'switch JSON storage to a database') so the user knows exactly what to "
-    "ask for next.\n"
+    "- BACKEND STATE MUST BE EXPLICIT — creation is UI-FIRST: 'What you "
+    "got' describes the completed UI (pages, navigation, the prepared API "
+    "layer, honest empty states, the live link to click around) and says "
+    "plainly that the backend is NOT wired yet. 'What's next' LEADS with: "
+    "the backend build runs automatically in the project's first session "
+    "(name the chosen pages / save target / integrations if the report "
+    "lists them) — then any further continuations as edit-session asks.\n"
     "- When unsure whether something was verified, treat it as NOT verified.\n"
     "Style rules: absolutely no file paths, no code identifiers, no framework/"
     "build/test jargon, no emoji besides the two section headers. Max ~180 "
@@ -371,12 +370,17 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
             (project_id, str(_uuid.uuid4()), "Creation", "webchat", "main", user_id),
         )
         session_row = conn.execute(
-            "SELECT id FROM sessions WHERE project_id = %s AND archived = 0 "
+            "SELECT id, session_key FROM sessions WHERE project_id = %s AND archived = 0 "
             "ORDER BY id DESC LIMIT 1",
             (project_id,),
         ).fetchone()
         # RealDictRow (Postgres) is dict-like; SQLite path returns tuples.
-        session_id = session_row["id"] if isinstance(session_row, dict) else session_row[0]
+        if isinstance(session_row, dict):
+            session_id = session_row["id"]
+            session_key = session_row["session_key"]
+        else:
+            session_id = session_row[0]
+            session_key = session_row[1]
 
         type_labels = {1: "website", 2: "Telegram bot", 3: "Discord bot", 4: "scheduler", 5: "AI agent"}
         kind_label = type_labels.get(type_id, "project")
@@ -433,6 +437,104 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
             )
         conn.commit()
     logger.info("[PROJECT-RUN] seeded creation session for project %s", project_id)
+
+    # ── Phase B: auto-run the backend build in the first session ──────────
+    # UI-only creation leaves the backend unimplemented; the first session
+    # builds it automatically per the user's picker choices (parsed from the
+    # creation prompt, injected by the frontend as PAGE INTEGRATION CHOICES)
+    # plus any credential keys present in the project env. Kill-switch:
+    # AUTO_BACKEND_RUN=0.
+    if type_id == 1 and os.getenv("AUTO_BACKEND_RUN", "1").lower() not in {"0", "false", "no", "off"}:
+        try:
+            import re as _re
+            prompt_text = (creation_prompt or "")
+            pages_m = _re.search(
+                r"REAL DATA PAGES:\s*(.+)", prompt_text)
+            save_m = _re.search(r"SAVE TARGET FIRST:\s*(.+)", prompt_text)
+            pages = pages_m.group(1).strip() if pages_m else ""
+            save_target = save_m.group(1).strip() if save_m else ""
+
+            env_keys = []
+            for _ef in (os.path.join(str(project_path), "backend", ".env"),
+                        os.path.join(str(project_path), ".env")):
+                try:
+                    if not os.path.exists(_ef):
+                        continue
+                    for _line in open(_ef, encoding="utf-8", errors="ignore"):
+                        _line = _line.strip()
+                        if _line and not _line.startswith("#") and "=" in _line:
+                            _k = _line.split("=", 1)[0].strip()
+                            if _re.fullmatch(r"[A-Z][A-Z0-9_]{2,}_(API_KEY|TOKEN|SECRET|KEY)", _k):
+                                env_keys.append(_k)
+                except Exception:
+                    continue
+
+            keys_line = ""
+            if env_keys:
+                keys_line = ("- Wire the connected integration keys by name via "
+                             "os.getenv: " + ", ".join(env_keys)
+                             + " — real calls, never mocks\n")
+
+            backend_prompt = (
+                "Continue the build — BACKEND INTEGRATION PHASE (auto-started). "
+                "The UI is complete and its API layer already calls the "
+                "endpoints from the brief's Backend section. Implement the "
+                "FastAPI backend now:\n"
+                f"- GET endpoints serving real saved data (JSON-file storage) for: {pages or 'the pages in the brief Backend section'}\n"
+                f"- The core write endpoint for: {save_target or 'the primary save feature in the brief'}\n"
+                + keys_line
+                + "Match the exact endpoint paths the frontend already calls. "
+                "Publish and verify on the live site per the usual verification "
+                "bar when done."
+            )
+
+            from database_adapter import get_db as _gdb
+            with _gdb() as conn:
+                conn.execute(
+                    "INSERT INTO messages (session_id, role, content, created_at) "
+                    "VALUES (%s, 'user', %s, CURRENT_TIMESTAMP + INTERVAL '4 milliseconds')",
+                    (session_id, backend_prompt[:6000]),
+                )
+                ack = (
+                    "⚙️ UI complete — now wiring your backend automatically: "
+                    + (("pages: " + pages) if pages else "the brief backend contract")
+                    + ((", save target: " + save_target) if save_target else "")
+                    + ((", integrations: " + ", ".join(env_keys)) if env_keys else "")
+                    + ". Watch the progress here; the live site updates when it's verified."
+                )
+                conn.execute(
+                    "INSERT INTO messages (session_id, role, content, created_at) "
+                    "VALUES (%s, 'assistant', %s, CURRENT_TIMESTAMP + INTERVAL '6 milliseconds')",
+                    (session_id, ack[:4000]),
+                )
+                conn.commit()
+
+            from services.session_chat_runs import create_run
+            run_info = create_run(
+                session_id=session_id,
+                session_key=session_key,
+                project_id=project_id,
+                user_id=user_id,
+                channel="webchat",
+                mode="dream",
+                user_message=backend_prompt[:6000],
+                session_context=(
+                    f"USER: {(creation_prompt or '')[:4000]}\n\n"
+                    f"USER: {backend_prompt[:2000]}"
+                ),
+                billing_user_id=user_id,
+            )
+            logger.info(
+                "[PROJECT-RUN] auto backend run enqueued for project %s "
+                "(run %s, pages=%r save=%r keys=%r)",
+                project_id, run_info.get("run_uuid", "?"), pages, save_target,
+                env_keys,
+            )
+        except Exception as auto_err:
+            logger.warning(
+                "[PROJECT-RUN] auto backend run failed to enqueue for %s "
+                "(non-fatal — user can ask in chat): %s", project_id, auto_err,
+            )
 
 
 def mark_completed(run_id: int, has_writes: bool = False) -> None:
