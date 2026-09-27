@@ -14736,11 +14736,16 @@ async def create_project_assistant(
             not collected_brief
             and not re.search(r'"brief"\s*:\s*\{', raw)
             and re.search(
-                r"(?:let me|i can|i'?ll|i will|now i can)\s+"
-                r"(?:now\s+|then\s+|go ahead and\s+)?"
+                r"(?:let me|i can|i'?ll|i'?ve|i will|now i can)\s+"
+                r"(?:now\s+|then\s+|go ahead and\s+|just\s+)?"
                 r"(?:put together|prepare|draft|write|create|build|generate)"
                 r"[^.]*brief"
-                r"|\bhere(?:'s| is)\b[^.]{0,60}\bbrief\b",
+                # 2:04 live trail: "Your build brief for X is ready — the
+                # confirmation card should be showing now!" with NO brief
+                # behind it. All three fabrication phrasings, same gate.
+                r"|\bhere(?:'s| is)\b[^.]{0,60}\bbrief\b"
+                r"|\bbrief\b[^.]{0,40}\bis ready\b"
+                r"|\bcard\b[^.]{0,60}\bshould be showing\b",
                 _guard_corpus, re.I)
         ):
             _guard_why = "brief-promise: model announced the brief instead of producing it"
