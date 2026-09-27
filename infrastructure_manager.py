@@ -3075,6 +3075,20 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 content = content.replace("{domain}", self.domain)
                 api_config_path.write_text(content, encoding="utf-8")
                 logger.info(f"✓ Updated frontend api-config.ts: {{domain}} → {self.domain}")
+                # The dist/ produced by the BUILD phase embeds the LITERAL
+                # placeholder (build runs before infra), and Phase 5 skips
+                # rebuilding when dist exists ("⚡ Skipping npm build") —
+                # the live site then fetches https://{domain}-api.… and the
+                # whole data flow is dead (11:0x live incident). Remove the
+                # stale dist so Phase 5 rebuilds with the substituted base.
+                dist_path = self.project_path / "frontend" / "dist"
+                if dist_path.exists():
+                    import shutil as _shutil
+                    _shutil.rmtree(dist_path, ignore_errors=True)
+                    logger.info(
+                        "✓ Removed stale frontend dist (built before api-config "
+                        "substitution) — Phase 5 rebuilds it with the real domain"
+                    )
             else:
                 logger.info(f"api-config.ts has no {{domain}} placeholder (already updated)")
 
