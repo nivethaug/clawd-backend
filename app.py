@@ -14335,6 +14335,7 @@ async def create_project_assistant(
     # suppression set — "resend" is a common verb, popping a Resend key ask on
     # "please resend that" would be a user-visible false positive.
     _create_injectable_keys = _create_unconnected_provider_keys - {"RESEND_API_KEY"}
+    _create_ready_to_brief = False
     if (
         ctx.detected_kind
         and not ctx.missing_required
@@ -14343,6 +14344,7 @@ async def create_project_assistant(
         and not ctx.regenerate
         and not ctx.prompt_confirmed
     ):
+        _create_ready_to_brief = True
         if ctx.project_name:
             ctx_lines.append(
                 "- READY TO BRIEF — ALL hard gates satisfied (type known, no missing "
@@ -14852,6 +14854,50 @@ async def create_project_assistant(
                     )
     except Exception as _guard_err:
         logger.warning("[CREATE-ASSISTANT] env-popup guard error (non-fatal): %s", _guard_err)
+
+    # DELIVERY ROUND (deterministic): 2:51-2:52 live — two consecutive brief
+    # turns each burned the single corrective on a DIFFERENT violation
+    # (env-popup, then persistence-ask) and still shipped announcements
+    # ("Here is the build brief for AIStudio.", brief:null). First-match-wins
+    # + one corrective per turn means a multi-violation reply always leaks
+    # one. When the READY TO BRIEF nudge fired and STILL nothing was
+    # delivered, one hard delivery round on the fallback model (glm-5.3-
+    # flash, proven tool loop) — regardless of which guard consumed the turn.
+    if (
+        _create_ready_to_brief
+        and fallback_client is not None
+        and not collected_brief
+        and not re.search(r'"brief"\s*:\s*\{', raw)
+    ):
+        _dr_msg = (
+            "DELIVERY ROUND: every gate is satisfied and the project is "
+            "named. Reply with the COMPLETE JSON now — the entire polished "
+            'build prompt inside the "brief" field (kind, prompt 120-400 '
+            "words, features, suggested_name) — and \"project_name\": \""
+            + (ctx.project_name or "the user's stated name") + "\". "
+            "No announcement, no questions, no credential narration, no "
+            "storage questions. JSON only."
+        )
+        try:
+            _dr = await fallback_client.chat_completion(
+                messages=convo + [{"role": "user", "content": _dr_msg}],
+                temperature=0.0, max_tokens=2500,
+            )
+            _dru = fallback_client.get_usage(_dr)
+            for _k in usage_tot:
+                usage_tot[_k] += int(_dru.get(_k, 0) or 0)
+            _drraw = str(
+                (_dr["choices"][0]["message"] or {}).get("content") or ""
+            ).strip()
+            if _drraw:
+                raw = _drraw
+            logger.info(
+                "[CREATE-ASSISTANT] delivery round on fallback model fired (%s)",
+                "delivered" if re.search(r'"brief"\s*:\s*\{', raw) else "still empty",
+            )
+        except Exception as _dr_err:
+            logger.warning(
+                "[CREATE-ASSISTANT] delivery round failed (non-fatal): %s", _dr_err)
 
     usage = usage_tot
 
