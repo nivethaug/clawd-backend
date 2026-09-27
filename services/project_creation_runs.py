@@ -481,6 +481,10 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
             save_target = save_m.group(1).strip() if save_m else ""
 
             env_keys = []
+            try:
+                from env_manager import SYSTEM_KEYS as _SYS_KEYS
+            except Exception:
+                _SYS_KEYS = frozenset()
             for _ef in (os.path.join(str(project_path), "backend", ".env"),
                         os.path.join(str(project_path), ".env")):
                 try:
@@ -490,7 +494,9 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
                         _line = _line.strip()
                         if _line and not _line.startswith("#") and "=" in _line:
                             _k = _line.split("=", 1)[0].strip()
-                            if _re.fullmatch(r"[A-Z][A-Z0-9_]{2,}_(API_KEY|TOKEN|SECRET|KEY)", _k):
+                            if (_re.fullmatch(r"[A-Z][A-Z0-9_]{2,}_(API_KEY|TOKEN|SECRET|KEY)", _k)
+                                    and _k not in _SYS_KEYS  # system keys aren't integrations
+                                    and _k not in env_keys):  # root+backend .env overlap
                                 env_keys.append(_k)
                 except Exception:
                     continue
