@@ -14873,15 +14873,22 @@ async def create_project_assistant(
         _dr_msg = (
             "DELIVERY ROUND: every gate is satisfied and the project is "
             "named. Reply with the COMPLETE JSON now — the entire polished "
-            'build prompt inside the "brief" field (kind, prompt 120-400 '
-            "words, features, suggested_name) with its REQUIRED sections: "
-            'a "Backend Contract" section (concrete relative /api/... '
-            "paths, method + payload per endpoint — never base URLs, never "
-            "localhost) and, when integrations were confirmed, an "
-            '"Integrations & external APIs" section naming each one, its '
-            "purpose, and the env key it reads via os.getenv — and "
-            "\"project_name\": \""
-            + (ctx.project_name or "the user's stated name") + "\". "
+            'build prompt inside the "brief" field with its REQUIRED '
+            'sections: a "Backend Contract" section (concrete relative '
+            "/api/... paths, method + payload per endpoint — never base "
+            "URLs, never localhost) and, when integrations were confirmed, "
+            'an "Integrations & external APIs" section naming each one, '
+            "its purpose, and the env key it reads via os.getenv. Start "
+            "from this skeleton and fill every field (prompt 120-400 "
+            "words; features: 4-6 short strings):\n"
+            '{"reply": "<1-2 sentences presenting the brief>", "kind": "'
+            + (ctx.detected_kind or "website") + '", "brief": {"kind": "'
+            + (ctx.detected_kind or "website")
+            + '", "prompt": "<THE COMPLETE BUILD PROMPT>", "features": '
+            '["...", "..."], "suggested_name": "'
+            + (ctx.project_name or "the user\'s stated name")
+            + '"}, "required_tokens": null, "required_env": null, '
+            '"project_name": "' + (ctx.project_name or "") + '"}\n'
             "No announcement, no questions, no credential narration, no "
             "storage questions. JSON only."
         )
