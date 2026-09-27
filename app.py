@@ -14543,10 +14543,22 @@ async def create_project_assistant(
                 "Reply with the JSON only."
             )
         # ---- b3: picker-prose ------------------------------------------------
-        elif re.search(
+        # Prose patterns + the LITERAL picker key names (models ask with the
+        # actual keys: "REAL_DATA_PAGES: Which 2 pages should save real data"
+        # — live miss 11:57). Key-name mentions are violations ONLY outside a
+        # proper required_env emission (the JSON legitimately contains them).
+        elif (
+            re.search(
                 r"pick up to\s+(?:two|2)\s+pages|real\s+saved\s+data|"
-                r"which\s+one\s+thing[^?]*save|pages?\s+for\s+real\s+data",
-                _guard_corpus, re.I):
+                r"which\s+(?:one\s+thing|\d\s*pages?|pages?)[^?]{0,40}(?:save|real)|"
+                r"pages?\s+(?:should\s+)?(?:for\s+)?real\s+data|"
+                r"save\s+real\s+data",
+                _guard_corpus, re.I)
+            or (
+                re.search(r"\b(?:REAL_DATA_PAGES|SAVE_TARGET)\b", raw)
+                and not _req_env_populated
+            )
+        ):
             _guard_why = "picker-prose: page/save questions asked in chat text"
             _guard_msg = (
                 "PLATFORM UI CORRECTION: NEVER ask the page-selection or "
