@@ -2651,25 +2651,6 @@ Project Name: {self.project_name}
 Project Description: {goal_description}
 """
 
-    def _build_page_templates_section(self, required_pages: List[str], goal_description: str) -> str:
-        """
-        Build page templates section for ACPX prompt.
-
-        Args:
-            required_pages: List of required page names
-            goal_description: Project goal description
-
-        Returns:
-            Page templates section for prompt
-        """
-        template_sections = []
-
-        for page_name in required_pages:
-            template_content = get_page_template_for_prompt(page_name, goal_description)
-            template_sections.append(template_content)
-
-        return "\n".join(template_sections)
-
     def _build_page_specs_section(self, required_pages: List[str]) -> str:
         """
         Build page specifications section for ACPX prompt (Phase 4).
