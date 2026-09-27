@@ -14417,141 +14417,98 @@ async def create_project_assistant(
         raise HTTPException(status_code=502, detail="Assistant backend error")
 
     # ---- Env-popup integrity guard (model-agnostic self-heal) -------------
-    # Three models have now failed this the same way: the reply/brief
-    # references a credential the project needs, but required_env comes back
-    # empty — the input popup never renders and the customer cannot provide
-    # the key. Two failure shapes: prose narration without the payload
-    # ("provide your API key…" — Gemini) and silent omission (brief mentions
-    # the key token, required_env stays null — qwen). One corrective re-ask,
-    # then accept whatever returns (fail-open). Keys already connected are
-    # excluded — a brief may legitimately mention them as integration notes.
+    # Consolidated 2026-09-27 after a week of live model failures. Branches
+    # (priority order):
+    #   b6  false-connected-claim — model says a credential is connected but
+    #       the platform context lists none (fabrication)
+    #   re-ask-connected — model asks AGAIN for an already-connected key
+    #   b2  persistence-ask — "backend storage or local storage?" question
+    #   b3  picker-prose — page/save questions asked in chat text
+    #   b4  picker-wait deadlock — pickers emitted + brief withheld
+    #   b5  brief-promise — announces the brief instead of producing it
+    #   env-popup — credential referenced but no required_tokens/required_env
+    # Every corrective is one re-ask with the fixed JSON contract; all are
+    # fail-open and disable-able via CREATE_ENV_GUARD_JEV (JEV layer only).
     try:
         # Detection corpus: raw reply text PLUS the collected brief. Models
         # using native tool-calls (qwen) put the brief in propose_brief's
-        # ARGUMENTS, not the message content — scanning raw alone missed the
-        # credential token living in the brief prompt (live miss 2026-09-26
-        # 18:01: brief referenced OPENROUTER_API_KEY, no popup, guard silent).
+        # ARGUMENTS, not the message content.
         _guard_corpus = raw + "\n" + str(collected_brief.get("prompt") or "")
         _guard_corpus += " " + " ".join(
             str(f) for f in (collected_brief.get("features") or []))
+
         _cred_keys = set(re.findall(
             r"\b[A-Z][A-Z0-9_]{2,}_(?:API_KEY|TOKEN|SECRET|KEY)\b", _guard_corpus))
         _connected_set = {str(c).strip().upper() for c in (ctx.connected_env_names or [])}
         _unconnected_creds = {k for k in _cred_keys if k not in _connected_set}
         _req_env_populated = bool(re.search(r'"required_env"\s*:\s*\[\s*\{', raw))
+
+        # ---- claim detection (shared by b6) --------------------------------
+        _claim_claim = re.compile(
+            r"(?:api\s*key|api\s*token|bot\s*token|token|key|credential|integration)"
+            r"[^.?!]{0,80}"
+            r"(?:already\s+)?(?:connected|attached|wired|configured|linked|verified)"
+            r"|(?:already\s+)?(?:connected|attached|wired|configured|linked|verified)"
+            r"[^.?!]{0,80}"
+            r"(?:api\s*key|api\s*token|bot\s*token|token|key|credential|integration)",
+            re.I)
+        _mentioned_keys = re.findall(
+            r"\b[A-Z][A-Z0-9_]{2,}_(?:API_KEY|TOKEN|SECRET|KEY)\b", _guard_corpus)
+        _claim_sentence = any(
+            _claim_claim.search(_sent)
+            for _sent in re.split(r"[.!?\n]", _guard_corpus))
+        # prose-only claim against an empty connected set is definitionally false
+        _false_claim = _claim_sentence and not _connected_set
+        # a false claim about SPECIFIC keys: mentioned but none connected
+        _false_claim_keys = bool(_mentioned_keys) and not any(
+            k in _connected_set for k in _mentioned_keys)
+
         _prose_ask = bool(
-            re.search(r"\b(api[_ -]?key|api[_ -]?token|bot[_ -]?token|access[_ -]?token|environment variable|env var|add[_ -]?token)\b", _guard_corpus, re.I)
-            and re.search(r"\b(provide|enter|paste|add|configure|share|connected|wire)\b", _guard_corpus, re.I)
+            re.search(r"\b(api[_ -]?key|api[_ -]?token|bot[_ -]?token|"
+                      r"access[_ -]?token|environment variable|env var|"
+                      r"add[_ -]?token)\b", _guard_corpus, re.I)
+            and re.search(r"\b(provide|enter|paste|add|configure|share|"
+                          r"connected|wire)\b", _guard_corpus, re.I)
         )
-        # "already connected" only suppresses the prose branch when the
-        # platform context ACTUALLY lists connected keys — models have been
-        # observed fabricating the claim (qwen: "I see you have an
-        # OPENROUTER_API_KEY already connected" with an empty connections
-        # panel). Token-level evidence always wins: an unconnected cred key
-        # fires regardless of any claimed connection.
-        _already = (
-            bool(re.search(r"already (connected|provided|configured|saved)", _guard_corpus, re.I))
-            and bool(_connected_set)
-        )
-        _should_fire = bool(_unconnected_creds) or (
-            _prose_ask and not _already
-        )
-        # (b) Re-ask suppressor: the model asking the user to attach a key
-        # that the platform context ALREADY lists as connected (qwen did it
-        # right after "Token verified ✅"). Sentence-level match: connected
-        # key's friendly name + an ask verb in the same sentence.
-        _asked_connected = []
-        _askverbs = r"\b(attached?|provided?|entered?|pasted?|shared?|confirmed?|verif(?:y|ied)|add[ -]?token)\b"
-        for _k2 in sorted(_connected_set):
-            _fr = re.escape(_k2.replace("_", " "))
-            for _sent in re.split(r"[.!?\n]", _guard_corpus):
-                if re.search(_fr, _sent, re.I) and re.search(_askverbs, _sent, re.I):
-                    _asked_connected.append(_k2)
-                    break
 
+        # ---- b6: false-connected-claim (highest priority) ------------------
+        _claim_ref = _claim_claim.search(_guard_corpus)
         _guard_why = None
         _guard_msg = None
-        # (b2) Persistence-ask suppressor: the model asking the user
-        # "backend storage or local storage?" — persistence is a PLATFORM
-        # decision (minimal backend budget: JSON-file storage), never a
-        # question.
-        _persistence_ask = bool(
-            re.search(r"\blocal\s*storage\b|\blocalstorage\b", _guard_corpus, re.I)
-            and re.search(r"\b(backend|server|database)\b", _guard_corpus, re.I)
-        )
-        _asked_connected = []
-        _askverbs = r"\b(attached?|provided?|entered?|pasted?|shared?|confirmed?|verif(?:y|ied)|add[ -]?token)\b"
-        for _k2 in sorted(_connected_set):
-            _fr = re.escape(_k2.replace("_", " "))
-            for _sent in re.split(r"[.!?\n]", _guard_corpus):
-                if re.search(_fr, _sent, re.I) and re.search(_askverbs, _sent, re.I):
-                    _asked_connected.append(_k2)
-                    break
-
-        _guard_why = None
-        _guard_msg = None
-        # (b3) Picker-prose suppressor: the model asking the page-selection
-        # / save-target questions in CHAT TEXT (rule 5b forbids it — the
-        # pickers render as chips in the final create section). Live miss
-        # 10:53: "could you pick up to 2 pages for real saved data ... and
-        # tell me which one thing to save first?"
-        _picker_prose = bool(re.search(
-            r"pick up to\s+(?:two|2)\s+pages|real\s+saved\s+data|"
-            r"which\s+one\s+thing[^?]*save|pages?\s+for\s+real\s+data",
-            _guard_corpus, re.I))
-        # (b4) Picker-wait deadlock suppressor: the model emits the pickers
-        # EARLY and waits for the user's picks before writing the brief
-        # ("once you fill those in I'll generate the brief") — but the
-        # pickers only RENDER after the brief card exists, so both sides
-        # wait forever (live deadlock 10:58).
-        _picker_wait = bool(re.search(
-            r"once you fill|fill\s+(?:those|these)\s+in[^.]*brief|"
-            r"pickers?[^.]*(?:then|before)[^.]*brief",
-            _guard_corpus, re.I))
-        # (b5) Brief-promise suppressor: the model ENDS its turn promising
-        # the brief ("Let me put together the build brief for you") instead
-        # of calling propose_brief — nothing arrives and the user must nudge
-        # (live stall 11:03).
-        # Skip when propose_brief was ALREADY called this turn (the brief
-        # is collected; the promise text is just its presentation).
-        _brief_promise = (
-            not collected_brief.get("prompt")
-            and bool(re.search(
-            r"(?:let me|i can|i'?ll|i will|now i can)\\s+"
-            r"(?:now\\s+|then\\s+|go ahead and\\s+)?"
-            r"(?:put together|prepare|draft|write|create|build|generate)"
-            r"[^.]*brief",
-            _guard_corpus, re.I)))
-        if _brief_promise:
-            _guard_why = "brief-promise: model announced the brief instead of producing it"
-            _guard_msg = (
-                "ACTION CORRECTION: do NOT promise the brief for later — "
-                "produce it NOW. If every gate is satisfied (idea clear, "
-                "required tokens verified, non-optional env keys answered, "
-                "integrations confirmed, project named), emit the COMPLETE "
-                "polished build prompt in the JSON \"brief\" field NOW (this "
-                "correction round has no tools — the JSON field IS the "
-                "delivery channel); your \"reply\" text is just 1-2 sentences "
-                "presenting it. If a gate is "
-                "still missing, ask for exactly that one thing instead. "
-                "If the user already gave a project name, echo it in project_name — never "
-"revert to the description title or re-ask. "
-"Re-emit the COMPLETE JSON now. Reply with the JSON only."
+        if _claim_ref and (_false_claim or _false_claim_keys):
+            _guard_why = (
+                "false-connected-claim: model claims a credential is connected "
+                f"but the platform context lists none (connected={sorted(_connected_set)})"
             )
-        elif _picker_wait:
-            _guard_why = "picker-wait: model waiting for picks before the brief (deadlock)"
             _guard_msg = (
-                "DEADLOCK CORRECTION: do NOT wait for the user's page/save "
-                "picks — the pickers only RENDER after the brief card "
-                "exists, so waiting blocks both. Generate the brief NOW on "
-                "your two best-fit page assumptions (real-data pages + save "
-                "target) and include the typed picker items as required_env "
-                "in the SAME reply ({\"key\": \"REAL_DATA_TYPES\" ... see "
-                "rule 5b}). The user's picks are injected into the build "
-                "automatically at create time and override your assumptions. "
+                "FABRICATION CORRECTION: NOTHING is connected for this "
+                "project — the platform context lists no attached "
+                "credentials. Never claim a key is connected, attached, or "
+                "wired when it is not. If the app needs the integration, ASK "
+                'the user to attach it: set "required_tokens" to '
+                '[{"key": "<EXACT_KEY_NAME>", "label": "<short label>"}] and '
+                "your reply tells them to use the Add-Token input that just "
+                "opened (their saved integrations appear as options there). "
                 "Re-emit the COMPLETE JSON now. Reply with the JSON only."
             )
-        elif _picker_prose:
+        # ---- b2: re-ask for an already-connected key ------------------------
+        elif _asked_connected:
+            _guard_why = f"re-asks for already-connected {_asked_connected}"
+            _guard_msg = (
+                "PLATFORM CONTEXT CORRECTION: "
+                f"{_asked_connected} already attached to this project and "
+                "verified — the platform context lists them as connected env "
+                "keys. Do NOT ask the user to attach or provide them again. "
+                "Re-emit the COMPLETE JSON treating those keys as connected "
+                "(no required_env entry for them), and adjust the reply text "
+                "to reference them as already connected. Reply with the JSON "
+                "only."
+            )
+        # ---- b3: picker-prose ------------------------------------------------
+        elif re.search(
+                r"pick up to\s+(?:two|2)\s+pages|real\s+saved\s+data|"
+                r"which\s+one\s+thing[^?]*save|pages?\s+for\s+real\s+data",
+                _guard_corpus, re.I):
             _guard_why = "picker-prose: page/save questions asked in chat text"
             _guard_msg = (
                 "PLATFORM UI CORRECTION: NEVER ask the page-selection or "
@@ -14560,36 +14517,55 @@ async def create_project_assistant(
                 "Write the brief on your two best-fit page assumptions and "
                 "emit the picker items as typed required_env entries "
                 '({"key": "REAL_DATA_PAGES", "type": "pages", "options": '
-                "[...pages..., \"Login/Signup\"]} and {\"key\": "
-                "\"SAVE_TARGET\", \"type\": \"choice\", \"options\": "
-                "[...]}) in the SAME reply that presents the brief. The "
-                "user's picks are injected into the build automatically. "
-                "Re-emit the COMPLETE JSON now without the prose questions. "
-                "Reply with the JSON only."
+                '[...pages..., "Login/Signup"]} and {"key": "SAVE_TARGET", '
+                '"type": "choice", "options": [...]}) in the SAME reply that '
+                "presents the brief. The user's picks are injected into the "
+                "build automatically. Re-emit the COMPLETE JSON now without "
+                "the prose questions. Reply with the JSON only."
             )
-        elif _persistence_ask:
-            _guard_why = "persistence-ask: Backend-vs-LocalStorage question in prose"
+        # ---- b4: picker-wait deadlock ----------------------------------------
+        elif re.search(
+                r"once you fill|fill\s+(?:those|these)\s+in[^.]*brief|"
+                r"pickers?[^.]*(?:then|before)[^.]*brief",
+                _guard_corpus, re.I):
+            _guard_why = "picker-wait: model waiting for picks before the brief (deadlock)"
             _guard_msg = (
-                "PLATFORM DECISION CORRECTION: persistence is NOT a user "
-                "question. The platform persists user content server-side "
-                "with simple JSON-file storage per the minimal backend "
-                "budget. Do not ask Backend-vs-LocalStorage. Re-emit the "
-                "COMPLETE JSON without that question; if the Content "
-                "Library needs saving, the brief specifies the backend "
-                "endpoints (e.g. POST /api/library) with JSON-file storage. "
+                "DEADLOCK CORRECTION: do NOT wait for the user's page/save "
+                "picks — the pickers only RENDER after the brief card "
+                "exists, so waiting blocks both. Generate the brief NOW on "
+                "your two best-fit page assumptions (real-data pages + save "
+                "target) and include the typed picker items as required_env "
+                "in the SAME reply (see rule 5b). The user's picks are "
+                "injected into the build automatically at create time and "
+                "override your assumptions. Re-emit the COMPLETE JSON now. "
                 "Reply with the JSON only."
             )
-        elif _asked_connected:
-            _guard_why = f"re-asks for already-connected {_asked_connected}"
+        # ---- b5: brief-promise -----------------------------------------------
+        elif re.search(
+                r"(?:let me|i can|i'?ll|i will|now i can)\s+"
+                r"(?:now\s+|then\s+|go ahead and\s+)?"
+                r"(?:put together|prepare|draft|write|create|build|generate)"
+                r"[^.]*brief",
+                _guard_corpus, re.I):
+            _guard_why = "brief-promise: model announced the brief instead of producing it"
             _guard_msg = (
-                "PLATFORM CONTEXT CORRECTION: "
-                f"{_asked_connected} already attached to this project and verified — "
-                "the platform context lists them as connected env keys. Do NOT ask "
-                "the user to attach or provide them again. Re-emit the COMPLETE JSON "
-                "treating those keys as connected (no required_env entry for them), "
-                "and adjust the reply text to reference them as already connected. "
-                "Reply with the JSON only."
+                "ACTION CORRECTION: do NOT promise the brief for later — "
+                "produce it NOW. If every gate is satisfied (idea clear, "
+                "required tokens verified, non-optional env keys answered, "
+                "integrations confirmed, project named), emit the COMPLETE "
+                'polished build prompt in the JSON "brief" field NOW (this '
+                "correction round has no tools — the JSON field IS the "
+                'delivery channel); your "reply" text is just 1-2 sentences '
+                "presenting it. If a gate is still missing, ask for exactly "
+                "that one REQUIRED gate (an unverified token, an unanswered "
+                "non-optional env key, or the project name when the user "
+                "truly has not given one) — never a permission or "
+                "confirmation question, and never revert the project name: "
+                "if the user already stated a name, use it verbatim in "
+                '"project_name". Re-emit the COMPLETE JSON now. Reply with '
+                "the JSON only."
             )
+        # ---- env-popup: credential referenced, no field emitted ---------------
         elif not _req_env_populated and _should_fire:
             _detail = (
                 f"credential key(s) {sorted(_unconnected_creds)}" if _unconnected_creds
@@ -14609,57 +14585,11 @@ async def create_project_assistant(
                 "(the Add-Token input opens); if it is a regular config "
                 'value, set "required_env" to [{"key": "<EXACT_KEY_NAME>", '
                 '"label": "<short label>", "question": "<one clear ask>", '
-                '"optional": false}]. Never defer a credential ask to "later" '
-                "or ask for its value in chat text. Do not include keys the "
-                "platform context already lists as connected. Reply with "
-                "the JSON only."
+                '"optional": false}]. Never defer a credential ask to '
+                '"later" or ask for its value in chat text. Do not include '
+                "keys the platform context already lists as connected. "
+                "Reply with the JSON only."
             )
-        # ---- Layer 2: JEV semantic check (additive-only) -----------------
-        # Runs ONLY when the regex layers passed, a brief was proposed, and
-        # the layer is enabled. Shadow = log-only (default); enforce lets a
-        # >=threshold JEV verdict trigger the SAME corrective as the regex
-        # layers. JEV can never cancel a regex fire.
-        if (
-            _guard_msg is None
-            and _CREATE_ENV_GUARD_JEV not in ("off", "")
-            and not _ENV_JEV_DISABLED["until_restart"]
-            and collected_brief.get("prompt")
-        ):
-            try:
-                _jev_prob = await _env_guard_jev_check(
-                    _guard_corpus, _connected_set)
-                _ENV_JEV_FAIL_COUNTER["consecutive"] = 0
-                _jev_fire = _jev_prob >= _ENV_JEV_FIRE_THRESHOLD
-                logger.info(
-                    "[ENV-GUARD-SHADOW] regex=skip jev=%s prob=%.2f mode=%s",
-                    "fire" if _jev_fire else "pass", _jev_prob,
-                    _CREATE_ENV_GUARD_JEV)
-                if _jev_fire and _CREATE_ENV_GUARD_JEV == "enforce":
-                    _guard_why = (
-                        "jev: brief semantically requires an unconnected "
-                        "credential (no regex shape matched)")
-                    _guard_msg = (
-                        "SYSTEM-INTEGRITY CORRECTION: your project needs a "
-                        "credential from the user (detected in the brief) but "
-                        "you are not emitting an input field for it. Re-emit "
-                        "the COMPLETE JSON now, choosing the RIGHT field: a "
-                        'masked secret (API key / token) goes in '
-                        '"required_tokens" as [{"key": "<EXACT_KEY_NAME>", '
-                        '"label": "<short label>"}] (Add-Token input); a '
-                        'regular config value goes in "required_env" as '
-                        '[{"key": ..., "label": ..., "question": ..., '
-                        '"optional": false}]. Never narrate a credential ask '
-                        "or defer it to later. Do not include keys the platform "
-                        "context already lists as connected. Reply with the "
-                        "JSON only."
-                    )
-            except Exception as _jev_err:
-                _ENV_JEV_FAIL_COUNTER["consecutive"] += 1
-                if _ENV_JEV_FAIL_COUNTER["consecutive"] >= 5:
-                    _ENV_JEV_DISABLED["until_restart"] = True
-                logger.info(
-                    "[ENV-GUARD-SHADOW] jev error (%d consecutive): %s",
-                    _ENV_JEV_FAIL_COUNTER["consecutive"], _jev_err)
 
         if _guard_msg:
             logger.warning(
