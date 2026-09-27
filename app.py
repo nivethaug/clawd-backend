@@ -14297,10 +14297,39 @@ async def create_project_assistant(
         and not e.get("optional")
         for e in (ctx.pending_env or [])
     )
+    # 07:24:58 live run: the nudge fired on TURN 1 — the idea mentioned
+    # OpenRouter with nothing connected and required_tokens not yet emitted
+    # (missing_required/pending_env both empty at that instant), so the
+    # "all hard gates satisfied" text pushed the model to skip the key ask
+    # and claim OpenRouter connected (b6 fired; popup never opened on the
+    # first reply). A mention of a provider whose key is NOT connected is a
+    # hard gate: the ask must happen first.
+    _create_connected_upper = {
+        str(c).strip().upper() for c in (ctx.connected_env_names or [])
+    }
+    _create_user_corpus = " ".join(
+        m.content for m in request.messages if m.role == "user"
+    ).lower()
+    _create_unconnected_provider = any(
+        re.search(rf"\b{_kw}\b", _create_user_corpus)
+        and _key not in _create_connected_upper
+        for _kw, _key in (
+            ("openrouter", "OPENROUTER_API_KEY"),
+            ("openai", "OPENAI_API_KEY"),
+            ("anthropic", "ANTHROPIC_API_KEY"),
+            ("claude", "ANTHROPIC_API_KEY"),
+            ("gemini", "GEMINI_API_KEY"),
+            ("serper", "SERPER_API_KEY"),
+            ("resend", "RESEND_API_KEY"),
+            ("stripe", "STRIPE_SECRET_KEY"),
+            ("coingecko", "COINGECKO_API_KEY"),
+        )
+    )
     if (
         ctx.detected_kind
         and not ctx.missing_required
         and not _create_chat_pending
+        and not _create_unconnected_provider
         and not ctx.regenerate
         and not ctx.prompt_confirmed
     ):
