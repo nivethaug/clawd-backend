@@ -132,10 +132,18 @@ class OpenRouterClient:
         #   against the z.ai API.
         model_l = (self.model or "").lower()
         if "glm" in model_l or "z-ai/" in model_l:
-            # GLM family: thinking can't be fully disabled without provider
-            # 400s (observed on 5.3-flash); effort=low validated live on both
-            # glm-5.3-flash and glm-4.7-flash (DreamSupport, 2026-09-22).
-            payload["reasoning"] = {"effort": "low"}
+            if self._tag == "ZAI-CLIENT":
+                # Direct z.ai NATIVE shape — wrapper-v2 tier1 live-validated
+                # 2026-08-31: TOP-LEVEL reasoning_effort param, honored,
+                # near-zero reasoning tokens, full text output. The
+                # OpenRouter-style {"reasoning": {"effort": ...}} object is
+                # NOT native here and was silently IGNORED (12:40 live:
+                # full-effort thinking ran the call past the 45s timeout).
+                payload["reasoning_effort"] = "low"
+            else:
+                # Via OpenRouter: effort=low object shape (observed live:
+                # reasoning_tokens 15/0 on glm-5.3-flash create-chat turns).
+                payload["reasoning"] = {"effort": "low"}
         else:
             payload["reasoning"] = {"enabled": False}
 
