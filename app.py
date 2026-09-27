@@ -14273,6 +14273,14 @@ async def create_project_assistant(
     elif ctx.prompt_confirmed:
         ctx_lines.append("- the user already confirmed a prompt: keep replies short, no new brief unless asked")
 
+    # TURN TRACE: the exact context the model received this turn
+    logger.info("[CREATE-TURN] ctx_lines=%s", ctx_lines)
+    logger.info("[CREATE-TURN] req: choice_answers=%s pending_env=%s "
+                "missing_required=%s connected=%s verified=%s",
+                getattr(request, "choice_answers", None),
+                getattr(request, "pending_env", None),
+                getattr(request, "missing_required", None),
+                ctx.connected_env_names, ctx.bot_token_verified)
     system_prompt = _CREATE_ASSISTANT_SYSTEM + "\n\nLive platform context:\n" + "\n".join(ctx_lines)
 
     # Tool loop: the model may call request_inputs to pop input fields; each
@@ -14282,6 +14290,16 @@ async def create_project_assistant(
         m.content for m in request.messages if m.role == "user"
     ).lower() + " "
     convo: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}] + list(history)
+
+    # TURN TRACE: every message sent to the LLM this turn (role, size, head)
+    for _mi, _m in enumerate(convo):
+        _mc = str(_m.get("content") or "")
+        _mt = [t.get("function", {}).get("name") for t in (_m.get("tool_calls") or [])]
+        logger.info(
+            "[CREATE-LLM] msg[%d] role=%s chars=%d tools=%s head=%r",
+            _mi, _m.get("role"), len(_mc), _mt or "-",
+            _mc[:160].replace("\n", " "),
+        )
     collected_tokens: List[Dict[str, str]] = []
     collected_env: List[Dict[str, Any]] = []
     collected_brief: Dict[str, Any] = {}
@@ -14698,6 +14716,16 @@ async def create_project_assistant(
         if json_match:
             text = json_match.group(0)
         data = json.loads(text)
+        # TURN TRACE: the model's raw structured output this turn
+        logger.info(
+            "[CREATE-TURN] out: reply=%r kind=%r tokens=%r env=%r "
+            "name=%r brief_len=%s",
+            (data.get("reply") or "")[:200],
+            k if isinstance(k, str) else None,
+            data.get("required_tokens"), data.get("required_env"),
+            data.get("project_name"),
+            len(str(b.get("prompt"))) if isinstance(b, dict) and b.get("prompt") else None,
+        )
         reply = str(data.get("reply") or "").strip()
         k = data.get("kind")
         if isinstance(k, str) and k.strip().lower() in _CREATE_ASSISTANT_KINDS:
