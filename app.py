@@ -14152,7 +14152,7 @@ Behaviour:
 4. Before producing a brief you MUST have asked at least ONE clarifying question (purpose, audience, key features, or commands) and received the user's answer — like a real product assistant refining the idea. Skip this only when the user has already given rich detail AND explicitly says to generate/proceed now.
 5. If the application would need ANY external API or integration (AI provider, weather, news, payments, email, maps, social, scraping, ...), CONFIRM with the user which ones to use BEFORE producing the brief — offer a short curated list when unsure. Skip asking only when the integration is already connected (it appears in the connected env keys) or is the project type's required bot token.
    - LLM/AI features are provider-AGNOSTIC: never assume OpenAI. If no LLM key is connected, ask which provider the user prefers (OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, ...). If one is already connected, suggest reusing it. In the final prompt use the matching env key for the CHOSEN provider (OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, ...) via os.getenv.
-5b. WEBSITE PAGE-INTEGRATION CHOICE (for website ideas with 3+ pages): NEVER ask these questions in chat text — no prose listing of pages, no "which pages should have real data?", nothing. You do NOT need the answers to write the brief: write the brief normally (your two best-fit data pages as the assumed scope), and IN THE SAME FINAL TURN that presents the brief (the reply after propose_brief is accepted) also emit these as "required_env": (a) {"key": "REAL_DATA_PAGES", "type": "pages", "options": [<the app's pages> + "Login/Signup"], "question": "Pick up to 2 pages for real saved data (suggestions: <your two best-fit pages>)"} and (b) {"key": "SAVE_TARGET", "type": "choice", "options": [<primary saveable things>], "question": "Which one thing should the app SAVE first?"}. The platform renders them as pickers in the final setup section and injects the user's picks into the build automatically — your brief's assumptions are overridden by them. ALWAYS include "Login/Signup" as a pages option (chosen = template auth service, no custom backend). If the user is in a hurry ("just build it"), skip the pickers and say so in one line.
+5b. WEBSITE PAGE-INTEGRATION CHOICE (for website ideas with 3+ pages): NEVER ask these questions in chat text — no prose listing of pages, no "which pages should have real data?", nothing. You do NOT need the answers to write the brief: write the brief normally (your two best-fit data pages as the assumed scope), and IN THE SAME FINAL TURN that presents the brief (the reply after propose_brief is accepted) also emit these as "required_env": (a) {"key": "REAL_DATA_PAGES", "type": "pages", "options": [<the app's pages> + "Login/Signup"], "question": "Pick up to 2 pages for real saved data (suggestions: <your two best-fit pages>)"} and (b) {"key": "SAVE_TARGET", "type": "choice", "options": [<primary saveable things>], "question": "Which one thing should the app SAVE first?"}. The platform renders them as pickers in the final setup section and injects the user's picks into the build automatically — your brief's assumptions are overridden by them. NEVER wait for the picks before writing the brief and never say "once you fill those in I'll generate the brief" — the pickers only appear AFTER the brief card, so waiting creates a deadlock. When every other gate is satisfied, propose the brief immediately; the pickers ride along. ALWAYS include "Login/Signup" as a pages option (chosen = template auth service, no custom backend). If the user is in a hurry ("just build it"), skip the pickers and say so in one line.
 6. AGENT DELIVERY CHANNELS: when the idea involves recurring output (daily reports, alerts, digests, keyword lists, notifications, monitoring), ask which channel(s) the user wants — list the four options (Telegram / Discord / Email / Webhook-API) and that ANY COMBINATION works, e.g. "email me daily AND ping Discord when something important is found". CRITICAL TIMING: the channel-selection question itself MUST go out with required_tokens null and required_env null — emitting a channel credential with the question pops a masked input before the user has chosen anything. Only in the turn AFTER the user names a channel do you collect what it needs, exactly like bot tokens:
    - Telegram → include {"key": "TELEGRAM_BOT_TOKEN", "label": "Telegram Bot Token"} in "required_tokens" (the masked Add-Token input opens — same flow as bot projects) AND ask for the chat id in chat, emitting {"key": "TELEGRAM_CHAT_ID", ...} in "required_env".
    - Discord → include {"key": "DISCORD_WEBHOOK_URL", "label": "Discord Webhook URL"} in "required_tokens" (masked input; the user copies it from their channel Settings → Integrations).
@@ -14494,7 +14494,29 @@ async def create_project_assistant(
             r"pick up to\s+(?:two|2)\s+pages|real\s+saved\s+data|"
             r"which\s+one\s+thing[^?]*save|pages?\s+for\s+real\s+data",
             _guard_corpus, re.I))
-        if _picker_prose:
+        # (b4) Picker-wait deadlock suppressor: the model emits the pickers
+        # EARLY and waits for the user's picks before writing the brief
+        # ("once you fill those in I'll generate the brief") — but the
+        # pickers only RENDER after the brief card exists, so both sides
+        # wait forever (live deadlock 10:58).
+        _picker_wait = bool(re.search(
+            r"once you fill|fill\s+(?:those|these)\s+in[^.]*brief|"
+            r"pickers?[^.]*(?:then|before)[^.]*brief",
+            _guard_corpus, re.I))
+        if _picker_wait:
+            _guard_why = "picker-wait: model waiting for picks before the brief (deadlock)"
+            _guard_msg = (
+                "DEADLOCK CORRECTION: do NOT wait for the user's page/save "
+                "picks — the pickers only RENDER after the brief card "
+                "exists, so waiting blocks both. Generate the brief NOW on "
+                "your two best-fit page assumptions (real-data pages + save "
+                "target) and include the typed picker items as required_env "
+                "in the SAME reply ({\"key\": \"REAL_DATA_TYPES\" ... see "
+                "rule 5b}). The user's picks are injected into the build "
+                "automatically at create time and override your assumptions. "
+                "Re-emit the COMPLETE JSON now. Reply with the JSON only."
+            )
+        elif _picker_prose:
             _guard_why = "picker-prose: page/save questions asked in chat text"
             _guard_msg = (
                 "PLATFORM UI CORRECTION: NEVER ask the page-selection or "
