@@ -14490,23 +14490,68 @@ async def create_project_assistant(
                         try:
                             args = json.loads(_raw_args or "{}")
                         except Exception:
-                            args = {}
+                            # Rescue: same embedded-JSON fallback the reply
+                            # parser uses (fences, leading prose). 12:16 live:
+                            # an 853-token brief call produced unparseable
+                            # arguments -> args={} SILENTLY -> empty
+                            # collected_brief -> tool said accepted anyway ->
+                            # brief lost with no guard able to fire (b5 and
+                            # the delivery round both check collected_brief).
+                            _rescued = None
+                            try:
+                                _t = str(_raw_args or "")
+                                if "```" in _t:
+                                    _t = _t.split("```")[1]
+                                    if _t.startswith("json"):
+                                        _t = _t[4:]
+                                _m = re.search(r"\{.*\}", _t, re.DOTALL)
+                                if _m:
+                                    _rescued = json.loads(_m.group(0))
+                            except Exception:
+                                _rescued = None
+                            if isinstance(_rescued, dict) and _rescued:
+                                args = _rescued
+                                logger.warning(
+                                    "[CREATE-ASSISTANT] propose_brief args "
+                                    "rescued via embedded-JSON fallback "
+                                    "(head=%r)", str(_raw_args)[:120],
+                                )
+                            else:
+                                args = {}
+                                logger.warning(
+                                    "[CREATE-ASSISTANT] propose_brief args "
+                                    "UNPARSEABLE — brief lost (head=%r)",
+                                    str(_raw_args)[:200],
+                                )
                     _pk = str(args.get("kind") or "").strip().lower()
                     _pp = str(args.get("prompt") or "").strip()
-                    if _pk not in _CREATE_ASSISTANT_KINDS:
-                        _pk = "custom"
-                    collected_brief.update({
-                        "kind": _pk,
-                        "prompt": _pp[:6000],
-                        "features": [str(f).strip()[:80] for f in (args.get("features") or []) if str(f).strip()][:8],
-                        "suggested_name": str(args.get("suggested_name") or "").strip()[:30] or None,
-                    })
-                    tool_out = {
-                        "accepted": True,
-                        "note": ("Brief recorded — the confirmation card is shown to "
-                                 "the user. Do NOT repeat the brief in your reply "
-                                 "text; just present it in 1-2 sentences."),
-                    }
+                    if not _pp:
+                        # NEVER accept an empty brief: the tool loop gives
+                        # the model up to 3 rounds — tell it to re-send
+                        # instead of lying 'accepted' (the 12:16 silent loss).
+                        tool_out = {
+                            "accepted": False,
+                            "error": ("brief rejected: 'prompt' is empty or "
+                                      "missing. Re-call propose_brief with "
+                                      "the COMPLETE arguments: kind, prompt "
+                                      "(120-400 words), features, "
+                                      "suggested_name."),
+                        }
+                    else:
+                        if _pk not in _CREATE_ASSISTANT_KINDS:
+                            _pk = "custom"
+                        collected_brief.update({
+                            "kind": _pk,
+                            "prompt": _pp[:6000],
+                            "features": [str(f).strip()[:80] for f in (args.get("features") or []) if str(f).strip()][:8],
+                            "suggested_name": str(args.get("suggested_name") or "").strip()[:30] or None,
+                        })
+                        tool_out = {
+                            "accepted": True,
+                            "note": ("Brief recorded — the confirmation card is shown to "
+                                     "the user. Do NOT repeat the brief in your reply "
+                                     "text; just present it in 1-2 sentences."),
+                        }
                 elif fn.get("name") != "request_inputs":
                     tool_out = {"error": f"unknown tool: {fn.get('name')}"}
                 else:
@@ -14736,7 +14781,7 @@ async def create_project_assistant(
         # safe for the legitimate presentation: a real propose_brief call
         # fills collected_brief, a JSON delivery matches the "brief": {.
         elif (
-            not collected_brief
+            not (collected_brief and collected_brief.get("prompt"))
             and not re.search(r'"brief"\s*:\s*\{', raw)
             and re.search(
                 r"(?:let me|i can|i'?ll|i'?ve|i will|now i can)\s+"
@@ -14821,7 +14866,7 @@ async def create_project_assistant(
             if (_guard_why and _guard_why.startswith("brief-promise")
                     and fallback_client is not None
                     and not re.search(r'"brief"\s*:\s*\{', raw)
-                    and not collected_brief):
+                    and not (collected_brief and collected_brief.get("prompt"))):
                 _fb_msg = (
                     "FINAL DELIVERY CORRECTION: your last two replies "
                     "ANNOUNCED the brief without producing it. Reply with "
@@ -14867,7 +14912,7 @@ async def create_project_assistant(
     if (
         _create_ready_to_brief
         and fallback_client is not None
-        and not collected_brief
+        and not (collected_brief and collected_brief.get("prompt"))
         and not re.search(r'"brief"\s*:\s*\{', raw)
     ):
         _dr_msg = (
