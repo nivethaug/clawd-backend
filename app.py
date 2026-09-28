@@ -15236,6 +15236,14 @@ async def create_project_assistant(
         pn = str(data.get("project_name") or "").strip()
         if pn:
             project_name = pn[:30]
+        # Deterministic fallback (regression C4 live): a delivered brief with
+        # project_name null — the model wrote the name into suggested_name
+        # instead. The UI already prefills from suggested_name; keep the API
+        # self-consistent too.
+        if not project_name and brief is not None:
+            _sn = str((getattr(brief, "suggested_name", None) or "")).strip()
+            if _sn:
+                project_name = _sn[:30]
 
         if not reply and not brief:
             raise ValueError("empty payload")
