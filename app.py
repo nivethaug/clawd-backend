@@ -14896,6 +14896,20 @@ async def create_project_assistant(
                 '"project_name". Re-emit the COMPLETE JSON now. Reply with '
                 "the JSON only."
             )
+        # ---- english-only: any CJK in the reply violates the language rule
+        # (regression C11 live: Chinese input got a Chinese reply). Highest-
+        # practical priority right before env-popup — the reply text itself
+        # is wrong regardless of anything else in it.
+        elif any("\u4e00" <= _ch <= "\u9fff" for _ch in raw) or \
+                any("\u3040" <= _ch <= "\u30ff" for _ch in raw):
+            _guard_why = "english-only: reply contains CJK characters"
+            _guard_msg = (
+                "LANGUAGE CORRECTION: you replied in Chinese/Japanese. The "
+                "platform rule is ENGLISH ONLY — always, regardless of the "
+                "user's language. Re-emit the COMPLETE JSON now with the "
+                "same content translated to natural English. Reply with "
+                "the JSON only."
+            )
         # ---- env-popup: credential referenced, no field emitted ---------------
         elif not _req_env_populated and _should_fire:
             _detail = (
