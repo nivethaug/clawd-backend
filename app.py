@@ -15274,6 +15274,15 @@ async def create_project_assistant(
         )
         kind = brief.kind
 
+    # Name fallback AFTER both brief paths converge (parse-JSON and the
+    # propose_brief tool — regression C4 rerun: the tool path converts the
+    # brief HERE, after the parse-block fallback, so project_name stayed
+    # null while suggested_name carried the name).
+    if not project_name and brief is not None:
+        _sn = str(getattr(brief, "suggested_name", None) or "").strip()
+        if _sn:
+            project_name = _sn[:30]
+
     # Fixed-stack guard (prompt rule 0 enforced in code — LLM compliance is
     # unreliable; incident: a CodeIgniter CMS spec was briefed, deployed as a
     # React scaffold, and reported as a success). A brief for a build whose
