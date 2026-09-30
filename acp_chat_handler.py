@@ -333,6 +333,61 @@ class ACPChatHandler:
 ---
 """
 
+    def _superpowers_tools_block(self) -> str:
+        """DreamAgent Superpowers integration recipe (platform tools-api).
+
+        Included in every edit-chat prompt so ANY project type can integrate
+        enabled superpowers (song, image-gen, ...) when the user asks in
+        plain language. The app's BACKEND calls tools server-side with the
+        injected project secret; output files land inside the project
+        workspace (tools-output/).
+        """
+        return """## DREAMAGENT SUPERPOWERS (platform tools — server-side integration)
+
+The platform provides ready-made AI/media tools the user enables on the
+Superpowers page (billed to their credits). When the user asks to ADD one of
+these features ("add song generation", "integrate image generation from my
+superpowers", "let users generate images"), integrate them like this:
+
+1. BACKEND ONLY — tool calls go through the app's backend, never frontend
+   code; never put secrets in frontend files. Env (already in backend/.env):
+   DREAMAGENT_TOOLS_URL (platform base URL), DREAMAGENT_PROJECT_SECRET,
+   PROJECT_ID.
+2. Execute: POST {DREAMAGENT_TOOLS_URL}/tools/projects/{PROJECT_ID}/tools/{tool}/execute
+   Headers: X-Project-Secret: <DREAMAGENT_PROJECT_SECRET>, Content-Type: application/json
+   Body: {"op": "<op>", "params": {...}}  ->  {"job_id": N}
+   - 409 = tool not enabled: tell the user to enable it on the Superpowers page.
+   - credits/402 errors = user out of credits: show a friendly message.
+3. Poll: GET {DREAMAGENT_TOOLS_URL}/tools/jobs/{job_id} (same header) every ~3s
+   until status is "done" or "error" (surface job error text on failure).
+4. Result: job output_path is INSIDE this project workspace
+   (tools-output/<file>) — read/serve it directly as the app's own file.
+   No download endpoint needed. For paid audio/video tools use "quantity"
+   in the execute body when duration matters (per-minute billing).
+5. Tool cheat-sheet (tool -> ops + key params):
+   song -> generate(prompt, style?, duration?, vocals? auto|female|male|instrumental)
+   image-gen -> generate(prompt, size? 1024x1024|1920x1080|1080x1920)
+   video-gen -> generate(prompt, style?, images? [project-relative paths], theme?, hook_lines?)
+   voiceover -> generate(file? [video], text, language e.g. ta-IN|en-US, bed?)
+   lip-sync -> generate(image, audio, duration, resolution? 720p|1080p)
+   voice-clone -> convert(source_audio, target_voice)
+   ffmpeg -> extract_audio / trim / audio_convert / replace_audio / merge / burn_subtitles
+   whisper -> transcribe(file, format? txt|srt|vtt, language?)
+   sharp -> process(file, op resize|compress|convert|thumbnail, width?, height?, format?)
+   pdf -> merge(files) / split(file, pages) / extract_text(file) / create(title, text)
+   remotion -> render(images, hook_lines?, duration_seconds?, format? 16:9|9:16, theme?, brand_title?)
+6. Build a clean UI around the feature (form -> progress -> play/download
+   result) and persist a generation history when the app has storage.
+   NEVER ask the user for API keys, URLs or endpoints — the platform
+   injects everything the backend needs.
+7. If the user asks WHICH tools are available, list the enabled superpowers
+   from /app/superpowers and what they do — do not guess pricing beyond
+   "billed to your credits (beta pricing)".
+
+---
+
+"""
+
     def _read_project_env_value(self, key: str):
         """Read a single key from the project's .env file.
 
@@ -738,6 +793,7 @@ class ACPChatHandler:
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="scheduler_chat_edit")}
 {self._env_rules_block()}
+{self._superpowers_tools_block()}
 You are a friendly AI assistant helping a user with their **{self.project_name}** scheduler project.
 
 ---
@@ -1244,6 +1300,7 @@ Before making any code changes, follow this process:
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="agent_chat_edit")}
 {self._env_rules_block()}
+{self._superpowers_tools_block()}
 You are a friendly AI assistant helping a user with their **{self.project_name}** automation agent.
 
 ---
@@ -1768,6 +1825,7 @@ against the reference showing through, then remove the element.
 
         return  f"""{self._workflow_meta_block(operation="edit", prompt_kind="website_chat_edit")}
 {self._env_rules_block()}
+{self._superpowers_tools_block()}
 You are a friendly AI assistant helping a user build their **{self.project_name}** web application.
 
 ## 🎯 SOURCE ATTRIBUTES (data-da-source)
@@ -2674,6 +2732,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow, with m
         
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="telegram_chat_edit")}
 {self._env_rules_block()}
+{self._superpowers_tools_block()}
 You are a friendly AI assistant helping a user modify their **{self.project_name}** Telegram bot.
 
 ---
@@ -3164,6 +3223,7 @@ This ensures even Dream Mode has a lightweight plan-and-execute workflow.
 
         return f"""{self._workflow_meta_block(operation="edit", prompt_kind="discord_chat_edit")}
 {self._env_rules_block()}
+{self._superpowers_tools_block()}
 You are a friendly AI assistant helping a user modify their **{self.project_name}** Discord bot.
 
 ---

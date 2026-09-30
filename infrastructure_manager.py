@@ -2968,7 +2968,14 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 'PORT': str(backend_port),
                 'PROJECT_NAME': self.project_name,
                 'SECRET_KEY': _project_secret,
-                'DEBUG': 'false'
+                'DEBUG': 'false',
+                # DreamAgent Superpowers (tools-api): the generated app's
+                # backend calls tools server-side with its project secret.
+                # Output files land in the project workspace (tools-output/).
+                'DREAMAGENT_TOOLS_URL': os.getenv(
+                    'DREAMAGENT_TOOLS_PUBLIC_URL', 'https://api.dreamagent.cloud'),
+                'DREAMAGENT_PROJECT_SECRET': _project_secret,
+                'PROJECT_ID': str(self.project_id),
             }
 
             # Store the SECRET_KEY in the DB so the internal integrations
