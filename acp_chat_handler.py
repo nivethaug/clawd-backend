@@ -350,21 +350,28 @@ these features ("add song generation", "integrate image generation from my
 superpowers", "let users generate images"), integrate them like this:
 
 1. BACKEND ONLY — tool calls go through the app's backend, never frontend
-   code; never put secrets in frontend files. Env (already in backend/.env):
-   DREAMAGENT_TOOLS_URL (platform base URL), DREAMAGENT_PROJECT_SECRET,
+   code; never put secrets in frontend files. The env vars live in the
+   project's .env FILE (backend/.env, telegram/.env, ...) — they are NOT in
+   the shell environment; load them with python-dotenv or by parsing the
+   file: DREAMAGENT_TOOLS_URL (platform base URL), DREAMAGENT_PROJECT_SECRET,
    PROJECT_ID.
-2. Execute: POST {DREAMAGENT_TOOLS_URL}/tools/projects/{PROJECT_ID}/tools/{tool}/execute
-   Headers: X-Project-Secret: <DREAMAGENT_PROJECT_SECRET>, Content-Type: application/json
+2. AUTH IS EXACTLY ONE THING — header "X-Project-Secret: <DREAMAGENT_PROJECT_SECRET>".
+   Do NOT use Authorization/Bearer (fails "invalid token"), do NOT send
+   X-Project-Id, do NOT look for a token-exchange endpoint, do NOT route
+   through the integrations proxy. The recipe is complete — no discovery needed.
+3. Execute: POST {DREAMAGENT_TOOLS_URL}/tools/projects/{PROJECT_ID}/tools/{tool}/execute
+   Headers: X-Project-Secret: <secret>, Content-Type: application/json
    Body: {"op": "<op>", "params": {...}}  ->  {"job_id": N}
    - 409 = tool not enabled: tell the user to enable it on the Superpowers page.
    - credits/402 errors = user out of credits: show a friendly message.
-3. Poll: GET {DREAMAGENT_TOOLS_URL}/tools/jobs/{job_id} (same header) every ~3s
-   until status is "done" or "error" (surface job error text on failure).
-4. Result: job output_path is INSIDE this project workspace
-   (tools-output/<file>) — read/serve it directly as the app's own file.
-   No download endpoint needed. For paid audio/video tools use "quantity"
-   in the execute body when duration matters (per-minute billing).
-5. Tool cheat-sheet (tool -> ops + key params):
+4. Poll: GET {DREAMAGENT_TOOLS_URL}/tools/jobs/{job_id} (same header) every ~3s
+   until status is "completed" or "error" (surface job error text on failure).
+   Typical duration 20-120s for songs.
+5. Result: job output_path is RELATIVE TO THE PROJECT ROOT
+   (tools-output/<file>) — open it as a local file; no download endpoint
+   exists or is needed. For paid audio/video tools use "quantity" in the
+   execute body when duration matters (per-minute billing).
+6. Tool cheat-sheet (tool -> ops + key params):
    song -> generate(prompt, style?, duration?, vocals? auto|female|male|instrumental)
    image-gen -> generate(prompt, size? 1024x1024|1920x1080|1080x1920)
    video-gen -> generate(prompt, style?, images? [project-relative paths], theme?, hook_lines?)
