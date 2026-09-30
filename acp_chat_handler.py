@@ -367,10 +367,14 @@ superpowers", "let users generate images"), integrate them like this:
 4. Poll: GET {DREAMAGENT_TOOLS_URL}/tools/jobs/{job_id} (same header) every ~3s
    until status is "completed" or "error" (surface job error text on failure).
    Typical duration 20-120s for songs.
-5. Result: job output_path is RELATIVE TO THE PROJECT ROOT
-   (tools-output/<file>) — open it as a local file; no download endpoint
-   exists or is needed. For paid audio/video tools use "quantity" in the
-   execute body when duration matters (per-minute billing).
+5. DOWNLOAD the result — the output file lives on the PLATFORM host, not in
+   this project's filesystem, so you MUST fetch it over HTTP:
+   GET {DREAMAGENT_TOOLS_URL}/tools/jobs/{job_id}/file   (same X-Project-Secret
+   header) returns the raw file bytes. Save them into the project, e.g.
+   tools-output/<filename from output_path>, then serve/play that local
+   copy. There is no other download route and the platform-side path is not
+   shared with this machine. For paid audio/video tools use "quantity" in
+   the execute body when duration matters (per-minute billing).
 6. Tool cheat-sheet (tool -> ops + key params):
    song -> generate(prompt, style?, duration?, vocals? auto|female|male|instrumental)
    image-gen -> generate(prompt, size? 1024x1024|1920x1080|1080x1920)
