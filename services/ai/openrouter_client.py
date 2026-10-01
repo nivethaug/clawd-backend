@@ -419,6 +419,21 @@ def get_zai_client(model: Optional[str] = None) -> OpenRouterClient:
     global _zai_client
     base = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4")
     mdl = model or os.getenv("ZAI_MODEL", "glm-5.3-flash")
+    # .env beats the process env for this key: pm2's saved env shadows
+    # dotenv (which never overrides existing vars), so a key rotation in
+    # .env never reached the running process — every z.ai call 401'd while
+    # the .env value was already valid (2026-10-02 live: .env key curl 200,
+    # process-env key curl 401). Refresh once here, in the factory, so
+    # every construction path (create-chat brief phase, brief_client on
+    # collection turns) sees the corrected value.
+    try:
+        from dotenv import dotenv_values
+        _fe_key = (dotenv_values(".env") or {}).get("ZAI_API_KEY")
+        if (_fe_key or "").strip() and _fe_key.strip() != (os.getenv("ZAI_API_KEY") or "").strip():
+            os.environ["ZAI_API_KEY"] = _fe_key.strip()
+            logger.info("[ZAI-CLIENT] ZAI_API_KEY refreshed from .env (process env was stale)")
+    except Exception:
+        pass
     key = os.getenv("ZAI_API_KEY", "")
     if model:
         # Dedicated per-model client (mirrors get_openrouter_client)
