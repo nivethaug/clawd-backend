@@ -14600,6 +14600,20 @@ async def create_project_assistant(
                 get_openrouter_client(model=_create_fb)
                 if _create_fb and _create_fb != _create_model else None
             )
+        # BRIEF CLIENT: guards/delivery machinery always generates the brief
+        # with the proven brief generator — even on collection-phase turns,
+        # where a guard corrective or the delivery/forced-tool round ends up
+        # producing the brief (00:15 live: the brief came from the collection
+        # router because the delivery round reused `client`).
+        if _brief_phase:
+            brief_client = client
+        elif (
+            os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai"
+            and (os.getenv("ZAI_API_KEY") or "").strip()
+        ):
+            brief_client = get_zai_client()
+        else:
+            brief_client = get_openrouter_client(model=_create_model)
         _fb_used = False
         for _round in range(3):
             try:
@@ -15168,19 +15182,21 @@ async def create_project_assistant(
             "No announcement, no questions, no credential narration, no "
             "storage questions. JSON only."
         )
+        _dr_client = brief_client or client
         try:
             # Tools attached: a propose_brief TOOL call survives even when the
             # same model's text-JSON breaks on unescaped inner quotes (23:43
             # live: delivery round produced the brief as text, json.loads
             # threw, the except kept the announcement text and dropped the
             # brief — user saw 'ready to build' with no card AGAIN). The
-            # tool-args path flows into collected_brief below.
-            _dr = await client.chat_completion(
+            # tool-args path flows into collected_brief below. Runs on the
+            # BRIEF model (glm/z.ai) even on collection-phase turns.
+            _dr = await _dr_client.chat_completion(
                 messages=convo + [{"role": "user", "content": _dr_msg}],
                 temperature=0.0, max_tokens=2500,
                 tools=[_CREATE_BRIEF_TOOL],
             )
-            _dru = client.get_usage(_dr)
+            _dru = _dr_client.get_usage(_dr)
             for _k in usage_tot:
                 usage_tot[_k] += int(_dru.get(_k, 0) or 0)
             _drmsg = (_dr["choices"][0]["message"] or {})
@@ -15227,7 +15243,7 @@ async def create_project_assistant(
         # collected_brief through the same absorb path above.
         if not (collected_brief and collected_brief.get("prompt")):
             try:
-                _ft = await client.chat_completion(
+                _ft = await _dr_client.chat_completion(
                     messages=convo + [{
                         "role": "user",
                         "content": ("Call the propose_brief tool NOW with the "
@@ -15238,7 +15254,7 @@ async def create_project_assistant(
                     tools=[_CREATE_BRIEF_TOOL],
                     tool_choice={"type": "function", "name": "propose_brief"},
                 )
-                _ftu = client.get_usage(_ft)
+                _ftu = _dr_client.get_usage(_ft)
                 for _k in usage_tot:
                     usage_tot[_k] += int(_ftu.get(_k, 0) or 0)
                 for _fttc in ((_ft["choices"][0]["message"] or {}).get("tool_calls") or []):
