@@ -3,6 +3,7 @@ File Utilities module for Clawd Backend.
 Handles secure file operations for the code editor.
 """
 
+import json
 import os
 import re
 import base64
@@ -79,6 +80,133 @@ class FileUtils:
                 findings.append('large-base64-blob')
                 break
         return findings
+
+    # Popular names for typosquat distance checks
+    POPULAR_NPM = {
+        'react', 'react-dom', 'vite', 'express', 'axios', 'lodash', 'next',
+        'vue', 'typescript', 'webpack', 'eslint', 'prettier', 'jest',
+        'moment', 'uuid', 'dotenv', 'socket.io', 'redis', 'pg', 'cors',
+        'jsonwebtoken', 'bcrypt', 'bcryptjs', 'stripe', 'tailwindcss',
+        'postcss', 'sass', 'framer-motion', 'zod', 'yup', 'react-router-dom',
+        'qs', 'chalk', 'commander', 'nodemon', 'ts-node',
+        'mongoose', 'cookie-parser', 'body-parser', 'passport', 'fastify',
+    }
+    POPULAR_PYPI = {
+        'requests', 'flask', 'django', 'fastapi', 'uvicorn', 'numpy',
+        'pandas', 'boto3', 'sqlalchemy', 'celery', 'redis', 'gunicorn',
+        'httpx', 'pydantic', 'setuptools', 'python-dotenv', 'psycopg2',
+        'psycopg2-binary', 'aiohttp', 'beautifulsoup4', 'openai', 'pyjwt',
+    }
+
+    @staticmethod
+    def _dist(a: str, b: str) -> int:
+        """Levenshtein distance (small strings only)."""
+        if abs(len(a) - len(b)) > 3:
+            return 99
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            cur = [i]
+            for j, cb in enumerate(b, 1):
+                cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+            prev = cur
+        return prev[-1]
+
+    @staticmethod
+    def check_package_json(old_content, new_content) -> list:
+        """Layer 3 - package.json guard. Returns blocking reasons."""
+        issues = []
+        try:
+            new = json.loads(new_content)
+        except Exception:
+            return issues  # partial/invalid JSON - signatures already ran
+        scripts = new.get('scripts') or {}
+        for k in ('preinstall', 'postinstall', 'prepare'):
+            if scripts.get(k):
+                issues.append("package.json has a '" + k + "' install script - install scripts are blocked")
+        old_deps, new_deps = {}, {}
+        if old_content:
+            try:
+                old = json.loads(old_content)
+                for sec in ('dependencies', 'devDependencies', 'optionalDependencies'):
+                    old_deps.update(old.get(sec) or {})
+            except Exception:
+                pass
+        for sec in ('dependencies', 'devDependencies', 'optionalDependencies'):
+            new_deps.update(new.get(sec) or {})
+        for name in sorted(set(new_deps) - set(old_deps)):
+            low = (name.split('/')[-1] if name.startswith('@') else name).lower()
+            if len(low) >= 5:
+                if low in FileUtils.POPULAR_NPM:
+                    continue  # exact popular name — legit
+                for pop in FileUtils.POPULAR_NPM:
+                    d = FileUtils._dist(low, pop)
+                    if 1 <= d <= 2:
+                        issues.append("new dependency '" + name + "' looks like a typosquat of '" + pop + "'")
+                        break
+        return issues
+
+    @staticmethod
+    def check_requirements(old_content, new_content) -> list:
+        """Layer 3 - requirements.txt typosquat guard."""
+        issues = []
+
+        def names(txt):
+            out = set()
+            for line in (txt or '').splitlines():
+                line = line.strip()
+                if line and not line.startswith(('#', '-')):
+                    out.add(re.split(r'[<>=~\[\s]', line, 1)[0].lower())
+            return out
+
+        new_names = names(new_content)
+        old_names = names(old_content)
+        for name in sorted(new_names - old_names):
+            if len(name) >= 5:
+                if name in FileUtils.POPULAR_PYPI:
+                    continue
+                for pop in FileUtils.POPULAR_PYPI:
+                    d = FileUtils._dist(name, pop)
+                    if 1 <= d <= 2:
+                        issues.append("new dependency '" + name + "' looks like a typosquat of '" + pop + "'")
+                        break
+        return issues
+
+    @staticmethod
+    def llm_security_review(relative_path: str, content: str) -> tuple:
+        """Layer 4 - LLM security classification via OpenRouter (Qwen flash).
+
+        Returns (verdict, reason). FAILS OPEN (SAFE) on any error so editor
+        saves never break because of the reviewer.
+        """
+        key = os.getenv('OPENROUTER_API_KEY')
+        if not key:
+            return ('SAFE', 'review unavailable')
+        try:
+            import httpx
+            model = os.getenv('OPENROUTER_REVIEW_MODEL', 'qwen/qwen3.7-flash')
+            payload = {
+                'model': model,
+                'temperature': 0,
+                'max_tokens': 200,
+                'messages': [
+                    {'role': 'system', 'content': (
+                        'You are a strict code-security reviewer. Decide whether the '
+                        'file content is MALICIOUS (reverse shells, credential theft, '
+                        'cryptominers, data exfiltration, heavy obfuscation) or SAFE '
+                        '(normal application code). Answer with exactly one word first: '
+                        'MALICIOUS or SAFE, then a short reason.')},
+                    {'role': 'user', 'content': 'File path: ' + relative_path + '\n\n' + content[:6000]},
+                ],
+            }
+            r = httpx.post(
+                'https://openrouter.ai/api/v1/chat/completions', json=payload,
+                headers={'Authorization': 'Bearer ' + key}, timeout=30)
+            text = (r.json().get('choices') or [{}])[0].get('message', {}).get('content') or ''
+            if 'MALICIOUS' in text.upper():
+                return ('MALICIOUS', text.strip()[:200])
+            return ('SAFE', '')
+        except Exception:
+            return ('SAFE', 'review unavailable')
 
     @staticmethod
     def delete_file(base_path: str, file_path: str) -> Dict[str, Any]:
@@ -313,6 +441,33 @@ class FileUtils:
             raise ValueError(
                 f"Blocked by content scan: {', '.join(findings)}. "
                 "If you believe this is a false positive, edit the file inside DreamAgent instead.")
+
+        norm_path = file_path.replace(os.sep, '/').lower()
+
+        # Layer 3 - dependency-file guards
+        old_content = None
+        if os.path.isfile(full_path):
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    old_content = f.read()
+            except Exception:
+                old_content = None
+        if norm_path.endswith('package.json'):
+            dep_issues = FileUtils.check_package_json(old_content, content)
+            if dep_issues:
+                raise ValueError("Blocked by dependency check: " + '; '.join(dep_issues))
+        elif norm_path.endswith('requirements.txt'):
+            req_issues = FileUtils.check_requirements(old_content, content)
+            if req_issues:
+                raise ValueError("Blocked by dependency check: " + '; '.join(req_issues))
+
+        # Layer 4 - Z.ai security review for executable code writes
+        if (norm_path.endswith(('.py', '.js', '.ts', '.mjs', '.sh', '.php', '.ps1'))
+                and len(content) > 800
+                and os.getenv('ZAI_API_KEY')):
+            verdict, review_reason = FileUtils.llm_security_review(file_path, content)
+            if verdict == 'MALICIOUS':
+                raise ValueError("Blocked by AI security review: " + review_reason)
 
         # Ensure directory exists
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
