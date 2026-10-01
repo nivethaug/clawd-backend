@@ -1074,6 +1074,23 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         return {"ok": True}
 
     selected_session = _get_selected_project_session(user_id, session_id)
+
+    # ── Fire event jobs on the selected AGENT/SCHEDULER project ──
+    if selected_session:
+        try:
+            _project_id = selected_session.get("project_id")
+            if _project_id:
+                from services.scheduler.jobs import trigger_event_jobs
+                from services.scheduler.events import record_event
+                event_body = {"source": "telegram", "chat_id": chat_id,
+                              "text": text, "message_id": message_id,
+                              "user_id": user_id}
+                record_event(int(_project_id),
+                             {"content-type": "application/json"},
+                             event_body)
+                trigger_event_jobs(int(_project_id))
+        except Exception:
+            pass
     original_command = original_text.split(maxsplit=1)[0].lower() if original_text.startswith("/") else ""
     if selected_session and original_command not in {"/switch", "/sessions", "/newsession", "/clearsession", "/complete", "/current", "/billing", "/help", "/link", "/unlink", "/start"}:
         session_label = selected_session.get("label") or f"session #{selected_session['id']}"
