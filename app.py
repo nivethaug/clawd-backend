@@ -14611,7 +14611,11 @@ async def create_project_assistant(
             os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai"
             and (os.getenv("ZAI_API_KEY") or "").strip()
         ):
-            brief_client = get_zai_client()
+            # Distinct local alias: the zai branch's `import get_zai_client`
+            # makes that name function-local for the WHOLE handler — reusing
+            # it here on collection turns raised UnboundLocalError.
+            from services.ai.openrouter_client import get_zai_client as _get_zai_brief
+            brief_client = _get_zai_brief()
         else:
             brief_client = get_openrouter_client(model=_create_model)
         _fb_used = False
