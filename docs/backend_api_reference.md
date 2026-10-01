@@ -1,6 +1,32 @@
 # Backend API Reference
 
-> [TOC](toc.md) | Updated: 2026-07-12
+> [TOC](toc.md) | Updated: 2026-10-01
+
+## Superpowers (tools-api — proxied via nginx at api.dreamagent.cloud/tools/)
+
+All superpower endpoints live in the standalone tools-api service. Auth: session token, user API key, or `X-Project-Secret` header. See [SUPERPOWERS_AND_FILE_SECURITY.md](SUPERPOWERS_AND_FILE_SECURITY.md).
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/tools/me/tools` | Catalog + enabled state + usage |
+| PUT | `/tools/me/tools/{key}` | Enable/disable (account-wide) |
+| POST | `/tools/projects/{id}/tools/{key}/execute` | Submit async job |
+| GET | `/tools/projects/{id}/tools/{key}/jobs` | Job history |
+| GET | `/tools/jobs/{id}` | Job status poll |
+| GET | `/tools/jobs/{id}/file` | Download output bytes |
+| GET | `/tools/projects/{id}/outputs` | List generated files |
+| GET | `/tools/projects/{id}/outputs/{name}` | Download output by name |
+| POST | `/tools/projects/{id}/files` | Upload input file (multipart) |
+
+## File Security (file_utils.py)
+
+All file reads/writes pass through FileUtils guards. Key rules:
+- **Read denylist**: `.env`, `.git/`, key files blocked on reads AND writes
+- **Write denylist**: same + 2MB cap + binary block
+- **Signature scan**: 10 malware rules on write content
+- **Dependency guards**: package.json install scripts blocked; typosquat check
+- **AI review**: executable writes >800 chars classified by LLM (fail-open)
+- **Traversal**: commonpath containment (not prefix match)
 
 ## Purpose
 

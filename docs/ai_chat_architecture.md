@@ -1,5 +1,7 @@
 # AI Chat System Architecture
 
+> **SUPERPOWERS RECIPE**: Every edit-chat prompt (all 5 project types) includes a `_superpowers_tools_block` teaching the agent to integrate enabled tools via tools-api. Covers: execute, poll, download via `/jobs/{id}/file`, input-file upload via `POST /tools/projects/{id}/files`, X-Project-Secret auth. See `acp_chat_handler.py`.
+
 ## System Design
 
 The AI Chat System follows a modular, service-oriented architecture with clear separation of concerns.

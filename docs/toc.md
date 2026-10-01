@@ -25,7 +25,8 @@
 | [recent_activity.md](./recent_activity.md) | Activity feed APIs |
 | [dashboard.md](./dashboard.md) | Home dashboard API |
 | [sentry_monitoring.md](./sentry_monitoring.md) | Optional Sentry error monitoring for backend and workers |
-| [worker_vps_migration.md](./worker_vps_migration.md) | Plan for moving Claude Code/project workers to a separate VPS |
+| [worker_vps_migration.md
+SUPERPOWERS_AND_FILE_SECURITY.md](./worker_vps_migration.md) | Plan for moving Claude Code/project workers to a separate VPS |
 | [worker_vps_setup.md](./worker_vps_setup.md) | Step-by-step worker VPS provisioning guide (with gotchas) |
 | [worker_scaling.md](./worker_scaling.md) | Parallel request handling: multiple worker instances + growth stages |
 | [worker_file_proxy.md](./worker_file_proxy.md) | Option B reverse proxy for project endpoints to the worker VPS |

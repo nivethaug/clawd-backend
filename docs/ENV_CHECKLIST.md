@@ -1,5 +1,15 @@
 # DreamAgent — Environment Checklist (Main VPS · Worker VPS · Wrapper-v2)
 
+## Project Backend Injection (superpowers)
+
+Every project's `.env` receives these three vars for tools-api integration (injected by `infrastructure_manager._configure_backend_env`):
+
+| Variable | Example | Purpose |
+|---|---|---|
+| `DREAMAGENT_TOOLS_URL` | `https://api.dreamagent.cloud` | Platform tools-api base URL |
+| `DREAMAGENT_PROJECT_SECRET` | `<projects.secret_key>` | Auth for tools-api calls (X-Project-Secret header) |
+| `PROJECT_ID` | `2061` | Project ID for tools-api paths |
+
 > Canonical env files: production reads `/root/clawd-backend/.env.postgres` (set by
 > `start-backend.sh`, `start-scheduler.sh`, `start-worker-api.sh` via
 > `POSTGRES_ENV_FILE`). Wrapper-v2 runs under PM2 (`ecosystem.config.js`).

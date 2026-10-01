@@ -1,5 +1,7 @@
 # Worker File Proxy (Option B)
 
+> **ROUTING FIX (2026-10-01)**: `_project_lives_on_worker` now uses **marker-based detection** — a local directory counts as main-hosted only if it contains a real project marker (`project.json`, `.git`, `backend/`, `frontend/`, `telegram/`, `discord/`, `scheduler/`). Partial stray dirs (tools-output, uploads, logs) created by platform services are ignored — the request correctly proxies to the worker. See `services/project_proxy.py`.
+
 > How project-scoped endpoints (download, export, logs, build/publish, files, commits, ...)
 > work when projects are hosted on a separate worker VPS.
 >
