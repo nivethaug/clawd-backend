@@ -209,6 +209,19 @@ class FileUtils:
             return ('SAFE', 'review unavailable')
 
     @staticmethod
+    def check_read_allowed(relative_path: str) -> None:
+        """Reads must not expose secrets either — .env, .git, key files.
+
+        Owners manage env values through the platform env-variables UI;
+        the file-read API never returns their raw contents.
+        """
+        normalized = '/' + relative_path.replace(os.sep, '/').lstrip('/').lower()
+        for pat in FileUtils.DENIED_WRITE_PATTERNS:
+            marker = pat.rstrip('/')
+            if pat in normalized or f'/{marker}' in normalized:
+                raise ValueError(f"Reading '{pat}' paths is not allowed via the file API")
+
+    @staticmethod
     def delete_file(base_path: str, file_path: str) -> Dict[str, Any]:
         """Delete a project file. Recoverable via the project's git history.
 
@@ -227,6 +240,7 @@ class FileUtils:
         """Unified diff of a file against the last commit (git)."""
         import subprocess
         full_path = FileUtils.sanitize_path(base_path, file_path)
+        FileUtils.check_read_allowed(file_path)
         if not os.path.isfile(full_path):
             raise FileNotFoundError(f"File not found: {file_path}")
         res = subprocess.run(
@@ -372,6 +386,9 @@ class FileUtils:
             PermissionError: If cannot read file
         """
         full_path = FileUtils.sanitize_path(base_path, file_path)
+
+        # Secrets/credential files are never readable via the file API
+        FileUtils.check_read_allowed(file_path)
 
         if not os.path.isfile(full_path):
             raise FileNotFoundError(f"File not found: {file_path}")
