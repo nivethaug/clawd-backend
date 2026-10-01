@@ -81,6 +81,38 @@ class FileUtils:
         return findings
 
     @staticmethod
+    def delete_file(base_path: str, file_path: str) -> Dict[str, Any]:
+        """Delete a project file. Recoverable via the project's git history.
+
+        Raises the same denylist errors as write_file (.env/.git/keys are
+        never deletable — deleting .env breaks the app, .git kills history).
+        """
+        full_path = FileUtils.sanitize_path(base_path, file_path)
+        FileUtils.check_write_allowed(file_path)
+        if not os.path.isfile(full_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+        os.remove(full_path)
+        return {'success': True, 'deleted': file_path}
+
+    @staticmethod
+    def file_diff(base_path: str, file_path: str) -> Dict[str, Any]:
+        """Unified diff of a file against the last commit (git)."""
+        import subprocess
+        full_path = FileUtils.sanitize_path(base_path, file_path)
+        if not os.path.isfile(full_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+        res = subprocess.run(
+            ['git', 'diff', 'HEAD', '--', file_path],
+            cwd=str(base_path), capture_output=True, text=True, timeout=30,
+        )
+        if res.returncode not in (0, 1):
+            raise ValueError("git diff unavailable for this project (no git history)")
+        patch = res.stdout
+        if not patch.strip():
+            patch = "(no changes vs last commit — file is committed or untracked)"
+        return {'path': file_path, 'diff': patch[:16000]}
+
+    @staticmethod
     def check_write_allowed(relative_path: str) -> None:
         """Raise ValueError if this relative path is on the denylist."""
         normalized = '/' + relative_path.replace(os.sep, '/').lstrip('/').lower()

@@ -10742,6 +10742,53 @@ async def get_project_files(
         raise HTTPException(status_code=500, detail=f"Failed to build file tree: {str(e)}")
 
 
+@app.get("/projects/{project_id}/files/diff")
+async def get_file_diff(
+    project_id: int,
+    path: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Git diff of one file vs the last commit (code-editor + MCP)."""
+    _require_project_owner(project_id, authorization)
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+    if not project or not project["project_path"]:
+        raise HTTPException(status_code=400, detail="Project has no file system path")
+    try:
+        return FileUtils.file_diff(project["project_path"], path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/projects/{project_id}/files/{file_path:path}")
+async def delete_project_file(
+    project_id: int,
+    file_path: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Delete a project file (code-editor + MCP). Denylist-protected;
+    recoverable via the project's git history."""
+    _require_project_owner(project_id, authorization)
+    with get_db() as conn:
+        project = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+    if not project or not project["project_path"]:
+        raise HTTPException(status_code=400, detail="Project has no file system path")
+    try:
+        return FileUtils.delete_file(project["project_path"], file_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/projects/{project_id}/files/{file_path:path}", response_model=FileContent)
 async def get_file_content(
     project_id: int,
