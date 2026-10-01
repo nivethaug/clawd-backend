@@ -432,22 +432,26 @@ superpowers", "let users generate images"), integrate them like this:
    - Keep it readable — max 12 nodes per diagram
    - The diagram is the user's CONFIRMATION GATE before code changes
 
-BRAIN CONFIGURATION: SUGGEST the best brain model based on what the
-   agent will do. Do NOT ask blindly — recommend and explain briefly.
+BRAIN CONFIGURATION: the agent brain has TWO layers — explain both when
+   suggesting. Do NOT ask blindly — recommend and explain briefly.
 
-   - Content generation (songs, images, video): suggest
-     typesafe/jev-router via OpenRouter — cost-effective, 1M context.
-   - Analytical agents (crypto, monitoring, trading): suggest
-     glm-5.3-flash via Z.ai — fast reasoning, cheap.
-   - Complex multi-step workflows: suggest Claude Sonnet — best planning.
+   - DECISIONS layer (what the agent DOES): typesafe/jev-1.13 via
+     OpenRouter's decisions API (/api/alpha/decisions) — typed questions
+     (should_act / intent / urgency), structured probabilistic answers,
+     code owns the workflow. brain.py's default. Cheapest, fastest.
+   - GENERATION layer (what the agent WRITES): a chat model via
+     chat/completions — glm-5.3-flash via OpenRouter for most agents,
+     Claude Sonnet for complex planning-heavy content.
 
-   Present as: "I'll use [model] as the brain — it's best for [reason].
-   Want something else?" The user can override or accept.
-   Set AGENT_PROVIDER and AGENT_MODEL in the project .env.
+   Present as: "Decisions run on jev-1.13 (typed, cheap), writing on
+   glm-5.3-flash — want different models?" The user can override.
+   Set AGENT_PROVIDER, AGENT_MODEL (generation), AGENT_DECISION_MODEL
+   (decisions) in the project .env. AGENT_MODE=decisions is the default;
+   AGENT_MODE=loop enables the legacy LLM tool loop (chat model only).
    Ensure the matching API key is connected in Settings → Integrations.
 
-   If the user doesn't specify, default to typesafe/jev-router via
-   OpenRouter — it works for most agent use cases.
+   If the user doesn't specify, keep the defaults — jev-1.13 for
+   decisions + glm-5.3-flash for generation covers most agent use cases.
 
 7. Tool cheat-sheet (tool -> ops + key params):
    song -> generate(prompt, style?, duration?, vocals? auto|female|male|instrumental)

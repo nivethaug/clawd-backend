@@ -1,15 +1,25 @@
 """
-DreamAgent Agent Brain — LLM-powered decision engine for agent projects.
+DreamAgent Agent Brain — two-layer decision engine for agent projects.
 
-Receives trigger events (Telegram, webhook, schedule) and uses the
-configured LLM (typesafe/jev-router via OpenRouter) to reason about
-what to do. Executes tools, sends deliveries, maintains state.
+Layer 1 — DECISIONS (typesafe/jev-1.13 via OpenRouter /api/alpha/decisions):
+    jev is a DECISIONS model, not a chat model. It answers narrow, typed
+    questions (noul / choice / score) about the trigger state and returns
+    structured probabilities. YOUR CODE owns the workflow — jev only
+    decides. Env: AGENT_DECISION_MODEL (default typesafe/jev-1.13).
+
+Layer 2 — GENERATION (chat model via chat/completions):
+    open-ended text (replies, summaries, composed content) comes from a
+    regular chat model. Env: AGENT_MODEL (default z-ai/glm-5.3-flash),
+    AGENT_PROVIDER (openrouter | openai | anthropic | zai).
 
 Called from executor.py when a job has use_ai=true or task_type=brain.
 
+AGENT_MODE:
+    "decisions" (default) — jev decides, code executes, chat model writes
+    "loop"                — legacy LLM-owned tool loop (chat model required)
+
 Env vars required (in project .env):
-    OPENROUTER_API_KEY  — key for the LLM (from Global Integrations or manual)
-    AGENT_MODEL         — default: typesafe/jev-router
+    OPENROUTER_API_KEY  — key for both layers (Global Integrations or manual)
     DREAMAGENT_TOOLS_URL — platform tools-api base URL
     DREAMAGENT_PROJECT_SECRET — project secret for tools-api auth
     PROJECT_ID          — this project's ID
@@ -20,12 +30,15 @@ import os
 import urllib.request
 
 MAX_TURNS = 6
-DEFAULT_MODEL = "typesafe/jev-router"
+# Generation layer (chat completions) — a CHAT model, never jev.
+DEFAULT_MODEL = "z-ai/glm-5.3-flash"
+# Decision layer (decisions API) — jev, typed questions only.
+DEFAULT_DECISION_MODEL = "typesafe/jev-1.13"
 
 
 # Provider registry — configured at creation time via project .env
 # AGENT_PROVIDER: openrouter | openai | anthropic | zai
-# AGENT_MODEL: model slug (e.g. typesafe/jev-router, gpt-4o-mini)
+# AGENT_MODEL: model slug (e.g. z-ai/glm-5.3-flash, gpt-4o-mini)
 _PROVIDERS = {
     "openrouter": {
         "url": "https://openrouter.ai/api/v1/chat/completions",
@@ -47,6 +60,7 @@ _PROVIDERS = {
 
 
 def _llm(messages):
+    """Layer 2 — open-ended generation via a chat model."""
     provider = os.getenv("AGENT_PROVIDER", "openrouter").lower()
     model = os.getenv("AGENT_MODEL", DEFAULT_MODEL)
     cfg = _PROVIDERS.get(provider, _PROVIDERS["openrouter"])
@@ -75,6 +89,53 @@ def _llm(messages):
     if "content" in body:
         return body["content"][0]["text"] if body["content"] else ""
     raise RuntimeError(f"Unexpected LLM response format from {provider}")
+
+
+def _decide(state, questions):
+    """Layer 1 — typed decisions via OpenRouter's decisions API.
+
+    jev-1.13 answers narrow typed questions about `state`; the CODE owns
+    the workflow and branches on the structured answers.
+
+    Args:
+        state: str — the trigger/event description to decide about.
+        questions: {"key": {"type": "noul"|"choice"|"score",
+                            "instructions": str,
+                            "criteria": {...} | [..]}}
+            noul  -> answer.noul      probability 0..1 (0 = no, 1 = yes)
+            choice -> answer.choice + answer.probabilities
+            score  -> answer.score    (+ distribution)
+
+    Returns {"key": answer_dict}. Raises on non-openrouter providers
+    (decisions is an OpenRouter feature) and when the key is missing —
+    callers decide their own fallback.
+    """
+    provider = os.getenv("AGENT_PROVIDER", "openrouter").lower()
+    if provider != "openrouter":
+        raise RuntimeError(
+            "decisions API is OpenRouter-only — switch AGENT_PROVIDER to "
+            "openrouter or branch on _llm() JSON instead.")
+    key = os.getenv("OPENROUTER_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "Brain not configured. OPENROUTER_API_KEY not set. Connect the "
+            "OpenRouter integration in Settings, or ask in chat to change "
+            "the brain model.")
+    payload = json.dumps({
+        "model": os.getenv("AGENT_DECISION_MODEL", DEFAULT_DECISION_MODEL),
+        "state": state,
+        "questions": questions,
+    }).encode()
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/alpha/decisions",
+        data=payload, method="POST",
+        headers={"Authorization": f"Bearer {key}",
+                 "Content-Type": "application/json",
+                 "HTTP-Referer": "https://dreamagent.cloud",
+                 "X-OpenRouter-Title": "DreamAgent"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        body = json.loads(r.read().decode())
+    return body.get("answers", {})
 
 
 def _system_prompt(trigger_desc: str) -> str:
@@ -209,25 +270,128 @@ def _send_discord(message: str):
     urllib.request.urlopen(req, timeout=15)
 
 
-def run_agent(trigger_data, context=None) -> dict:
-    """Run the agent decision loop on a trigger event.
+def _deliver(reply: str, attach_path: str = None) -> list:
+    """Send a generated reply through every configured channel."""
+    executed = []
+    if not reply:
+        return executed
+    if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"):
+        _send_telegram(reply, attach_path)
+        executed.append({"tool": "send_telegram", "status": "sent"})
+    if os.getenv("DISCORD_WEBHOOK_URL"):
+        _send_discord(reply)
+        executed.append({"tool": "send_discord", "status": "sent"})
+    if not executed and os.getenv("EMAIL_TO"):
+        # Email channel: the platform job runner picks up the returned reply
+        # and mails it — nothing to do here.
+        executed.append({"tool": "email", "status": "queued"})
+    return executed
 
-    Args:
-        trigger_data: dict or str — the event payload
-        context: optional dict with description, capabilities, etc.
 
-    Returns:
-        {"actions_executed": [...], "reply": str}
+def _decisions_flow(trigger_desc: str, ctx: dict) -> dict:
+    """AGENT_MODE=decisions (default): jev decides, code owns the workflow.
+
+    Phase 1 — typed decisions (jev-1.13): should we act? what intent? urgency.
+    Phase 2 — generation (chat model): compose the reply / next content.
+    Phase 3 — delivery (code): send through configured channels.
+
+    Customize the decision questions for this agent's domain — the criteria
+    below are generic on purpose so any project type starts working.
     """
-    ctx = context or {}
-    trigger_desc = (json.dumps(trigger_data, default=str)[:3000]
-                    if isinstance(trigger_data, dict) else str(trigger_data)[:3000])
+    intent_options = ctx.get("intents") or [
+        "respond",      # reply conversationally
+        "generate",     # create content (superpowers tools)
+        "record",       # store/update state only
+        "noop",         # nothing to do
+    ]
+    decisions = {}
+    try:
+        decisions = _decide(trigger_desc, {
+            "should_act": {
+                "type": "noul",
+                "instructions": "Does this trigger require the agent to act?",
+                "criteria": {
+                    "true": "Relevant to the agent's purpose",
+                    "false": "Spam, unrelated, or nothing to do",
+                },
+            },
+            "intent": {
+                "type": "choice",
+                "instructions": "What should the agent do with this trigger?",
+                "criteria": {o: o.replace("_", " ") for o in intent_options},
+            },
+            "urgency": {
+                "type": "score",
+                "instructions": "How urgently should this be handled?",
+                "criteria": ["Low", "Normal", "Urgent"],
+            },
+        })
+    except Exception as e:
+        # No decisions layer (non-openrouter provider / missing key):
+        # degrade to act-always so the agent stays functional.
+        decisions = {}
+        decisions_error = str(e)
 
+    should_act = True
+    intent = intent_options[0]
+    urgency = "Normal"
+    if decisions:
+        should_act = float(decisions.get("should_act", {}).get("noul") or 0) > 0.5
+        intent = decisions.get("intent", {}).get("choice") or intent
+        urgency = decisions.get("urgency", {}).get("score") or urgency
+    else:
+        decisions_error = "decisions unavailable"
+
+    if not should_act:
+        return {"actions_executed": [], "reply": "",
+                "decisions": {"act": False, "mode": "decisions"}}
+
+    if intent == "noop":
+        return {"actions_executed": [], "reply": "",
+                "decisions": {"act": False, "intent": intent}}
+
+    # Phase 2 — generation (chat model; jev is NOT used for prose)
+    if intent == "generate":
+        gen_prompt = (
+            "You are an autonomous agent. A trigger arrived and the decision "
+            f"layer classified it as CONTENT GENERATION (urgency: {urgency}).\n"
+            f"Trigger:\n{trigger_desc}\n\n"
+            "Write the exact content to deliver (lyrics, caption, message — "
+            "whatever this agent produces). Output the content only.")
+    elif intent == "record":
+        try:
+            from services import api_client
+            api_client.state_set("last_trigger", trigger_desc[:2000])
+        except Exception:
+            pass
+        return {"actions_executed": [{"tool": "state_set", "status": "saved"}],
+                "reply": "", "decisions": {"intent": intent}}
+    else:  # respond
+        gen_prompt = (
+            "You are an autonomous agent. A trigger arrived and the decision "
+            f"layer classified it as a CONVERSATIONAL REPLY (urgency: {urgency}).\n"
+            f"Trigger:\n{trigger_desc}\n\n"
+            "Write the reply to deliver. Output the reply text only.")
+
+    reply = _llm([{"role": "user", "content": gen_prompt}]).strip()
+
+    # Phase 3 — delivery (code-owned)
+    executed = _deliver(reply)
+
+    return {"actions_executed": executed, "reply": reply,
+            "decisions": {"intent": intent, "urgency": urgency}}
+
+
+def _loop_flow(trigger_desc: str) -> dict:
+    """AGENT_MODE=loop — legacy LLM-owned tool loop (chat model required).
+
+    Use for complex multi-step workflows where the model must interleave
+    tool calls with reasoning. Requires a chat model as AGENT_MODEL.
+    """
     messages = [{"role": "system", "content": _system_prompt(trigger_desc)},
                 {"role": "user", "content": f"Trigger: {trigger_desc}"}]
 
     executed = []
-
     for turn in range(MAX_TURNS):
         response = _llm(messages)
         messages.append({"role": "assistant", "content": response})
@@ -276,3 +440,30 @@ def run_agent(trigger_data, context=None) -> dict:
             break
 
     return {"actions_executed": executed, "reply": reply}
+
+
+def run_agent(trigger_data, context=None) -> dict:
+    """Run the agent brain on a trigger event.
+
+    Args:
+        trigger_data: dict or str — the event payload
+        context: optional dict with description, capabilities, intents
+
+    Returns:
+        {"actions_executed": [...], "reply": str, "decisions": {...}}
+
+    AGENT_MODE=decisions (default): jev-1.13 answers typed questions
+    (should_act / intent / urgency) via OpenRouter's decisions API, the
+    code branches on the answers, and a chat model only writes prose.
+    AGENT_MODE=loop: the legacy model-owned tool loop.
+    """
+    ctx = context or {}
+    trigger_desc = (json.dumps(trigger_data, default=str)[:3000]
+                    if isinstance(trigger_data, dict) else str(trigger_data)[:3000])
+
+    mode = os.getenv("AGENT_MODE", "decisions").lower()
+    if mode == "loop":
+        result = _loop_flow(trigger_desc)
+        result["decisions"] = {"mode": "loop"}
+        return result
+    return _decisions_flow(trigger_desc, ctx)
