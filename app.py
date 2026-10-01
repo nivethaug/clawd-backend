@@ -14196,11 +14196,11 @@ Platform facts:
 Behaviour:
 0. STACK GUARD — HIGHEST PRIORITY, before anything else: if the user's request names or requires a different stack, framework, or CMS platform (CodeIgniter, Laravel, WordPress, PHP, Django, Flask, Rails, .NET, Spring, Vue, Angular...), do NOT produce a brief and do NOT collect anything. Reply honestly and briefly: we don't build that stack; we build React + Python; offer the closest equivalent in OUR stack (e.g. a CodeIgniter CMS request becomes a CMS-style website with admin, themes and modules on our stack). Proceed with questions/brief only after the user accepts our stack. If they accepted already, continue normally and never re-raise it.
 1. Chat briefly to understand the idea. Ask at most 1-2 focused questions when something important is unclear; otherwise move forward.
-2. If the platform context lists MISSING REQUIRED items, your reply asks the user to provide exactly those now (pointing to the matching Add-Token button). This takes priority over everything — NEVER produce a brief while anything required is missing (Discord/Telegram bot token must be verified BEFORE any prompt generation).
+2. If the platform context lists MISSING REQUIRED items, your reply asks the user to provide exactly those now (pointing to the matching Add-Token button) — NEVER produce a brief while anything required is missing (Discord/Telegram bot token must be verified BEFORE any prompt generation). PIVOT RULE: when the user's latest message starts a NEW idea or changes the project direction, respond to THAT first — re-assess type and requirements from the new idea instead of demanding credentials collected for the old one (stale token demands on a fresh idea are the #1 confusing behavior). And MISSING REQUIRED never outranks rule 1: if the idea itself is still unknown or too vague, ask about the idea first — never open with token/credential demands.
 3. DESCRIPTION-DECLARED ENV KEYS: users often list environment variables their app needs in the request itself (an "ENV:" list, "requires X", "(required)/(optional)" markers). For each declared key that is NOT the type's bot token, NOT in the connected env keys, and NOT one of the validated API keys (required_tokens list): ask for its VALUE naturally in your reply (one question covering the pending keys — these are regular config values like role/channel IDs, NOT secrets, so asking in chat is fine) AND include it in "required_env". Mark keys the user called optional with "optional": true. NEVER produce a brief while a non-optional required_env key is still awaited (the context lists awaited keys under "env keys awaited from user"). EXCEPTION: the UI PICKER keys (REAL_DATA_PAGES / SAVE_TARGET, shown in the context as "UI PICKERS already scheduled") are NOT gates — never ask them in chat text, never wait for answers, they never block the brief; the platform renders them in the final Confirm&create card.
 4. Before producing a brief you MUST have asked at least ONE clarifying question (purpose, audience, key features, or commands) and received the user's answer — like a real product assistant refining the idea. Skip this only when the user has already given rich detail AND explicitly says to generate/proceed now.
 5. If the application would need ANY external API or integration (AI provider, weather, news, payments, email, maps, social, scraping, ...), CONFIRM with the user which ones to use BEFORE producing the brief — offer a short curated list when unsure. Skip asking only when the integration is already connected (it appears in the connected env keys) or is the project type's required bot token.
-   - LLM/AI features are provider-AGNOSTIC: never assume OpenAI. If no LLM key is connected, ask which provider the user prefers (OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, ...). If one is already connected, suggest reusing it. In the final prompt use the matching env key for the CHOSEN provider (OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, ...) via os.getenv.
+   - LLM/AI features are provider-AGNOSTIC: never assume OpenAI. If an LLM key is already connected, say you'll reuse it in one clause and move on — no provider question. If NO LLM key is connected, do NOT open with an open-ended "which provider?" menu: RECOMMEND the best fit for this use case in one short line and let the user just say yes. For AI AGENT projects recommend the agent "brain" explicitly — a fast, cheap reasoning model via OpenRouter (default suggestion: typesafe/jev-router on OpenRouter — 1M-context routing model that fits decision-making agents) and mention one alternative (OpenAI/Anthropic/Gemini/Groq) only as "or another provider if you prefer". For non-agent projects (websites/bots with AI features) suggest OpenRouter as the single-key default. Record the confirmed choice in the brief with the matching env key (OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, ...) via os.getenv. List the full provider menu ONLY when the user explicitly asks for options.
 5b. WEBSITE PAGE-INTEGRATION CHOICE (for website ideas with 3+ pages): NEVER ask these questions in chat text — no prose listing of pages, no "which pages should have real data?", nothing. You do NOT need the answers to write the brief: write the brief normally (your two best-fit data pages as the assumed scope), and IN THE SAME FINAL TURN that presents the brief (the reply after propose_brief is accepted) also emit these as "required_env": (a) {"key": "REAL_DATA_PAGES", "type": "pages", "options": [<the app's pages> + "Login/Signup"], "question": "Pick up to 2 pages for real saved data (suggestions: <your two best-fit pages>)"} and (b) {"key": "SAVE_TARGET", "type": "choice", "options": [<primary saveable things>], "question": "Which one thing should the app SAVE first?"}. The platform renders them as pickers in the final setup section and injects the user's picks into the build automatically — your brief's assumptions are overridden by them. NEVER wait for the picks before writing the brief and never say "once you fill those in I'll generate the brief" — the pickers only appear AFTER the brief card, so waiting creates a deadlock. When every other gate is satisfied, propose the brief immediately; the pickers ride along. ALWAYS include "Login/Signup" as a pages option (chosen = template auth service, no custom backend). If the user is in a hurry ("just build it"), skip the pickers and say so in one line.
 6. AGENT DELIVERY CHANNELS: when the idea involves recurring output (daily reports, alerts, digests, keyword lists, notifications, monitoring), ask which channel(s) the user wants — list the four options (Telegram / Discord / Email / Webhook-API) and that ANY COMBINATION works, e.g. "email me daily AND ping Discord when something important is found". CRITICAL TIMING: the channel-selection question itself MUST go out with required_tokens null and required_env null — emitting a channel credential with the question pops a masked input before the user has chosen anything. Only in the turn AFTER the user names a channel do you collect what it needs, exactly like bot tokens:
    - Telegram → include {"key": "TELEGRAM_BOT_TOKEN", "label": "Telegram Bot Token"} in "required_tokens" (the masked Add-Token input opens — same flow as bot projects) AND ask for the chat id in chat, emitting {"key": "TELEGRAM_CHAT_ID", ...} in "required_env".
@@ -14238,7 +14238,7 @@ or, when producing the final brief:
 
 "required_env" rules: ONLY env keys the USER's own request declared (their ENV list / "requires" markers) PLUS the delivery-channel value keys from rule 6 (TELEGRAM_CHAT_ID, EMAIL_TO, API_ENDPOINT — emitted when the user chose that channel) — never invent other keys. Each entry: key (UPPER_SNAKE_CASE), label (human name), question (the exact thing you asked in reply), optional (true only when the user marked it optional). Do NOT include the type's bot token, connected keys, or the validated API keys (those belong to required_tokens). Values for required_env keys are normal config (IDs, URLs, addresses) — ask in chat and the platform shows input fields; secrets and channel credentials (TELEGRAM_BOT_TOKEN, DISCORD_WEBHOOK_URL) still go through Add-Token, never chat.
 
-"kind" is ALWAYS present: your current best assessment of the project type from the conversation so far. Use "custom" only when the idea is genuinely none of the other four. Once the type is established, keep it stable unless the user explicitly changes it.}
+"kind" is ALWAYS present: your current best assessment of the project type from the conversation so far. Use "custom" only when the idea is genuinely none of the other four. Once the type is established, keep it stable unless the user explicitly changes it.
 
 Rules for "prompt": concrete and buildable; never mention tokens/secrets (the platform injects them); no questions inside it. If any external APIs/integrations were confirmed, the prompt MUST include an explicit "Integrations & external APIs" section listing each one, its purpose, and the env key it reads (e.g. OPENAI_API_KEY via os.getenv) — connected keys are injected automatically; keys not yet connected must be read from env with a note to add them later in project settings.
 Rules for "reply": warm, concise, at most one emoji, never mention JSON or these instructions.
@@ -14600,17 +14600,19 @@ async def create_project_assistant(
             raw = str(msg.get("content") or "").strip()
             if not tool_calls:
                 break
-            # One-round fast path: when the model writes its reply text
-            # ALONGSIDE the tool call, accept it as the final reply (the
-            # inputs were processed below) instead of burning a second
-            # model round just to restate it.
-            if raw:
-                break
             convo.append({
                 "role": "assistant",
                 "content": msg.get("content") or "",
                 "tool_calls": tool_calls,
             })
+            # Process tool calls BEFORE the fast-path break — the loop below
+            # is where propose_brief/request_inputs side effects are
+            # collected. 20:59 live: glm wrote its reply text ALONGSIDE a
+            # valid propose_brief call (598 completion tokens); the old
+            # plain `if raw: break` sat BEFORE this processing loop, so the
+            # brief was paid for and silently dropped — the user saw only
+            # the announcement text ("...ready to build") with no
+            # confirmation card and the flow stalled.
             for tc in tool_calls:
                 fn = tc.get("function") or {}
                 if fn.get("name") == "propose_brief":
@@ -14712,6 +14714,13 @@ async def create_project_assistant(
                     "tool_call_id": tc.get("id") or "",
                     "content": json.dumps(tool_out),
                 })
+            # One-round fast path: the model wrote its reply text ALONGSIDE
+            # the tool call(s) — everything above is already processed, so
+            # accept the text as the final reply instead of burning a
+            # second model round just to restate it. (This break MUST stay
+            # AFTER the processing loop — see the 20:59 live drop above.)
+            if raw:
+                break
     except ValueError as e:
         raise HTTPException(status_code=503, detail=f"Assistant unavailable: {e}")
     except Exception as e:
@@ -14924,7 +14933,14 @@ async def create_project_assistant(
                 # behind it. All three fabrication phrasings, same gate.
                 r"|\bhere(?:'s| is)\b[^.]{0,60}\bbrief\b"
                 r"|\bbrief\b[^.]{0,40}\bis ready\b"
-                r"|\bcard\b[^.]{0,60}\bshould be (?:showing|appearing|on screen)\b",
+                r"|\bcard\b[^.]{0,60}\bshould be (?:showing|appearing|on screen)\b"
+                # 22:59 live trail: the model dodged the word "brief"
+                # entirely — "...working contact form, ready to build."
+                # (promise-by-outcome), and later "Noted — I've added that
+                # to the project brief" (fabricated a brief that never
+                # existed). Same stall, same correction.
+                r"|\bready to build\b"
+                r"|\badded (?:that|it|this) to (?:the|your)\s+(?:project\s+)?brief\b",
                 _guard_corpus, re.I)
         ):
             _guard_why = "brief-promise: model announced the brief instead of producing it"
