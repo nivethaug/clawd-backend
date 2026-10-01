@@ -289,12 +289,17 @@ def _project_lives_on_worker(project_id: int) -> Tuple[bool, Optional[str]]:
         # No path recorded yet — likely mid-creation; let the local handler decide.
         return (False, None)
 
-    # The decisive test: does the path exist HERE?
-    # - exists locally → main-hosted (legacy or main-created) → handle locally
-    # - missing locally → worker-hosted → proxy
+    # The decisive test: does the path exist HERE, and does it look like a
+    # real project? Platform services can create PARTIAL stray directories
+    # on main (tools-output, uploads, logs) for worker-homed projects — a
+    # bare directory must NOT hijack routing away from the worker. Only a
+    # local copy carrying a real project marker is main-hosted.
     try:
         if os.path.isdir(project_path):
-            return (False, project_path)
+            for marker in ('project.json', '.git', 'backend', 'frontend',
+                           'telegram', 'discord', 'scheduler'):
+                if os.path.exists(os.path.join(project_path, marker)):
+                    return (False, project_path)
     except OSError:
         pass
     return (True, project_path)
