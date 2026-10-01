@@ -15177,6 +15177,57 @@ async def create_project_assistant(
             logger.warning(
                 "[CREATE-ASSISTANT] delivery round failed (non-fatal): %s", _dr_err)
 
+        # FORCED-TOOL FINAL DELIVERY — 23:52 live: guards + delivery round all
+        # fired and glm STILL answered with a fabricated "Noted — I've added
+        # that to the project brief" (nothing delivered, name unechoed).
+        # tool_choice=forced removes the text escape hatch entirely: the API
+        # must return a propose_brief call, whose arguments land in
+        # collected_brief through the same absorb path above.
+        if not (collected_brief and collected_brief.get("prompt")):
+            try:
+                _ft = await client.chat_completion(
+                    messages=convo + [{
+                        "role": "user",
+                        "content": ("Call the propose_brief tool NOW with the "
+                                    "complete brief (kind, prompt 120-400 words, "
+                                    "features, suggested_name)."),
+                    }],
+                    temperature=0.0, max_tokens=2500,
+                    tools=[_CREATE_BRIEF_TOOL],
+                    tool_choice={"type": "function", "name": "propose_brief"},
+                )
+                _ftu = client.get_usage(_ft)
+                for _k in usage_tot:
+                    usage_tot[_k] += int(_ftu.get(_k, 0) or 0)
+                for _fttc in ((_ft["choices"][0]["message"] or {}).get("tool_calls") or []):
+                    _ftfn = _fttc.get("function") or {}
+                    if _ftfn.get("name") != "propose_brief":
+                        continue
+                    _ftargs = _ftfn.get("arguments")
+                    if not isinstance(_ftargs, dict):
+                        try:
+                            _ftargs = json.loads(_ftargs or "{}")
+                        except Exception:
+                            _m2 = re.search(r"\{.*\}", str(_ftargs or ""), re.DOTALL)
+                            try:
+                                _ftargs = json.loads(_m2.group(0)) if _m2 else {}
+                            except Exception:
+                                _ftargs = {}
+                    if isinstance(_ftargs, dict) and str(_ftargs.get("prompt") or "").strip():
+                        collected_brief.update({
+                            "kind": str(_ftargs.get("kind") or ctx.detected_kind or "custom").strip().lower(),
+                            "prompt": str(_ftargs["prompt"]).strip()[:6000],
+                            "features": [str(f).strip()[:80] for f in (_ftargs.get("features") or []) if str(f).strip()][:8],
+                            "suggested_name": str(_ftargs.get("suggested_name") or "").strip()[:30] or None,
+                        })
+                logger.info(
+                    "[CREATE-ASSISTANT] forced-tool delivery (%s)",
+                    "delivered" if (collected_brief and collected_brief.get("prompt")) else "still empty",
+                )
+            except Exception as _ft_err:
+                logger.warning(
+                    "[CREATE-ASSISTANT] forced-tool delivery failed (non-fatal): %s", _ft_err)
+
     usage = usage_tot
 
     try:
