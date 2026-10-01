@@ -367,6 +367,13 @@ superpowers", "let users generate images"), integrate them like this:
 4. Poll: GET {DREAMAGENT_TOOLS_URL}/tools/jobs/{job_id} (same header) every ~3s
    until status is "completed" or "error" (surface job error text on failure).
    Typical duration 20-120s for songs.
+   INPUT FILES (for transcribe, voiceover, sharp, ffmpeg etc.): the app
+   must FIRST upload input files to tools-api before submitting the job:
+   POST {DREAMAGENT_TOOLS_URL}/tools/projects/{PROJECT_ID}/files
+   (same X-Project-Secret header, multipart form with "file" field)
+   -> returns {"path": "uploads/<filename>"}. Use that returned path in
+   the job params. Do NOT use local worker paths as input — they are on
+   a different filesystem than the tools-api executor.
 5. DOWNLOAD the result — the output file lives on the PLATFORM host, not in
    this project's filesystem, so you MUST fetch it over HTTP:
    GET {DREAMAGENT_TOOLS_URL}/tools/jobs/{job_id}/file   (same X-Project-Secret
