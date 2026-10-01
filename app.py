@@ -14532,19 +14532,37 @@ async def create_project_assistant(
         # CREATE_ASSISTANT_* lines shadow these defaults (dotenv last-wins).
         _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "qwen/qwen3.7-flash")
         _create_fb = os.getenv("CREATE_ASSISTANT_FALLBACK_MODEL", "z-ai/glm-5.3-flash")
-        # Optional direct-Z.ai primary (CREATE_ASSISTANT_PROVIDER=zai in
-        # .env): same GLM model straight from api.z.ai with effort=low —
-        # no OpenRouter shared-pool 429s. Fallback stays on OpenRouter so a
-        # z.ai outage degrades to the proven path instead of a dead turn.
-        # Without ZAI_API_KEY the client would silently send the OpenRouter
-        # key to z.ai (401 every call, 12:36 live) — refuse the switch
-        # instead and stay on the normal primary.
-        if (
+        # TWO-PHASE MODEL ROUTING (user direction, 2026-10-01 23:5x):
+        # COLLECTION turns (idea chat, tokens, channels, name — short Q&A)
+        # run the fast/cheap router model; BRIEF-phase turns (ready to
+        # brief, regenerate, post-confirm) run the proven brief generator
+        # below. Collection turns don't need the heavy model — and glm's
+        # 15-55s turns were the main source of client-side timeouts.
+        # Guards/delivery rounds still run on the brief model: they only
+        # arm on ready-to-brief turns, which are brief-phase by definition.
+        _brief_phase = bool(
+            _create_ready_to_brief or ctx.regenerate or ctx.prompt_confirmed
+        )
+        if not _brief_phase:
+            _col_model = os.getenv("CREATE_COLLECTION_MODEL", "typesafe/jev-router")
+            client = get_openrouter_client(model=_col_model)
+            fallback_client = (
+                get_openrouter_client(model=_create_fb)
+                if _create_fb != _col_model else None
+            )
+            logger.info(
+                "[CREATE-ASSISTANT] collection phase on %s (fallback %s)",
+                _col_model, _create_fb)
+        elif (
             os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai"
             and (os.getenv("ZAI_API_KEY") or "").strip()
         ):
             from services.ai.openrouter_client import get_zai_client
             client = get_zai_client()
+            fallback_client = (
+                get_openrouter_client(model=_create_fb)
+                if _create_fb and _create_fb != _create_model else None
+            )
             logger.info(
                 "[CREATE-ASSISTANT] primary provider: direct z.ai (model=%s)", client.model)
         else:
@@ -14554,10 +14572,10 @@ async def create_project_assistant(
                     "ZAI_API_KEY is empty/missing — staying on OpenRouter "
                     "primary. Add the real key to .env and restart.")
             client = get_openrouter_client(model=_create_model)
-        fallback_client = (
-            get_openrouter_client(model=_create_fb)
-            if _create_fb and _create_fb != _create_model else None
-        )
+            fallback_client = (
+                get_openrouter_client(model=_create_fb)
+                if _create_fb and _create_fb != _create_model else None
+            )
         _fb_used = False
         for _round in range(3):
             try:
