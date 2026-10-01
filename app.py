@@ -14530,8 +14530,8 @@ async def create_project_assistant(
         # One-shot fallback: glm-5.3-flash (proven tool loop; the popup
         # guards were tuned on it). Both env-overridable; .env
         # CREATE_ASSISTANT_* lines shadow these defaults (dotenv last-wins).
-        _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "qwen/qwen3.7-flash")
-        _create_fb = os.getenv("CREATE_ASSISTANT_FALLBACK_MODEL", "z-ai/glm-5.3-flash")
+        _create_model = os.getenv("CREATE_ASSISTANT_MODEL", "z-ai/glm-5.3-flash")
+        _create_fb = os.getenv("CREATE_ASSISTANT_FALLBACK_MODEL", "")
         # TWO-PHASE MODEL ROUTING (user direction, 2026-10-01 23:5x):
         # COLLECTION turns (idea chat, tokens, channels, name — short Q&A)
         # run the fast/cheap router model; BRIEF-phase turns (ready to
@@ -14561,40 +14561,7 @@ async def create_project_assistant(
             logger.info(
                 "[CREATE-ASSISTANT] collection phase on %s (fallback %s)",
                 _col_model, _create_fb)
-        elif (
-            os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai"
-            and (os.getenv("ZAI_API_KEY") or "").strip()
-        ):
-            from services.ai.openrouter_client import get_zai_client
-            # pm2's saved env shadows .env (dotenv never overrides existing
-            # vars) — the stale ZAI_API_KEY 401'd every turn while the
-            # corrected .env value was valid (2026-10-02 live: .env key curl
-            # -> 200, process-env key curl -> 401). Prefer the .env file
-            # value so a key rotation doesn't need pm2 env surgery.
-            try:
-                from dotenv import dotenv_values
-                _fe = dotenv_values(".env")
-                if (_fe.get("ZAI_API_KEY") or "").strip() and \
-                        _fe["ZAI_API_KEY"].strip() != (os.getenv("ZAI_API_KEY") or "").strip():
-                    os.environ["ZAI_API_KEY"] = _fe["ZAI_API_KEY"].strip()
-                    logger.info(
-                        "[CREATE-ASSISTANT] ZAI_API_KEY refreshed from .env "
-                        "(process env was stale)")
-            except Exception:
-                pass
-            client = get_zai_client()
-            fallback_client = (
-                get_openrouter_client(model=_create_fb)
-                if _create_fb and _create_fb != _create_model else None
-            )
-            logger.info(
-                "[CREATE-ASSISTANT] primary provider: direct z.ai (model=%s)", client.model)
         else:
-            if os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai":
-                logger.error(
-                    "[CREATE-ASSISTANT] CREATE_ASSISTANT_PROVIDER=zai but "
-                    "ZAI_API_KEY is empty/missing — staying on OpenRouter "
-                    "primary. Add the real key to .env and restart.")
             client = get_openrouter_client(model=_create_model)
             fallback_client = (
                 get_openrouter_client(model=_create_fb)
@@ -14607,15 +14574,6 @@ async def create_project_assistant(
         # router because the delivery round reused `client`).
         if _brief_phase:
             brief_client = client
-        elif (
-            os.getenv("CREATE_ASSISTANT_PROVIDER", "").lower() == "zai"
-            and (os.getenv("ZAI_API_KEY") or "").strip()
-        ):
-            # Distinct local alias: the zai branch's `import get_zai_client`
-            # makes that name function-local for the WHOLE handler — reusing
-            # it here on collection turns raised UnboundLocalError.
-            from services.ai.openrouter_client import get_zai_client as _get_zai_brief
-            brief_client = _get_zai_brief()
         else:
             brief_client = get_openrouter_client(model=_create_model)
         _fb_used = False
