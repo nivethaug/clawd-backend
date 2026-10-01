@@ -15245,8 +15245,52 @@ async def create_project_assistant(
                     "delivered" if (collected_brief and collected_brief.get("prompt")) else "still empty",
                 )
             except Exception as _ft_err:
-                logger.warning(
-                    "[CREATE-ASSISTANT] forced-tool delivery failed (non-fatal): %s", _ft_err)
+                # OpenRouter rejects tool_choice=forced for some providers
+                # (00:28 live: z-ai/glm-5.3-flash -> 400 Bad Request) —
+                # retry once WITHOUT the forced choice (tools still attached;
+                # the prompt already instructs the tool call).
+                try:
+                    _ft = await _dr_client.chat_completion(
+                        messages=convo + [{
+                            "role": "user",
+                            "content": ("Call the propose_brief tool NOW with the "
+                                        "complete brief (kind, prompt 120-400 words, "
+                                        "features, suggested_name)."),
+                        }],
+                        temperature=0.0, max_tokens=2500,
+                        tools=[_CREATE_BRIEF_TOOL],
+                    )
+                    _ftu = _dr_client.get_usage(_ft)
+                    for _k in usage_tot:
+                        usage_tot[_k] += int(_ftu.get(_k, 0) or 0)
+                    for _fttc in ((_ft["choices"][0]["message"] or {}).get("tool_calls") or []):
+                        _ftfn = _fttc.get("function") or {}
+                        if _ftfn.get("name") != "propose_brief":
+                            continue
+                        _ftargs = _ftfn.get("arguments")
+                        if not isinstance(_ftargs, dict):
+                            try:
+                                _ftargs = json.loads(_ftargs or "{}")
+                            except Exception:
+                                _m3 = re.search(r"\{.*\}", str(_ftargs or ""), re.DOTALL)
+                                try:
+                                    _ftargs = json.loads(_m3.group(0)) if _m3 else {}
+                                except Exception:
+                                    _ftargs = {}
+                        if isinstance(_ftargs, dict) and str(_ftargs.get("prompt") or "").strip():
+                            collected_brief.update({
+                                "kind": str(_ftargs.get("kind") or ctx.detected_kind or "custom").strip().lower(),
+                                "prompt": str(_ftargs["prompt"]).strip()[:6000],
+                                "features": [str(f).strip()[:80] for f in (_ftargs.get("features") or []) if str(f).strip()][:8],
+                                "suggested_name": str(_ftargs.get("suggested_name") or "").strip()[:30] or None,
+                            })
+                    logger.info(
+                        "[CREATE-ASSISTANT] forced-tool retry (unforced) after 400: %s",
+                        "delivered" if (collected_brief and collected_brief.get("prompt")) else "still empty")
+                except Exception as _ft2_err:
+                    logger.warning(
+                        "[CREATE-ASSISTANT] forced-tool delivery failed (non-fatal): %s / retry: %s",
+                        _ft_err, _ft2_err)
 
     usage = usage_tot
 
