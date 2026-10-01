@@ -48,6 +48,7 @@ from config import (
     API_ENDPOINT,
 )
 from services import api_client
+from agent.brain import run_agent
 
 logger = logging.getLogger('scheduler.executor')
 
@@ -322,6 +323,16 @@ def execute_task(job: dict) -> dict:
                     "message": f"would send via {chan}",
                     "resolved_payload": payload}
         email = None
+        # AI brain: use_ai jobs go through the LLM
+        if job.get("use_ai") or task_type == "brain":
+            trigger = job.get("event") or {"source": task_type, "data": str(payload)[:2000]}
+            brain_result = run_agent(trigger)
+            return {
+                "status": "success",
+                "reply": brain_result.get("reply", ""),
+                "actions": brain_result.get("actions_executed", []),
+            }
+
         if task_type == 'telegram':
             status, message = _send_telegram(payload)
         elif task_type == 'discord':
