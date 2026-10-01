@@ -183,7 +183,7 @@ class FileUtils:
             return ('SAFE', 'review unavailable')
         try:
             import httpx
-            model = os.getenv('OPENROUTER_REVIEW_MODEL', 'qwen/qwen3.7-flash')
+            model = os.getenv('OPENROUTER_REVIEW_MODEL', 'typesafe/jev-router')
             payload = {
                 'model': model,
                 'temperature': 0,
