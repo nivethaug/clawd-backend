@@ -385,7 +385,12 @@ superpowers", "let users generate images"), integrate them like this:
    GET {DREAMAGENT_TOOLS_URL}/tools/projects/{PROJECT_ID}/outputs/<name>.
    For paid audio/video tools use "quantity" in the execute body when
    duration matters (per-minute billing).
-6. Tool cheat-sheet (tool -> ops + key params):
+6. AI AGENT MODE (use_ai jobs):
+   For tasks needing REASONING at runtime, create jobs with
+   "use_ai": true. The LLM brain understands the trigger, picks tools,
+   and self-corrects. Example: {"task_type": "event", "use_ai": true}
+
+7. Tool cheat-sheet (tool -> ops + key params):
    song -> generate(prompt, style?, duration?, vocals? auto|female|male|instrumental)
    image-gen -> generate(prompt, size? 1024x1024|1920x1080|1080x1920)
    video-gen -> generate(prompt, style?, images? [project-relative paths], theme?, hook_lines?)
