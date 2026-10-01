@@ -23,11 +23,39 @@ MAX_TURNS = 6
 DEFAULT_MODEL = "typesafe/jev-router"
 
 
+# Provider registry — configured at creation time via project .env
+# AGENT_PROVIDER: openrouter | openai | anthropic | zai
+# AGENT_MODEL: model slug (e.g. typesafe/jev-router, gpt-4o-mini)
+_PROVIDERS = {
+    "openrouter": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "key_env": "OPENROUTER_API_KEY",
+    },
+    "openai": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "key_env": "OPENAI_API_KEY",
+    },
+    "anthropic": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "key_env": "ANTHROPIC_API_KEY",
+    },
+    "zai": {
+        "url": "https://api.z.ai/api/paas/v4/chat/completions",
+        "key_env": "ZAI_API_KEY",
+    },
+}
+
+
 def _llm(messages):
-    key = os.getenv("OPENROUTER_API_KEY")
-    if not key:
-        raise RuntimeError("OPENROUTER_API_KEY not set in project .env")
+    provider = os.getenv("AGENT_PROVIDER", "openrouter").lower()
     model = os.getenv("AGENT_MODEL", DEFAULT_MODEL)
+    cfg = _PROVIDERS.get(provider, _PROVIDERS["openrouter"])
+    key = os.getenv(cfg["key_env"])
+    if not key:
+        raise RuntimeError(
+            f"Brain not configured. {cfg['key_env']} not set. "
+            f"Connect the {provider} integration in Settings, or ask in chat "
+            f"to change the brain model.")
     payload = json.dumps({
         "model": model,
         "messages": messages,
@@ -35,13 +63,18 @@ def _llm(messages):
         "max_tokens": 2000,
     }).encode()
     req = urllib.request.Request(
-        "https://openrouter.ai/api/v1/chat/completions",
-        data=payload, method="POST",
+        cfg["url"], data=payload, method="POST",
         headers={"Authorization": f"Bearer {key}",
                  "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as r:
         body = json.loads(r.read().decode())
-    return body["choices"][0]["message"]["content"]
+    # OpenAI-compatible response
+    if "choices" in body:
+        return body["choices"][0]["message"]["content"]
+    # Anthropic response format
+    if "content" in body:
+        return body["content"][0]["text"] if body["content"] else ""
+    raise RuntimeError(f"Unexpected LLM response format from {provider}")
 
 
 def _system_prompt(trigger_desc: str) -> str:

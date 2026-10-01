@@ -390,6 +390,18 @@ superpowers", "let users generate images"), integrate them like this:
    "use_ai": true. The LLM brain understands the trigger, picks tools,
    and self-corrects. Example: {"task_type": "event", "use_ai": true}
 
+   BRAIN CONFIGURATION: When creating or editing an agent that will use
+   AI reasoning, ASK the user which brain model they want:
+   - "Jev via OpenRouter" (recommended — typesafe/jev-router, 1M context)
+   - "OpenAI GPT-4o-mini" (via OpenAI)
+   - "Anthropic Claude" (via Anthropic)
+   - Or the user can name any model
+   Based on their choice, set these in the project's .env:
+     AGENT_PROVIDER=openrouter|openai|anthropic|zai
+     AGENT_MODEL=<model-slug>
+   And ensure the matching API key integration is connected
+   (OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or ZAI_API_KEY).
+
 7. Tool cheat-sheet (tool -> ops + key params):
    song -> generate(prompt, style?, duration?, vocals? auto|female|male|instrumental)
    image-gen -> generate(prompt, size? 1024x1024|1920x1080|1080x1920)
