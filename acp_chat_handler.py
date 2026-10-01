@@ -372,9 +372,12 @@ superpowers", "let users generate images"), integrate them like this:
    GET {DREAMAGENT_TOOLS_URL}/tools/jobs/{job_id}/file   (same X-Project-Secret
    header) returns the raw file bytes. Save them into the project, e.g.
    tools-output/<filename from output_path>, then serve/play that local
-   copy. There is no other download route and the platform-side path is not
-   shared with this machine. For paid audio/video tools use "quantity" in
-   the execute body when duration matters (per-minute billing).
+   copy. To list all previously generated outputs:
+   GET {DREAMAGENT_TOOLS_URL}/tools/projects/{PROJECT_ID}/outputs
+   returns [{name, size, modified, url}]; download any of them with
+   GET {DREAMAGENT_TOOLS_URL}/tools/projects/{PROJECT_ID}/outputs/<name>.
+   For paid audio/video tools use "quantity" in the execute body when
+   duration matters (per-minute billing).
 6. Tool cheat-sheet (tool -> ops + key params):
    song -> generate(prompt, style?, duration?, vocals? auto|female|male|instrumental)
    image-gen -> generate(prompt, size? 1024x1024|1920x1080|1080x1920)
