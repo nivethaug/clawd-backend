@@ -14540,8 +14540,16 @@ async def create_project_assistant(
         # 15-55s turns were the main source of client-side timeouts.
         # Guards/delivery rounds still run on the brief model: they only
         # arm on ready-to-brief turns, which are brief-phase by definition.
+        # 00:1x live: _create_ready_to_brief alone armed brief phase on the
+        # FIRST message of token-free projects (websites) — glm went first
+        # and jev never collected. Brief phase requires the brief to be
+        # DELIVERABLE this turn: name present (or a regenerate/confirmed
+        # turn). A ready-to-brief-without-name turn asks the name — that's
+        # collection.
         _brief_phase = bool(
-            _create_ready_to_brief or ctx.regenerate or ctx.prompt_confirmed
+            ctx.regenerate
+            or ctx.prompt_confirmed
+            or (_create_ready_to_brief and bool(ctx.project_name))
         )
         if not _brief_phase:
             _col_model = os.getenv("CREATE_COLLECTION_MODEL", "typesafe/jev-router")
@@ -14558,6 +14566,22 @@ async def create_project_assistant(
             and (os.getenv("ZAI_API_KEY") or "").strip()
         ):
             from services.ai.openrouter_client import get_zai_client
+            # pm2's saved env shadows .env (dotenv never overrides existing
+            # vars) — the stale ZAI_API_KEY 401'd every turn while the
+            # corrected .env value was valid (2026-10-02 live: .env key curl
+            # -> 200, process-env key curl -> 401). Prefer the .env file
+            # value so a key rotation doesn't need pm2 env surgery.
+            try:
+                from dotenv import dotenv_values
+                _fe = dotenv_values(".env")
+                if (_fe.get("ZAI_API_KEY") or "").strip() and \
+                        _fe["ZAI_API_KEY"].strip() != (os.getenv("ZAI_API_KEY") or "").strip():
+                    os.environ["ZAI_API_KEY"] = _fe["ZAI_API_KEY"].strip()
+                    logger.info(
+                        "[CREATE-ASSISTANT] ZAI_API_KEY refreshed from .env "
+                        "(process env was stale)")
+            except Exception:
+                pass
             client = get_zai_client()
             fallback_client = (
                 get_openrouter_client(model=_create_fb)
