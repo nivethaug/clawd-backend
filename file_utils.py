@@ -4,6 +4,7 @@ Handles secure file operations for the code editor.
 """
 
 import os
+import re
 import base64
 from pathlib import Path
 from typing import List, Dict, Optional, Any
@@ -34,6 +35,59 @@ class FileUtils:
 
     # Maximum file size to load (10 MB)
     MAX_FILE_SIZE = 10 * 1024 * 1024
+
+    # Maximum size for a single write (2 MB)
+    MAX_WRITE_SIZE = 2 * 1024 * 1024
+
+    # Paths that may never be written through file-edit surfaces.
+    DENIED_WRITE_PATTERNS = (
+        '.env', '.git/', 'id_rsa', 'id_ed25519', '.ssh/',
+        '.npmrc', '.pypirc', 'authorized_keys',
+    )
+
+    # Content signature pack: (rule name, regex). HIGH-confidence markers.
+    CONTENT_SIGNATURES = [
+        ('webshell-php', r'eval\s*\(\s*\$_(POST|GET|REQUEST)'),
+        ('webshell-php-assert', r'assert\s*\(\s*base64_decode'),
+        ('shell-python-reverse', r'socket\.socket\([^)]*\)[\s\S]{0,400}\.connect\([^)]*\)[\s\S]{0,400}/bin/(ba)?sh'),
+        ('shell-bash-devtcp', r'/dev/tcp/[0-9]{1,3}\.'),
+        ('shell-powershell-enc', r'-EncodedCommand[\s\S]{0,80}Invoke-Expression'),
+        ('obfuscated-exec-py', r'(exec|eval|compile)\s*\(\s*base64\.b64decode\s*\('),
+        ('obfuscated-exec-js', r'eval\s*\(\s*atob\s*\('),
+        ('miner-stratum', r'stratum\+tcp://'),
+        ('miner-xmrig', r'xmrig'),
+        ('stealer-cookie-exfil', r'document\.cookie[\s\S]{0,200}(fetch|XMLHttpRequest|location\.href)\s*[=(]'),
+    ]
+
+    @staticmethod
+    def scan_content(relative_path: str, content: str) -> list:
+        """Static content signature scan. Returns rule names hit.
+
+        HIGH-confidence markers only — clean files must pass silently.
+        """
+        findings = []
+        lower_name = relative_path.lower()
+        for rule, pattern in FileUtils.CONTENT_SIGNATURES:
+            try:
+                if re.search(pattern, content, re.IGNORECASE):
+                    findings.append(rule)
+            except re.error:
+                continue
+        # Long base64 blob heuristic in executable files
+        if lower_name.endswith(('.py', '.js', '.ts', '.sh', '.ps1', '.php')):
+            for chunk in re.findall(r'[A-Za-z0-9+/=]{2000,}', content):
+                findings.append('large-base64-blob')
+                break
+        return findings
+
+    @staticmethod
+    def check_write_allowed(relative_path: str) -> None:
+        """Raise ValueError if this relative path is on the denylist."""
+        normalized = '/' + relative_path.replace(os.sep, '/').lstrip('/').lower()
+        for pat in FileUtils.DENIED_WRITE_PATTERNS:
+            marker = pat.rstrip('/') if not pat.endswith('/') else pat.rstrip('/')
+            if pat in normalized or f'/{marker}' in normalized:
+                raise ValueError(f"Writing to '{pat}' paths is not allowed")
 
     @staticmethod
     def is_binary_file(filename: str, content: bytes = b'') -> bool:
@@ -84,8 +138,9 @@ class FileUtils:
         base = Path(base_path).resolve()
         full = (base / relative_path).resolve()
 
-        # Ensure full path starts with base path
-        if not str(full).startswith(str(base)):
+        # Strict containment: base must be a path-PREFIX component, not a
+        # string prefix (otherwise sibling dirs like "<base>-evil" pass).
+        if os.path.commonpath([str(base), str(full)]) != str(base):
             raise ValueError(f"Path traversal attempt: {relative_path}")
 
         return str(full)
@@ -212,6 +267,20 @@ class FileUtils:
         # Don't allow writing to binary files
         if FileUtils.is_binary_file(file_path):
             raise ValueError(f"Cannot write to binary file: {file_path}")
+
+        # Denylist: secrets, git metadata, credential stores
+        FileUtils.check_write_allowed(file_path)
+
+        # Write size cap
+        if len(content) > FileUtils.MAX_WRITE_SIZE:
+            raise ValueError(f"Content too large: {len(content)} bytes (max {FileUtils.MAX_WRITE_SIZE})")
+
+        # Content signature scan — HIGH-confidence malware markers block the write
+        findings = FileUtils.scan_content(file_path, content)
+        if findings:
+            raise ValueError(
+                f"Blocked by content scan: {', '.join(findings)}. "
+                "If you believe this is a false positive, edit the file inside DreamAgent instead.")
 
         # Ensure directory exists
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
