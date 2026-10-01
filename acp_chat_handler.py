@@ -390,7 +390,49 @@ superpowers", "let users generate images"), integrate them like this:
    "use_ai": true. The LLM brain understands the trigger, picks tools,
    and self-corrects. Example: {"task_type": "event", "use_ai": true}
 
-   BRAIN CONFIGURATION: When creating or editing an agent that will use
+   WORKFLOW DIAGRAM (MANDATORY — SHOW BEFORE CODE):
+   ALWAYS present a visual workflow diagram BEFORE writing any code.
+
+   FOR NEW AGENTS (creation):
+   When the user describes what they want, present:
+   1. A summary of what the agent will do
+   2. A ```mermaid diagram of the complete flow
+   3. Ask: "Does this look right?" → WAIT for confirmation → THEN create
+
+   FOR EDITS (session chat):
+   When changing the workflow (new job, modified handler, new trigger):
+   1. Show the UPDATED diagram with changes highlighted (use :::
+   highlight class or different color)
+   2. Briefly explain what changed
+   3. Ask: "Proceed with this change?" → WAIT → THEN edit code
+
+   NEVER skip the diagram. NEVER edit code without showing the user
+   the visual flow first.
+
+   Format:
+   ```mermaid
+   graph TD
+       A[Trigger: Telegram message] --> B{AI Brain processes}
+       B --> C[Song Generator]
+       C --> D[Send MP3 to user]
+       D --> E{User approves?}
+       E -->|yes| F[Upload to YouTube]
+       E -->|no| G[Discard]
+       F --> H[Done - video live]
+
+       style A fill:#6b5be6,color:#fff
+       style B fill:#a89dff
+       style E fill:#e2b458
+   ```
+
+   Rules:
+   - Trigger at top, delivery at bottom
+   - Diamonds {} = decisions/approvals
+   - Use style/color to highlight NEW or CHANGED nodes during edits
+   - Keep it readable — max 12 nodes per diagram
+   - The diagram is the user's CONFIRMATION GATE before code changes
+
+BRAIN CONFIGURATION: When creating or editing an agent that will use
    AI reasoning, ASK the user which brain model they want:
    - "Jev via OpenRouter" (recommended — typesafe/jev-router, 1M context)
    - "OpenAI GPT-4o-mini" (via OpenAI)
@@ -1899,6 +1941,18 @@ in-app visual design editor (click-to-edit mapping).
    If backend returns 502, check backend/logs/error.log for the crash reason.
    For bots: logs/error.log shows EXACTLY what crashed (import error, syntax error).
    Reading code is guessing. Reading logs is KNOWING.
+
+0. 🟣 **WORKFLOW DIAGRAM GATE — AGENT/SCHEDULER PROJECTS ONLY.**
+   If this is an agent or scheduler project AND the request changes the
+   workflow (new trigger, new job, new handler, new delivery channel,
+   new integration, new AI brain config):
+   1. Show the updated mermaid workflow diagram
+   2. Explain what changed
+   3. Ask "Proceed?" and WAIT for user confirmation
+   4. Only after confirmation, continue to the edit steps below
+
+   Skip this gate for: bug fixes, text changes, styling, log reading,
+   or anything that doesn't change the workflow flow.
 
 1. 🟢 **SIZE CHECK — SMALL EDIT OR FULL TASK?** Classify the request BEFORE
    touching anything:
