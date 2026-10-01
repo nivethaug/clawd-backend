@@ -15127,21 +15127,51 @@ async def create_project_assistant(
             "storage questions. JSON only."
         )
         try:
+            # Tools attached: a propose_brief TOOL call survives even when the
+            # same model's text-JSON breaks on unescaped inner quotes (23:43
+            # live: delivery round produced the brief as text, json.loads
+            # threw, the except kept the announcement text and dropped the
+            # brief — user saw 'ready to build' with no card AGAIN). The
+            # tool-args path flows into collected_brief below.
             _dr = await client.chat_completion(
                 messages=convo + [{"role": "user", "content": _dr_msg}],
                 temperature=0.0, max_tokens=2500,
+                tools=[_CREATE_BRIEF_TOOL],
             )
             _dru = client.get_usage(_dr)
             for _k in usage_tot:
                 usage_tot[_k] += int(_dru.get(_k, 0) or 0)
-            _drraw = str(
-                (_dr["choices"][0]["message"] or {}).get("content") or ""
-            ).strip()
+            _drmsg = (_dr["choices"][0]["message"] or {})
+            for _drtc in (_drmsg.get("tool_calls") or []):
+                _drfn = _drtc.get("function") or {}
+                if _drfn.get("name") != "propose_brief":
+                    continue
+                _drargs = _drfn.get("arguments")
+                if not isinstance(_drargs, dict):
+                    try:
+                        _drargs = json.loads(_drargs or "{}")
+                    except Exception:
+                        _m = re.search(r"\{.*\}", str(_drargs or ""), re.DOTALL)
+                        try:
+                            _drargs = json.loads(_m.group(0)) if _m else {}
+                        except Exception:
+                            _drargs = {}
+                if isinstance(_drargs, dict) and str(_drargs.get("prompt") or "").strip():
+                    collected_brief.update({
+                        "kind": str(_drargs.get("kind") or ctx.detected_kind or "custom").strip().lower(),
+                        "prompt": str(_drargs["prompt"]).strip()[:6000],
+                        "features": [str(f).strip()[:80] for f in (_drargs.get("features") or []) if str(f).strip()][:8],
+                        "suggested_name": str(_drargs.get("suggested_name") or "").strip()[:30] or None,
+                    })
+            _drraw = str(_drmsg.get("content") or "").strip()
             if _drraw:
                 raw = _drraw
             logger.info(
                 "[CREATE-ASSISTANT] delivery round on fallback model fired (%s)",
-                "delivered" if re.search(r'"brief"\s*:\s*\{', raw) else "still empty",
+                "delivered" if (
+                    (collected_brief and collected_brief.get("prompt"))
+                    or re.search(r'"brief"\s*:\s*\{', raw)
+                ) else "still empty",
             )
         except Exception as _dr_err:
             logger.warning(
@@ -15184,14 +15214,17 @@ async def create_project_assistant(
             text = json_match.group(0)
         data = json.loads(text)
         # TURN TRACE: the model's raw structured output this turn
+        # (reads data directly — the old k/b references fired BEFORE those
+        # locals were assigned; a fresh scope would NameError here and the
+        # except would discard a perfectly parsed brief)
         logger.info(
             "[CREATE-TURN] out: reply=%r kind=%r tokens=%r env=%r "
             "name=%r brief_len=%s",
             (data.get("reply") or "")[:200],
-            k if isinstance(k, str) else None,
+            data.get("kind") if isinstance(data.get("kind"), str) else None,
             data.get("required_tokens"), data.get("required_env"),
             data.get("project_name"),
-            len(str(b.get("prompt"))) if isinstance(b, dict) and b.get("prompt") else None,
+            len(str(data.get("brief", {}).get("prompt"))) if isinstance(data.get("brief"), dict) and data.get("brief", {}).get("prompt") else None,
         )
         reply = str(data.get("reply") or "").strip()
         k = data.get("kind")
@@ -15325,7 +15358,45 @@ async def create_project_assistant(
                 reply = json.loads('"' + _m.group(1) + '"')
             except Exception:
                 reply = _m.group(1)
-        kind, brief = None, None
+        # Brief rescue (23:43 live): the delivery round DID emit the brief,
+        # but unescaped inner quotes in the prompt text broke json.loads —
+        # this except kept only the reply sentence and DISCARDED the brief,
+        # so the user saw "ready to build" with no confirmation card. Pull
+        # the brief fields back out textually — partial recovery beats no
+        # card. (The propose_brief tool path is the primary fix; this is
+        # the belt-and-braces for text-only deliveries.)
+        _bp = re.search(r'"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL)
+        if _bp and len(_bp.group(1)) > 80:
+            try:
+                _bprompt = json.loads('"' + _bp.group(1) + '"')
+            except Exception:
+                _bprompt = _bp.group(1)
+            _bk = re.search(r'"kind"\s*:\s*"(website|discord|telegram|agent|custom)"', raw)
+            _bsn = re.search(r'"suggested_name"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+            _bfeat = re.search(r'"features"\s*:\s*\[(.*?)\]', raw, re.DOTALL)
+            _feat_list: List[str] = []
+            if _bfeat:
+                for _fm in re.finditer(r'"((?:[^"\\]|\\.)*)"', _bfeat.group(1)):
+                    try:
+                        _feat_list.append(json.loads('"' + _fm.group(1) + '"'))
+                    except Exception:
+                        _feat_list.append(_fm.group(1))
+            try:
+                _bsn_name = json.loads('"' + _bsn.group(1) + '"') if _bsn else None
+            except Exception:
+                _bsn_name = _bsn.group(1) if _bsn else None
+            brief = CreateAssistantBrief(
+                kind=(_bk.group(1) if _bk else (ctx.detected_kind or "custom")),
+                prompt=_bprompt[:6000],
+                features=[f for f in _feat_list if f and f.strip()][:8],
+                suggested_name=(_bsn_name or None),
+            )
+            kind = brief.kind
+            logger.warning(
+                "[CREATE-ASSISTANT] brief rescued via textual fallback "
+                "(strict JSON unparseable, prompt_len=%d)", len(_bprompt))
+        if not brief:
+            kind, brief = None, None
 
     # A brief delivered via the propose_brief tool beats a lost/absent JSON
     # brief (models replying in prose after tool rounds). The parsed-JSON
