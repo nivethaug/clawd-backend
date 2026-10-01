@@ -830,15 +830,35 @@ def init_schema():
             cur.execute("""CREATE TABLE IF NOT EXISTS scheduler_jobs (
                 id SERIAL PRIMARY KEY,
                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                job_type VARCHAR(20) CHECK (job_type IN ('interval', 'daily', 'once', 'event')),
+                job_type VARCHAR(20) CHECK (job_type IN ('interval', 'daily', 'once', 'event', 'weekly', 'monthly')),
                 schedule_value VARCHAR(100) NOT NULL,
                 task_type VARCHAR(50) NOT NULL,
                 payload JSONB DEFAULT '{}',
                 last_run TIMESTAMP,
                 next_run TIMESTAMP,
                 status VARCHAR(20) DEFAULT 'active',
+                timezone VARCHAR(64),
+                retry_count INTEGER DEFAULT 0,
+                max_retries INTEGER DEFAULT 0,
+                retry_backoff_seconds INTEGER DEFAULT 60,
+                on_failure_job_id INTEGER,
+                parent_job_id INTEGER,
                 created_at TIMESTAMP DEFAULT NOW()
             )""")
+            conn.commit()
+
+            # Migration: widen job_type CHECK + add new columns for existing tables
+            cur.execute("""
+                ALTER TABLE scheduler_jobs DROP CONSTRAINT IF EXISTS scheduler_jobs_job_type_check;
+                ALTER TABLE scheduler_jobs ADD CONSTRAINT scheduler_jobs_job_type_check
+                    CHECK (job_type IN ('interval', 'daily', 'once', 'event', 'weekly', 'monthly'));
+                ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS timezone VARCHAR(64);
+                ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+                ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS max_retries INTEGER DEFAULT 0;
+                ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS retry_backoff_seconds INTEGER DEFAULT 60;
+                ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS on_failure_job_id INTEGER;
+                ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS parent_job_id INTEGER;
+            """)
             conn.commit()
 
             # Scheduler jobs indexes
@@ -857,10 +877,28 @@ def init_schema():
             cur.execute("""CREATE TABLE IF NOT EXISTS scheduler_logs (
                 id SERIAL PRIMARY KEY,
                 job_id INTEGER REFERENCES scheduler_jobs(id) ON DELETE CASCADE,
-                status VARCHAR(20) CHECK (status IN ('success', 'failed')),
+                status VARCHAR(20) CHECK (status IN ('success', 'failed', 'retrying', 'skipped')),
                 message TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )""")
+            conn.commit()
+
+            # Sync webhook response store (correlation-based)
+            cur.execute("""CREATE TABLE IF NOT EXISTS scheduler_sync_results (
+                id SERIAL PRIMARY KEY,
+                correlation_id VARCHAR(100) UNIQUE NOT NULL,
+                status VARCHAR(20),
+                result JSONB,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""")
+            conn.commit()
+
+            # Widen scheduler_logs status CHECK for existing tables
+            cur.execute("""
+                ALTER TABLE scheduler_logs DROP CONSTRAINT IF EXISTS scheduler_logs_status_check;
+                ALTER TABLE scheduler_logs ADD CONSTRAINT scheduler_logs_status_check
+                    CHECK (status IN ('success', 'failed', 'retrying', 'skipped'));
+            """)
             conn.commit()
 
             cur.execute("""

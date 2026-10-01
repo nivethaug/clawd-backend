@@ -10,8 +10,10 @@ The loop NEVER crashes — all errors are caught and logged.
 """
 
 import os
+import json
 import time
 import logging
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 # Configure logging for standalone daemon process
@@ -41,6 +43,20 @@ MAX_WORKERS = int(os.getenv("SCHEDULER_MAX_WORKERS", "10"))
 FUTURE_WAIT_TIMEOUT = JOB_TIMEOUT_SECONDS + 30
 
 
+def _store_sync_result(correlation_id: str, status: str, result: dict):
+    """Store result for sync webhook response polling."""
+    try:
+        from database_postgres import get_db
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO scheduler_sync_results (correlation_id, status, result) "
+                "VALUES (%s, %s, %s)",
+                (correlation_id, status, json.dumps(result, default=str)[:16000]))
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"sync result store error: {e}")
+
+
 def _execute_single_job(job: dict):
     """
     Execute one job in a worker thread.
@@ -68,11 +84,67 @@ def _execute_single_job(job: dict):
         status = result.get("status", "failed")
         message = result.get("message", "No message")
 
+        # ── Retry logic ──
+        if status == "failed":
+            max_retries = job.get("max_retries", 0)
+            retry_count = job.get("retry_count", 0)
+            if max_retries > retry_count:
+                backoff = job.get("retry_backoff_seconds", 60)
+                next_run = datetime.utcnow() + timedelta(
+                    seconds=backoff * (retry_count + 1))
+                update_job_run(job_id, next_run,
+                               retry_count=retry_count + 1)
+                log_job(job_id, "retrying",
+                        f"retry {retry_count + 1}/{max_retries}: {message[:200]}")
+                logger.info(f"Job {job_id} retrying ({retry_count + 1}/{max_retries}) "
+                            f"in {backoff * (retry_count + 1)}s")
+                return
+
+        # ── On-failure hook ──
+        if status == "failed" and job.get("on_failure_job_id"):
+            on_fail_id = job["on_failure_job_id"]
+            try:
+                from services.scheduler.jobs import run_job_now
+                run_job_now(on_fail_id)
+                logger.info(f"Job {job_id} failed → triggered on-failure job {on_fail_id}")
+            except Exception as hook_err:
+                logger.warning(f"Job {job_id} on-failure hook {on_fail_id} error: {hook_err}")
+
+        # ── Sub-workflow chaining ──
+        payload = job.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        if status != "failed" and isinstance(payload, dict) and payload.get("on_complete_job_id"):
+            chain_id = payload["on_complete_job_id"]
+            try:
+                from services.scheduler.jobs import run_job_now
+                run_job_now(chain_id)
+                logger.info(f"Job {job_id} completed → chained job {chain_id}")
+            except Exception as chain_err:
+                logger.warning(f"Job {job_id} chain to {chain_id} error: {chain_err}")
+
+        # ── Sync webhook response store ──
+        correlation_id = None
+        if isinstance(payload, dict):
+            correlation_id = payload.get("_correlation_id")
+        if correlation_id:
+            _store_sync_result(correlation_id, status, result)
+
         # Calculate next run
-        next_run = calculate_next_run(job['job_type'], job['schedule_value'])
+        next_run = calculate_next_run(
+            job['job_type'], job['schedule_value'],
+            timezone=job.get('timezone'))
+
+        # Reset retry count on success
+        updates = {}
+        if status != "failed" and job.get("retry_count", 0) > 0:
+            updates["retry_count"] = 0
 
         # Update job timestamps
-        update_job_run(job_id, next_run)
+        update_job_run(job_id, next_run, **updates)
 
         # Log the execution
         log_job(job_id, status, message)

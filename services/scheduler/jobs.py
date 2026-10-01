@@ -23,7 +23,7 @@ MAX_JOBS_PER_PROJECT = 100
 
 # Valid job types (schedule types). task_type is free-form — executor validates.
 # 'event' jobs are dormant (next_run NULL) until a webhook trigger re-arms them.
-VALID_JOB_TYPES = ('interval', 'daily', 'once', 'event')
+VALID_JOB_TYPES = ('interval', 'daily', 'once', 'event', 'weekly', 'monthly')
 
 
 def create_job(project_id: int, job_data: dict) -> dict:
