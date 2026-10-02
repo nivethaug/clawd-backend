@@ -14001,6 +14001,9 @@ class CreateAssistantContext(BaseModel):
     # Live connection state sent every turn:
     bot_token_verified: Optional[bool] = None    # required bot token verified
     connected_env_names: List[str] = Field(default_factory=list)  # verified/env keys attached
+    # Verified Global Integrations vault keys — the assistant points the user
+    # at "Use a saved credential" for these instead of demanding a fresh key.
+    saved_integration_keys: List[str] = Field(default_factory=list)
     # Description-declared env keys still awaiting a value: [{key,label,optional}]
     pending_env: List[Dict[str, Any]] = Field(default_factory=list)
     # UI-choice answers made this turn (page pickers / save target): [{key,value}]
