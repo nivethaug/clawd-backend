@@ -15023,7 +15023,8 @@ async def create_project_assistant(
                 # to the project brief" (fabricated a brief that never
                 # existed). Same stall, same correction.
                 r"|\bready to build\b"
-                r"|\badded (?:that|it|this) to (?:the|your)\s+(?:project\s+)?brief\b",
+                r"|\badded (?:that|it|this) to (?:the|your)\s+(?:project\s+)?brief\b"
+                r"|\bon its confirmation card\b",
                 _guard_corpus, re.I)
         ):
             _guard_why = "brief-promise: model announced the brief instead of producing it"
@@ -15453,6 +15454,27 @@ async def create_project_assistant(
                     }
                     if _kind_signals.get(key) != (ctx.detected_kind or ""):
                         continue  # user never named this channel — no popup yet
+                # USER-DECLINED KEYS: when the user explicitly said the key
+                # isn't needed ("CoinGecko's free API works without a key",
+                # "no X key", "skip the key"), the model re-emitting it must
+                # not block the brief — drop the requirement and let the
+                # brief's "add later in settings" note carry it. (11:3x live:
+                # glm re-emitted COINGECKO_API_KEY three turns in a row and
+                # refused to brief while its own gate was unsatisfied.)
+                _tk_base = key.replace("_API_KEY", "").replace("_SECRET_KEY", "").replace("_KEY", "").lower()
+                _decline_markers = (
+                    f"no {_tk_base} key", f"without a {_tk_base} key",
+                    f"without {_tk_base} key", f"skip the {_tk_base} key",
+                    f"no need for a {_tk_base} key",
+                )
+                if any(m in _user_said for m in _decline_markers) or (
+                    _tk_base in _user_said and "free" in _user_said
+                    and "no key" in _user_said
+                ):
+                    logger.info(
+                        "[CREATE-ASSISTANT] dropping %s — user declined the key",
+                        key)
+                    continue
                 if key in {p["key"] for p in parsed_rt}:
                     continue
                 label = str(item.get("label") or "").strip()[:40] or (
