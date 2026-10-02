@@ -164,10 +164,14 @@ def _system_prompt(trigger_desc: str) -> str:
    sharp(file, op), pdf(op, ...), remotion(images, text?)
    → call POST {tools_url}/tools/projects/{project_id}/tools/{{tool}}/execute
      headers: X-Project-Secret: {os.getenv("DREAMAGENT_PROJECT_SECRET", "<from .env>")}
-4. state_get(key) / state_set(key, value) — persistent memory
-5. send_telegram(message, attach_path?) — send message/file to Telegram
-6. send_discord(message) — send via Discord webhook
-7. wait — do nothing this run (wait for next trigger)
+4. state_get(key) / state_set(key, value) — small persistent memory (platform state)
+5. db_insert(collection, doc) / db_find(collection, filter?, limit?) /
+   db_find_one(collection, filter) / db_count(collection, filter?) /
+   db_delete(collection, filter?) — document storage (SQLite, schemaless):
+   run history, incidents, stories, any records you need to keep or query
+6. send_telegram(message, attach_path?) — send message/file to Telegram
+7. send_discord(message) — send via Discord webhook
+8. wait — do nothing this run (wait for next trigger)
 
 ## Delivery Channels
 {', '.join(channels) if channels else 'None configured'}
@@ -226,6 +230,21 @@ def _execute_tool(tool: str, params: dict) -> dict:
     elif tool == "state_set":
         api_client.state_set(params["key"], params["value"])
         return {"data": "saved"}
+    elif tool in ("db_insert", "db_find", "db_find_one", "db_count", "db_delete"):
+        import storage
+        col = storage.db.collection(str(params.get("collection", "data")))
+        if tool == "db_insert":
+            return {"data": col.insert(params.get("doc") or {})}
+        if tool == "db_find":
+            return {"data": col.find(
+                params.get("filter") or None,
+                limit=int(params.get("limit") or 50),
+                since=params.get("since"))}
+        if tool == "db_find_one":
+            return {"data": col.find_one(params.get("filter") or None)}
+        if tool == "db_count":
+            return {"data": col.count(params.get("filter") or None)}
+        return {"data": {"deleted": col.delete(params.get("filter") or None)}}
     else:
         return {"error": f"Unknown tool: {tool}"}
 
