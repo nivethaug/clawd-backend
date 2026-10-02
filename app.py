@@ -14573,7 +14573,9 @@ async def create_project_assistant(
             or (_create_ready_to_brief and bool(ctx.project_name))
         )
         if not _brief_phase:
-            _col_model = os.getenv("CREATE_COLLECTION_MODEL", "typesafe/jev-1.13")
+            # jev-1.13 is OpenRouter-BLOCKED on chat/completions (decisions model
+# only — live 400). It belongs to the agent-brain decisions layer.
+            _col_model = os.getenv("CREATE_COLLECTION_MODEL", "typesafe/jev-router")
             client = get_openrouter_client(model=_col_model)
             fallback_client = (
                 get_openrouter_client(model=_create_fb)
