@@ -14080,12 +14080,10 @@ def _create_user_declined_key(key: str, user_said: str) -> bool:
     # (11:5x live: "CoinGecko FREE public API (no API key needed)"
     # also named OpenRouter, and the guard dropped OpenRouter too).
     _pat = re.compile(
-        _tk_base + r"\b[^.]{0,60}?" + BS + "b"
-        r"(?:no key|no api key|key[- ]free|without a key)" + BS + "b",
+        _tk_base + r"\b[^.]{0,60}?\b(?:no key|no api key|key[- ]free|without a key)\b",
         re.IGNORECASE)
     _pat_rev = re.compile(
-        r"(?:no key|no api key|key[- ]free|without a key)" + BS + "b[^.]{0,60}?" + BS + "b"
-        + _tk_base + r"\b",
+        r"(?:no key|no api key|key[- ]free|without a key)\b[^.]{0,60}?\b" + _tk_base + r"\b",
         re.IGNORECASE)
     return bool(_pat.search(_said) or _pat_rev.search(_said))
 
