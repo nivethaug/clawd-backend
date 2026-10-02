@@ -14612,7 +14612,10 @@ async def create_project_assistant(
         if not _brief_phase:
             # jev-1.13 is OpenRouter-BLOCKED on chat/completions (decisions model
 # only — live 400). It belongs to the agent-brain decisions layer.
-            _col_model = os.getenv("CREATE_COLLECTION_MODEL", "typesafe/jev-router")
+            # glm flash pinned for collection: jev-router's provider routing
+            # is unpredictable for chat (one live turn burned 2000 reasoning
+            # tokens / $0.004 with zero content before glm recovered).
+            _col_model = os.getenv("CREATE_COLLECTION_MODEL", "z-ai/glm-5.3-flash")
             client = get_openrouter_client(model=_col_model)
             fallback_client = (
                 get_openrouter_client(model=_create_fb)
