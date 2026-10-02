@@ -15469,7 +15469,9 @@ async def create_project_assistant(
                 )
                 if any(m in _user_said for m in _decline_markers) or (
                     _tk_base in _user_said and "free" in _user_said
-                    and "no key" in _user_said
+                    and ("no key" in _user_said or "no api key" in _user_said
+                         or "key-free" in _user_said or "key free" in _user_said
+                         or "without a key" in _user_said)
                 ):
                     logger.info(
                         "[CREATE-ASSISTANT] dropping %s — user declined the key",
