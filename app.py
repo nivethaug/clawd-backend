@@ -14054,6 +14054,33 @@ _CREATE_ALLOWED_TOKENS = {
     "COINGECKO_API_KEY", "STRIPE_SECRET_KEY",
     "TELEGRAM_BOT_TOKEN", "DISCORD_WEBHOOK_URL",
 }
+def _create_user_declined_key(key: str, user_said: str) -> bool:
+    """True when the user explicitly said this key isn't needed.
+
+    ("CoinGecko's free API works without a key", "no X key", "skip the
+    key", "free ... no api key"). The model re-emitting a declined key
+    must not block the brief — the brief carries an add-later-in-settings
+    note instead. (11:3x-11:5x live: glm re-emitted COINGECKO_API_KEY for
+    five straight turns against explicit user refusal.)"""
+    _tk_base = (key or "").replace("_API_KEY", "").replace("_SECRET_KEY", "").replace("_KEY", "").lower()
+    if not _tk_base:
+        return False
+    _said = (user_said or "").lower()
+    _markers = (
+        f"no {_tk_base} key", f"without a {_tk_base} key",
+        f"without {_tk_base} key", f"skip the {_tk_base} key",
+        f"no need for a {_tk_base} key",
+    )
+    if any(m in _said for m in _markers):
+        return True
+    return (
+        _tk_base in _said and "free" in _said
+        and ("no key" in _said or "no api key" in _said
+             or "key-free" in _said or "key free" in _said
+             or "without a key" in _said)
+    )
+
+
 _CREATE_CHANNEL_TOKEN_GUARD = {
     "TELEGRAM_BOT_TOKEN": ("telegram", " tg ", "botfather"),
     "DISCORD_WEBHOOK_URL": ("discord",),
@@ -15461,18 +15488,7 @@ async def create_project_assistant(
                 # brief's "add later in settings" note carry it. (11:3x live:
                 # glm re-emitted COINGECKO_API_KEY three turns in a row and
                 # refused to brief while its own gate was unsatisfied.)
-                _tk_base = key.replace("_API_KEY", "").replace("_SECRET_KEY", "").replace("_KEY", "").lower()
-                _decline_markers = (
-                    f"no {_tk_base} key", f"without a {_tk_base} key",
-                    f"without {_tk_base} key", f"skip the {_tk_base} key",
-                    f"no need for a {_tk_base} key",
-                )
-                if any(m in _user_said for m in _decline_markers) or (
-                    _tk_base in _user_said and "free" in _user_said
-                    and ("no key" in _user_said or "no api key" in _user_said
-                         or "key-free" in _user_said or "key free" in _user_said
-                         or "without a key" in _user_said)
-                ):
+                if _create_user_declined_key(key, _user_said):
                     logger.info(
                         "[CREATE-ASSISTANT] dropping %s — user declined the key",
                         key)
@@ -15691,7 +15707,8 @@ async def create_project_assistant(
     }
     _tok_keys_inj = {t["key"] for t in (required_tokens or [])}
     for _pk in sorted(_create_injectable_keys):
-        if _pk in _CREATE_PROVIDER_LABELS and _pk not in _tok_keys_inj:
+        if _pk in _CREATE_PROVIDER_LABELS and _pk not in _tok_keys_inj \
+                and not _create_user_declined_key(_pk, _user_said):
             required_tokens = (required_tokens or []) + [
                 {"key": _pk, "label": _CREATE_PROVIDER_LABELS[_pk]}
             ]
