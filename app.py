@@ -14130,6 +14130,7 @@ def _collect_request_inputs(
     user_said: str,
     out_tokens: List[Dict[str, str]],
     out_env: List[Dict[str, Any]],
+    detected_kind: str = "",
 ) -> List[str]:
     """Validate one request_inputs tool call; append accepted items.
 
@@ -14150,7 +14151,15 @@ def _collect_request_inputs(
         if key in _CREATE_CHANNEL_TOKEN_GUARD and not any(
             w in user_said for w in _CREATE_CHANNEL_TOKEN_GUARD[key]
         ):
-            continue
+            # Same kind-signal admission as the parse block: the detected
+            # kind names the channel even when the naming message fell out
+            # of the client's 12-message window.
+            _kind_signals = {
+                "DISCORD_WEBHOOK_URL": "discord",
+                "TELEGRAM_BOT_TOKEN": "telegram",
+            }
+            if _kind_signals.get(key) != (detected_kind or "").lower():
+                continue
         label = str(item.get("label") or "").strip()[:40] or (
             key.replace("_API_KEY", "").replace("_", " ").title()
         )
@@ -14729,6 +14738,7 @@ async def create_project_assistant(
                     accepted = _collect_request_inputs(
                         args.get("items"), connected, _user_said,
                         collected_tokens, collected_env,
+                        detected_kind=ctx.detected_kind or "",
                     )
                     tool_out = {
                         "accepted": accepted,
@@ -15387,7 +15397,18 @@ async def create_project_assistant(
                 if key in _CHANNEL_TOKEN_GUARD and not any(
                     w in _user_said for w in _CHANNEL_TOKEN_GUARD[key]
                 ):
-                    continue  # user never named this channel — no popup yet
+                    # The detected kind IS the channel-choice signal — a
+                    # discord-kind project named the channel even when the
+                    # naming message fell out of the client's 12-message
+                    # window (09:5x live: the model correctly emitted
+                    # DISCORD_WEBHOOK_URL but the guard dropped it because
+                    # the only "discord" mention was message #1).
+                    _kind_signals = {
+                        "DISCORD_WEBHOOK_URL": "discord",
+                        "TELEGRAM_BOT_TOKEN": "telegram",
+                    }
+                    if _kind_signals.get(key) != (ctx.detected_kind or ""):
+                        continue  # user never named this channel — no popup yet
                 if key in {p["key"] for p in parsed_rt}:
                     continue
                 label = str(item.get("label") or "").strip()[:40] or (
