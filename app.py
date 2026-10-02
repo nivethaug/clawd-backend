@@ -14073,12 +14073,21 @@ def _create_user_declined_key(key: str, user_said: str) -> bool:
     )
     if any(m in _said for m in _markers):
         return True
-    return (
-        _tk_base in _said and "free" in _said
-        and ("no key" in _said or "no api key" in _said
-             or "key-free" in _said or "key free" in _said
-             or "without a key" in _said)
-    )
+    # Same-clause window: the key name must sit within 60 chars of the
+    # key-free phrase (same sentence, no crossing periods). A loose
+    # whole-text check over-declined EVERY key named alongside a
+    # free-API sentence — including keys the user explicitly wanted
+    # (11:5x live: "CoinGecko FREE public API (no API key needed)"
+    # also named OpenRouter, and the guard dropped OpenRouter too).
+    _pat = re.compile(
+        _tk_base + r"\b[^.]{0,60}?" + BS + "b"
+        r"(?:no key|no api key|key[- ]free|without a key)" + BS + "b",
+        re.IGNORECASE)
+    _pat_rev = re.compile(
+        r"(?:no key|no api key|key[- ]free|without a key)" + BS + "b[^.]{0,60}?" + BS + "b"
+        + _tk_base + r"\b",
+        re.IGNORECASE)
+    return bool(_pat.search(_said) or _pat_rev.search(_said))
 
 
 _CREATE_CHANNEL_TOKEN_GUARD = {
