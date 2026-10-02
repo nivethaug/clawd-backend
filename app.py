@@ -15776,11 +15776,27 @@ class CreateDraftBody(BaseModel):
 _CREATE_DRAFT_MAX_BYTES = 131072  # 128 KB — the client trims before sending
 
 
+def _resolve_draft_user(user_id: Optional[int], impersonate_header: Optional[str]) -> Optional[int]:
+    """Admin impersonation: when an admin passes X-Impersonate-User-Id,
+    resolve to the target user so the admin can see/edit that user's
+    create-chat draft. Non-admin callers are unaffected."""
+    if impersonate_header and user_id and _is_admin_user(user_id):
+        try:
+            return int(impersonate_header)
+        except (ValueError, TypeError):
+            pass
+    return user_id
+
+
 @app.get("/api/projects/create-draft")
-async def get_create_draft(authorization: Optional[str] = Header(None)):
+async def get_create_draft(
+    authorization: Optional[str] = Header(None),
+    x_impersonate_user_id: Optional[str] = Header(None),
+):
     user_id = get_user_id_from_token(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = _resolve_draft_user(user_id, x_impersonate_user_id)
     with get_db() as conn:
         # Opportunistic TTL sweep: abandoned drafts vanish after 14 days.
         conn.execute(
@@ -15805,10 +15821,12 @@ async def get_create_draft(authorization: Optional[str] = Header(None)):
 async def put_create_draft(
     body: CreateDraftBody,
     authorization: Optional[str] = Header(None),
+    x_impersonate_user_id: Optional[str] = Header(None),
 ):
     user_id = get_user_id_from_token(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = _resolve_draft_user(user_id, x_impersonate_user_id)
     try:
         blob = json.dumps(body.payload)
     except Exception:
@@ -15831,10 +15849,14 @@ async def put_create_draft(
 
 
 @app.delete("/api/projects/create-draft")
-async def delete_create_draft(authorization: Optional[str] = Header(None)):
+async def delete_create_draft(
+    authorization: Optional[str] = Header(None),
+    x_impersonate_user_id: Optional[str] = Header(None),
+):
     user_id = get_user_id_from_token(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = _resolve_draft_user(user_id, x_impersonate_user_id)
     with get_db() as conn:
         conn.execute("DELETE FROM create_drafts WHERE user_id = %s", (user_id,))
         conn.commit()
