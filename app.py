@@ -14296,6 +14296,15 @@ async def create_project_assistant(
             "any of these — they are connected. If a feature needs one, "
             "treat it as configured and say so in one line."
         )
+    if ctx.saved_integration_keys:
+        ctx_lines.append(
+            "- SAVED INTEGRATIONS (verified vault entries, NOT yet attached "
+            "to this project): "
+            + ", ".join(ctx.saved_integration_keys)
+            + ". When one of these covers a token you need, say so in one "
+            'line and point the user at "Use a saved credential" in the '
+            "input that opens — do NOT send them off to create a new key."
+        )
     if ctx.pending_env:
         # Split chat-asked keys from UI-picker keys: labeling REAL_DATA_PAGES /
         # SAVE_TARGET as "asked via chat" contradicted rule 5b and made the
