@@ -14297,6 +14297,7 @@ Language: respond in ENGLISH only — never Chinese or any other language, even 
 async def create_project_assistant(
     request: CreateAssistantRequest,
     authorization: Optional[str] = Header(None),
+    x_impersonate_user_id: Optional[str] = Header(None),
 ):
     """LLM assistant for the chat-based Create Project page.
 
@@ -14309,6 +14310,14 @@ async def create_project_assistant(
     user_id = get_user_id_from_token(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    # Admin impersonation: when an admin opens create-chat from the user
+    # grid, the LLM context (connected integrations, etc.) is built for the
+    # target user so the model sees what the user sees.
+    if x_impersonate_user_id and _is_admin_user(user_id):
+        try:
+            user_id = int(x_impersonate_user_id)
+        except (ValueError, TypeError):
+            pass
 
     try:
         rate_limit(user_id, "ai_chat")
