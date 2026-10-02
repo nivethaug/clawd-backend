@@ -14223,6 +14223,8 @@ Behaviour:
 7. PROJECT NAME: drive it conversationally. When the context says "project name: NOT SET" AND all required tokens/env keys are satisfied (or none are needed), ask what to call the project as your natural next question — not before. When the user gives a name (or you can infer one they clearly stated, e.g. "named DreamSupport"), acknowledge it naturally in your reply AND echo it in "project_name" (kebab-case, max 30 chars). Never re-ask once the context shows a name set.
 8. When at least one clarification is answered AND the idea is clear AND nothing required is missing (tokens AND non-optional env keys) AND all external APIs/integrations are confirmed AND the project has a name, produce a brief. NEVER announce or promise the brief ("let me put together the build brief", "now that X is attached I can generate the brief") — either CALL propose_brief in THIS reply or ask for exactly one REQUIRED gate that is genuinely missing (an unverified token, an unanswered non-optional env key, or the project name when the user truly has not given one). NEVER ask permission or confirmation questions ("are you ready", "do you have a key ready", "should I use that name") — if the user already stated the name, use it verbatim in "project_name" and never revert to the description title. A promise or a permission-question ends the turn with nothing delivered and stalls the conversation.
 
+9. AGENT FLOWCHART GATE: for kind="agent" projects, BEFORE propose_brief you must present the workflow as a mermaid flowchart and get the user's confirmation. Put it in "reply" as a ```mermaid code block (flowchart TD) showing: the trigger (schedule/webhook/chat) → decision layer → each tool/superpower/data-fetch step → delivery channel(s) → error/fallback path. Keep it under 12 nodes. After the diagram, ask one short line: "Confirm this flow or tell me what to change." Do NOT call propose_brief in that turn. Only when the user approves the diagram (in a later message) — or asks for a change (then re-present the updated diagram) — propose the brief, baking the confirmed flow into the prompt. Websites/bots skip this gate.
+
 INPUT COLLECTION TOOL — request_inputs: when you need a value from the user (email address, Telegram chat id, webhook endpoint, or an allowed API/delivery token), CALL the request_inputs tool with ALL items you currently need in one call, instead of asking for them in text alone. The platform pops the input fields under your message and the user fills them there. Rules:
 - Only keys from the tool's enum — it rejects anything else. Delivery-channel credentials (TELEGRAM_BOT_TOKEN, DISCORD_WEBHOOK_URL) only AFTER the user names that channel.
 - After calling the tool, still write your natural short reply (acknowledge + what the fields are for) — do NOT repeat the individual value requests in text.
@@ -14472,20 +14474,55 @@ async def create_project_assistant(
         and not ctx.prompt_confirmed
     ):
         _create_ready_to_brief = True
-        if ctx.project_name:
-            ctx_lines.append(
-                "- READY TO BRIEF — ALL hard gates satisfied (type known, no missing "
-                f"tokens/env keys, name set: '{ctx.project_name}'). Your reply THIS TURN "
-                "must CALL propose_brief with the complete build prompt. Do NOT announce, "
-                "promise, or describe the brief in text; no further questions."
-            )
-        else:
-            ctx_lines.append(
-                "- READY TO BRIEF — all hard gates satisfied EXCEPT the project name "
-                "(context: NOT SET). If the user's latest message names the project, this "
-                "reply MUST call propose_brief using exactly that name. Otherwise ask ONLY "
-                "the name question. Never announce or promise the brief either way."
-            )
+    # AGENT FLOWCHART GATE: has the user already approved an agent workflow
+    # diagram in this conversation? (assistant posted a mermaid block, then
+    # the user said some flavor of "yes/confirm/looks good".)
+    _create_flowchart_confirmed = False
+    if ctx.detected_kind == "agent":
+        _saw_diagram = False
+        for _m in request.messages:
+            if _m.role == "assistant" and "```mermaid" in (_m.content or ""):
+                _saw_diagram = True
+            elif _m.role == "user" and _saw_diagram and re.search(
+                r"\b(confirm|confirmed|yes|yeah|yep|looks? good|looks? great|"
+                r"correct|approved|perfect|go ahead|proceed|that'?s right|"
+                r"that works|flow is (?:good|ok|fine))\b",
+                (_m.content or "").lower(),
+            ):
+                _create_flowchart_confirmed = True
+                break
+    # Flowchart still awaiting user confirmation — brief delivery machinery
+    # (b5 corrective, delivery round, forced tool) must NOT fire this turn.
+    _create_agent_flowchart_pending = bool(
+        ctx.detected_kind == "agent"
+        and _create_ready_to_brief
+        and not _create_flowchart_confirmed
+    )
+    if _create_ready_to_brief and _create_agent_flowchart_pending:
+        ctx_lines.append(
+            "- READY TO BRIEF (agent) — hard gates satisfied"
+            + (f" (name set: '{ctx.project_name}')"
+               if ctx.project_name else " EXCEPT the project name") + ". "
+            "AGENT FLOWCHART GATE applies: your reply THIS TURN presents the "
+            "workflow as a mermaid flowchart (rule 9) and asks the user to "
+            "confirm or adjust — do NOT call propose_brief yet."
+            + ("" if ctx.project_name else " If the user's latest message does "
+               "not name the project, also ask the name in the same reply.")
+        )
+    elif ctx.project_name:
+        ctx_lines.append(
+            "- READY TO BRIEF — ALL hard gates satisfied (type known, no missing "
+            f"tokens/env keys, name set: '{ctx.project_name}'). Your reply THIS TURN "
+            "must CALL propose_brief with the complete build prompt. Do NOT announce, "
+            "promise, or describe the brief in text; no further questions."
+        )
+    else:
+        ctx_lines.append(
+            "- READY TO BRIEF — all hard gates satisfied EXCEPT the project name "
+            "(context: NOT SET). If the user's latest message names the project, this "
+            "reply MUST call propose_brief using exactly that name. Otherwise ask ONLY "
+            "the name question. Never announce or promise the brief either way."
+        )
     if ctx.regenerate:
         ctx_lines.append("- the user asked for a regenerated prompt: produce a fresh alternative brief now")
     elif ctx.prompt_confirmed:
@@ -14964,6 +15001,7 @@ async def create_project_assistant(
         # fills collected_brief, a JSON delivery matches the "brief": {.
         elif (
             not (collected_brief and collected_brief.get("prompt"))
+            and not _create_agent_flowchart_pending
             and not re.search(r'"brief"\s*:\s*\{', raw)
             and re.search(
                 r"(?:let me|i can|i'?ll|i'?ve|i will|now i can)\s+"
@@ -15140,6 +15178,7 @@ async def create_project_assistant(
     if (
         _create_ready_to_brief
         and not _create_edit_intent
+        and not _create_agent_flowchart_pending
         and not (collected_brief and collected_brief.get("prompt"))
         and not re.search(r'"brief"\s*:\s*\{', raw)
     ):
