@@ -59,7 +59,9 @@ _PROXY_SUBROUTES = (
 )
 
 # Chat routes — MUST proxy because the ACP handler reads frontend/src from disk.
-_CHAT_ROUTES = {"/chat", "/chat/stream", "/chat/cancel", "/chat/status", "/chat/chunks", "/sessions/details"}
+# /chat/attach re-attaches to a durable run (page reload / dropped stream) and
+# must land on the same box that executed the run.
+_CHAT_ROUTES = {"/chat", "/chat/stream", "/chat/cancel", "/chat/status", "/chat/chunks", "/chat/attach", "/sessions/details"}
 
 # Hop-by-hop headers that must not be forwarded (HTTP spec).
 _HOP_BY_HOP = {
