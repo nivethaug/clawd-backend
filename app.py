@@ -10303,12 +10303,23 @@ async def chat_chunks(
             logger.debug(f"[CHUNKS] durable active lookup failed: {exc}")
         return (False, None)
 
-    if not handler:
-        # No in-memory handler — read entirely from the durable store.
-        try:
-            from services.session_chat_runs import get_active_run_for_session, get_latest_run_for_session, get_chunks as get_run_chunks
+    # Durable runs are executed by the session-chat WORKER (separate process /
+    # machine), which writes every chunk to Postgres. The handler registered
+    # in THIS process's active_handlers never runs the query, so its
+    # _last_query_chunks stays empty forever. When an active durable run
+    # exists, the DB chunk store is the source of truth — serve from it and
+    # skip the local handler buffer entirely (serving the empty local buffer
+    # made reload/recovery poll back 0 chunks with active=true, freezing the
+    # UI on a bare "Thinking..." bubble until the run finished).
+    _durable_now, _durable_run = _durable_active()
 
-            run = get_active_run_for_session(session_key) or get_latest_run_for_session(session_key)
+    if _durable_now or not handler:
+        # No in-memory handler (or a durable run owns the query) — read
+        # entirely from the durable store.
+        try:
+            from services.session_chat_runs import get_latest_run_for_session, get_chunks as get_run_chunks
+
+            run = _durable_run or get_latest_run_for_session(session_key)
             if not run:
                 return {"chunks": [], "total": 0, "active": False}
             durable = get_run_chunks(int(run["id"]), after)
@@ -10348,6 +10359,92 @@ async def chat_chunks(
         "total": len(all_chunks),
         "active": handler_active,
     }
+
+
+@app.get("/chat/attach")
+async def chat_attach(
+    session_key: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Re-attach to the ACTIVE durable chat run and stream its chunks live over
+    SSE. Used by the frontend on page reload and after a dropped /chat stream
+    so the UI resumes real-time (0.75s) updates instead of relying on the
+    coarse /chat/chunks polling. Returns 409 JSON when nothing is running so
+    the client can fall back to polling or a plain DB reload.
+    """
+    _require_session_key_owner(session_key, authorization)
+    try:
+        from services.session_chat_runs import get_active_run_for_session, get_chunks as get_run_chunks
+    except Exception as import_err:
+        logger.error("[ATTACH] session_chat_runs import failed: %s", import_err)
+        return JSONResponse(status_code=503, content={"active": False, "detail": "Durable runs unavailable."})
+
+    run = get_active_run_for_session(session_key)
+    if not run:
+        return JSONResponse(status_code=409, content={"active": False, "detail": "No active chat run for this session."})
+    run_id = int(run["id"])
+    logger.info("[ATTACH] client attached to durable run %s (session %s)", run_id, session_key)
+
+    async def attach_streaming_response():
+        """Same DB-poll loop as durable_streaming_response in /chat/stream."""
+        import time as _time
+        after = 0
+        last_status = "running"
+        # SSE keepalive: resets nginx's proxy_read_timeout during long
+        # no-chunk phases; ': ping' comments are ignored by SSE parsers.
+        _last_emit = _time.monotonic()
+        _KEEPALIVE_S = 10.0
+        try:
+            while True:
+                try:
+                    chunk_result = get_run_chunks(run_id, after)
+                except Exception as poll_err:
+                    logger.warning("[ATTACH] chunk poll error run=%s: %s", run_id, poll_err)
+                    if _time.monotonic() - _last_emit >= _KEEPALIVE_S:
+                        yield ": ping\n\n"
+                        _last_emit = _time.monotonic()
+                    await asyncio.sleep(1.5)
+                    continue
+                last_status = chunk_result.get("status") or last_status
+                emitted = False
+                for chunk in chunk_result.get("chunks", []):
+                    seq = int(chunk.get("seq", after))
+                    after = max(after, seq + 1)
+                    content = str(chunk.get("content") or "")
+                    if not content:
+                        continue
+                    emitted = True
+                    event_data = json.dumps({'choices': [{'delta': {'content': content + "\n"}}]})
+                    yield f"data: {event_data}\n\n"
+
+                if emitted:
+                    _last_emit = _time.monotonic()
+                elif _time.monotonic() - _last_emit >= _KEEPALIVE_S:
+                    yield ": ping\n\n"
+                    _last_emit = _time.monotonic()
+
+                if last_status in {"completed", "failed", "cancelled", "interrupted"}:
+                    break
+                await asyncio.sleep(0.75)
+        except asyncio.CancelledError:
+            logger.info("[ATTACH] client disconnected from run %s; worker continues", run_id)
+            raise
+        finally:
+            logger.info("[ATTACH] stream finished run=%s status=%s", run_id, last_status)
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        attach_streaming_response(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "X-Session-Run-Id": str(run_id),
+        },
+    )
 
 
 @app.post("/chat")
