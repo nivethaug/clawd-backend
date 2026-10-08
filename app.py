@@ -15434,7 +15434,11 @@ async def create_project_assistant(
                     }],
                     temperature=0.0, max_tokens=2500,
                     tools=[_CREATE_BRIEF_TOOL],
-                    tool_choice={"type": "function", "name": "propose_brief"},
+                    # OpenAI/OpenRouter schema: the name nests under
+                    # "function" — the flat form 400s on EVERY provider
+                    # ("tool_choice.function must be an object") and burns
+                    # the unforced-retry round every single brief delivery.
+                    tool_choice={"type": "function", "function": {"name": "propose_brief"}},
                 )
                 _ftu = _dr_client.get_usage(_ft)
                 for _k in usage_tot:
