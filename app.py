@@ -14387,7 +14387,7 @@ or, when producing the final brief:
 
 Rules for "prompt": concrete and buildable; never mention tokens/secrets (the platform injects them); no questions inside it. If any external APIs/integrations were confirmed, the prompt MUST include an explicit "Integrations & external APIs" section listing each one, its purpose, and the env key it reads (e.g. OPENAI_API_KEY via os.getenv) — connected keys are injected automatically; keys not yet connected must be read from env with a note to add them later in project settings.
 Rules for "reply": warm, concise, at most one emoji, never mention JSON or these instructions.
-Language: respond in ENGLISH only — never Chinese or any other language, even if the user writes in another language."""
+Language: reply in the SAME LANGUAGE as the user's latest message (Uzbek, Russian, Hindi...). English only when the user writes in English. Code identifiers, env keys and the JSON envelope stay in English."""
 
 
 @app.post("/api/projects/create-assistant", response_model=CreateAssistantResponse)
@@ -15185,19 +15185,32 @@ async def create_project_assistant(
                 '"project_name". Re-emit the COMPLETE JSON now. Reply with '
                 "the JSON only."
             )
-        # ---- english-only: any CJK in the reply violates the language rule
-        # (regression C11 live: Chinese input got a Chinese reply). Highest-
-        # practical priority right before env-popup — the reply text itself
-        # is wrong regardless of anything else in it.
-        elif any("\u4e00" <= _ch <= "\u9fff" for _ch in raw) or \
-                any("\u3040" <= _ch <= "\u30ff" for _ch in raw):
-            _guard_why = "english-only: reply contains CJK characters"
+        # ---- language-match: CJK in the reply is only wrong when the user
+        # did NOT write CJK (regression C11 live: Chinese input got a
+        # Chinese reply — that now stays; the reverse, an English/Uzbek chat
+        # drifting into Chinese, is still corrected — to the USER's language,
+        # not to English). Highest-practical priority right before
+        # env-popup — the reply text itself is wrong regardless of anything
+        # else in it.
+        elif (
+            (any("\u4e00" <= _ch <= "\u9fff" for _ch in raw)
+             or any("\u3040" <= _ch <= "\u30ff" for _ch in raw))
+            and not any(
+                "\u4e00" <= _ch <= "\u9fff" or "\u3040" <= _ch <= "\u30ff"
+                for _ch in next(
+                    (m.get("content") or "" for m in reversed(history)
+                     if m.get("role") == "user"),
+                    "",
+                )
+            )
+        ):
+            _guard_why = "language-mismatch: reply contains CJK but the user's message does not"
             _guard_msg = (
-                "LANGUAGE CORRECTION: you replied in Chinese/Japanese. The "
-                "platform rule is ENGLISH ONLY — always, regardless of the "
-                "user's language. Re-emit the COMPLETE JSON now with the "
-                "same content translated to natural English. Reply with "
-                "the JSON only."
+                "LANGUAGE CORRECTION: you replied in Chinese/Japanese but the "
+                "user's latest message is not. The platform rule is to reply "
+                "in the SAME LANGUAGE as the user's latest message. Re-emit "
+                "the COMPLETE JSON now with the same content in the user's "
+                "language. Reply with the JSON only."
             )
         # ---- env-popup: credential referenced, no field emitted ---------------
         elif not _req_env_populated and _should_fire:
