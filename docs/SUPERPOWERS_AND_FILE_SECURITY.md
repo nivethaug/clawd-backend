@@ -51,7 +51,8 @@ Account-level AI tools. Enable once at `/app/superpowers`, use from any project 
 |---|---|---|---|
 | `song` | paid | song-api (RunPod) | generate(prompt, style?, duration?, vocals?) |
 | `image-gen` | paid | openrouter (FLUX.2 Klein) | generate(prompt, size?) |
-| `video-gen` | paid | song-api (Remotion) | generate(prompt, style?, images?, theme?) |
+| `video-gen` (Music Video Maker) | paid | song-api (Remotion) | generate(prompt, style?, images?, theme?) |
+| `ai-video` (AI Video Generation, Wan) | paid | song-api (Wan) | generate(image, prompt, format?, length?, seed?, cfg?) |
 | `voiceover` | paid | song-api | generate(file?, text, language, bed?) |
 | `lip-sync` | paid | openrouter (HeyGen) | generate(image, audio, duration) |
 | `voice-clone` | paid | voice-api (Seed-VC) | convert(source_audio, target_voice) |
@@ -59,7 +60,7 @@ Account-level AI tools. Enable once at `/app/superpowers`, use from any project 
 | `whisper` | free | local (faster-whisper) | transcribe(file, format?, language?) |
 | `sharp` | free | local (sharp) | process(file, op, width?, height?, format?) |
 | `pdf` | free | local (pypdf) | merge, split, extract_text, create |
-| `remotion` | free | song-api (Remotion) | render(images, hook_lines?, duration_seconds?, format?) |
+| `remotion` (render + website_demo / code_explainer / data_report / product_ad) | free | song-api (Remotion) | render(images, hook_lines?, duration_seconds?, format?) |
 
 ### Output delivery (pull-model)
 

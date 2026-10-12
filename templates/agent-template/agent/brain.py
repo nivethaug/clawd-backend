@@ -159,9 +159,9 @@ def _system_prompt(trigger_desc: str) -> str:
 1. fetch_json(url, method?, headers?, body?) — HTTP request
 2. proxy_call(provider, method, endpoint, body?, params?) — OAuth call (providers: {', '.join(oauth) or 'none connected'})
 3. superpowers_execute(tool, params) — run a superpower tool:
-   song(prompt, vocals?), image-gen(prompt, size?), video-gen(prompt),
-   voiceover(text, language?), lip-sync(image, audio), whisper(file),
-   sharp(file, op), pdf(op, ...), remotion(images, text?)
+   song(prompt, vocals?), image-gen(prompt, size?), ai-video(image, prompt),
+   video-gen(prompt), voiceover(text, language?), lip-sync(image, audio),
+   whisper(file), sharp(file, op), pdf(op, ...), remotion(images, text?)
    → call POST {tools_url}/tools/projects/{project_id}/tools/{{tool}}/execute
      headers: X-Project-Secret: {os.getenv("DREAMAGENT_PROJECT_SECRET", "<from .env>")}
 4. state_get(key) / state_set(key, value) — small persistent memory (platform state)

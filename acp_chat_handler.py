@@ -456,7 +456,8 @@ BRAIN CONFIGURATION: the agent brain has TWO layers — explain both when
 7. Tool cheat-sheet (tool -> ops + key params):
    song -> generate(prompt, style?, duration?, vocals? auto|female|male|instrumental)
    image-gen -> generate(prompt, size? 1024x1024|1920x1080|1080x1920)
-   video-gen -> generate(prompt, style?, images? [project-relative paths], theme?, hook_lines?)
+   ai-video -> generate(image [project file — base frame], prompt [describe the MOTION: what each person does, camera move, 'preserve faces, no cuts'], format? 16:9|9:16, length? 81|129 frames = 5s|8s, seed?, cfg?)
+   video-gen (Music Video Maker) -> generate(prompt [lyrics], style?, images? [project-relative paths], theme?, hook_lines?)
    voiceover -> generate(file? [video], text, language e.g. ta-IN|en-US, bed?)
    lip-sync -> generate(image, audio, duration, resolution? 720p|1080p)
    voice-clone -> convert(source_audio, target_voice)
@@ -464,7 +465,7 @@ BRAIN CONFIGURATION: the agent brain has TWO layers — explain both when
    whisper -> transcribe(file, format? txt|srt|vtt, language?)
    sharp -> process(file, op resize|compress|convert|thumbnail, width?, height?, format?)
    pdf -> merge(files) / split(file, pages) / extract_text(file) / create(title, text)
-   remotion -> render(images, hook_lines?, duration_seconds?, format? 16:9|9:16, theme?, brand_title?)
+   remotion -> render(images, hook_lines?, duration_seconds?, format? 16:9|9:16, theme?, brand_title?) | website_demo(images [1-8 screenshots], website_url?, brand_title?, brand_subtitle?, cta_text?) | code_explainer(title, description?, steps?[{title,text}] max 8, code_snippets?[{label,code}] max 6, diagram?) | data_report(title, metrics 1-6, charts[{type:line|bar,labels,series}] 1-3, subtitle?, sections?) | product_ad(product_name, tagline?, features?[{name,text}] max 4, offer?{price,old_price,period}, testimonials? max 3, cta_text?)
 6. Build a clean UI around the feature (form -> progress -> play/download
    result) and persist a generation history when the app has storage.
    NEVER ask the user for API keys, URLs or endpoints — the platform
