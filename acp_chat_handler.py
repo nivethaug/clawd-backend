@@ -456,7 +456,7 @@ BRAIN CONFIGURATION: the agent brain has TWO layers — explain both when
 7. Tool cheat-sheet (tool -> ops + key params):
    song -> generate(prompt, style?, duration?, vocals? auto|female|male|instrumental)
    image-gen -> generate(prompt, size? 1024x1024|1920x1080|1080x1920)
-   ai-video -> generate(image [project file — base frame], prompt [describe the MOTION: what each person does, camera move, 'preserve faces, no cuts'], format? 16:9|9:16, length? 81|129 frames = 5s|8s, seed?, cfg?)
+   ai-video -> generate(image [project file — base frame], prompt [describe the MOTION: what each person does, camera move, 'preserve faces, no cuts'], format? 16:9|9:16, length? 81|129 frames = 5s|8s, seed?, cfg?) — the clip is VOICELESS; for narration: voiceover(text) → ffmpeg replace_audio(video_id, audio_id)
    video-gen (Music Video Maker) -> generate(prompt [lyrics], style?, images? [project-relative paths], theme?, hook_lines?)
    voiceover -> generate(file? [video], text, language e.g. ta-IN|en-US, bed?)
    lip-sync -> generate(image, audio, duration, resolution? 720p|1080p)
