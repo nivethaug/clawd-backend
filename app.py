@@ -16869,6 +16869,11 @@ class CommitRequest(BaseModel):
     session_id: int
     message: str
     auto_push: bool = True
+    # When true (MCP direct file writes), insert a fresh mode='system'
+    # assistant message carrying the commit hash instead of attaching to
+    # the session's latest assistant message (which belongs to an old chat
+    # turn). Mirrors _broadcast_rollback_to_sessions.
+    system_message: bool = False
 
 @app.post("/projects/{project_id}/commits")
 async def commit_and_push(
@@ -16957,18 +16962,31 @@ async def commit_and_push(
         # Update the latest assistant message in this session with commit_hash
         # Also INSERT into commit_log for persistent history (survives session deletion)
         with get_db() as conn:
-            message_row = conn.execute(
-                "SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
-                (req.session_id,)
-            ).fetchone()
-
             message_id = None
-            if message_row:
-                message_id = message_row["id"]
-                conn.execute(
-                    "UPDATE messages SET commit_hash = ?, commit_status = ? WHERE id = ?",
-                    (commit_hash, commit_status, message_id)
-                )
+            if req.system_message:
+                # MCP direct file write: no chat turn produced this commit, so
+                # attach it to a fresh mode='system' history entry (rollback-
+                # broadcast pattern) rather than an old assistant message.
+                row = conn.execute(
+                    """INSERT INTO messages
+                       (session_id, role, content, commit_hash, commit_status, mode)
+                       VALUES (?, 'assistant', ?, ?, ?, 'system') RETURNING id""",
+                    (req.session_id, req.message, commit_hash, commit_status),
+                ).fetchone()
+                message_id = row["id"] if row else None
+                logger.info(
+                    f"✓ Inserted system history entry {message_id} for commit {commit_hash[:8]}")
+            else:
+                message_row = conn.execute(
+                    "SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+                    (req.session_id,)
+                ).fetchone()
+                if message_row:
+                    message_id = message_row["id"]
+                    conn.execute(
+                        "UPDATE messages SET commit_hash = ?, commit_status = ? WHERE id = ?",
+                        (commit_hash, commit_status, message_id)
+                    )
 
             # Dual-write: also persist in commit_log (independent of messages table)
             conn.execute(
