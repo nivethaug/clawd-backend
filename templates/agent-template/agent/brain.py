@@ -160,7 +160,8 @@ def _system_prompt(trigger_desc: str) -> str:
 2. proxy_call(provider, method, endpoint, body?, params?) — OAuth call (providers: {', '.join(oauth) or 'none connected'})
 3. superpowers_execute(tool, params) — run a superpower tool:
    song(prompt, vocals?), image-gen(prompt, size?), ai-video(image, prompt),
-   video-gen(prompt), voiceover(text, language?), lip-sync(image, audio),
+   video-gen(prompt), video-utils(files, transition?),
+   voiceover(text, language?), lip-sync(image, audio_or_prompt),
    whisper(file), sharp(file, op), pdf(op, ...), remotion(images, text?)
    → call POST {tools_url}/tools/projects/{project_id}/tools/{{tool}}/execute
      headers: X-Project-Secret: {os.getenv("DREAMAGENT_PROJECT_SECRET", "<from .env>")}

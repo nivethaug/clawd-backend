@@ -459,7 +459,8 @@ BRAIN CONFIGURATION: the agent brain has TWO layers — explain both when
    ai-video -> generate(image [project file — base frame], prompt [describe the MOTION: what each person does, camera move, 'preserve faces, no cuts'], format? 16:9|9:16, length? 81|129 frames = 5s|8s, seed?, cfg?) — the clip is VOICELESS; for narration: voiceover(text) → ffmpeg replace_audio(video_id, audio_id)
    video-gen (Music Video Maker) -> generate(prompt [lyrics], style?, images? [project-relative paths], theme?, hook_lines?)
    voiceover -> generate(file? [video], text, language e.g. ta-IN|en-US, bed?)
-   lip-sync -> generate(image, audio, duration, resolution? 720p|1080p)
+   lip-sync -> generate(image, audio? [omit for prompt-dialogue], prompt? [motion/expression OR the dialogue to speak], duration? 5-15, resolution? 480p|720p|2K, aspect_ratio? 16:9|9:16)
+   video-utils -> merge(files [2-10 clips, best FIRST], transition? fade|dissolve|wipeleft|circleopen|..., transition_s? 0-2) | shorts(files [1-10], picks? [{start_s,end_s}] per clip, transition?)
    voice-clone -> convert(source_audio, target_voice)
    ffmpeg -> extract_audio / trim / audio_convert / replace_audio / merge / burn_subtitles
    whisper -> transcribe(file, format? txt|srt|vtt, language?)
