@@ -430,7 +430,25 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
             session_key = session_row[1]
 
         type_labels = {1: "website", 2: "Telegram bot", 3: "Discord bot", 4: "scheduler", 5: "AI agent"}
-        kind_label = type_labels.get(type_id, "project")
+        kind_label = type_labels.get(type_id)
+        if kind_label is None:
+            # Slug fallback: agent rows created post-migration carry
+            # non-sequential type ids (live: id=67186 for slug 'agent') and
+            # printed as "Project type: project". Resolve the slug → label.
+            try:
+                with get_db() as tconn:
+                    trow = tconn.execute(
+                        "SELECT type FROM project_types WHERE id = %s", (type_id,)
+                    ).fetchone()
+                slug = (trow.get("type") if isinstance(trow, dict) else trow[0]) if trow else None
+                kind_label = {
+                    "website": "website", "telegrambot": "Telegram bot",
+                    "discordbot": "Discord bot", "tradingbot": "Trading bot",
+                    "scheduler": "scheduler", "agent": "AI agent", "custom": "custom",
+                }.get(slug)
+            except Exception as label_err:
+                logger.warning("[PROJECT-RUN] type label lookup failed for %s: %s", type_id, label_err)
+        kind_label = kind_label or "project"
         # Type FIRST — bot/agent projects also carry a domain (webhook host),
         # but a "Live at" website link is only meaningful for websites.
         if type_id == 1:
