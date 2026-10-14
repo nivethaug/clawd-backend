@@ -33,7 +33,7 @@ from typing import Optional, Tuple
 
 import httpx
 from fastapi import Request
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 logger = logging.getLogger("project_proxy")
 
@@ -371,6 +371,44 @@ async def project_proxy_middleware(request: Request, call_next):
         )
     if not is_on_worker:
         return await call_next(request)
+
+    # ---- SECURITY: main-side owner gate ----------------------------------
+    # The worker's handlers can lag main's code (verified live 2026-10-14:
+    # PUT /env on a worker-homed project reached the worker's pre-fix
+    # handler and returned 200 for a non-owner). Enforce ownership HERE for
+    # every user-facing project route before forwarding, so a stale worker
+    # can never serve cross-tenant requests. Admins pass; public-gallery
+    # sources may be cloned by anyone.
+    if _is_proxyable_project_route(request.url.path, request.method):
+        try:
+            from app import get_user_id_from_token, _is_admin_user
+            auth_header = request.headers.get("authorization", "")
+            uid = get_user_id_from_token(auth_header) if auth_header else None
+            if uid is None or not _is_admin_user(uid):
+                with get_db() as conn:
+                    prow = conn.execute(
+                        "SELECT user_id FROM projects WHERE id = %s", (project_id,)
+                    ).fetchone()
+                owner_id = (prow.get("user_id") if isinstance(prow, dict) else prow[0]) if prow else None
+                allowed = owner_id is not None and str(owner_id) == str(uid)
+                if not allowed and request.url.path.rstrip("/").endswith("/clone"):
+                    with get_db() as conn:
+                        grow = conn.execute(
+                            "SELECT id FROM gallery_projects WHERE project_id = %s AND status = 'public' LIMIT 1",
+                            (project_id,),
+                        ).fetchone()
+                    allowed = bool(grow)
+                if not allowed:
+                    if owner_id is None:
+                        return JSONResponse(status_code=404, content={"detail": "Not found"})
+                    logger.warning(
+                        "project_proxy: BLOCKED non-owner %s %s (project=%s user=%s)",
+                        request.method, request.url.path, project_id, uid,
+                    )
+                    return JSONResponse(status_code=403, content={"detail": "You do not have access to this project"})
+        except Exception as gate_err:
+            logger.exception("project_proxy owner gate failed for %s: %s", request.url.path, gate_err)
+            return JSONResponse(status_code=503, content={"detail": "Access check unavailable"})
 
     # ---- Forward to the worker ----
     target_url = f"{worker_url}{request.url.path}"
