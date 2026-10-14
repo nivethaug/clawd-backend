@@ -36,3 +36,9 @@ log.txt
 # Runtime state
 scripts/seed_progress.json
 logs/
+
+# Security: local databases and logs with user data — never commit
+*.db
+log.txt
+*.log
+secure_value.key

@@ -676,10 +676,12 @@ async def wait_for_run(run_id: int, poll_seconds: float = 2.0, timeout_seconds: 
                     if worker_url:
                         import httpx
                         logger.info("[SESSION-RUN] Proxying run %s to %s/internal/chat-execute", run_id, worker_url)
+                        _secret = os.getenv("INTERNAL_API_SECRET", "").strip()
                         async with httpx.AsyncClient(timeout=1800) as client:
                             resp = await client.post(
                                 f"{worker_url}/internal/chat-execute",
                                 json={"run_id": run_id},
+                                headers={"X-Internal-Secret": _secret} if _secret else {},
                                 timeout=1800,
                             )
                             if resp.status_code == 200:

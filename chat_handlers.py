@@ -14,13 +14,26 @@ from context_injector import ContextInjector
 
 # Configuration from app.py (will be imported)
 CLAWDBOT_BASE_URL = os.getenv("CLAWDBOT_BASE_URL", "http://localhost:18789")
-CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "355fc5e1f0d6078a8a9a56f684d551d803f92decf956d11ca7494f0f461b470a")
+# SECURITY: no hardcoded fallback — a committed default token was a live
+# credential leak. Missing env var must fail loudly, not silently use a
+# leaked secret.
+CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN", "")
 
 # Get singleton instance (no more duplicate ContextInjector instances)
 context_injector = ContextInjector()
 
 
+def _require_clawdbot_token() -> None:
+    """Fail loudly when the service token is missing (no silent fallback)."""
+    if not CLAWDBOT_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="CLAWDBOT_TOKEN is not configured on the server.",
+        )
+
+
 async def generate_sse_stream(request, session_id, user_content):
+    _require_clawdbot_token()
     """
     Generate SSE stream for chat responses.
 
@@ -306,6 +319,7 @@ async def handle_chat_text_only(request, user_content):
     Returns:
         Assistant response content string
     """
+    _require_clawdbot_token()
     try:
         # CRITICAL: Use "user" field to maintain session continuity in OpenClaw
         # Format: "adapter-session-{session_key}"

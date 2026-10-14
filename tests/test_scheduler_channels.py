@@ -32,7 +32,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USER = os.getenv("SMTP_USER", "support@dreamagent.cloud")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8754771378:AAFqdZNwYc8JbZanNy901IQr6lFmJs1gtm4")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "1234567890:TEST-TOKEN-DO-NOT-USE")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "2048754634")
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1492717782792671384/e5LqOI4VQxfZLlxb0qpPNY9-dpq-O-Kgrr-PrpSIemNT1sW8iOhrWZKf2XSxS3lydT7A")

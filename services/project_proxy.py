@@ -112,6 +112,14 @@ def _get_client() -> httpx.AsyncClient:
 # Security model matches /internal/chat-execute: worker port 8003 is
 # firewalled to the main VPS only — no auth header needed.
 
+def _internal_secret_headers() -> dict:
+    """Headers authenticating main→worker /internal/* calls. Sent whenever
+    INTERNAL_API_SECRET is set; the worker's guard requires it once its env
+    matches (fail-closed rollout: unset here = legacy heuristic on worker)."""
+    secret = os.getenv("INTERNAL_API_SECRET", "").strip()
+    return {"X-Internal-Secret": secret} if secret else {}
+
+
 async def post_to_worker(path: str, json_payload: Optional[dict] = None,
                          timeout: Optional[float] = None) -> dict:
     """POST json to {WORKER_VPS_URL}{path} and return the parsed JSON response.
@@ -126,6 +134,7 @@ async def post_to_worker(path: str, json_payload: Optional[dict] = None,
         resp = await client.post(
             f"{base}{path}",
             json=json_payload or {},
+            headers=_internal_secret_headers(),
             timeout=timeout if timeout is not None else httpx.USE_DEFAULT,
         )
         return resp.json()
@@ -145,6 +154,7 @@ async def get_from_worker(path: str, timeout: Optional[float] = None) -> dict:
     try:
         resp = await client.get(
             f"{base}{path}",
+            headers=_internal_secret_headers(),
             timeout=timeout if timeout is not None else httpx.USE_DEFAULT,
         )
         return resp.json()

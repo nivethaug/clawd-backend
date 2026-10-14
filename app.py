@@ -2273,14 +2273,31 @@ async def internal_routes_guard(request: Request, call_next):
     path = request.url.path
     if path == "/internal" or path.startswith("/internal/"):
         secret = request.headers.get("x-internal-secret", "")
-        if INTERNAL_API_SECRET and secret and secrets.compare_digest(secret, INTERNAL_API_SECRET):
-            return await call_next(request)
+        if INTERNAL_API_SECRET:
+            # Fail closed: ONLY the shared secret authenticates internal
+            # calls. The previous no-XFF heuristic treated ANY headerless
+            # direct connection as trusted — with 8003 reachable from the
+            # internet that made /internal/delete-user-data, /internal/
+            # pm2-restart, /internal/email/send and /internal/scrape an
+            # unauthenticated admin API (verified live 2026-10-14).
+            if secret and secrets.compare_digest(secret, INTERNAL_API_SECRET):
+                return await call_next(request)
+            client_host = request.client.host if request.client else "unknown"
+            logger.warning(
+                "[INTERNAL-GUARD] BLOCKED %s from %s (missing/incorrect shared secret)",
+                path, client_host,
+            )
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        # SECRET UNSET — legacy heuristic still active so a partial rollout
+        # can't take the platform down. Pair with the 8003 firewall and set
+        # INTERNAL_API_SECRET on BOTH VPSes (main sends, worker enforces).
         forwarded = request.headers.get("x-forwarded-for", "")
         if not forwarded:
             # Direct internal call (docker bridge / main VPS / localhost)
             client_host = request.client.host if request.client else "unknown"
-            logger.info(
-                "[INTERNAL-GUARD] allowed %s from %s (direct)",
+            logger.warning(
+                "[INTERNAL-GUARD] DEPRECATED allow %s from %s (direct) — "
+                "INTERNAL_API_SECRET is unset; set it on both VPSes",
                 path, client_host,
             )
             return await call_next(request)
@@ -4742,6 +4759,26 @@ async def clone_project(
         raise HTTPException(status_code=404, detail=f"Source project {project_id} not found")
 
     source = dict(source)
+    # SECURITY: source gate — the cloner's quota was checked but the SOURCE's
+    # ownership never was: any authenticated user could clone ANY private
+    # project by sequential id (full source + uploads theft). Allowed now:
+    # owner, admin, or projects the owner published to the public gallery.
+    _source_owner = source.get("user_id")
+    _source_is_public = False
+    try:
+        with get_db() as gconn:
+            _grow = gconn.execute(
+                "SELECT id FROM gallery_projects WHERE project_id = ? AND status = 'public' LIMIT 1",
+                (project_id,),
+            ).fetchone()
+        _source_is_public = bool(_grow)
+    except Exception as _gerr:
+        logger.warning("[CLONE] gallery visibility check failed for %s: %s", project_id, _gerr)
+    if str(_source_owner) != str(user_id) and not _is_admin_user(user_id) and not _source_is_public:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have access to clone this project.",
+        )
     source_type_id = source.get("type_id") or 1
     source_path = source.get("project_path") or ""
     source_description = source.get("description")
@@ -6961,7 +6998,21 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
                             break
                     if bot_cwd:
                         req_file = os.path.join(bot_cwd, "requirements.txt")
-                        if os.path.exists(req_file):
+                        # SECURITY: only install from inside the project
+                        # workspace — a PM2 app whose cwd points elsewhere
+                        # must not be able to feed arbitrary requirement
+                        # files into the shared platform venv.
+                        _workspace_roots = (
+                            os.getenv("WORKSPACE_ROOT", "/workspaces"),
+                            "/root/dreampilot/projects",
+                        )
+                        _real_req = os.path.realpath(req_file)
+                        if not _real_req.startswith(tuple(os.path.realpath(r) + os.sep for r in _workspace_roots if os.path.isdir(r))):
+                            logger.warning(
+                                "[INTERNAL-RESTART] blocked dependency install from outside workspace roots: %s",
+                                _real_req,
+                            )
+                        elif os.path.exists(req_file):
                             logger.info(f"[INTERNAL-RESTART] Installing deps from {req_file}")
                             inst = subprocess.run(
                                 [venv_pip, "install", "--prefer-binary", "-r", req_file],
@@ -7380,7 +7431,9 @@ async def get_project_env(
     Returns masked values for sensitive variables. To see the real value,
     use the /env/reveal endpoint.
     """
-    user_id = get_user_id_from_token(authorization)
+    # SECURITY: owner gate — without it any authenticated user could read any
+    # project's env key names by sequential id (cross-tenant recon).
+    user_id = _require_project_owner(project_id, authorization)
 
     try:
         env_path, type_id, domain, project_name = env_manager.get_project_env_info(project_id)
@@ -7455,7 +7508,10 @@ async def update_project_env(
     - Deletes any keys in the `deleted` list.
     - Restarts the relevant PM2 process.
     """
-    user_id = get_user_id_from_token(authorization)
+    # SECURITY: owner gate — without it any authenticated user could overwrite
+    # ANY project's env by sequential id (swap bot tokens/webhooks to hijack
+    # the victim's integrations) and restart it.
+    user_id = _require_project_owner(project_id, authorization)
 
     # Build updates dict from request items
     updates = {item.key: item.value for item in request.updates}
