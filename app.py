@@ -12012,16 +12012,46 @@ class GitHubExportRequest(BaseModel):
 async def github_oauth_url(authorization: Optional[str] = Header(None)):
     """
     Return the GitHub OAuth authorize URL for the current user.
-    The frontend opens this in a new tab/popup. The `state` carries the
-    user_id so the callback knows which user to save the token for.
+    The frontend opens this in a new tab/popup. The `state` is an
+    HMAC-signed payload (user_id + issue time) — the callback verifies the
+    signature and a 10-minute window, so a forged state can no longer bind
+    an attacker's GitHub account to a victim (state carried the user_id in
+    CLEARTEXT and was never validated before).
     """
     user_id = get_user_id_from_token(authorization)
     try:
-        state = f"{user_id}:{secrets.token_hex(8)}"
+        import time as _time
+        _state_key = (os.getenv("OAUTH_STATE_SECRET") or INTERNAL_API_SECRET or "").encode()
+        if not _state_key:
+            raise RuntimeError("OAuth state signing key unavailable (set OAUTH_STATE_SECRET or INTERNAL_API_SECRET)")
+        _exp = int(_time.time()) + 600
+        _payload = f"{user_id}:{_exp}"
+        _sig = hmac.new(_state_key, _payload.encode(), "sha256").hexdigest()
+        state = f"{_payload}:{_sig}"
         url = github_oauth_service.build_authorize_url(state=state)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"url": url, "state": state}
+
+
+def _verify_github_oauth_state(state: str) -> Optional[int]:
+    """Validate an HMAC-signed OAuth state → user_id, or None."""
+    try:
+        user_id_str, exp_str, sig = state.split(":", 2)
+        user_id = int(user_id_str)
+        exp = int(exp_str)
+    except (ValueError, AttributeError):
+        return None
+    _state_key = (os.getenv("OAUTH_STATE_SECRET") or INTERNAL_API_SECRET or "").encode()
+    if not _state_key:
+        return None
+    expected = hmac.new(_state_key, f"{user_id_str}:{exp_str}".encode(), "sha256").hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return None
+    import time as _time
+    if _time.time() > exp:
+        return None
+    return user_id
 
 
 @app.get("/auth/github/callback")
@@ -12042,11 +12072,10 @@ async def github_oauth_callback(
             url=f"{frontend_url}/auth/github/callback?github_error={quote(error)}",
         )
 
-    # Decode user_id from state
-    try:
-        user_id_str = state.split(":", 1)[0]
-        user_id = int(user_id_str)
-    except (ValueError, AttributeError):
+    # Verify the signed state → user_id (HMAC + 10-min window; forged or
+    # expired states are rejected).
+    user_id = _verify_github_oauth_state(state or "")
+    if user_id is None:
         return RedirectResponse(
             url=f"{frontend_url}/auth/github/callback?github_error=invalid_state",
         )

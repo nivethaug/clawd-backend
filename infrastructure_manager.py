@@ -640,6 +640,22 @@ class ServiceManager:
                 os.getenv("EXECUTION_MODE", "local").lower() == "container"
                 and os.path.exists(sandbox_script)
             )
+            # Fail-loud: with SANDBOX_ENFORCE set, an unsandboxed start (wrong
+            # EXECUTION_MODE or missing script) must REFUSE instead of silently
+            # running customer code as host root.
+            from services.pm2_env import sandbox_enforced
+            if sandbox_enforced() and not use_sandbox:
+                _mode = os.getenv("EXECUTION_MODE", "local").lower()
+                _why = (
+                    f"sandbox script missing ({sandbox_script})"
+                    if not os.path.exists(sandbox_script)
+                    else f"EXECUTION_MODE={_mode!r} (need 'container')"
+                )
+                raise RuntimeError(
+                    f"REFUSING unsandboxed start for {app_name}: {_why}. "
+                    "Set EXECUTION_MODE=container and deploy scripts/backend-sandbox.sh "
+                    "(or unset SANDBOX_ENFORCE only for local dev)."
+                )
 
             # Defensive: ensure the sandbox script is executable. Git on Windows
             # can lose the +x bit, and PM2 with 'interpreter: none' exec()s the

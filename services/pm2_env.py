@@ -32,6 +32,18 @@ _SAFE_BASE_KEYS = (
 )
 
 
+def sandbox_enforced() -> bool:
+    """True when unsandboxed project-process starts must be REFUSED.
+
+    Set SANDBOX_ENFORCE=1 on production workers. Launch sites (bot pm2
+    managers, infrastructure_manager backends) then hard-fail instead of
+    silently falling back to unsandboxed-root execution when the sandbox
+    script is missing or EXECUTION_MODE is not 'container'. Default (unset)
+    keeps the legacy fallback so local/dev flows don't break.
+    """
+    return os.getenv("SANDBOX_ENFORCE", "").strip().lower() in ("1", "true", "yes")
+
+
 def clean_pm2_env(extra: dict | None = None) -> dict:
     """Minimal, secret-free environment for pm2 CLI invocations.
 

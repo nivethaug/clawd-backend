@@ -136,6 +136,17 @@ def start_bot_pm2(
         )
         # Static: always container mode — bot-sandbox.sh uses shared venv Python
         use_sandbox = os.path.exists(sandbox_script)
+        if not use_sandbox:
+            from services.pm2_env import sandbox_enforced
+            if sandbox_enforced():
+                logger.error(
+                    "REFUSING unsandboxed start for %s: sandbox script missing (%s)",
+                    process_name, sandbox_script,
+                )
+                return False, (
+                    "Sandbox script missing and SANDBOX_ENFORCE is set — "
+                    "refusing to start unsandboxed. Deploy scripts/bot-sandbox.sh."
+                )
 
         if use_sandbox:
             pm2_cmd = [
