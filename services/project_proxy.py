@@ -382,6 +382,7 @@ async def project_proxy_middleware(request: Request, call_next):
     if _is_proxyable_project_route(request.url.path, request.method):
         try:
             from app import get_user_id_from_token, _is_admin_user
+            from database_postgres import get_db
             auth_header = request.headers.get("authorization", "")
             uid = get_user_id_from_token(auth_header) if auth_header else None
             if uid is None or not _is_admin_user(uid):
