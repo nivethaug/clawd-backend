@@ -219,8 +219,36 @@ async def mcp_oauth_callback(state: str, code: Optional[str] = None,
         return _back("error", str(e))
 
     # Save: MCP_SERVER_URL[n] + MCP_TOKEN[n] vault rows (verified=TRUE).
+    # Title = the server's own name (via an authenticated probe) so the user
+    # sees WHICH server they connected, not a generic label.
     suffix = _vault_row_suffix(int(flow["user_id"]), "MCP_SERVER_URL")
-    title = flow.get("label") or "MCP Server (OAuth)"
+    title = (flow.get("label") or "").strip()
+    if not title:
+        try:
+            tok_probe = mcp_oauth.MCPConnection  # noqa: F841 (name readability)
+            from services.integrations.catalog import _v_mcp_server  # probe uses same transport
+            # lightweight authenticated initialize → serverInfo.name
+            import httpx as _httpx
+            headers = {"Content-Type": "application/json",
+                       "Accept": "application/json, text/event-stream",
+                       "Authorization": "Bearer " + str(doc.get("access_token") or "")}
+            r = await _httpx.AsyncClient(timeout=10.0).post(
+                flow["server_url"], headers=headers, json={
+                    "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                               "clientInfo": {"name": "dreamagent", "version": "1.0"}}})
+            ctype = (r.headers.get("content-type") or "").lower()
+            from services.integrations.mcp_oauth import parse_sse_or_json
+            init = parse_sse_or_json(r)
+            name = ((((init or {}).get("result") or {}).get("serverInfo") or {}).get("name") or "")
+            name = name.split("/")[-1].replace("@", "").replace("-mcp", "").replace("_mcp", "").strip()
+            title = (name[:1].upper() + name[1:]) if name else ""
+        except Exception:
+            title = ""
+        if not title:
+            from urllib.parse import urlparse as _up
+            host = _up(flow["server_url"]).hostname or "MCP Server"
+            title = host.split(".")[0].capitalize()
     token_json = mcp_oauth.token_row_value(doc, auth, flow["client_id"],
                                             flow.get("client_secret"))
     with _get_db() as conn:

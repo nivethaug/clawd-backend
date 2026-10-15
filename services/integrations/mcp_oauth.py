@@ -255,3 +255,50 @@ def token_row_value(doc: Dict[str, Any], auth: ServerAuth,
         "client_id": client_id,
         "client_secret": client_secret,
     })
+
+
+def parse_sse_or_json(r: "httpx.Response") -> Optional[Dict[str, Any]]:
+    """Parse an MCP response body: JSON, or SSE with JSON data frames."""
+    import json as _json
+    ctype = (r.headers.get("content-type") or "").lower()
+    if "event-stream" not in ctype:
+        try:
+            doc = r.json()
+            return doc if isinstance(doc, dict) else None
+        except Exception:
+            return None
+    msgs, data = [], []
+    for line in r.text.splitlines():
+        if line.startswith("data:"):
+            data.append(line[5:].strip())
+        elif not line.strip() and data:
+            try:
+                msgs.append(_json.loads("\n".join(data)))
+            except Exception:
+                pass
+            data = []
+    if data:
+        try:
+            msgs.append(_json.loads("\n".join(data)))
+        except Exception:
+            pass
+    for m in reversed(msgs):
+        if isinstance(m, dict):
+            return m
+    return None
+
+
+def probe_server_name(url: str, access_token: str) -> str:
+    """Authenticated initialize → the server's declared name (e.g. svgator)."""
+    headers = {"Content-Type": "application/json",
+               "Accept": "application/json, text/event-stream",
+               "Authorization": "Bearer " + (access_token or "")}
+    r = httpx.post(url, headers=headers, json={
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                   "clientInfo": {"name": "dreamagent", "version": "1.0"}}},
+        timeout=PROBE_TIMEOUT)
+    doc = parse_sse_or_json(r)
+    name = ((((doc or {}).get("result") or {}).get("serverInfo") or {}).get("name") or "")
+    name = name.split("/")[-1].replace("@", "").replace("-mcp", "").replace("_mcp", "").strip()
+    return name
