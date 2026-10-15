@@ -7010,11 +7010,8 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
                     detail="This project secret cannot restart that app")
 
     # AUTH LAYER 1: platform internal secret (main→worker, existing path).
-    internal_secret = request_obj.headers.get("x-internal-secret", "")
-    expected_secret = os.getenv("INTERNAL_API_SECRET", "").strip()
-    if expected_secret and not project_scope_ok:
-        if not internal_secret or not secrets.compare_digest(internal_secret, expected_secret):
-            raise HTTPException(status_code=404, detail="Not Found")
+    if expected_secret and not internal_ok and not project_scope_ok:
+        raise HTTPException(status_code=404, detail="Not Found")
 
     logger.info(f"[INTERNAL-RESTART] restarting PM2 app '{app_name}' (from {client_host})")
 
