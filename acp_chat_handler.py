@@ -391,7 +391,10 @@ class ACPChatHandler:
             "## DREAMAGENT SUPERPOWERS (platform tools - server-side integration) "
             "Tools whose key starts with mcp_ are the user's connected MCP servers "
             "(Integrations page) - same execute endpoint, op 'call', arguments = the "
-            "tool's own input schema.")
+            "tool's own input schema. "
+            "ROUTING CONVENTION: nginx maps public /api/* to the backend ROOT - "
+            "register backend routes WITHOUT the /api prefix (prefix='/svgator', "
+            "never prefix='/api/svgator') so public /api/x reaches route /x.")
         return mcp_head + """
 The platform provides ready-made AI/media tools the user enables on the
 Superpowers page (billed to their credits). When the user asks to ADD one of
