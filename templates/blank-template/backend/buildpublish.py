@@ -142,6 +142,16 @@ def restart_pm2(domain: str = None, backend_port: int = None):
             # Auth: the project's own secret scopes this restart to THIS project's
             # pm2 app (the platform rejects platform-secret-less restarts).
             _proj_secret = os.environ.get("DREAMAGENT_PROJECT_SECRET", "")
+            if not _proj_secret:
+                try:
+                    # docker sandboxes may not carry the env var — the secret
+                    # always lives in this project's backend/.env file.
+                    for _line in open(Path(__file__).resolve().parent / ".env", encoding="utf-8", errors="replace"):
+                        if _line.strip().startswith("DREAMAGENT_PROJECT_SECRET="):
+                            _proj_secret = _line.split("=", 1)[1].strip()
+                            break
+                except Exception:
+                    pass
             _headers = {"Content-Type": "application/json"}
             if _proj_secret:
                 _headers["X-Project-Secret"] = _proj_secret
