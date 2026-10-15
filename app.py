@@ -7212,27 +7212,103 @@ async def internal_mcp_connections(
             rows = conn.execute(
                 "SELECT id, key_name, title, value_encrypted, verified "
                 "FROM global_integrations WHERE user_id = ? "
-                "AND left(key_name, 14) = 'MCP_SERVER_URL' "
+                "AND (left(key_name, 14) = 'MCP_SERVER_URL' "
+                "     OR left(key_name, 9) = 'MCP_TOKEN') "
                 "AND verified = TRUE ORDER BY id",
                 (user_id,),
             ).fetchall()
+        # URL rows define connections; MCP_TOKEN[same suffix] carries OAuth.
+        tokens: dict = {}
         for row in rows:
-            r = row if isinstance(row, dict) else {"id": row[0], "key_name": row[1],
-                                                   "title": row[2],
-                                                   "value_encrypted": row[3],
-                                                   "verified": row[4]}
+            r = _mcp_row(row)
+            kn = r.get("key_name") or ""
+            if kn.startswith("MCP_TOKEN"):
+                try:
+                    tokens[kn[len("MCP_TOKEN"):]] = json.loads(
+                        decrypt_value(r.get("value_encrypted") or "") or "{}")
+                except Exception:
+                    pass
+        for row in rows:
+            r = _mcp_row(row)
+            kn = r.get("key_name") or ""
+            if not kn.startswith("MCP_SERVER_URL"):
+                continue
             try:
                 url = decrypt_value(r.get("value_encrypted") or "")
             except Exception:
                 continue
             if not url:
                 continue
+            suffix = kn[len("MCP_SERVER_URL"):]
+            tok = tokens.get(suffix) or {}
             out.append({"id": int(r["id"]),
                         "title": r.get("title") or r.get("key_name") or "MCP server",
-                        "url": url, "key_name": r.get("key_name") or url_key})
+                        "url": url, "key_name": kn,
+                        "oauth": bool(tok),
+                        "token": tok.get("access_token") or "",
+                        "token_key": f"MCP_TOKEN{suffix}" if tok else ""})
     except Exception as exc:
         logger.warning("[MCP-INTERNAL] connection lookup failed for user %s: %s", user_id, exc)
     return {"connections": out}
+
+
+def _mcp_row(row) -> dict:
+    if isinstance(row, dict):
+        return row
+    return {"id": row[0], "key_name": row[1], "title": row[2],
+            "value_encrypted": row[3], "verified": row[4]}
+
+
+@app.post("/internal/mcp/refresh")
+async def internal_mcp_refresh(request: Request):
+    """tools-api asks the backend to refresh an OAuth MCP token (localhost,
+    X-Internal-Secret). Body: {"user_id": int, "token_key": "MCP_TOKEN[_n]"}.
+    Updates the vault row and returns the new access token."""
+    from services.integrations import mcp_oauth
+    from secure_value import decrypt_value, encrypt_value
+
+    try:
+        body = await request.json()
+        user_id = int(body.get("user_id") or 0)
+        token_key = str(body.get("token_key") or "")
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "bad body"})
+    if not user_id or not token_key.startswith("MCP_TOKEN"):
+        return JSONResponse(status_code=400, content={"error": "bad body"})
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, value_encrypted FROM global_integrations "
+                "WHERE user_id = ? AND key_name = ? AND verified = TRUE",
+                (user_id, token_key)).fetchone()
+        if not row:
+            return JSONResponse(status_code=404, content={"error": "token row not found"})
+        r = row if isinstance(row, dict) else {"id": row[0], "value_encrypted": row[1]}
+        info = json.loads(decrypt_value(r["value_encrypted"]) or "{}")
+        if not info.get("refresh_token"):
+            return JSONResponse(status_code=409, content={"error": "no refresh token stored"})
+        doc = await mcp_oauth.refresh_token(
+            info["token_endpoint"], info.get("client_id"),
+            info.get("client_secret"), info["refresh_token"])
+        info["access_token"] = doc.get("access_token") or info.get("access_token")
+        if doc.get("refresh_token"):
+            info["refresh_token"] = doc["refresh_token"]
+        expires_in = int(doc.get("expires_in") or 0)
+        if expires_in:
+            import time as _t
+            info["expires_at"] = int(_t.time()) + expires_in
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE global_integrations SET value_encrypted = ?, "
+                "updated_at = NOW() WHERE id = ?",
+                (encrypt_value(json.dumps(info)), r["id"]))
+            conn.commit()
+        return {"access_token": info["access_token"]}
+    except mcp_oauth.OAuthFlowError as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+    except Exception as exc:
+        logger.warning("[MCP-INTERNAL] refresh failed for %s: %s", token_key, exc)
+        return JSONResponse(status_code=500, content={"error": "refresh failed"})
 
 
 @app.post("/internal/scrape")

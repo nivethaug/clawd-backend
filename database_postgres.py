@@ -1402,6 +1402,26 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added global_integrations table")
 
+            # --- mcp_oauth_flows (in-flight OAuth connects for MCP servers) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS mcp_oauth_flows (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                server_url TEXT NOT NULL,
+                authorization_endpoint TEXT NOT NULL,
+                token_endpoint TEXT NOT NULL,
+                client_id TEXT NOT NULL,
+                client_secret TEXT,
+                code_verifier TEXT NOT NULL,
+                state TEXT NOT NULL UNIQUE,
+                label TEXT,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW(),
+                completed_at TIMESTAMP
+            )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_mcp_oauth_flows_user ON mcp_oauth_flows(user_id)")
+            conn.commit()
+            logger.info("✓ Added mcp_oauth_flows table")
+
             # --- credit_transactions (audit ledger) ---
             cur.execute("""CREATE TABLE IF NOT EXISTS credit_transactions (
                 id SERIAL PRIMARY KEY,
