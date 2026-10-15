@@ -288,7 +288,8 @@ async def _v_mcp_server(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
                 "params": {"protocolVersion": "2024-11-05", "capabilities": {},
                            "clientInfo": {"name": "dreamagent", "version": "1.0"}}})
             if r.status_code in (401, 403):
-                return False, "server rejected the credentials"
+                return False, ("this MCP server requires sign-in — use the "
+                               "'Sign in & connect (OAuth)' button instead of Test")
             if r.status_code >= 400:
                 return False, f"server returned HTTP {r.status_code}"
             sid = r.headers.get("mcp-session-id")
@@ -494,4 +495,4 @@ async def validate_credentials(integration_type: str, values: Dict[str, str]) ->
         return {"valid": False, "error": "validation request failed"}
     if ok:
         return {"valid": True, "info": info}
-    return {"valid": False, "error": "credential rejected by provider"}
+    return {"valid": False, "error": info or "credential rejected by provider"}
