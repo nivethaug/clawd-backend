@@ -12,11 +12,49 @@ Run on the WORKER:  cd /root/clawd-backend && ./venv/bin/python scripts/backfill
 Optional scope:     ... --project 2043
 """
 import argparse
+import os
 import secrets as _secrets
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+
+
+def _load_env_file() -> None:
+    """Parse ../.env ourselves (CRLF-safe, quotes stripped) — setdefault so
+    real process env wins. database_postgres.py has no dotenv of its own;
+    a bare `python3 scripts/...` shell call has no env either."""
+    env_file = BASE_DIR / ".env"
+    if not env_file.exists():
+        print(f"!! no .env at {env_file} — DB connection will fail")
+        return
+    for raw in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip().rstrip("\r")
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        os.environ.setdefault(key, value)
+
+
+_load_env_file()
+
+if not os.environ.get("DB_PASSWORD"):
+    db_keys = []
+    ef = BASE_DIR / ".env"
+    if ef.exists():
+        for raw in ef.read_text(encoding="utf-8", errors="replace").splitlines():
+            if raw.strip().startswith(("DB_", "DATABASE")) and "=" in raw:
+                db_keys.append(raw.split("=")[0].strip())
+    print("!! DB_PASSWORD is empty after loading .env — cannot reach Postgres.")
+    print(f"   DB-like keys present in {ef}: {db_keys or 'NONE'}")
+    print("   If the names differ, export them manually, e.g.:")
+    print("   export DB_PASSWORD=... DB_USER=... DB_NAME=... DB_HOST=...")
+    sys.exit(2)
+
+from database_adapter import get_db  # noqa: E402  (after env load)
 
 HEADER_ANCHOR = 'req = _urlreq.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")'
 HEADER_BLOCK = (
@@ -37,7 +75,6 @@ def ensure_secret(project_id: int, current) -> str:
     if current:
         return current
     new_secret = _secrets.token_urlsafe(32)
-    from database_adapter import get_db
     with get_db() as conn:
         conn.execute("UPDATE projects SET secret_key = %s WHERE id = %s",
                      (new_secret, project_id))
