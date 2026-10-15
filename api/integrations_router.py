@@ -181,7 +181,7 @@ async def mcp_oauth_callback(state: str, code: Optional[str] = None,
     """AS redirect target: exchange the code, save URL+token vault rows,
     bounce the browser back to the Integrations page with a status flag."""
     import time as _time
-    frontend = (os.getenv("FRONTEND_URL") or "https://dreamagent.cloud").rstrip("/")
+    from services.integrations.mcp_oauth import PUBLIC_SITE_URL as frontend
     from services.integrations import mcp_oauth
     from database_adapter import get_db as _get_db
     from secure_value import encrypt_value

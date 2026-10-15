@@ -36,6 +36,10 @@ logger = logging.getLogger("integrations.mcp_oauth")
 PROBE_TIMEOUT = 10.0
 FLOW_TTL_SECONDS = 15 * 60
 PUBLIC_API_BASE = os.getenv("PUBLIC_API_BASE", "https://api.dreamagent.cloud").rstrip("/")
+# Frontend origin the OAuth callback bounces to. Deliberately NOT
+# FRONTEND_URL — that legacy var carried a dead domain and the bounce
+# landed on DNS_PROBE_FINISHED_NXDOMAIN (2026-10-15).
+PUBLIC_SITE_URL = os.getenv("PUBLIC_SITE_URL", "https://dreamagent.cloud").rstrip("/")
 REDIRECT_URI = f"{PUBLIC_API_BASE}/api/integrations/mcp/oauth/callback"
 CLIENT_NAME = "DreamAgent"
 
