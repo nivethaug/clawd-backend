@@ -85,7 +85,13 @@ def publish(project_path: str, project_id: str) -> bool:
     # Retry once — the worker-api may be briefly busy installing deps.
     for attempt in range(2):
         try:
-            req = _urlreq.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+                        # Auth: the project's own secret scopes this restart to THIS
+            # project's pm2 app (platform rejects secret-less restarts).
+            _proj_secret = os.environ.get("DREAMAGENT_PROJECT_SECRET", "")
+            _headers = {"Content-Type": "application/json"}
+            if _proj_secret:
+                _headers["X-Project-Secret"] = _proj_secret
+            req = _urlreq.Request(endpoint, data=payload, headers=_headers, method="POST")
             with _urlreq.urlopen(req, timeout=120) as resp:
                 result = _json.loads(resp.read().decode())
             if result.get("success"):

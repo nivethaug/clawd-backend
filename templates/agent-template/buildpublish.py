@@ -129,7 +129,13 @@ def restart_scheduler():
         payload = _json.dumps({"pm2_app_name": app_name}).encode()
         print(f"→ Calling worker-api: POST {endpoint}")
         try:
-            req = _urlreq.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+                        # Auth: the project's own secret scopes this restart to THIS
+            # project's pm2 app (platform rejects secret-less restarts).
+            _proj_secret = os.environ.get("DREAMAGENT_PROJECT_SECRET", "")
+            _headers = {"Content-Type": "application/json"}
+            if _proj_secret:
+                _headers["X-Project-Secret"] = _proj_secret
+            req = _urlreq.Request(endpoint, data=payload, headers=_headers, method="POST")
             with _urlreq.urlopen(req, timeout=60) as resp:
                 result = _json.loads(resp.read().decode())
             if result.get("success"):
