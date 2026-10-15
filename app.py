@@ -7212,7 +7212,7 @@ async def internal_mcp_connections(
             rows = conn.execute(
                 "SELECT id, key_name, title, value_encrypted, verified "
                 "FROM global_integrations WHERE user_id = ? "
-                "AND key_name LIKE 'MCP_SERVER_URL' || '%' "
+                "AND left(key_name, 14) = 'MCP_SERVER_URL' "
                 "AND verified = TRUE ORDER BY id",
                 (user_id,),
             ).fetchall()
