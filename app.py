@@ -6968,10 +6968,18 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
     their own backend/frontend PM2 process. The worker-api runs on the
     same host as PM2 and has direct access.
     """
-    # Basic security: only allow requests from localhost or Docker bridge.
+    # Security, in order: (1) a valid platform internal secret (main→worker)
+    # authorizes from anywhere; (2) the caller's PROJECT secret authorizes
+    # only its own app (sandbox publish path); (3) with neither, only
+    # localhost/docker-bridge sources may proceed (legacy).
     client_host = request_obj.client.host if request_obj.client else ""
-    if not (client_host.startswith("127.") or client_host.startswith("172.")
-            or client_host.startswith("10.") or client_host == "::1"):
+    internal_secret = request_obj.headers.get("x-internal-secret", "")
+    expected_secret = os.getenv("INTERNAL_API_SECRET", "").strip()
+    internal_ok = bool(expected_secret and internal_secret
+                       and secrets.compare_digest(internal_secret, expected_secret))
+    if not internal_ok and not (client_host.startswith("127.")
+            or client_host.startswith("172.") or client_host.startswith("10.")
+            or client_host == "::1"):
         raise HTTPException(status_code=403, detail="Internal endpoint — not accessible from public network")
 
     app_name = request.pm2_app_name.strip()
