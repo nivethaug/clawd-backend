@@ -2240,14 +2240,10 @@ app = FastAPI(
     openapi_url="/openapi.json" if _DOCS_ENABLED else None,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
+# CORS moved to the very END of this file — it must be the OUTERMOST
+# middleware (last added = outermost in Starlette) so preflight OPTIONS and
+# every middleware-generated response (project_proxy forwards to the worker,
+# internal-guard 404s, rate-limit 429s) all carry Access-Control-Allow-Origin.
 
 # ---------------------------------------------------------------------------
 # /internal/* deny-by-default guard (security review P0).
@@ -19103,3 +19099,23 @@ if __name__ == "__main__":
 
 # ============================================================================
 
+
+
+# ---------------------------------------------------------------------------
+# CORS — OUTERMOST middleware (registered last on purpose).
+# Starlette applies user middleware last-registered-first, so this must be
+# the final add_middleware call in the file: it then wraps project_proxy,
+# proxy_auth, sentry context, the internal guard and the rate limiter, and
+# every response they generate (including proxied worker responses) gets
+# Access-Control-Allow-Origin. Registering it earlier made it the innermost
+# middleware, so preflight OPTIONS and proxied /projects/{id}/env responses
+# lost CORS headers and the dashboard's env editor broke with CORS errors.
+# ---------------------------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
