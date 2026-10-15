@@ -2268,6 +2268,12 @@ INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "").strip()
 async def internal_routes_guard(request: Request, call_next):
     path = request.url.path
     if path == "/internal" or path.startswith("/internal/"):
+        # Publish-flow exception: sandboxed buildpublish calls
+        # /internal/pm2-restart with the caller's PROJECT secret (it can never
+        # hold the platform internal secret). The endpoint enforces project
+        # scoping itself — let it through the guard.
+        if path == "/internal/pm2-restart" and request.headers.get("x-project-secret"):
+            return await call_next(request)
         secret = request.headers.get("x-internal-secret", "")
         if INTERNAL_API_SECRET:
             # Fail closed: ONLY the shared secret authenticates internal
@@ -6971,6 +6977,44 @@ async def internal_pm2_restart(request: InternalRestartRequest, request_obj: Req
     app_name = request.pm2_app_name.strip()
     if not app_name or not app_name.replace("-", "").replace("_", "").isalnum():
         raise HTTPException(status_code=400, detail="Invalid pm2_app_name")
+
+    # AUTH LAYER 2 (SANDBOX PUBLISH PATH): buildpublish.py inside customer
+    # sandboxes cannot hold INTERNAL_API_SECRET, but must be able to restart
+    # THEIR OWN app after a deploy. Accept the caller's project secret and
+    # scope it to that project's pm2 names ({domain}-backend/frontend,
+    # tg-bot-{id}, dc-bot-{id}). A project secret can never restart another
+    # tenant's process, and the endpoint stays closed to the internet.
+    project_scope_ok = False
+    project_row = None
+    caller_secret = request_obj.headers.get("x-project-secret", "")
+    if caller_secret:
+        try:
+            with get_db() as conn:
+                project_row = conn.execute(
+                    "SELECT id, domain, type_id FROM projects WHERE secret_key = ?",
+                    (caller_secret,)).fetchone()
+        except Exception as scope_err:
+            logger.warning("[INTERNAL-RESTART] project-scope lookup failed: %s", scope_err)
+        if project_row:
+            pr = project_row if isinstance(project_row, dict) else {
+                "id": project_row[0], "domain": project_row[1], "type_id": project_row[2]}
+            domain = (pr.get("domain") or "")
+            pid = pr.get("id")
+            allowed = {f"{domain}-backend", f"{domain}-frontend", f"{domain}-bot",
+                       f"tg-bot-{pid}", f"dc-bot-{pid}", f"dc-bot-{domain}"}
+            if app_name in allowed:
+                project_scope_ok = True
+            else:
+                raise HTTPException(
+                    status_code=403,
+                    detail="This project secret cannot restart that app")
+
+    # AUTH LAYER 1: platform internal secret (main→worker, existing path).
+    internal_secret = request_obj.headers.get("x-internal-secret", "")
+    expected_secret = os.getenv("INTERNAL_API_SECRET", "").strip()
+    if expected_secret and not project_scope_ok:
+        if not internal_secret or not secrets.compare_digest(internal_secret, expected_secret):
+            raise HTTPException(status_code=404, detail="Not Found")
 
     logger.info(f"[INTERNAL-RESTART] restarting PM2 app '{app_name}' (from {client_host})")
 
