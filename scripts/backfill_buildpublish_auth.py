@@ -105,10 +105,32 @@ HEADER_BLOCK = (
     "# Auth: the project's own secret scopes this restart to THIS project's\n"
     "            # pm2 app (platform rejects secret-less restarts).\n"
     "            _proj_secret = os.environ.get(\"DREAMAGENT_PROJECT_SECRET\", \"\")\n"
+    "            if not _proj_secret:\n"
+    "                try:\n"
+    "                    for _line in open(Path(bp_file).resolve().parent / '.env', encoding='utf-8', errors='replace'):\n"
+    "                        if _line.strip().startswith('DREAMAGENT_PROJECT_SECRET='):\n"
+    "                            _proj_secret = _line.split('=', 1)[1].strip()\n"
+    "                            break\n"
+    "                except Exception:\n"
+    "                    pass\n"
     "            _headers = {\"Content-Type\": \"application/json\"}\n"
     "            if _proj_secret:\n"
     "                _headers[\"X-Project-Secret\"] = _proj_secret\n"
     "            req = _urlreq.Request(endpoint, data=payload, headers=_headers, method=\"POST\")"
+)
+
+# upgrade pattern for files patched by the OLDER script version (env-var only)
+UPGRADE_ANCHOR = '_proj_secret = os.environ.get("DREAMAGENT_PROJECT_SECRET", "")'
+UPGRADE_EXTRA = (
+    '_proj_secret = os.environ.get("DREAMAGENT_PROJECT_SECRET", "")\n'
+    "            if not _proj_secret:\n"
+    "                try:\n"
+    "                    for _line in open(Path(bp_file).resolve().parent / '.env', encoding='utf-8', errors='replace'):\n"
+    "                        if _line.strip().startswith('DREAMAGENT_PROJECT_SECRET='):\n"
+    "                            _proj_secret = _line.split('=', 1)[1].strip()\n"
+    "                            break\n"
+    "                except Exception:\n"
+    "                    pass"
 )
 
 ENV_CANDIDATES = ["backend/.env", ".env", "telegram/.env", "discord/.env", "scheduler/.env"]
@@ -143,7 +165,16 @@ def patch_buildpublish(bp_file: Path) -> bool:
         return False
     content = bp_file.read_text(encoding="utf-8", errors="replace")
     if "X-Project-Secret" in content:
-        return False  # already patched
+        # already patched — upgrade env-var-only blocks to include the .env
+        # file fallback (docker sandboxes may not carry the env var)
+        if "DREAMAGENT_PROJECT_SECRET" in content and ".env, encoding" not in content:
+            content = content.replace(UPGRADE_ANCHOR, UPGRADE_EXTRA)
+            if "from pathlib import Path" not in content:
+                content = "from pathlib import Path\n" + content
+            bp_file.write_text(content, encoding="utf-8")
+            print(f"  upgraded -> {bp_file.name}")
+            return True
+        return False  # already patched and current
     if HEADER_ANCHOR not in content:
         print(f"  !! {bp_file}: restart call anchor not found — patch manually")
         return False
