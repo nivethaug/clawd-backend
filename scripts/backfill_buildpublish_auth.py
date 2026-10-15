@@ -41,6 +41,25 @@ def _load_env_file() -> None:
 
 _load_env_file()
 
+def _from_database_url() -> bool:
+    """Derive DB_* from DATABASE_URL (postgres://user:pass@host:port/db)."""
+    from urllib.parse import urlparse, unquote
+    dsn = os.environ.get("DATABASE_URL", "").strip()
+    if not dsn:
+        return False
+    p = urlparse(dsn)
+    if p.scheme not in ("postgres", "postgresql"):
+        return False
+    os.environ.setdefault("DB_USER", unquote(p.username or "admin"))
+    os.environ.setdefault("DB_PASSWORD", unquote(p.password or ""))
+    os.environ.setdefault("DB_HOST", p.hostname or "localhost")
+    os.environ.setdefault("DB_PORT", str(p.port or 5432))
+    os.environ.setdefault("DB_NAME", (p.path or "/dreampilot").lstrip("/"))
+    return True
+
+
+if not os.environ.get("DB_PASSWORD"):
+    _from_database_url()
 if not os.environ.get("DB_PASSWORD"):
     db_keys = []
     ef = BASE_DIR / ".env"
@@ -48,10 +67,13 @@ if not os.environ.get("DB_PASSWORD"):
         for raw in ef.read_text(encoding="utf-8", errors="replace").splitlines():
             if raw.strip().startswith(("DB_", "DATABASE")) and "=" in raw:
                 db_keys.append(raw.split("=")[0].strip())
-    print("!! DB_PASSWORD is empty after loading .env — cannot reach Postgres.")
-    print(f"   DB-like keys present in {ef}: {db_keys or 'NONE'}")
-    print("   If the names differ, export them manually, e.g.:")
-    print("   export DB_PASSWORD=... DB_USER=... DB_NAME=... DB_HOST=...")
+    pm2_info = "unknown"
+    print("!! DB_PASSWORD is still empty — the worker keeps DB config outside .env")
+    print(f"   DB-like keys in {ef}: {db_keys or 'NONE'}")
+    print("   Likely carried by pm2 env (e.g. DATABASE_URL). Run:")
+    print("     pm2 env 76 | grep -iE 'DATABASE|POSTGRES|^DB_'")
+    print("   then either export DATABASE_URL=... and rerun this script")
+    print("   (it parses DSNs), or export DB_PASSWORD etc. manually.")
     sys.exit(2)
 
 from database_adapter import get_db  # noqa: E402  (after env load)
