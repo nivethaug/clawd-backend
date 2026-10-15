@@ -58,8 +58,30 @@ def _from_database_url() -> bool:
     return True
 
 
+def _from_pm2_env() -> bool:
+    """The worker's pm2 process carries DB_* in colon format
+    (e.g. 'DB_PASSWORD: xxx') — parse it directly."""
+    import re
+    import subprocess
+    try:
+        out = subprocess.run(["pm2", "env", os.getenv("BACKFILL_PM2_ID", "76")],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return False
+    found = False
+    for line in out.splitlines():
+        m = re.match(r"^(DB_(?:HOST|PORT|NAME|USER|PASSWORD))\s*[:=]\s*(.+)$", line.strip())
+        if m:
+            os.environ.setdefault(m.group(1), m.group(2).strip())
+            if m.group(1) == "DB_PASSWORD" and m.group(2).strip():
+                found = True
+    return found
+
+
 if not os.environ.get("DB_PASSWORD"):
     _from_database_url()
+if not os.environ.get("DB_PASSWORD"):
+    _from_pm2_env()
 if not os.environ.get("DB_PASSWORD"):
     db_keys = []
     ef = BASE_DIR / ".env"
