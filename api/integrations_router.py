@@ -133,6 +133,7 @@ def _vault_row_suffix(user_id: int, base_key: str) -> str:
     return f"_{n}"
 
 
+@router.post("/api/integrations/mcp/oauth/start")
 async def mcp_oauth_start(request: McpOAuthStartRequest,
                           authorization: Optional[str] = Header(None)):
     """Begin the OAuth connect for an MCP server. Returns the authorize URL
@@ -242,8 +243,6 @@ async def mcp_oauth_callback(state: str, code: Optional[str] = None,
     logger.info("[MCP-OAUTH] user %s connected MCP server via OAuth", flow["user_id"])
     return _back("connected", title)
 
-
-@router.post("/api/integrations/mcp/oauth/start")
 
 @router.post("/api/integrations/save")
 async def save_credential(request: SaveCredentialRequest,
