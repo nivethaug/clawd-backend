@@ -16828,7 +16828,14 @@ def _restart_pm2_via_worker_api(pm2_app_name: str) -> bool:
         import urllib.request as _urlreq
         endpoint = "http://localhost:8003/internal/pm2-restart"
         payload = _json.dumps({"pm2_app_name": pm2_app_name}).encode()
-        req = _urlreq.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        headers = {"Content-Type": "application/json"}
+        # The worker's guard is fail-closed when INTERNAL_API_SECRET is set —
+        # this platform-side call must carry it (the 404 here silently broke
+        # auto-restart after every edit, 2026-10-15).
+        _secret = os.getenv("INTERNAL_API_SECRET", "").strip()
+        if _secret:
+            headers["X-Internal-Secret"] = _secret
+        req = _urlreq.Request(endpoint, data=payload, headers=headers, method="POST")
         with _urlreq.urlopen(req, timeout=60) as resp:
             result = _json.loads(resp.read().decode())
         if result.get("success"):
