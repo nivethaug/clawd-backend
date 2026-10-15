@@ -333,6 +333,50 @@ class ACPChatHandler:
 ---
 """
 
+    def _enabled_mcp_tools_block(self) -> str:
+        """List this project's ENABLED MCP tools for the edit chat.
+
+        Pulled live from tools-api with the project secret (short timeout,
+        fail-open -> empty string). This is how the chat learns WHICH
+        user-connected MCP servers/tools it can wire into the frontend.
+        """
+        import httpx as _httpx
+        try:
+            from database_adapter import get_db as _get_db
+            with _get_db() as conn:
+                row = conn.execute(
+                    "SELECT user_id, secret_key FROM projects WHERE id = ?",
+                    (self.project_id,)).fetchone()
+            if not row:
+                return ""
+            d = dict(row) if not isinstance(row, dict) else row
+            secret = d.get("secret_key") or ""
+            if not secret:
+                return ""
+            base = (os.getenv("DREAMAGENT_TOOLS_PUBLIC_URL")
+                    or "https://api.dreamagent.cloud/tools").rstrip("/")
+            r = _httpx.get(
+                f"{base}/tools/projects/{self.project_id}/tools",
+                headers={"X-Project-Secret": secret}, timeout=6.0)
+            tools = (r.json() or {}).get("tools") or []
+            enabled = [t for t in tools
+                       if t.get("category") == "mcp" and t.get("enabled")]
+            if not enabled:
+                return ""
+            lines = ["## THE PROJECT'S ENABLED MCP TOOLS (user-connected servers)",
+                     "These are ON for this project right now — when the user asks the",
+                     "frontend/agent to use them (like: add an SVG generator using my Svgator),",
+                     "integrate them with the superpowers recipe below, op \"call\":"]
+            for t in enabled[:30]:
+                desc = (t.get("description") or "")[:110]
+                lines.append(f"- {t['key']} — {t.get('name')}"
+                             + (f" — {desc}" if desc else ""))
+            lines.append("")
+            return chr(10).join(lines) + chr(10)
+        except Exception as e:
+            logger.debug("[ACP] enabled-mcp block skipped: %s", e)
+            return ""
+
     def _superpowers_tools_block(self) -> str:
         """DreamAgent Superpowers integration recipe (platform tools-api).
 
@@ -342,11 +386,13 @@ class ACPChatHandler:
         injected project secret; output files land inside the project
         workspace (tools-output/).
         """
-        return """## DREAMAGENT SUPERPOWERS (platform tools — server-side integration)
-   Tools whose key starts with mcp_ are the user's connected MCP servers
-   (Integrations page) — same execute endpoint, op "call", arguments = the
-   tool's own input schema.
-
+        mcp_list = self._enabled_mcp_tools_block()
+        mcp_head = (mcp_list + chr(10)) if mcp_list else (
+            "## DREAMAGENT SUPERPOWERS (platform tools - server-side integration) "
+            "Tools whose key starts with mcp_ are the user's connected MCP servers "
+            "(Integrations page) - same execute endpoint, op 'call', arguments = the "
+            "tool's own input schema.")
+        return mcp_head + """
 The platform provides ready-made AI/media tools the user enables on the
 Superpowers page (billed to their credits). When the user asks to ADD one of
 these features ("add song generation", "integrate image generation from my
