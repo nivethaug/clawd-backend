@@ -343,6 +343,9 @@ class ACPChatHandler:
         workspace (tools-output/).
         """
         return """## DREAMAGENT SUPERPOWERS (platform tools — server-side integration)
+   Tools whose key starts with mcp_ are the user's connected MCP servers
+   (Integrations page) — same execute endpoint, op "call", arguments = the
+   tool's own input schema.
 
 The platform provides ready-made AI/media tools the user enables on the
 Superpowers page (billed to their credits). When the user asks to ADD one of

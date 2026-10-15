@@ -227,6 +227,95 @@ async def _v_youtube(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
     return (r.status_code == 200), ("key valid (public data)" if r.status_code == 200 else None)
 
 
+async def _v_mcp_server(values: Dict[str, str]) -> Tuple[bool, Optional[str]]:
+    """Connect to an external MCP server (streamable HTTP) and list tools.
+
+    The stored value is the FULL server URL, including any token query
+    parameter hosted MCP servers use. The URL is never logged with its
+    query string. HTTP only — the platform never runs user stdio servers.
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    url = (values.get("MCP_SERVER_URL") or "").strip()
+    if not url:
+        return False, None
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False, "URL must be http(s) with a host"
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+    except socket.gaierror:
+        return False, "cannot resolve server host"
+    for info in infos:
+        ip = info[4][0]
+        addr = ipaddress.ip_address(ip)
+        if (addr.is_loopback or addr.is_private or addr.is_link_local
+                or addr.is_reserved or ip in ("195.200.14.37", "187.55.225.39")):
+            return False, "server points at a private/platform address"
+    # Minimal JSON-RPC handshake + tools/list (SSE or JSON response).
+    headers = {"Content-Type": "application/json",
+               "Accept": "application/json, text/event-stream"}
+
+    def _parse(text: str):
+        import json as _json
+        msgs, data = [], []
+        for line in text.splitlines():
+            if line.startswith("data:"):
+                data.append(line[5:].strip())
+            elif not line.strip() and data:
+                try:
+                    msgs.append(_json.loads(chr(10).join(data)))
+                except Exception:
+                    pass
+                data = []
+        if data:
+            try:
+                msgs.append(_json.loads(chr(10).join(data)))
+            except Exception:
+                pass
+        for m in reversed(msgs):
+            if isinstance(m, dict):
+                return m
+        return None
+
+    import json as _json
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(url, headers=headers, json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                           "clientInfo": {"name": "dreamagent", "version": "1.0"}}})
+            if r.status_code in (401, 403):
+                return False, "server rejected the credentials"
+            if r.status_code >= 400:
+                return False, f"server returned HTTP {r.status_code}"
+            sid = r.headers.get("mcp-session-id")
+            if sid:
+                headers["Mcp-Session-Id"] = sid
+            ctype = (r.headers.get("content-type") or "").lower()
+            init = r.json() if "json" in ctype and "event-stream" not in ctype else _parse(r.text)
+            if not isinstance(init, dict) or init.get("error"):
+                return False, "not a valid MCP server"
+            r2 = await client.post(url, headers=headers, json={
+                "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+            ctype2 = (r2.headers.get("content-type") or "").lower()
+            listed = r2.json() if "json" in ctype2 and "event-stream" not in ctype2 else _parse(r2.text)
+            if not isinstance(listed, dict) or listed.get("error"):
+                return False, "tools/list failed"
+            tools = ((listed.get("result") or {}).get("tools")
+                     if "result" in listed else listed.get("tools")) or []
+            names = [str(t.get("name") or "") for t in tools[:8] if isinstance(t, dict)]
+            n = len(tools)
+            if n == 0:
+                return False, "server connected but exposes no tools"
+            label = ", ".join(x for x in names if x) or "..."
+            return True, f"{n} tools: {label}{' …' if n > 8 else ''}"
+    except httpx.HTTPError:
+        return False, "server unreachable"
+
+
 _VALIDATORS = {
     "openai": _v_openai,
     "openrouter": _v_openrouter,
@@ -243,6 +332,7 @@ _VALIDATORS = {
     "coingecko": _v_coingecko,
     "serper": _v_serper,
     "youtube": _v_youtube,
+    "mcp-server": _v_mcp_server,
 }
 
 CATALOG: Dict[str, IntegrationDef] = {
@@ -353,6 +443,14 @@ CATALOG: Dict[str, IntegrationDef] = {
             docs_url="https://console.cloud.google.com/apis/credentials",
             description="YouTube Data API — search, videos and channel stats (public data).",
             validator="youtube", icon_hint="youtube",
+        ),
+        IntegrationDef(
+            type="mcp-server", title="MCP Server", category="Tools",
+            key_names=["MCP_SERVER_URL"],
+            docs_url="https://modelcontextprotocol.io",
+            description=("External MCP server (streamable HTTP). Paste the full URL "
+                         "including any token parameter. Its tools appear in Superpowers."),
+            validator="mcp-server", icon_hint="mcp",
         ),
     ]
 }

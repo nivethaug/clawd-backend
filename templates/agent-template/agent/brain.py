@@ -158,7 +158,11 @@ def _system_prompt(trigger_desc: str) -> str:
 ## Available Tools
 1. fetch_json(url, method?, headers?, body?) — HTTP request
 2. proxy_call(provider, method, endpoint, body?, params?) — OAuth call (providers: {', '.join(oauth) or 'none connected'})
-3. superpowers_execute(tool, params) — run a superpower tool:
+3. superpowers_execute(tool, params) — run a superpower tool.
+   Tools whose key starts with mcp_ come from the user's connected MCP
+   servers (Integrations page) — call them exactly like platform tools,
+   with op "call" and the tool's own arguments as params.
+   Platform tools:
    song(prompt, vocals?), image-gen(prompt, size?), ai-video(image, prompt),
    video-gen(prompt), video-utils(files, transition?),
    voiceover(text, language?), lip-sync(image, audio_or_prompt),

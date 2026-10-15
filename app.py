@@ -7189,6 +7189,52 @@ class InternalScrapeRequest(BaseModel):
     render: bool = False  # If True, use Chrome CDP (for JS-heavy pages). If False, use fast requests fetch.
 
 
+@app.get("/internal/mcp/connections")
+async def internal_mcp_connections(
+    user_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Decrypted MCP-server connections for a user — tools-api ONLY.
+
+    Serves the Superpowers MCP bridge: the user's verified 'mcp-server'
+    global_integrations rows (full URL incl. token, decrypted). Guarded by
+    the shared internal secret like every /internal route; called over
+    localhost from tools-api. Values must never be logged.
+    """
+    from services.integrations.catalog import get_def
+    from secure_value import decrypt_value
+
+    mcp_def = get_def("mcp-server")
+    url_key = mcp_def.key_names[0] if mcp_def else "MCP_SERVER_URL"
+    out = []
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, key_name, title, value_encrypted, verified "
+                "FROM global_integrations WHERE user_id = ? "
+                "AND key_name LIKE 'MCP_SERVER_URL%' "
+                "AND verified = TRUE ORDER BY id",
+                (user_id,),
+            ).fetchall()
+        for row in rows:
+            r = row if isinstance(row, dict) else {"id": row[0], "key_name": row[1],
+                                                   "title": row[2],
+                                                   "value_encrypted": row[3],
+                                                   "verified": row[4]}
+            try:
+                url = decrypt_value(r.get("value_encrypted") or "")
+            except Exception:
+                continue
+            if not url:
+                continue
+            out.append({"id": int(r["id"]),
+                        "title": r.get("title") or r.get("key_name") or "MCP server",
+                        "url": url, "key_name": r.get("key_name") or url_key})
+    except Exception as exc:
+        logger.warning("[MCP-INTERNAL] connection lookup failed for user %s: %s", user_id, exc)
+    return {"connections": out}
+
+
 @app.post("/internal/scrape")
 async def internal_scrape(request: InternalScrapeRequest, request_obj: Request):
     """Scrape a URL — tiered: fast HTTP fetch by default, Chrome CDP if render=True.
