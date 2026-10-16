@@ -266,7 +266,12 @@ def guard_push(repo_path: str) -> tuple:
     for dirpath, dirnames, filenames in _os.walk(rp):
         dirnames[:] = [d for d in dirnames if d not in _SCAN_SKIP_DIRS]
         for fname in filenames:
-            if fname == ".env" or fname.endswith((".pyc", ".png", ".jpg", ".woff", ".woff2", ".mp4")):
+            if fname == ".env" or fname.endswith((".pyc", ".png", ".jpg", ".woff", ".woff2", ".mp4", ".log")):
+                continue
+            # Log files are runtime output (API response hashes, request IDs
+            # 32+ hex chars) — never belong in a repo and always false-positive
+            # the credential scanner. Skip the whole logs/ content by extension.
+            if fname.endswith(".log") or "/logs/" in str(Path(dirpath) / fname):
                 continue
             fpath = Path(dirpath) / fname
             try:
