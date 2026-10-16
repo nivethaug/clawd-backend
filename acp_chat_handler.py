@@ -394,7 +394,16 @@ class ACPChatHandler:
             "tool's own input schema. "
             "ROUTING CONVENTION: nginx maps public /api/* to the backend ROOT - "
             "register backend routes WITHOUT the /api prefix (prefix='/svgator', "
-            "never prefix='/api/svgator') so public /api/x reaches route /x.")
+            "never prefix='/api/svgator') so public /api/x reaches route /x. "
+            "PUBLISH RULE: after publishing the backend, DO NOT manually probe "
+            "/internal/pm2-restart or other /internal/* endpoints — bare calls "
+            "without the X-Project-Secret header are rejected with 404 BY DESIGN "
+            "(that is the security guard, not a missing route). buildpublish.py "
+            "sends the auth header automatically and the restart works — just "
+            "run the publish script and then verify the LIVE API response "
+            "(curl the public endpoint), never the restart call itself. "
+            "Likewise /api routing: register backend routes WITHOUT the /api "
+            "prefix (nginx strips it before proxying).")
         return mcp_head + """
 The platform provides ready-made AI/media tools the user enables on the
 Superpowers page (billed to their credits). When the user asks to ADD one of
