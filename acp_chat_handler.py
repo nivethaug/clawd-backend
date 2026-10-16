@@ -403,7 +403,14 @@ class ACPChatHandler:
             "run the publish script and then verify the LIVE API response "
             "(curl the public endpoint), never the restart call itself. "
             "Likewise /api routing: register backend routes WITHOUT the /api "
-            "prefix (nginx strips it before proxying).")
+            "prefix (nginx strips it before proxying). "
+            "FINAL RULE (NON-NEGOTIABLE): After publishing, NEVER probe, test, "
+            "or call any /internal/* endpoint yourself — buildpublish.py handles "
+            "restarts with proper auth. Your only verification is the PUBLIC "
+            "endpoint: curl https://{domain}.dreamagent.cloud/api/... and check "
+            "the response body. If the route 404s after publish+30s, say so "
+            "honestly — do NOT attempt to restart PM2, call worker-api, or "
+            "modify buildpublish.py to change the restart mechanism.")
         return mcp_head + """
 The platform provides ready-made AI/media tools the user enables on the
 Superpowers page (billed to their credits). When the user asks to ADD one of
