@@ -935,8 +935,17 @@ class ClaudeCodeAgent:
         else:
             self._resumed_session_id = None
 
-        # Add prompt flag first
-        command.extend(["-p", prompt])
+        # Add prompt flag first. LARGE prompts go via stdin (claude -p -)
+        # CLI args share the ~128KB ARG_MAX with the whole command line
+        # and the wrapper env; 120K+ char design references crash with
+        # Argument list too long (live: session 453, 2026-10-17).
+        _STDIN_PROMPT_THRESHOLD = 96 * 1024
+        _use_stdin_prompt = len(prompt.encode("utf-8")) > _STDIN_PROMPT_THRESHOLD
+        if _use_stdin_prompt:
+            command.extend(["-p", "-"])
+            logger.info("[CLAUDE-AGENT] Large prompt (%d chars) - using stdin", len(prompt))
+        else:
+            command.extend(["-p", prompt])
 
         # Add auto-approve flag AFTER prompt (matches working CLI format)
         command.append("--dangerously-skip-permissions")
