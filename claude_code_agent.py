@@ -968,6 +968,16 @@ class ClaudeCodeAgent:
         process = spawn.process
         effective_command = spawn.effective_command
 
+        # Feed a large prompt via stdin (spawned with `-p -` above).
+        if _use_stdin_prompt and process.stdin:
+            try:
+                process.stdin.write(prompt.encode("utf-8"))
+                await process.stdin.drain()
+                process.stdin.close()
+            except Exception as stdin_err:
+                logger.warning("[CLAUDE-AGENT] stdin prompt write failed: %s",
+                               stdin_err)
+
         # Mark container as having an active Claude process (PID file for reaper).
         # The reaper checks this PID to decide whether the container can be
         # stopped. Without it, the reaper would kill the container mid-query.
