@@ -141,19 +141,8 @@ async def handle_acp_chat(request, session_id: int, user_content: str) -> str:
     # more history than the old limit of 4 (which only worked because --resume
     # carried the rest natively).
     context_lines = []
-    with get_db() as conn:
-        recent_messages = conn.execute(
-            """SELECT role, content FROM messages
-               WHERE session_id = ?
-               ORDER BY created_at DESC
-               LIMIT 10""",
-            (session_id,)
-        ).fetchall()
-        
-        for msg in reversed(recent_messages):  # Oldest first
-            role = "User" if msg['role'] == 'user' else "Assistant"
-            context_lines.append(f"{role}: {msg['content'][:500]}")
-    
+    context_str = _load_session_context_budgeted(session_id)
+    context_lines = [context_str] if context_str else []
     session_context = "\n\n".join(context_lines) if context_lines else ""
     
     # Log prompt framing before sending to Claude
@@ -1210,6 +1199,56 @@ def _require_project_owner(project_id: int, authorization: Optional[str]) -> int
         raise HTTPException(status_code=403, detail="You do not have access to this project")
 
     return user_id
+
+
+def _load_session_context_budgeted(session_id: int, budget: int = None,
+                                    max_messages: int = 10,
+                                    min_messages: int = 2) -> str:
+    """Dynamic conversation context: last N messages within a char budget.
+
+    Fetches up to max_messages (newest first), then includes messages
+    newest-to-oldest in FULL while the running total stays within budget.
+    Older messages are dropped first; at least min_messages always survive
+    (even if they alone exceed the budget). Image attachments become
+    placeholders. No per-message truncation — full or not included.
+
+    Env: SESSION_CONTEXT_BUDGET (default 30000 chars ≈ 15K tokens).
+    """
+    if budget is None:
+        budget = int(os.getenv("SESSION_CONTEXT_BUDGET", "30000"))
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT role, content, image FROM messages "
+                "WHERE session_id = ? ORDER BY created_at DESC "
+                f"LIMIT {int(max_messages)}",
+                (session_id,),
+            ).fetchall()
+    except Exception as exc:
+        logger.warning("[CONTEXT] query failed for session %s: %s", session_id, exc)
+        return ""
+
+    included = []  # newest first
+    total = 0
+    for row in rows:
+        r = row if isinstance(row, dict) else {
+            "role": row[0], "content": row[1],
+            "image": row[2] if len(row) > 2 else None}
+        content = r.get("content") or ""
+        image = r.get("image")
+        if image:
+            content = f"{content}\n\n[Image was attached in previous message]"
+        total += len(content)
+        if total > budget and len(included) >= min_messages:
+            break
+        included.append(f"{(r.get('role') or 'user').upper()}: {content}")
+
+    included.reverse()  # chronological order
+    context = "\n\n".join(included)
+    dropped = len(rows) - len(included)
+    logger.info("[CONTEXT] session %s: %d messages (%d chars, budget %d, dropped %d)",
+                session_id, len(included), total, budget, dropped)
+    return context
 
 
 def _require_session_owner(session_id: int, authorization: Optional[str]) -> int:
@@ -9672,33 +9711,9 @@ async def chat_stream_endpoint(
             if request.design_context and handler.project_type_id == 1:
                 acp_user_content = _append_design_context_block(acp_user_content, request.design_context)
             
-            # Get conversation context from database for continuity (last 4 messages = 2 exchanges)
-            # Replace base64 images with placeholder to avoid bloating context
-            session_context = ""
-            try:
-                with get_db() as conn:
-                    rows = conn.execute(
-                        """SELECT role, content, image FROM messages
-                           WHERE session_id = ?
-                           ORDER BY created_at DESC LIMIT 10""",
-                        (session_id,)
-                    ).fetchall()
-                    if rows:
-                        context_parts = []
-                        for row in reversed(rows):  # Chronological order
-                            role = row['role'] if isinstance(row, dict) else row[0]
-                            content = row['content'] if isinstance(row, dict) else row[1]
-                            image = row['image'] if isinstance(row, dict) else row[2] if len(row) > 2 else None
-                            
-                            # If message has image, add placeholder instead of base64
-                            if image:
-                                content = f"{content}\n\n[Image was attached in previous message]"
-                            
-                            context_parts.append(f"{role.upper()}: {content}")
-                        session_context = "\n\n".join(context_parts)
-                        logger.info(f"[ACP-STREAM] Loaded {len(rows)} messages as context ({len(session_context)} chars)")
-            except Exception as ctx_err:
-                logger.warning(f"[ACP-STREAM] Could not load context: {ctx_err}")
+            # Dynamic conversation context: last 10 messages within a
+            # char budget (oldest dropped first, min 2 always kept).
+            session_context = _load_session_context_budgeted(session_id)
             
             # Log prompt framing before sending to Claude
             logger.info(f"[ACP-STREAM] === PROMPT FRAMING ===")
@@ -10800,32 +10815,8 @@ async def chat_endpoint(
                     if design_reference:
                         acp_user_content = append_design_reference_continuation(user_content, design_reference)
                 
-                # Get conversation context from database
-                # Replace base64 images with placeholder to avoid bloating context
-                session_context = ""
-                try:
-                    with get_db() as ctx_conn:
-                        rows = ctx_conn.execute(
-                            """SELECT role, content, image FROM messages 
-                               WHERE session_id = ? 
-                               ORDER BY created_at DESC LIMIT 10""",
-                            (session_id,)
-                        ).fetchall()
-                        if rows:
-                            context_parts = []
-                            for row in reversed(rows):
-                                role = row['role'] if isinstance(row, dict) else row[0]
-                                content = row['content'] if isinstance(row, dict) else row[1]
-                                image = row['image'] if isinstance(row, dict) else row[2] if len(row) > 2 else None
-                                
-                                # If message has image, add placeholder instead of base64
-                                if image:
-                                    content = f"{content}\n\n[Image was attached in previous message]"
-                                
-                                context_parts.append(f"{role.upper()}: {content}")
-                            session_context = "\n\n".join(context_parts)
-                except Exception as ctx_err:
-                    logger.warning(f"[ACP-MODE] Could not load context: {ctx_err}")
+                # Dynamic conversation context (budgeted)
+                session_context = _load_session_context_budgeted(session_id)
                 
                 # Log prompt framing before sending to Claude
                 logger.info(f"[ACP-MODE] === PROMPT FRAMING ===")

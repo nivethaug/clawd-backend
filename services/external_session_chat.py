@@ -16,8 +16,18 @@ from services.session_lock_service import SessionLockService
 logger = logging.getLogger(__name__)
 
 
-def load_session_context(session_id: int, limit: int = 10) -> str:
-    """Load recent editor chat messages for ACP continuity."""
+def load_session_context(session_id: int, limit: int = 10,
+                         budget: int = None, min_messages: int = 2) -> str:
+    """Load recent editor chat messages for ACP continuity.
+
+    Dynamic context window: includes messages newest-to-oldest in FULL
+    while the running total stays within `budget` chars. Older messages
+    are dropped first; at least `min_messages` always survive.
+    Env: SESSION_CONTEXT_BUDGET (default 30000).
+    """
+    import os as _os
+    if budget is None:
+        budget = int(_os.getenv("SESSION_CONTEXT_BUDGET", "30000"))
     try:
         with get_db() as conn:
             rows = conn.execute(
@@ -30,15 +40,21 @@ def load_session_context(session_id: int, limit: int = 10) -> str:
         if not rows:
             return ""
 
-        parts = []
-        for row in reversed(rows):
+        included = []  # newest first
+        total = 0
+        for row in rows:
             role = row["role"] if isinstance(row, dict) else row[0]
             content = row["content"] if isinstance(row, dict) else row[1]
             image = row.get("image") if isinstance(row, dict) else (row[2] if len(row) > 2 else None)
             if image:
                 content = f"{content}\n\n[Image was attached in previous message]"
-            parts.append(f"{str(role).upper()}: {content}")
-        return "\n\n".join(parts)
+            total += len(content)
+            if total > budget and len(included) >= min_messages:
+                break
+            included.append(f"{str(role).upper()}: {content}")
+
+        included.reverse()  # chronological
+        return "\n\n".join(included)
     except Exception as e:
         logger.warning("[EXTERNAL-SESSION] Failed to load session context: %s", e, exc_info=True)
         return ""
