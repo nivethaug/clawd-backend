@@ -816,6 +816,7 @@ class ContainerManager:
         args: List[str] = [
             "docker",
             "exec",
+            "-i",  # keep stdin open — large prompts pipe through (claude -p -)
             "--user", f"{CONTAINER_USER_UID}:{CONTAINER_USER_GID}",
         ]
 
