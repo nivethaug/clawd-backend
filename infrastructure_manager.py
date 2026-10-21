@@ -17,6 +17,8 @@ import json
 import logging
 import os
 import time
+
+from services.npm_install import run_npm
 import asyncio
 import sys
 import builtins
@@ -940,14 +942,11 @@ class ServiceManager:
             
             # Install dependencies before build (use npm ci for speed)
             # logger.info("[BUILD] Installing frontend dependencies...")  # Commented for cleaner logs
-            install_result = subprocess.run(
-                ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
-                capture_output=True,
-                text=True,
-                timeout=600,  # 10 minutes
+            install_result = run_npm(
+                ["ci", "--prefer-offline", "--no-audit", "--progress=false"],
                 cwd=str(frontend_dist_path),
-                env=env
-            )
+                timeout=600,  # 10 minutes
+                env=env, logger=logger)
             
             if install_result.returncode != 0:
                 # Extract actual errors from stderr (npm warnings go to stderr but don't fail)
@@ -1074,14 +1073,11 @@ class ServiceManager:
                                     logger.warning(f"⚠️ Could not clean cache {cache_path}: {cache_err}")
                         
                         # Install dependencies (use npm ci for speed)
-                        install_result = subprocess.run(
-                            ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
-                            capture_output=True,
-                            text=True,
-                            timeout=300,
+                        install_result = run_npm(
+                            ["ci", "--prefer-offline", "--no-audit", "--progress=false"],
                             cwd=str(frontend_dist_path),
-                            env=env
-                        )
+                            timeout=300,
+                            env=env, logger=logger)
                         
                         if install_result.returncode != 0:
                             logger.warning(f"npm install warnings: {install_result.stderr}")
@@ -2677,12 +2673,10 @@ CRITICAL: Fix the errors and ensure npm run build succeeds."""
                 # Step 2: npm ci with dev dependencies (optimized)
                 # logger.info(f"[BUILD] Running npm ci in {frontend_path}")  # Commented for cleaner logs
                 print("📦 Running npm ci (node_modules not found)...")
-                install_result = subprocess.run(
-                    ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
+                install_result = run_npm(
+                    ["ci", "--prefer-offline", "--no-audit", "--progress=false"],
                     cwd=str(frontend_path),
-                    env=env,
-                    capture_output=True,
-                    text=True,
+                    env=env, logger=logger,
                     timeout=600  # 10 minutes
                 )
             

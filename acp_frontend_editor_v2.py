@@ -17,6 +17,8 @@ import re
 import shutil
 import subprocess
 import logging
+
+from services.npm_install import run_npm
 import hashlib
 from datetime import datetime
 from pathlib import Path
@@ -815,15 +817,13 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         print("⚠️  [DEPS] PM2 detected → optimized npm ci", flush=True)
 
         try:
-            result = subprocess.run(
-                ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
+            result = run_npm(
+                ["ci", "--prefer-offline", "--no-audit", "--progress=false"],
                 cwd=str(frontend_path),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                text=True,
-                timeout=BUILD_TIMEOUT
-            )
+                timeout=BUILD_TIMEOUT, logger=logger)
 
             if result.returncode == 0:
                 logger.info("✅ npm ci successful (optimized)")
@@ -882,15 +882,13 @@ def install_dependencies(frontend_path: Path) -> Tuple[bool, str]:
         logger.info("📦 Running optimized npm ci...")
         print("📦 [DEPS] Running optimized npm ci...", flush=True)
 
-        result = subprocess.run(
-            ["npm", "ci", "--prefer-offline", "--no-audit", "--progress=false"],
+        result = run_npm(
+            ["ci", "--prefer-offline", "--no-audit", "--progress=false"],
             cwd=str(frontend_path),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            text=True,
-            timeout=BUILD_TIMEOUT
-        )
+            timeout=BUILD_TIMEOUT, logger=logger)
 
         if result.returncode == 0:
             logger.info("✅ npm ci successful (optimized)")

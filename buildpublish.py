@@ -25,6 +25,7 @@ from typing import Optional, Tuple
 # workspace dir while EXECUTION_MODE=local keeps today's flat layout.
 # In local mode this returns exactly "/root/dreampilot/projects/website".
 from services.container_storage import website_root as _website_root
+from services.npm_install import run_npm
 
 # Configure logging
 logging.basicConfig(
@@ -81,14 +82,11 @@ class BuildPublisher:
             
             # Step 2: npm install (prefer cache)
             logger.info("📦 Installing dependencies...")
-            install_result = subprocess.run(
-                ["npm", "install", "--prefer-offline", "--legacy-peer-deps"],
+            install_result = run_npm(
+                ["install", "--prefer-offline", "--legacy-peer-deps"],
                 cwd=str(self.frontend_path),
-                capture_output=True,
-                text=True,
                 timeout=600,  # 10 minutes
-                env=env
-            )
+                env=env, logger=logger)
             
             if install_result.returncode != 0:
                 logger.error(f"npm install failed: {install_result.stderr[:500]}")

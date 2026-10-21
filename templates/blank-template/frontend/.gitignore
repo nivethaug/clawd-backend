@@ -4,7 +4,8 @@ node_modules/
 
 # Lock files (keep only one)
 # pnpm-lock.yaml  # DISABLED - using npm only
-package-lock.json
+# package-lock.json is COMMITTED on purpose: npm ci requires it and builds
+# must be reproducible from source control, not worker disk state (P0).
 
 # Build output
 dist/

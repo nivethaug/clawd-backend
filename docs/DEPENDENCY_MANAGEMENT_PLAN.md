@@ -97,3 +97,13 @@
 ## 7. Approval boundary
 
 **Approving this plan = approving (a) writing this document to `docs/DEPENDENCY_MANAGEMENT_PLAN.md` and (b) the P0 design for a FUTURE implementation task.** No phase is implemented now; P1–P3 need explicit separate approvals.
+
+---
+
+## Addendum (P0 review): shared-cache growth watch
+
+Per review feedback, `run_npm()` and the template `buildpublish.py` also log
+**`cache_delta` and `cache_total`** (`/srv/cache/npm` usage before/after every
+install). If the logs show unbounded growth across projects, the follow-up is
+an `npm cache clean --force` cron or a size cap — decide from the collected
+data, not preemptively. (Implemented with P0.)

@@ -2514,6 +2514,7 @@ async def sentry_context_middleware(request: Request, call_next):
 # Forwards project-scoped requests to the worker when the project's files are
 # not present locally. No-op when WORKER_VPS_URL is unset (backward compatible).
 from services.project_proxy import project_proxy_middleware, proxy_auth_middleware  # noqa: E402
+from services.npm_install import run_npm  # noqa: E402
 from services.system_metrics import collect as collect_system_metrics  # noqa: E402
 # Phase 2 (container migration): path-traversal guards + path construction route
 # through ContainerStorage so the same check works in both EXECUTION_MODE layouts.
@@ -4410,11 +4411,9 @@ def _clone_worker(project_id: int, clone_name: str, clone_domain: str, source_ty
                 logger.info(f"[CLONE] Running npm install in {frontend_dir}")
                 npm_env = os.environ.copy()
                 npm_env.pop("NODE_ENV", None)  # Ensure devDependencies are installed
-                npm_install_result = subprocess.run(
-                    ["npm", "install", "--no-audit", "--progress=false"],
-                    capture_output=True, text=True, timeout=600,
-                    cwd=frontend_dir, env=npm_env,
-                )
+                npm_install_result = run_npm(
+                    ["install", "--no-audit", "--progress=false"],
+                    cwd=frontend_dir, timeout=600, env=npm_env, logger=logger)
                 if npm_install_result.returncode != 0:
                     logger.warning(f"[CLONE] npm install failed (non-fatal, provision_all will retry): {npm_install_result.stderr[:500]}")
                 else:

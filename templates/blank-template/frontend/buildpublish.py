@@ -107,11 +107,41 @@ def npm_install(cwd: str = None):
     Uses NODE_ENV=development via get_env_override() so that devDependencies
     such as vite, vitest, @vitejs/plugin-react, and @vitejs/plugin-react-swc
     are always installed regardless of the server's global NODE_ENV.
+
+    Shares the platform npm DOWNLOAD cache (NPM_CONFIG_CACHE, default
+    /srv/cache/npm — container mode sets the same value) and logs one
+    structured line per install (Dependency Management Plan P0). Lockfile
+    and node_modules stay per-project.
     """
+    import time as _time
+
     print("\n" + "="*50)
     print("NPM CI")
     print("="*50)
-    
+
+    cache_dir = os.environ.get("NPM_CONFIG_CACHE", "/srv/cache/npm")
+    env = get_env_override()
+    env["NPM_CONFIG_CACHE"] = cache_dir
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError:
+        pass  # fall back to npm's default cache location
+
+    def _du_mb(path):
+        try:
+            out = subprocess.run(["du", "-sm", path], capture_output=True,
+                                 text=True, timeout=30)
+            if out.returncode == 0 and out.stdout.split():
+                return float(out.stdout.split()[0])
+        except Exception:
+            pass
+        return None
+
+    nm_path = os.path.join(cwd or os.getcwd(), "node_modules")
+    nm_before = _du_mb(nm_path) or 0.0
+    cache_before = _du_mb(cache_dir)
+    t0 = _time.time()
+
     result = subprocess.run(
         [
             "npm",
@@ -125,9 +155,22 @@ def npm_install(cwd: str = None):
         text=True,
         timeout=600,
         cwd=cwd,
-        env=get_env_override(),
+        env=env,
     )
-    
+
+    elapsed = _time.time() - t0
+    nm_after = _du_mb(nm_path) or 0.0
+    cache_after = _du_mb(cache_dir)
+    cache_delta = (
+        f"{cache_after - cache_before:+.1f}MB"
+        if cache_before is not None and cache_after is not None else "n/a")
+    cache_total = f"{cache_after:.1f}MB" if cache_after is not None else "n/a"
+    print(
+        f"[NPM] cmd=npm ci cwd={cwd} cache={cache_dir} "
+        f"duration={elapsed:.1f}s exit={result.returncode} "
+        f"node_modules_delta={nm_after - nm_before:+.1f}MB "
+        f"cache_delta={cache_delta} cache_total={cache_total}")
+
     if result.returncode != 0:
         # Extract actual errors from stderr (npm warnings go to stderr but don't fail)
         stderr_lines = result.stderr.split('\n')
