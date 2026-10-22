@@ -12639,6 +12639,7 @@ UPLOAD_DOC_TYPES = {
     "application/pdf": ".pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "text/plain": ".txt",
 }
 # 3D models (Dependency Management / 3D preset support): rigged GLB/GLTF
 # characters and scenes for website frontends. GLB is self-contained.
