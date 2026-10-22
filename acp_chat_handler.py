@@ -2485,7 +2485,8 @@ curl -s -o /dev/null -w "%{{http_code}}" https://{self.backend_domain}/health
 ### ✅ Adding npm Packages — THE ONE SANCTIONED ROUTE
 Never edit package.json or run npm install yourself. If the user needs a
 new npm package (e.g. 3D, animation, charts), call the platform endpoint:
-  POST {backend_url}/projects/{project_id}/frontend/deps
+  POST https://api.dreamagent.cloud/projects/{self.project_id}/frontend/deps
+  Headers: Authorization: Bearer <the request's own auth token>
   Body: {{"packages": ["name@1.2.3", ...]}}   (EXACT pinned versions only)
 The platform security-gates the packages, updates package.json + lockfile,
 installs and commits them; then publish normally via buildpublish.py.
