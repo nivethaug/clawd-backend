@@ -12640,6 +12640,13 @@ UPLOAD_DOC_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
 }
+# 3D models (Dependency Management / 3D preset support): rigged GLB/GLTF
+# characters and scenes for website frontends. GLB is self-contained.
+UPLOAD_MODEL_TYPES = {
+    "model/gltf-binary": ".glb",
+    "model/gltf+json": ".gltf",
+    "application/octet-stream": ".glb,.gltf",  # browsers often send this
+}
 # Circuit breaker: uploads pause when the workspace volume drops below this
 UPLOAD_MIN_FREE_DISK_BYTES = 5 * 1024 * 1024 * 1024  # 5GB
 
@@ -12670,8 +12677,11 @@ def _uploads_dir_for_project(project_path: str, type_id: int, kind: str) -> tupl
     """
     base = Path(project_path)
     if type_id == 1:
-        if kind == "image":
-            return base / "frontend" / "public" / "uploads", True
+        if kind in ("image", "model"):
+            # models (glb/gltf) land beside images so the frontend can load
+            # them same-origin at /uploads/models/<name> after a build
+            sub = "models" if kind == "model" else ""
+            return base / "frontend" / "public" / "uploads" / sub, True
         return base / "backend" / "data" / "uploads", False
     if type_id == 2:  # telegram
         subdir = "telegram"
@@ -12798,12 +12808,22 @@ async def upload_project_file(
 
     # Classify + validate
     content_type = (file.content_type or "").lower()
-    if kind not in {"image", "doc"}:
+    filename_lc = (file.filename or "").lower()
+    if kind not in {"image", "doc", "model"}:
         kind = "image" if content_type in UPLOAD_IMAGE_TYPES else "doc" if content_type in UPLOAD_DOC_TYPES else None
+        if kind is None:
+            ext_ok = filename_lc.endswith((".glb", ".gltf"))
+            ct_ok = content_type in UPLOAD_MODEL_TYPES or content_type == "application/octet-stream"
+            if ext_ok and (ct_ok or content_type in UPLOAD_MODEL_TYPES):
+                kind = "model"
     if kind == "image" and content_type not in UPLOAD_IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Invalid image format. Accepted: .jpg, .png, .webp, .gif")
     if kind == "doc" and content_type not in UPLOAD_DOC_TYPES:
         raise HTTPException(status_code=400, detail="Invalid document format. Accepted: .pdf, .docx, .xlsx")
+    if kind == "model":
+        ext = "." + filename_lc.rsplit(".", 1)[-1] if "." in filename_lc else ""
+        if ext not in (".glb", ".gltf"):
+            raise HTTPException(status_code=400, detail="Invalid 3D model format. Accepted: .glb, .gltf")
 
     contents = await file.read()
     bytes_before = len(contents)
@@ -12829,6 +12849,8 @@ async def upload_project_file(
     if kind == "image":
         ext = UPLOAD_IMAGE_TYPES[content_type]
         contents, ext = _compress_image_bytes(contents, ext)
+    elif kind == "model":
+        ext = "." + filename_lc.rsplit(".", 1)[-1]
     else:
         ext = UPLOAD_DOC_TYPES[content_type]
     bytes_after = len(contents)
@@ -12850,7 +12872,9 @@ async def upload_project_file(
     from services.container_storage import to_container_path
 
     container_path = to_container_path(str(host_path))
-    url = f"/uploads/{filename}" if (is_public_frontend and project.get("domain")) else None
+    url = None
+    if is_public_frontend and project.get("domain"):
+        url = f"/uploads/models/{filename}" if kind == "model" else f"/uploads/{filename}"
 
     # Ledger row
     with get_db() as conn:
