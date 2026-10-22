@@ -107,3 +107,30 @@ Per review feedback, `run_npm()` and the template `buildpublish.py` also log
 install). If the logs show unbounded growth across projects, the follow-up is
 an `npm cache clean --force` cron or a size cap — decide from the collected
 data, not preemptively. (Implemented with P0.)
+
+---
+
+## P1 implementation status (2026-10-22)
+
+**Implemented, shipped LOG-ONLY** (`NPM_GATE_ENFORCE` unset/`0`): structural
+rejections (unpinned specs, blocklist) always block; metadata-verifiability
+failures log a warning and proceed until adversarial tests pass in staging.
+Flip `NPM_GATE_ENFORCE=1` to enforce (rollback = set back to 0).
+
+- `services/sandbox/npm_gate.py` — blocklist (wildcards), exact-pin-only,
+  registry verification (existence/version/lifecycle-scripts/peer-deps vs
+  the project's current deps), per-op unpacked-size cap, transitive report,
+  **fail-closed** on unverifiable metadata.
+- `services/deps/frontend_deps.py` — the sanctioned `add_frontend_deps()`:
+  gate → `check_package_json` typosquat → atomic `FileUtils.write_file`
+  (all existing layers) → lockfile-only regen via `run_npm` (shared cache +
+  P0 logging) with **rollback on failure** → git commit of both files.
+- `POST /projects/{id}/frontend/deps` (owner-gated; auto-forwarded to the
+  worker by project_proxy with its main-side owner gate).
+- Tests: `tests/test_p1_npm_gate.py` — 20 cases incl. adversarial rows.
+
+**Isolation decision (P1 item 4):** reviewed — local-mode npm still runs as
+root today (pre-existing condition, not introduced by P1). All installs now
+flow through `services/npm_install.run_npm`, so switching execution to the
+container path or a dedicated non-root build user is a one-place change.
+Scheduled as the gating prerequisite before `NPM_GATE_ENFORCE=1`.
