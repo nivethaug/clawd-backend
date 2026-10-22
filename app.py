@@ -12859,7 +12859,17 @@ async def upload_project_file(
     uploads_dir, is_public_frontend = _uploads_dir_for_project(project_path, int(project.get("type_id") or 1), kind)
     uploads_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    filename = f"{kind}_{project_id}_{timestamp}_{uuid.uuid4().hex[:8]}{ext}"
+    # Human-readable filename (user→LLM communication): keep the original
+    # file's stem so "the Sunlit Urban Alleyway Reflections image" is
+    # matchable from its name. Sanitized, truncated, still unique.
+    original_stem = re.sub(
+        r"[^a-z0-9]+", "-", (file.filename or "").rsplit(".", 1)[0].lower()
+    ).strip("-")[:40]
+    unique_id = uuid.uuid4().hex[:8]
+    if original_stem:
+        filename = f"{kind}_{project_id}_{original_stem}_{unique_id}{ext}"
+    else:
+        filename = f"{kind}_{project_id}_{timestamp}_{unique_id}{ext}"
     host_path = uploads_dir / filename
     host_path.write_bytes(contents)
 
