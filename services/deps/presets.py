@@ -83,6 +83,24 @@ def preset_specs(preset: str) -> List[str]:
             for name, version in PRESETS.get(preset, {}).get("deps", {}).items()]
 
 
+def _copy_preset_files(project_path: str, preset: str) -> None:
+    """Copy services/deps/preset_files/<preset>/** into the project frontend
+    (src/ tree). No-op when the preset has no files (standard)."""
+    import shutil
+    src_dir = os.path.join(os.path.dirname(__file__), "preset_files", preset)
+    frontend_src = os.path.join(project_path, "frontend", "src")
+    if not os.path.isdir(src_dir) or not os.path.isdir(frontend_src):
+        return
+    for root, _dirs, files in os.walk(src_dir):
+        for f in files:
+            s = os.path.join(root, f)
+            rel = os.path.relpath(s, src_dir)
+            d = os.path.join(frontend_src, rel)
+            os.makedirs(os.path.dirname(d), exist_ok=True)
+            shutil.copy2(s, d)
+            logger.info("[PRESET] installed support file src/%s (%s)", rel, preset)
+
+
 def apply_preset(project_path: str, preset: str,
                  install: bool = True) -> Dict:
     """Apply a preset to <project>/frontend via the P1 sanctioned service.
@@ -110,6 +128,10 @@ def apply_preset(project_path: str, preset: str,
                      preset, project_path, result.get("message"))
         return {"ok": False, "preset": preset, "applied": [],
                 "message": result.get("message", "preset application failed")}
+
+    # Preset support files (P3): e.g. the lazy 3D wrapper so Vite
+    # code-splits three/fiber/drei out of the initial bundle.
+    _copy_preset_files(project_path, preset)
 
     # Incremental install: the fresh template copy has node_modules; npm
     # install adds only the new packages (Phase 5 then skips its own ci).

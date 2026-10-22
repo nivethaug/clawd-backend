@@ -164,3 +164,23 @@ byte-identical — acceptance row 1 asserted by tests).
   `npm ci --dry-run` resolving the 3D pins).
 - Remaining before P3: one live 3D project creation through the platform
   (full AI build) as the production smoke test.
+
+---
+
+## P3 implementation status (2026-10-22)
+
+**Implemented + measured.** See `docs/BENCHMARKS.md` for the full table.
+
+- `services/deps/preset_files/3d/lib/lazy3d.tsx` — preset-installed wrapper
+  (LazyCanvas via React.lazy, `loadThree()`, `lazyDrei()`); standard preset
+  installs nothing. `apply_preset` copies preset support files into `src/`.
+- Agent prompt now carries a BUNDLE RULE: render 3D through
+  `src/lib/lazy3d.tsx`, never eager-import three/fiber/drei in shared code.
+- **manualChunks evaluated: NOT needed** — Vite's default dynamic-import
+  splitting already isolates the 3D libs via the wrapper (measured: 3-chunk
+  lazy build; initial JS 319 KB vs 317 KB standard; eager would be 1180 KB).
+- `scripts/bundle_benchmark.py` — reproducible 3-variant benchmark
+  (standard / eager worst-case / lazy) writing `docs/BENCHMARKS.md` with
+  4 acceptance assertions (all passing).
+- Tests: `tests/test_p3_lazy3d.py` (wrapper install, standard no-op,
+  no-eager-import invariant on the shipped wrapper).
