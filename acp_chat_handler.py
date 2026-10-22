@@ -2482,6 +2482,18 @@ curl -s -o /dev/null -w "%{{http_code}}" https://{self.backend_domain}/health
 ⛔ Never manually restart PM2
 ⛔ Never manually reload nginx
 
+### ✅ Adding npm Packages — THE ONE SANCTIONED ROUTE
+Never edit package.json or run npm install yourself. If the user needs a
+new npm package (e.g. 3D, animation, charts), call the platform endpoint:
+  POST {backend_url}/projects/{project_id}/frontend/deps
+  Body: {{"packages": ["name@1.2.3", ...]}}   (EXACT pinned versions only)
+The platform security-gates the packages, updates package.json + lockfile,
+installs and commits them; then publish normally via buildpublish.py.
+For 3D work prefer the existing stack: three, @react-three/fiber,
+@react-three/drei (the project may already have them — check imports).
+If src/lib/lazy3d.tsx exists, render 3D through its LazyCanvas/Suspense
+wrapper; never eager-import three/fiber/drei in shared components.
+
 ### BEFORE Publishing - Update Agent Folder
 See Agent Folder Update Checklist at the bottom.
  
