@@ -48,6 +48,17 @@ def get_env_override():
     """
     env = os.environ.copy()
     env["NODE_ENV"] = "development"
+    # Exec-safe scratch for native toolchains (P0/P1 findings): swc 1.16
+    # materializes its binding into ~/.cache or /tmp, which sandboxes mount
+    # noexec - the #1 cause of "broken native module" build failures.
+    # A project-local dir is writable AND executable.
+    scratch = os.path.join(os.getcwd(), ".toolcache")
+    try:
+        os.makedirs(scratch, exist_ok=True)
+    except OSError:
+        pass
+    env.setdefault("SWC_NATIVE_BINDING_CACHE", scratch)
+    env.setdefault("TMPDIR", scratch)
     return env
 
 
