@@ -12963,18 +12963,29 @@ async def list_uploaded_files(
                ORDER BY created_at DESC, id DESC LIMIT 200""",
             (project_id,),
         ).fetchall()
-    return {
-        "files": [
-            {
-                "id": r["id"],
-                "kind": r["kind"],
-                "name": r["original_name"] or r["filename"],
-                "size_bytes": int(r["size_bytes"]),
-                "created_at": str(r["created_at"]),
-            }
-            for r in rows
-        ]
-    }
+        type_row = conn.execute(
+            "SELECT type_id FROM projects WHERE id = %s", (project_id,)
+        ).fetchone()
+    type_id = (type_row["type_id"] if type_row else 1) or 1
+    is_website = int(type_id) == 1
+
+    files = []
+    for r in rows:
+        # website projects: public same-origin URL for image/model kinds
+        url = None
+        if is_website and r["kind"] in ("image", "model"):
+            url = (f"/uploads/models/{r['filename']}" if r["kind"] == "model"
+                   else f"/uploads/{r['filename']}")
+        files.append({
+            "id": r["id"],
+            "kind": r["kind"],
+            "name": r["original_name"] or r["filename"],
+            "filename": r["filename"],
+            "url": url,
+            "size_bytes": int(r["size_bytes"]),
+            "created_at": str(r["created_at"]),
+        })
+    return {"files": files}
 
 
 @app.delete("/projects/{project_id}/files/uploads/{upload_id}")
