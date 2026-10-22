@@ -229,7 +229,7 @@ _SECRET_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 ]
 
-_SCAN_SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", "dist", "build", ".next"}
+_SCAN_SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", "dist", "build", ".next", ".tmp", ".execsafe", "node-compile-cache", ".cache"}
 _SCAN_MAX_FILE = 2 * 1024 * 1024  # skip files > 2MB (binaries, bundles)
 
 
