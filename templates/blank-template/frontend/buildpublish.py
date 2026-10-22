@@ -145,7 +145,7 @@ def npm_install(cwd: str = None):
     result = subprocess.run(
         [
             "npm",
-            "install",
+            "ci",
             "--prefer-offline",
             "--no-audit",
             "--progress=false",
@@ -428,7 +428,6 @@ def main():
     parser.add_argument("--install-only", action="store_true", help="Run only npm ci (skip build, restart, cleanup)")
     parser.add_argument("--no-restart", action="store_true", help="Skip PM2 and nginx restart (restart is default)")
     parser.add_argument("--cleanup", action="store_true", help="Remove node_modules after a successful build (manual disk-pressure relief)")
-    parser.add_argument("--clean-install", action="store_true", help="Force a full wipe + reinstall of node_modules (default keeps healthy modules)")
     args = parser.parse_args()
     
     # Determine frontend directory
@@ -469,13 +468,11 @@ def main():
     # Step 1: Clean Vite caches
     clean_vite_caches()
     
-    # Step 2: keep healthy node_modules (npm install preserves working
-    # native bindings - esbuild/swc - and only adds/updates per lockfile).
-    # A full wipe happens only with --clean-install.
-    if args.clean_install and not args.skip_install:
+    # Step 2: Remove existing node_modules for clean install
+    if not args.skip_install:
         remove_node_modules()
     
-    # Step 3: npm install (with NODE_ENV=development for devDependencies)
+    # Step 3: npm ci (with NODE_ENV=development for devDependencies)
     if not args.skip_install:
         if not npm_install(cwd=str(frontend_dir)):
             success = False
