@@ -6810,6 +6810,19 @@ async def publish_frontend(
         
         if result.returncode == 0:
             logger.info(f"✅ Frontend build completed for project {project_id}")
+            # Builds run as root - freshly written dist/node_modules arrive
+            # root-owned and block the next agent-side (dreampilot) build.
+            # Transfer ownership the same way the creation flow does.
+            try:
+                for cmd in (
+                    ["chattr", "-R", "-i", str(frontend_path)],
+                    ["chown", "-R", "dreampilot:dreampilot", str(frontend_path)],
+                    ["chmod", "-R", "u+rwX", str(frontend_path)],
+                ):
+                    subprocess.run(cmd, capture_output=True, timeout=180)
+                logger.info("Post-build ownership transferred to dreampilot: %s", frontend_path)
+            except Exception as own_err:
+                logger.warning("Post-build chown skipped: %s", own_err)
             return BuildPublishResponse(
                 success=True,
                 message="Frontend build and publish completed successfully",
@@ -6910,6 +6923,16 @@ async def publish_backend(
         )
         
         if result.returncode == 0:
+            try:
+                for cmd in (
+                    ["chattr", "-R", "-i", str(backend_path)],
+                    ["chown", "-R", "dreampilot:dreampilot", str(backend_path)],
+                    ["chmod", "-R", "u+rwX", str(backend_path)],
+                ):
+                    subprocess.run(cmd, capture_output=True, timeout=180)
+                logger.info("Post-build ownership transferred to dreampilot: %s", backend_path)
+            except Exception as own_err:
+                logger.warning("Post-build chown skipped: %s", own_err)
             logger.info(f"✅ Backend build completed for project {project_id}")
             return BuildPublishResponse(
                 success=True,
