@@ -115,7 +115,7 @@ def _patch_vite_manual_chunks(project_path: str) -> None:
         // 3D preset: pin three/@react-three into one vendor chunk (deduped,
         // never in the entry bundle; loads with the 3D scene)
         manualChunks(id) {
-          if (/node_modules[\/](three|@react-three)[\/]/.test(id)) return "three-vendor";
+          if (/node_modules[\\/](three|@react-three)[\\/]/.test(id)) return "three-vendor";
         },
       },
     },
