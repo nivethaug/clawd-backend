@@ -68,3 +68,59 @@ class TestPresetSupportFiles(unittest.TestCase):
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2).result.wasSuccessful() else 1)
+
+
+class TestManualChunksPatch(unittest.TestCase):
+    CFG = ("export default defineConfig(({ mode }) => ({" + chr(10)
+           + "  server: { port: 8080 }," + chr(10)
+           + "  plugins: [react()]," + chr(10)
+           + "}));" + chr(10))
+
+    def _project_with_config(self):
+        import tempfile
+        tmp = tempfile.mkdtemp(prefix="p3mc_")
+        frontend = Path(tmp) / "frontend"
+        frontend.mkdir(parents=True)
+        (frontend / "vite.config.ts").write_text(self.CFG)
+        return tmp, frontend
+
+    def _rmtree(self, tmp):
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_patch_adds_rule_and_is_idempotent(self):
+        tmp, frontend = self._project_with_config()
+        try:
+            presets._patch_vite_manual_chunks(tmp)
+            cfg1 = (frontend / "vite.config.ts").read_text()
+            self.assertIn("manualChunks", cfg1)
+            self.assertIn("three-vendor", cfg1)
+            presets._patch_vite_manual_chunks(tmp)
+            self.assertEqual(cfg1, (frontend / "vite.config.ts").read_text(), "idempotent")
+        finally:
+            self._rmtree(tmp)
+
+    def test_apply_preset_3d_invokes_patch(self):
+        tmp, frontend = self._project_with_config()
+        try:
+            from services.deps import frontend_deps
+            fake = mock.Mock(return_value={"ok": True, "added": ["three@0.186.1"]})
+            import services.npm_install as ni
+            with mock.patch.object(frontend_deps, "add_frontend_deps", fake):
+                with mock.patch.object(ni, "run_npm", mock.Mock(returncode=0)):
+                    presets.apply_preset(tmp, "3d", install=False)
+            self.assertIn("manualChunks", (frontend / "vite.config.ts").read_text())
+        finally:
+            self._rmtree(tmp)
+
+    def test_standard_preset_never_touches_vite_config(self):
+        tmp, frontend = self._project_with_config()
+        try:
+            presets.apply_preset(tmp, "standard")
+            self.assertEqual((frontend / "vite.config.ts").read_text(), self.CFG)
+        finally:
+            self._rmtree(tmp)
+
+
+if __name__ == "__main__":
+    sys.exit(0 if unittest.main(verbosity=2).result.wasSuccessful() else 1)

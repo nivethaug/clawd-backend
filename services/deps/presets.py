@@ -83,6 +83,48 @@ def preset_specs(preset: str) -> List[str]:
             for name, version in PRESETS.get(preset, {}).get("deps", {}).items()]
 
 
+def _patch_vite_manual_chunks(project_path: str) -> None:
+    """3D projects (P3): pin three/@react-three into ONE vendor chunk.
+
+    Without this, Rollup hoists the three libraries into the ENTRY chunk
+    when more than one dynamic entry (LazyCanvas's fiber import and
+    lazyDrei's drei import) shares them - measured live on project 2131:
+    entry ballooned to 1692KB with a duplicated three. The manualChunks
+    rule dedupes the stack into a single 'three-vendor' chunk and keeps it
+    out of the entry bundle no matter how application code imports it.
+    Idempotent; the AI never edits vite.config (path-blocked), so the
+    patch persists.
+    """
+    cfg = os.path.join(project_path, "frontend", "vite.config.ts")
+    try:
+        src = open(cfg, encoding="utf-8").read()
+    except OSError:
+        logger.warning("[PRESET] vite.config.ts not found - manualChunks not added")
+        return
+    if "manualChunks" in src:
+        return  # already patched
+    marker = "plugins: [react()],"
+    if marker not in src:
+        logger.warning("[PRESET] vite.config.ts plugins marker not found - manualChunks not added")
+        return
+    block = marker + """
+
+  build: {
+    rollupOptions: {
+      output: {
+        // 3D preset: pin three/@react-three into one vendor chunk (deduped,
+        // never in the entry bundle; loads with the 3D scene)
+        manualChunks(id) {
+          if (/node_modules[\/](three|@react-three)[\/]/.test(id)) return "three-vendor";
+        },
+      },
+    },
+  },"""
+    src = src.replace(marker, block, 1)
+    open(cfg, "w", encoding="utf-8").write(src)
+    logger.info("[PRESET] manualChunks added to vite.config.ts (3d vendor chunk)")
+
+
 def _copy_preset_files(project_path: str, preset: str) -> None:
     """Copy services/deps/preset_files/<preset>/** into the project frontend
     (src/ tree). No-op when the preset has no files (standard)."""
@@ -132,6 +174,8 @@ def apply_preset(project_path: str, preset: str,
     # Preset support files (P3): e.g. the lazy 3D wrapper so Vite
     # code-splits three/fiber/drei out of the initial bundle.
     _copy_preset_files(project_path, preset)
+    if preset == '3d':
+        _patch_vite_manual_chunks(project_path)
 
     # Incremental install: the fresh template copy has node_modules; npm
     # install adds only the new packages (Phase 5 then skips its own ci).

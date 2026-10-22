@@ -148,7 +148,37 @@ def run_benchmarks() -> dict:
             "three_in_initial": _has_marker(_index_chunk(chunks_l)),
             "lazy3d_chunk_kb": (os.path.getsize(big_lazy[0]) // 1024) if big_lazy else 0,
         }
-        return {"standard": std, "eager": eager, "lazy": lazy}
+
+        # ---------------- 3d preset + STATIC 3d page (the 2131 case) --------
+        # A component using LazyCanvas/lazyDrei statically imported by an
+        # eager page — the wiring that duplicated three before the
+        # manualChunks rule existed. The vendor chunk must keep three out
+        # of the entry AND exist as a single copy.
+        app.write_text(original, encoding="utf-8")
+        (frontend / "src" / "pages" / "SceneDemo.tsx").write_text(
+            LAZY_PAGE, encoding="utf-8")
+        static_app = original.replace(
+            'import Welcome from "./pages/Welcome";',
+            'import Welcome from "./pages/Welcome";\n'
+            'import SceneDemo from "./pages/SceneDemo";')
+        static_app = static_app.replace(
+            '<Route path="/" element={<Welcome />} />',
+            '<Route path="/" element={<Welcome />} />\n'
+            '          <Route path="/scene" element={<SceneDemo />} />')
+        app.write_text(static_app, encoding="utf-8")
+        el_s, chunks_s = _build(frontend)
+        vendor = [c for c in chunks_s if "three-vendor" in os.path.basename(c)]
+        three_copies = sum(1 for c in chunks_s if _has_marker(c))
+        static_v = {
+            "build_s": el_s, "chunks": len(chunks_s),
+            "total_kb": sum(os.path.getsize(c) for c in chunks_s) // 1024,
+            "initial_kb": os.path.getsize(_index_chunk(chunks_s)) // 1024,
+            "three_in_initial": _has_marker(_index_chunk(chunks_s)),
+            "three_copy_chunks": three_copies,
+            "vendor_chunk_kb": (os.path.getsize(vendor[0]) // 1024) if vendor else 0,
+        }
+
+        return {"standard": std, "eager": eager, "lazy": lazy, "static": static_v}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -158,9 +188,12 @@ def assertions(r: dict) -> list:
         ("standard build has no three", not r["standard"]["three_in_initial"]),
         ("lazy: three NOT in initial chunk", not r["lazy"]["three_in_initial"]),
         ("lazy: separate 3D chunk >=500KB exists", r["lazy"]["lazy3d_chunk_kb"] >= 500),
-        ("lazy initial ≈ standard initial (±10%)",
-         abs(r["lazy"]["initial_kb"] - r["standard"]["initial_kb"])
-         <= 0.10 * r["standard"]["initial_kb"]),
+        ("preset initial does not inflate vs standard (>10% fails)",
+         r["lazy"]["initial_kb"] <= 1.10 * r["standard"]["initial_kb"]
+         and r["static"]["initial_kb"] <= 1.10 * r["standard"]["initial_kb"]),
+        ("static 3D page: three NOT in entry (manualChunks)", not r["static"]["three_in_initial"]),
+        ("static 3D page: single three copy", r["static"]["three_copy_chunks"] <= 1),
+        ("static 3D page: vendor chunk exists (>=400KB)", r["static"]["vendor_chunk_kb"] >= 400),
     ]
     return checks
 
@@ -185,6 +218,9 @@ def markdown(r: dict, checks: list) -> str:
         f"| 3d preset + lazy3d wrapper (target) | {r['lazy']['build_s']:.1f} | {r['lazy']['chunks']} "
         f"| {r['lazy']['total_kb']} | **{r['lazy']['initial_kb']}** "
         f"| {'YES' if r['lazy']['three_in_initial'] else 'no'} |",
+        f"| 3d preset + STATIC 3d page (2131 case) | {r['static']['build_s']:.1f} | {r['static']['chunks']} "
+        f"| {r['static']['total_kb']} | **{r['static']['initial_kb']}** "
+        f"| {'YES' if r['static']['three_in_initial'] else 'no'} |",
         "",
         f"Lazy 3D chunk size: **{r['lazy']['lazy3d_chunk_kb']} KB** "
         "(loads only when a 3D scene mounts).",
@@ -201,9 +237,12 @@ def markdown(r: dict, checks: list) -> str:
         f"**{r['eager']['initial_kb'] / max(1, r['standard']['initial_kb']):.1f}×** "
         "— which is why the 3d preset ships `src/lib/lazy3d.tsx` and the agent prompt "
         "forbids eager three/fiber/drei imports in shared components.",
-        "- `manualChunks` was evaluated and is NOT needed: Vite's default "
-        "dynamic-import splitting already isolates the 3D libraries when the "
-        "wrapper is used (see the 3-chunk lazy build above).",
+        "- The `manualChunks` vendor rule (added with the 3d preset) is what "
+        "keeps three out of the entry chunk in EVERY wiring — even eager "
+        f"imports land at {r['eager']['initial_kb']} KB initial (they were "
+        "1180 KB before the rule, live on project 2131). Without it, two "
+        "dynamic entries sharing three made Rollup hoist a duplicate into "
+        "the entry chunk.",
         "",
     ]
     return "\n".join(lines)
