@@ -434,6 +434,28 @@ That's all. Execute Phase {phase} now.
             f"- Frontend Optimizer already handles root file optimization",
         ]
 
+        # Frontend preset (Dependency Management Plan, P2): tell the agent
+        # which registry-verified dependencies were pre-added so it imports
+        # them instead of trying (and failing) to add packages itself.
+        preset = os.getenv("FRONTEND_PRESET", "").strip().lower()
+        if preset == "3d":
+            description_parts += [
+                "",
+                "AVAILABLE 3D DEPENDENCIES (already installed — import freely):",
+                "- three@0.186.1, @react-three/fiber@8.18.0, @react-three/drei@9.122.0",
+                "Build the 3D scenes with these. Do NOT add other 3D/animation",
+                "libraries. If physics or post-processing effects are genuinely",
+                "required, note it in the final summary instead of installing.",
+            ]
+        elif preset == "animated":
+            description_parts += [
+                "",
+                "AVAILABLE ANIMATION DEPENDENCY (already installed):",
+                "- framer-motion@11.18.2",
+                "Use it for the requested motion/animation work. Do NOT install",
+                "other animation libraries.",
+            ]
+
         return "\n".join(description_parts)
 
     def phase_2_template_setup(self) -> bool:

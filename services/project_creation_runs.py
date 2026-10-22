@@ -1334,6 +1334,25 @@ def _run_website_pipeline(
     if fast_code != 0:
         raise RuntimeError(f"fast_wrapper.py failed with exit code {fast_code}")
 
+    # Frontend preset (Dependency Management Plan, P2): classify the brief
+    # and add registry-verified pinned deps (3d / animated) through the P1
+    # sanctioned service BEFORE the AI build phase, so the agent can import
+    # them. Standard preset = strict no-op (template stays byte-identical).
+    try:
+        from services.deps.presets import classify_preset, apply_preset
+        _preset = classify_preset(description)
+        if _preset != "standard":
+            _presult = apply_preset(project_path, _preset)
+            append_chunk(run_id, "log", f"Frontend preset: {_presult.get('message')}")
+            if _presult.get("ok"):
+                env["FRONTEND_PRESET"] = _preset
+        else:
+            env["FRONTEND_PRESET"] = "standard"
+    except Exception as _perr:  # presets must never kill a creation
+        logger.warning("[PRESET] application skipped for project %s: %s",
+                       project_id, _perr)
+        append_chunk(run_id, "log", f"Frontend preset skipped: {_perr}")
+
     # fast_wrapper has just rsync'd the template into project_path (as root).
     # Claude Code runs as the dreampilot user, so transfer ownership now —
     # before openclaw invokes claude, which needs write access to every file.

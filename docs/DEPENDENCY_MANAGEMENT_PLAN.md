@@ -134,3 +134,33 @@ root today (pre-existing condition, not introduced by P1). All installs now
 flow through `services/npm_install.run_npm`, so switching execution to the
 container path or a dedicated non-root build user is a one-place change.
 Scheduled as the gating prerequisite before `NPM_GATE_ENFORCE=1`.
+
+---
+
+## P2 implementation status (2026-10-22)
+
+**Implemented.** Presets ship dormant-by-default for existing surfaces:
+classification runs at creation; **standard stays a strict no-op** (template
+byte-identical — acceptance row 1 asserted by tests).
+
+- `services/deps/presets.py` — deterministic keyword classifier (fallback =
+  standard, `FORCE_FRONTEND_PRESET` override for ops), registry-verified
+  exact pins (three@0.186.1, @react-three/fiber@8.18.0 — fiber v9 excluded,
+  needs React 19; @react-three/drei@9.122.0; framer-motion@11.18.2 — peers
+  verified against React 18.3.1 at implementation). Physics/postprocessing
+  are NOT preset members — post-creation via the P1 endpoint
+  (`ON_DEMAND_EXTRAS` documents the sanctioned route).
+- Application routes exclusively through P1 `add_frontend_deps` (gate →
+  guards → lockfile regen → commit) + an incremental `npm install` that
+  reuses the copied template node_modules (keeps the skip-install
+  optimization); Phase 5's own npm ci is the fallback if that fails.
+- Wired into `_run_website_pipeline` (after template copy, before the AI
+  phase; failures are logged and never kill a creation) and
+  `openclaw_wrapper._build_acp_goal_description` (the agent is told which
+  3D/animation deps exist so it imports instead of installing).
+- Tests: `tests/test_p2_presets.py` — classification (incl. "game" alone ≠
+  3D), exact-pin conformance, standard no-op, no rapier/postprocessing, and
+  a REAL end-to-end apply on a template copy (registry + lockfile + cold
+  `npm ci --dry-run` resolving the 3D pins).
+- Remaining before P3: one live 3D project creation through the platform
+  (full AI build) as the production smoke test.
