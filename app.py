@@ -2536,11 +2536,11 @@ app.include_router(ai_confirm_router, prefix="/api/ai", tags=["ai-confirm"])
 # Register Scheduler Job API router
 from api.scheduler_router import router as scheduler_router
 app.include_router(scheduler_router, prefix="/api/scheduler", tags=["scheduler"])
+from api.frontend_deps_router import router as frontend_deps_router
 app.include_router(frontend_deps_router, tags=["frontend-deps"])
 
 # Webhook event triggers (public /api/triggers/{token} + owner info endpoint)
 from api.triggers_router import router as triggers_router
-from api.frontend_deps_router import router as frontend_deps_router
 app.include_router(triggers_router, prefix="/api/triggers", tags=["triggers"])
 
 # Register Validation API router
