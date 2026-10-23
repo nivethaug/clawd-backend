@@ -10644,6 +10644,44 @@ async def chat_attach(
 
     run = get_active_run_for_session(session_key)
     if not run:
+        # No durable run row — but the handler may still be active (race
+        # between handler state and run-row status). Check the handler like
+        # /chat/chunks does; if it has chunks, stream those instead of 409.
+        handler = active_handlers.get(session_key)
+        if handler and handler.is_query_running():
+            all_chunks = getattr(handler, '_last_query_chunks', []) or []
+            if all_chunks:
+                logger.info("[ATTACH] no durable run, but handler active with %d "
+                            "chunks — streaming from handler", len(all_chunks))
+
+                async def handler_streaming_response():
+                    """Stream the handler's in-memory chunks (short-lived)."""
+                    import time as _time
+                    last_emit = len(all_chunks)
+                    _last_send = _time.monotonic()
+                    try:
+                        while True:
+                            current = getattr(handler, '_last_query_chunks', []) or []
+                            for chunk in current[last_emit:]:
+                                content = str(chunk or "")
+                                if not content:
+                                    continue
+                                event_data = json.dumps({'choices': [{'delta': {'content': content + "\n"}}]})
+                                yield f"data: {event_data}\n\n"
+                            last_emit = len(current)
+                            _last_send = _time.monotonic()
+                            if not handler.is_query_running():
+                                break
+                            await asyncio.sleep(0.75)
+                    except asyncio.CancelledError:
+                        raise
+                    yield "data: [DONE]\n\n"
+
+                return StreamingResponse(
+                    handler_streaming_response(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
         return JSONResponse(status_code=409, content={"active": False, "detail": "No active chat run for this session."})
     run_id = int(run["id"])
     logger.info("[ATTACH] client attached to durable run %s (session %s)", run_id, session_key)
