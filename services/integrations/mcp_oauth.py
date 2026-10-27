@@ -57,6 +57,18 @@ class ServerAuth:
     registration_endpoint: Optional[str] = None
     scopes_supported: Optional[list] = None
 
+    def scope_string(self) -> str:
+        """Space-joined scopes to request at authorize. Prefers the server's
+        declared scopes_supported; empty string = omit (server default)."""
+        if self.scopes_supported:
+            return " ".join(self.scopes_supported)
+        return ""
+
+    def with_scopes(self, scopes: list) -> "ServerAuth":
+        """Copy with explicit scopes (from WWW-Authenticate resource metadata)."""
+        self.scopes_supported = scopes or self.scopes_supported
+        return self
+
 
 # ── discovery ───────────────────────────────────────────────────────────────
 
@@ -108,6 +120,16 @@ async def discover(server_url: str) -> Optional[ServerAuth]:
         if r.status_code != 401:
             return None
 
+        # Extract required scopes from WWW-Authenticate (RFC 6750 error format)
+        _www_scopes: list = []
+        www_hdr = r.headers.get("www-authenticate") or ""
+        if "scope=" in www_hdr:
+            try:
+                scope_val = www_hdr.split("scope=")[1].strip().strip('"').split(",")[0]
+                _www_scopes = [s for s in scope_val.split() if s]
+            except Exception:
+                pass
+
         as_bases = []
         www = r.headers.get("www-authenticate") or ""
         if "resource_metadata" in www:
@@ -134,12 +156,13 @@ async def discover(server_url: str) -> Optional[ServerAuth]:
                 auth_ep = doc.get("authorization_endpoint")
                 token_ep = doc.get("token_endpoint")
                 if auth_ep and token_ep:
+                    scopes = doc.get("scopes_supported") or _www_scopes or None
                     return ServerAuth(
                         server_url=server_url,
                         authorization_endpoint=auth_ep,
                         token_endpoint=token_ep,
                         registration_endpoint=doc.get("registration_endpoint"),
-                        scopes_supported=doc.get("scopes_supported"),
+                        scopes_supported=scopes,
                     )
         raise OAuthFlowError(
             "This MCP server requires OAuth but publishes no authorization "
@@ -184,14 +207,18 @@ def make_pkce() -> Tuple[str, str]:
 
 def authorize_url(auth: ServerAuth, state: str, challenge: str,
                   client_id: str) -> str:
-    q = urlencode({
+    params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": REDIRECT_URI,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
         "state": state,
-    })
+    }
+    scope = auth.scope_string()
+    if scope:
+        params["scope"] = scope
+    q = urlencode(params)
     sep = "&" if "?" in auth.authorization_endpoint else "?"
     return f"{auth.authorization_endpoint}{sep}{q}"
 
@@ -208,6 +235,9 @@ async def exchange_code(auth: ServerAuth, client_id: str,
         "client_id": client_id,
         "code_verifier": verifier,
     }
+    scope = auth.scope_string()
+    if scope:
+        data["scope"] = scope
     headers = {}
     if client_secret:
         data["client_secret"] = client_secret
@@ -219,12 +249,14 @@ async def exchange_code(auth: ServerAuth, client_id: str,
 
 async def refresh_token(token_endpoint: str, client_id: str,
                         client_secret: Optional[str],
-                        refresh_tok: str) -> Dict[str, Any]:
+                        refresh_tok: str, scope: str = "") -> Dict[str, Any]:
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_tok,
         "client_id": client_id,
     }
+    if scope:
+        data["scope"] = scope
     if client_secret:
         data["client_secret"] = client_secret
     async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
