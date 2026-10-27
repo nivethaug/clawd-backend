@@ -286,6 +286,7 @@ def token_row_value(doc: Dict[str, Any], auth: ServerAuth,
         "token_endpoint": auth.token_endpoint,
         "client_id": client_id,
         "client_secret": client_secret,
+        "scope": doc.get("scope", "") or auth.scope_string(),
     })
 
 
