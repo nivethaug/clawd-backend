@@ -410,7 +410,9 @@ class ACPChatHandler:
             "endpoint: curl https://{domain}.dreamagent.cloud/api/... and check "
             "the response body. If the route 404s after publish+30s, say so "
             "honestly — do NOT attempt to restart PM2, call worker-api, or "
-            "modify buildpublish.py to change the restart mechanism.")
+            "modify buildpublish.py to change the restart mechanism. "
+            "SCREENSHOTS: take_screenshot works — use it freely for verification. "
+            "For WebGL/3D scenes, wait 5-10 seconds after navigation before capturing.")
         return mcp_head + """
 The platform provides ready-made AI/media tools the user enables on the
 Superpowers page (billed to their credits). When the user asks to ADD one of
