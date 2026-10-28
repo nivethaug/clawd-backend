@@ -939,7 +939,7 @@ class ClaudeCodeAgent:
         # CLI args share the ~128KB ARG_MAX with the whole command line
         # and the wrapper env; 120K+ char design references crash with
         # Argument list too long (live: session 453, 2026-10-17).
-        _STDIN_PROMPT_THRESHOLD = 96 * 1024
+        _STDIN_PROMPT_THRESHOLD = 125 * 1024  # docker exec stdin drops large payloads; CLI args work to ~128K
         _use_stdin_prompt = len(prompt.encode("utf-8")) > _STDIN_PROMPT_THRESHOLD
         if _use_stdin_prompt:
             command.extend(["-p", "-"])
