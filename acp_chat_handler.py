@@ -948,6 +948,19 @@ BRAIN CONFIGURATION: the agent brain has TWO layers — explain both when
 
 ---
 """
+
+        # LANGUAGE RULE: always match the user's LATEST message language.
+        # Without this, agents mirror Chinese/Japanese text from earlier
+        # context even when the current message is English (live: user
+        # writing English got Chinese progress updates mixed in).
+        _user_lang_note = (
+            chr(10) + chr(10) + "## LANGUAGE RULE" + chr(10) +
+            "Always respond in the SAME LANGUAGE as the user's LATEST message. "
+            "If the conversation history contains other languages, IGNORE them "
+            "for language choice - match only the user's most recent message. "
+            "Progress updates, code comments, and explanations must all be in "
+            "the user's language." + chr(10)
+        )
         integrations_section = build_external_integrations_block(self.project_id)
         uploads_section = build_uploaded_files_block(self.project_id)
         limits_section = sandbox_limits_block()
