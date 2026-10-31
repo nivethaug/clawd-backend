@@ -6410,15 +6410,27 @@ async def delete_project(
             # dropped by the worker during this forwarded cleanup (its postgres
             # connection points at the master DB).
             if not os.path.isdir(project_path):
+                # Route to the project's REGISTERED node when homed on a
+                # dedicated worker (per-node URL + per-node secret); fall
+                # back to the legacy shared env URL otherwise.
+                from services import worker_registry as _wr
                 from services.project_proxy import _get_worker_url
 
-                worker_url = _get_worker_url()
-                if worker_url:
-                    import httpx as _httpx
-
+                _node = _wr.resolve_for_project(project_id)
+                if _node and _node.get("api_url"):
+                    worker_url = str(_node["api_url"]).rstrip("/")
+                    headers = {}
+                    _sec = _wr.internal_secret_for_node(_node.get("id"))
+                    if _sec:
+                        headers["x-internal-secret"] = _sec
+                else:
+                    worker_url = _get_worker_url()
                     headers = {}
                     if INTERNAL_API_SECRET:
                         headers["x-internal-secret"] = INTERNAL_API_SECRET
+                if worker_url:
+                    import httpx as _httpx
+
                     fwd_payload = {
                         "project_path": project_path,
                         "project_name": project_name,
@@ -7695,7 +7707,40 @@ async def internal_chat_execute(request: InternalChatExecuteRequest, request_obj
     client_host = request_obj.client.host if request_obj.client else ""
     logger.info(f"[INTERNAL-CHAT] Executing run {request.run_id} from {client_host}")
 
-    logger.info(f"[INTERNAL-CHAT] Executing run {request.run_id} from {client_host}")
+    # Claim guard: atomically flip queued→running BEFORE executing. The
+    # dedicated worker's poller may have claimed the run a moment before
+    # main's nudge arrived (wait_for_run fires at ~3s, pollers run at 2s) —
+    # without this guard both would execute concurrently (duplicate
+    # messages, duplicate refunds, double token accounting).
+    try:
+        from services.session_chat_runs import get_connection_pool
+
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE session_chat_runs
+                       SET status = 'running',
+                           worker_id = %s,
+                           started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                           heartbeat_at = CURRENT_TIMESTAMP
+                       WHERE id = %s AND status = 'queued'
+                       RETURNING id""",
+                    (f"{socket.gethostname()}:{os.getpid()}-internal", request.run_id),
+                )
+                claimed = cur.fetchone()
+                conn.commit()
+            if not claimed:
+                logger.info(
+                    "[INTERNAL-CHAT] Run %s not in queued state (already claimed/completed) — skipping",
+                    request.run_id,
+                )
+                return {"success": True, "run_id": request.run_id, "skipped": True}
+        finally:
+            pool.putconn(conn)
+    except Exception as claim_exc:
+        logger.warning("[INTERNAL-CHAT] claim guard failed for %s: %s", request.run_id, claim_exc)
 
     try:
         from services.session_chat_runs import execute_run

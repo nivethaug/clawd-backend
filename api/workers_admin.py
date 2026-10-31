@@ -149,14 +149,39 @@ async def assign_dedicated_worker(
     if worker_id and not get_node(worker_id):
         raise HTTPException(status_code=404, detail=f"Worker node '{worker_id}' not found or not active")
 
+    from services import worker_registry
+
     with get_db() as conn:
         row = conn.execute("SELECT id FROM users WHERE id = %s", (user_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-        conn.execute(
-            "UPDATE users SET dedicated_worker_id = %s WHERE id = %s",
-            (worker_id, user_id),
-        )
+        if worker_id:
+            # Same claim invariant as pool purchases: one tenant per node,
+            # enforced under a node-row lock so a concurrent pool claim
+            # cannot double-bind.
+            conn.execute("SELECT id FROM worker_nodes WHERE id = %s FOR UPDATE", (worker_id,))
+            taken = conn.execute(
+                "SELECT id FROM users WHERE dedicated_worker_id = %s AND id <> %s",
+                (worker_id, user_id),
+            ).fetchone()
+            if taken:
+                conn.commit()
+                raise HTTPException(status_code=409, detail=f"Node '{worker_id}' is already bound to another user")
+            # Admin grants have NO paid term: dedicated_until=NULL means the
+            # expiry sweep never touches them (sweep requires NOT NULL).
+            conn.execute(
+                "UPDATE users SET dedicated_worker_id = %s, dedicated_until = NULL WHERE id = %s",
+                (worker_id, user_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE users SET dedicated_worker_id = NULL, dedicated_until = NULL WHERE id = %s",
+                (user_id,),
+            )
         conn.commit()
+    worker_registry.invalidate_cache()
+    if not worker_id:
+        # Release through the registry so a homed node gets drained
+        worker_registry.release_user_worker(user_id)
     logger.info("[WORKERS-ADMIN] admin %s set user %s dedicated_worker=%s", admin_id, user_id, worker_id or "(cleared)")
     return {"success": True, "user_id": user_id, "dedicated_worker_id": worker_id}

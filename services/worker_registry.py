@@ -237,12 +237,44 @@ def claim_pool_worker(user_id: int, region: Optional[str] = None) -> Optional[st
     given, any region when None). Returns the node id or None when the
     pool is empty. SKIP LOCKED keeps concurrent purchases safe.
     """
+    got = extend_or_claim_dedication(user_id, region=region, until=None)
+    return got.get("node_id") if got else None
+
+
+def extend_or_claim_dedication(
+    user_id: int, *, region: Optional[str], until
+) -> Optional[Dict[str, Any]]:
+    """Renewal-safe dedication update in ONE transaction.
+
+    - user already bound → extend dedicated_until (no re-claim, so a sweep
+      racing the renewal webhook can never orphan a paid user onto a
+      different worker)
+    - unbound → claim from the pool (region-matched)
+
+    Returns {"node_id": ..., "claimed": bool} or None when unbound and the
+    pool is empty. `until` may be a datetime or SQL passthrough string.
+    """
     try:
         from database_postgres import get_db
 
         with get_db() as conn:
             if not _table_exists(conn):
                 return None
+            row = conn.execute(
+                "SELECT dedicated_worker_id FROM users WHERE id = %s FOR UPDATE",
+                (user_id,),
+            ).fetchone()
+            if not row:
+                conn.commit()
+                return None
+            current = row.get("dedicated_worker_id") if isinstance(row, dict) else row[0]
+            if current:
+                conn.execute(
+                    "UPDATE users SET dedicated_until = %s WHERE id = %s AND dedicated_worker_id = %s",
+                    (until, user_id, current),
+                )
+                conn.commit()
+                return {"node_id": str(current), "claimed": False}
             row = conn.execute(
                 """
                 SELECT w.id FROM worker_nodes w
@@ -263,26 +295,62 @@ def claim_pool_worker(user_id: int, region: Optional[str] = None) -> Optional[st
                 return None
             node_id = row.get("id") if isinstance(row, dict) else row[0]
             conn.execute(
-                "UPDATE users SET dedicated_worker_id = %s WHERE id = %s",
-                (node_id, user_id),
+                "UPDATE users SET dedicated_worker_id = %s, dedicated_until = %s WHERE id = %s",
+                (node_id, until, user_id),
             )
             conn.commit()
         invalidate_cache()
         logger.info("[WORKER-REGISTRY] user %s claimed pool worker %s (region=%s)", user_id, node_id, region)
-        return str(node_id)
+        return {"node_id": str(node_id), "claimed": True}
     except Exception as exc:
-        logger.error("[WORKER-REGISTRY] claim_pool_worker failed for %s: %s", user_id, exc)
+        logger.error("[WORKER-REGISTRY] extend_or_claim failed for %s: %s", user_id, exc)
         return None
 
 
-def release_user_worker(user_id: int) -> Optional[str]:
-    """Clear the user's dedicated binding (worker returns to the pool)."""
+def _drain_if_orphaned(node_id: str) -> None:
+    """Remove a node from the pool when its last tenant releases it.
+
+    The node keeps serving its homed projects' file/chat routes (the files
+    live on its disk), but it must NOT be sold to a new tenant until wiped
+    — a fresh buyer must never inherit the previous tenant's data.
+    """
     try:
         from database_postgres import get_db
 
         with get_db() as conn:
             row = conn.execute(
-                "UPDATE users SET dedicated_worker_id = NULL WHERE id = %s AND dedicated_worker_id IS NOT NULL RETURNING dedicated_worker_id",
+                """
+                SELECT
+                  EXISTS (SELECT 1 FROM users u WHERE u.dedicated_worker_id = %s) AS bound,
+                  EXISTS (SELECT 1 FROM projects p WHERE p.worker_id = %s) AS homed
+                """,
+                (node_id, node_id),
+            ).fetchone()
+            if not row:
+                conn.commit()
+                return
+            d = row if isinstance(row, dict) else dict(zip(("bound", "homed"), row))
+            if not d.get("bound") and d.get("homed"):
+                conn.execute(
+                    "UPDATE worker_nodes SET status = 'drained' WHERE id = %s AND is_shared = FALSE",
+                    (node_id,),
+                )
+                logger.info("[WORKER-REGISTRY] node %s drained (released with homed projects — wipe before re-pooling)", node_id)
+            conn.commit()
+        invalidate_cache()
+    except Exception as exc:
+        logger.warning("[WORKER-REGISTRY] drain check failed for %s: %s", node_id, exc)
+
+
+def release_user_worker(user_id: int) -> Optional[str]:
+    """Clear the user's dedicated binding (worker leaves the sellable pool
+    if it homed projects — see _drain_if_orphaned)."""
+    try:
+        from database_postgres import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "UPDATE users SET dedicated_worker_id = NULL, dedicated_until = NULL WHERE id = %s AND dedicated_worker_id IS NOT NULL RETURNING dedicated_worker_id",
                 (user_id,),
             ).fetchone()
             conn.commit()
@@ -290,18 +358,65 @@ def release_user_worker(user_id: int) -> Optional[str]:
         if released:
             invalidate_cache()
             logger.info("[WORKER-REGISTRY] user %s released worker %s", user_id, released)
+            _drain_if_orphaned(str(released))
         return str(released) if released else None
     except Exception as exc:
         logger.error("[WORKER-REGISTRY] release failed for %s: %s", user_id, exc)
         return None
 
 
-def release_expired_dedications() -> int:
-    """Return workers to the pool for every user past dedicated_until.
+def retry_pending_dedication_claims() -> int:
+    """Re-try pool claims for PAID add-on subscribers who have no worker.
 
-    Called from the billing cron. Users with an active subscription get
-    their term extended by renewal fulfillment BEFORE this runs, so an
-    expiry here means the subscription truly lapsed.
+    Covers the pool-empty-at-charge-time case: the subscription is active
+    and paid, but fulfillment parked it. Runs hourly from the billing cron;
+    succeeds automatically once the pool is refilled.
+    """
+    try:
+        from database_postgres import get_db
+
+        with get_db() as conn:
+            if not _table_exists(conn):
+                return 0
+            rows = conn.execute(
+                """
+                SELECT s.user_id, s.current_period_end
+                FROM subscriptions s
+                JOIN billing_plans p ON p.id = s.plan_id
+                WHERE p.slug = 'dedicated-worker'
+                  AND s.status = 'active'
+                  AND s.current_period_end > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM users u
+                      WHERE u.id = s.user_id AND u.dedicated_worker_id IS NOT NULL
+                  )
+                """
+            ).fetchall()
+        claimed = 0
+        for row in rows:
+            d = row if isinstance(row, dict) else dict(zip(("user_id", "current_period_end"), row))
+            result = extend_or_claim_dedication(int(d["user_id"]), region=None, until=d.get("current_period_end"))
+            if result and result.get("claimed"):
+                logger.info("[WORKER-REGISTRY] pending claim retry succeeded for user %s -> %s", d["user_id"], result["node_id"])
+                claimed += 1
+        return claimed
+    except Exception as exc:
+        logger.error("[WORKER-REGISTRY] pending claim retry failed: %s", exc)
+        return 0
+
+
+# Paid-term grace: Razorpay retries webhooks for hours; releasing at the
+# exact term end would steal workers from users whose renewal is merely
+# delayed. Release well past the grace instead.
+DEDICATION_GRACE_HOURS = 48
+
+
+def release_expired_dedications() -> int:
+    """Return workers to the pool for users past dedicated_until + grace.
+
+    Renewals extend dedicated_until inside the same transaction as the
+    claim (extend_or_claim_dedication), so an expiry here means the
+    subscription truly lapsed. Drains nodes with homed projects.
     """
     try:
         from database_postgres import get_db
@@ -311,10 +426,10 @@ def release_expired_dedications() -> int:
                 return 0
             cur = conn.execute(
                 """
-                UPDATE users SET dedicated_worker_id = NULL
+                UPDATE users SET dedicated_worker_id = NULL, dedicated_until = NULL
                 WHERE dedicated_worker_id IS NOT NULL
                   AND dedicated_until IS NOT NULL
-                  AND dedicated_until < NOW()
+                  AND dedicated_until < NOW() - INTERVAL '48 hours'
                 RETURNING id, dedicated_worker_id
                 """
             )
@@ -325,6 +440,7 @@ def release_expired_dedications() -> int:
             for r in rows:
                 d = r if isinstance(r, dict) else dict(zip(("id", "worker"), r))
                 logger.info("[WORKER-REGISTRY] expired dedication released: user %s -> %s", d.get("id"), d.get("dedicated_worker_id"))
+                _drain_if_orphaned(str(d.get("dedicated_worker_id")))
         return len(rows)
     except Exception as exc:
         logger.error("[WORKER-REGISTRY] expiry sweep failed: %s", exc)

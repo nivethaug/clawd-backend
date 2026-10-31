@@ -112,14 +112,6 @@ def _get_client() -> httpx.AsyncClient:
 # Security model matches /internal/chat-execute: worker port 8003 is
 # firewalled to the main VPS only — no auth header needed.
 
-def _internal_secret_headers() -> dict:
-    """Headers authenticating main→worker /internal/* calls. Sent whenever
-    INTERNAL_API_SECRET is set; the worker's guard requires it once its env
-    matches (fail-closed rollout: unset here = legacy heuristic on worker)."""
-    secret = os.getenv("INTERNAL_API_SECRET", "").strip()
-    return {"X-Internal-Secret": secret} if secret else {}
-
-
 async def post_to_worker(path: str, json_payload: Optional[dict] = None,
                          timeout: Optional[float] = None,
                          project_id: Optional[int] = None) -> dict:
@@ -374,7 +366,7 @@ async def project_proxy_middleware(request: Request, call_next):
     _path = request.url.path
     _is_chat = _path in _CHAT_ROUTES or _path.startswith("/chat") or _path.startswith("/sessions")
     if _is_chat:
-        logger.warning(
+        logger.debug(
             "project_proxy DEBUG: %s %s query=%s",
             request.method, _path, dict(request.query_params),
         )
@@ -383,11 +375,11 @@ async def project_proxy_middleware(request: Request, call_next):
     project_id = await _resolve_project_id_from_request(request)
     if project_id is None:
         if _is_chat:
-            logger.warning("project_proxy DEBUG: %s -> project_id=None (pass-through)", _path)
+            logger.debug("project_proxy DEBUG: %s -> project_id=None (pass-through)", _path)
         return await call_next(request)
 
     if _is_chat:
-        logger.warning("project_proxy DEBUG: %s -> project_id=%s", _path, project_id)
+        logger.debug("project_proxy DEBUG: %s -> project_id=%s", _path, project_id)
 
     # Dedicated-worker routing (enterprise isolation): when the project is
     # homed on a registered node, forward to THAT node's api_url — overriding

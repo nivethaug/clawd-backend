@@ -1478,7 +1478,7 @@ def init_schema():
                 """INSERT INTO billing_plans (slug, name, price_monthly_cents, is_addon, features)
                    VALUES ('dedicated-worker', 'Dedicated Worker', 2900, TRUE,
                            '["Dedicated 8GB worker", "Region choice", "Isolated compute", "Priority runs"]'::jsonb)
-                   ON CONFLICT (slug) DO UPDATE SET is_addon = TRUE"""
+                   ON CONFLICT (slug) DO NOTHING"""
             )
             conn.commit()
             logger.info("✓ Added dedicated-worker add-on plan + region/entitlement columns")

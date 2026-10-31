@@ -132,12 +132,20 @@ def _cron_loop():
         except Exception as e:
             logger.error(f"[BILLING_CRON] Error during reset check: {e}", exc_info=True)
 
-        # Dedicated-worker expiry sweep — every tick (hourly). Renewals extend
-        # dedicated_until BEFORE expiry, so anything past it means the
-        # subscription lapsed: return the worker to the pool.
+        # Dedicated-worker sweeps — every tick (hourly):
+        #   1. re-try claims for PAID subscribers parked when the pool was
+        #      empty at charge time (fulfillment marked them for retry)
+        #   2. release bindings past dedicated_until + grace (drains nodes
+        #      with homed projects so they're never re-sold with old data)
         try:
-            from services.worker_registry import release_expired_dedications
+            from services.worker_registry import (
+                release_expired_dedications,
+                retry_pending_dedication_claims,
+            )
 
+            retried = retry_pending_dedication_claims()
+            if retried:
+                logger.info(f"[BILLING_CRON] Claimed {retried} pending dedicated worker(s) for paid subscribers")
             released = release_expired_dedications()
             if released:
                 logger.info(f"[BILLING_CRON] Released {released} expired dedicated worker(s) to the pool")

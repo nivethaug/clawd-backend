@@ -82,6 +82,13 @@ async def dedicated_cancel(authorization: Optional[str] = Header(None)):
     try:
         razorpay_service.cancel_subscription(sub_id)
     except Exception as exc:
-        logger.warning("[DEDICATED] Razorpay cancel failed for %s (continuing local): %s", sub_id, exc)
+        # Provider cancel FAILED: do NOT flip local state — a locally
+        # cancelled row would be resurrected by the next subscription.charged
+        # webhook while Razorpay keeps billing. Surface the error instead.
+        logger.error("[DEDICATED] Razorpay cancel failed for %s: %s", sub_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not cancel at the payment provider — nothing changed. Please retry or contact support.",
+        )
     razorpay_service.cancel_razorpay_subscription_locally(sub_id, "cancelled")
     return {"success": True, "message": "Dedicated worker cancelled — active until the end of the paid term."}

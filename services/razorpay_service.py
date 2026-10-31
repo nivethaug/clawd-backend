@@ -496,20 +496,45 @@ def fulfill_razorpay_subscription(
 
     user_id = int(user_id_str)
     # Razorpay returns current_end/current_start as UNIX epoch seconds (int),
-    # not ISO strings — convert before writing to the TIMESTAMP column.
+    # not ISO strings — convert (UTC) before writing to the TIMESTAMPTZ column.
     current_end = subscription_entity.get("current_end")
     period_end = None
     if isinstance(current_end, (int, float)) and current_end > 0:
-        from datetime import datetime
-        period_end = datetime.fromtimestamp(int(current_end))
+        from datetime import datetime, timezone
+        period_end = datetime.fromtimestamp(int(current_end), tz=timezone.utc)
     elif isinstance(current_end, str) and current_end:
         period_end = current_end  # ISO string passthrough
 
     # Add-on plans (dedicated worker) NEVER touch the user's main plan —
     # they grant/extend a per-user entitlement on a pool worker instead.
-    from services.plan_cache import get_plan
-    _plan = get_plan(plan_slug) or {}
-    is_addon = bool(_plan.get("is_addon"))
+    # Resolve is_addon from the DB (NOT the plan cache): a cache miss or a
+    # deactivated plan row must never make an add-on take the main-plan
+    # path (assign_plan would brick the user with the addon's 0 limits).
+    is_addon = None
+    with get_db() as conn:
+        _row = conn.execute(
+            "SELECT is_addon FROM billing_plans WHERE slug = %s", (plan_slug,)
+        ).fetchone()
+    if _row:
+        _d = _row if isinstance(_row, dict) else dict(zip(("is_addon",), _row))
+        is_addon = bool(_d.get("is_addon"))
+    if is_addon is None:
+        logger.error(
+            "[RAZORPAY] subscription %s references unknown plan slug '%s' — refusing fulfillment",
+            sub_id, plan_slug,
+        )
+        capture_payment_failure(
+            provider="razorpay", event="subscription_charged",
+            reason="unknown_plan_slug", subscription_id=sub_id, plan=plan_slug,
+        )
+        return {"fulfilled": False, "reason": "unknown_plan_slug"}
+
+    # Add-on activation must follow a real CHARGE. 'authenticated' means the
+    # mandate is approved but the first payment hasn't been captured —
+    # granting a worker there hands out a free month when the charge fails.
+    if is_addon and subscription_entity.get("status") == "authenticated" and not payment_entity:
+        logger.info("[RAZORPAY] add-on sub %s authenticated (not charged yet) — worker granted on subscription.charged", sub_id)
+        return {"fulfilled": False, "reason": "awaiting_first_charge"}
 
     with get_db() as conn:
         conn.execute(
@@ -531,18 +556,38 @@ def fulfill_razorpay_subscription(
                 "UPDATE users SET subscription_tier = %s WHERE id = %s",
                 (plan_slug, user_id),
             )
-        else:
-            # Dedicated-worker activation/renewal: bind a pool worker (region
-            # from notes when given) and extend the entitlement to the paid
-            # period end. Renewals just extend — the worker stays bound.
-            from services import worker_registry
-            if not worker_registry.get_user_dedication(user_id):
-                worker_registry.claim_pool_worker(user_id, notes.get("region"))
-            conn.execute(
-                """UPDATE users SET dedicated_until = %s
-                   WHERE id = %s AND dedicated_worker_id IS NOT NULL""",
-                (period_end, user_id),
+        conn.commit()
+
+    if is_addon:
+        # Dedicated-worker activation/renewal — one transaction handles both
+        # (extend bound worker OR claim from pool). A None result with no
+        # existing binding means the pool was EMPTY at charge time: the user
+        # has PAID but there is no worker — do not mark the payment
+        # completed; alert and let the hourly sweep retry the claim.
+        from services import worker_registry
+        result = worker_registry.extend_or_claim_dedication(
+            user_id, region=(notes.get("region") or "").strip().lower() or None, until=period_end
+        )
+        if result is None:
+            logger.error(
+                "[RAZORPAY] add-on charged for user %s but pool EMPTY — subscription parked for claim retry (sub=%s)",
+                user_id, sub_id,
             )
+            capture_payment_failure(
+                provider="razorpay", event="subscription_charged",
+                reason="dedicated_pool_empty", user_id=user_id, subscription_id=sub_id,
+            )
+            with get_db() as conn:
+                conn.execute(
+                    """UPDATE payments SET status = 'created', updated_at = NOW()
+                       WHERE provider_subscription_id = %s AND provider = 'razorpay'
+                         AND status = 'created'""",
+                    (sub_id,),
+                )
+                conn.commit()
+            return {"fulfilled": False, "reason": "dedicated_pool_empty"}
+
+    with get_db() as conn:
         # Complete the payments intent row created at /subscription time.
         conn.execute(
             """UPDATE payments SET status = 'completed', updated_at = NOW()
@@ -616,9 +661,17 @@ def cancel_razorpay_subscription_locally(sub_id: str, new_status: str = "cancell
             (new_status, sub_id),
         )
         if is_addon:
-            # Add-on cancellation: keep the user's MAIN plan untouched. The
-            # dedicated worker stays until dedicated_until passes, then the
-            # billing-cron sweep returns it to the pool.
+            # Add-on cancellation/halt: keep the user's MAIN plan untouched.
+            # halted/completed means payment failed or term ended — release
+            # the worker NOW (and drain the node if it homed projects).
+            # A user-initiated 'cancelled' keeps the worker until term end
+            # (they paid for it); the expiry sweep handles release.
+            if new_status in ("halted", "completed", "expired"):
+                try:
+                    from services.worker_registry import release_user_worker
+                    release_user_worker(user_id)
+                except Exception as rel_exc:
+                    logger.warning("[RAZORPAY] add-on release failed for user %s: %s", user_id, rel_exc)
             conn.commit()
         else:
             conn.execute(

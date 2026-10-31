@@ -30,11 +30,13 @@ WORKER_NODE_ID="${WORKER_NODE_ID:?set WORKER_NODE_ID, e.g. ent-1}"
 REPO_BRANCH="${REPO_BRANCH:-container-migration}"
 WORKDIR="${WORKDIR:-/opt/worker}"
 
-echo "==> [1/5] Docker"
+echo "==> [1/5] Docker + host deps"
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
 fi
 docker compose version >/dev/null || { echo "docker compose plugin missing"; exit 1; }
+# rsync for artifact sync; openssh-client for the jump-host pulls
+command -v rsync >/dev/null 2>&1 || apt-get update -qq && apt-get install -y -qq rsync openssh-client >/dev/null
 
 echo "==> [2/5] Repo -> $WORKDIR"
 mkdir -p "$WORKDIR"
@@ -45,36 +47,53 @@ else
 fi
 
 echo "==> [3/5] One-time host artifacts from the shared worker (via $MAIN_VPS)"
-# /root/.claude (agent configs), /root/dreampilot (website template + venv),
-# /opt/wrapper (wrapper-v2 source + venv). These are shared verbatim with
-# project sandboxes — they must live at the SAME absolute paths on this host.
+# /root/.claude (agent configs) and /root/dreampilot (website template + venv)
+# are shared verbatim with project sandboxes — same absolute paths here.
+SHARED_WORKER="${SHARED_WORKER:-187.55.225.39}"
 mkdir -p /root/.claude /root/dreampilot /opt/wrapper
-for ART in "/root/.claude:." "/root/dreampilot:." "/root/wraper:."; do
-  SRC="${ART%%:*}"; : # wraper (sic) is the shared worker's wrapper dir
-  DST="/opt/wrapper"
-  [ "$SRC" = "/root/.claude" ] && DST="/root/.claude"
-  [ "$SRC" = "/root/dreampilot" ] && DST="/root/dreampilot"
+for ART in "/root/.claude" "/root/dreampilot"; do
+  DST="$ART"
   if [ -z "$(ls -A "$DST" 2>/dev/null)" ]; then
-    echo "    pulling $SRC -> $DST"
-    ssh -o StrictHostKeyChecking=accept-new -J "root@$MAIN_VPS" "root@187.55.225.39" \
-      "tar -C $(dirname "$SRC") -czf - $(basename "$SRC")" | tar -C / -xz
-    # wrapper lands at /root/wraper — move into place with its venv
-    if [ "$SRC" = "/root/wraper" ] && [ -d /root/wraper ]; then
-      rsync -a /root/wraper/ "$DST"/ && rm -rf /root/wraper
-    fi
+    echo "    pulling $ART"
+    ssh -o StrictHostKeyChecking=accept-new -J "root@$MAIN_VPS" "root@$SHARED_WORKER" \
+      "tar -C $(dirname "$ART") -czf - $(basename "$ART")" | tar -C / -xz
   else
     echo "    $DST already populated — skipping"
   fi
 done
 
+# Wrapper-v2: pull SOURCE ONLY and build a fresh venv here. Python venvs are
+# NOT relocatable (activate + shebangs hardcode the original path), so
+# copying the shared worker's venv would break on import.
+if [ -z "$(ls -A /opt/wrapper/src 2>/dev/null)" ]; then
+  echo "    pulling wrapper source"
+  ssh -o StrictHostKeyChecking=accept-new -J "root@$MAIN_VPS" "root@$SHARED_WORKER" \
+    "tar -C /root -czf - wraper/src wraper/requirements.txt 2>/dev/null || tar -C /root -czf - wraper" \
+    | tar -C /tmp -xz
+  mkdir -p /opt/wrapper
+  [ -d /tmp/wraper/src ] && cp -a /tmp/wraper/src /opt/wrapper/src
+  [ -f /tmp/wraper/requirements.txt ] && cp -a /tmp/wraper/requirements.txt /opt/wrapper/
+  rm -rf /tmp/wraper
+  python3 -m venv /opt/wrapper/venv
+  /opt/wrapper/venv/bin/pip install -q --upgrade pip
+  /opt/wrapper/venv/bin/pip install -q -r /opt/wrapper/requirements.txt 2>/dev/null \
+    || /opt/wrapper/venv/bin/pip install -q fastapi uvicorn httpx
+  echo "    wrapper venv rebuilt at /opt/wrapper/venv"
+else
+  echo "    /opt/wrapper already populated — skipping"
+fi
+
 echo "==> [4/5] worker.env"
 cd "$WORKDIR/clawd-backend/deploy/worker"
 [ -f worker.env ] || cp worker.env.example worker.env
 sed -i "s/^WORKER_NODE_ID=.*/WORKER_NODE_ID=$WORKER_NODE_ID/" worker.env
-grep -q '^DB_PASSWORD=.\+' worker.env || cat <<'EOF'
+if ! grep -q '^DB_PASSWORD=..*' worker.env; then
+  cat <<'EOF'
 !! worker.env has an empty DB_PASSWORD (and possibly other secrets).
     Edit it now, then re-run this script to build and start.
 EOF
+  exit 1
+fi
 
 echo "==> [5/5] Build + start"
 docker compose build

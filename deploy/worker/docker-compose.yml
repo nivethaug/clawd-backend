@@ -17,6 +17,9 @@
 name: clawd-worker
 
 x-worker-base: &worker-base
+  build:
+    context: ..
+    dockerfile: deploy/worker/Dockerfile
   image: clawd-worker:latest
   restart: unless-stopped
   network_mode: host          # wrapper on localhost:7861; :8003 for main proxy

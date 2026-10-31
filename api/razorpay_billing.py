@@ -332,7 +332,7 @@ async def create_razorpay_subscription(
         from services import worker_registry
         if worker_registry.get_user_dedication(user_id):
             raise HTTPException(status_code=409, detail="Dedicated worker already active for this account")
-        region = (request.region or "").strip() or None
+        region = (request.region or "").strip().lower() or None
         available = worker_registry.pool_summary()
         if region and available.get(region, 0) < 1:
             raise HTTPException(
@@ -386,8 +386,8 @@ async def create_razorpay_subscription(
             request.plan_slug, plan.get("name", request.plan_slug), amount_paise
         )
         notes = {"user_id": str(user_id), "plan_slug": request.plan_slug}
-        if is_addon and request.region:
-            notes["region"] = request.region.strip()
+        if is_addon and region:
+            notes["region"] = region  # normalized (strip+lower) above
         if promo_context:
             notes["promo_code"] = str(promo_context["promo"]["code"])
         sub = razorpay_service.create_subscription(rzp_plan_id, notes=notes, coupon_id=coupon_id)

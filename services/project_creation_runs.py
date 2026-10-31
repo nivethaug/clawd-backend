@@ -1757,10 +1757,16 @@ def recover_stale_runs(stale_after_minutes: int = 20) -> int:
             """
             SELECT id, project_id, user_id, operation_code, charge
             FROM project_creation_runs
-            WHERE status = 'running'
-              AND (heartbeat_at IS NULL OR heartbeat_at < %s)
+            WHERE (
+                    status = 'running'
+                    AND (heartbeat_at IS NULL OR heartbeat_at < %s)
+                  )
+               OR (
+                    status = 'queued'
+                    AND created_at < %s
+                  )
             """,
-            (cutoff,),
+            (cutoff, cutoff),
         ).fetchall()
         for row in rows:
             run_id = _row_value(row, "id")
