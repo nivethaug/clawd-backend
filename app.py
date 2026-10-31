@@ -2165,6 +2165,8 @@ SESSION_MODELS = [
      "vision": False, "multiplier": 2},
     {"id": "openai/gpt-6-luna", "name": "GPT-6 Luna", "tier": "tier2",
      "vision": True, "multiplier": 2},
+    {"id": "deepseek/deepseek-v4.1-flash-1017", "name": "DeepSeek V4.1 Flash", "tier": "tier2",
+     "vision": True, "multiplier": 2},
 ]
 _DEFAULT_SESSION_MODEL = "z-ai/glm-5.3-flash"
 # Billing multipliers are OFF until this env is set — all models cost the
