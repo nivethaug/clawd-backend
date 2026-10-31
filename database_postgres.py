@@ -1463,6 +1463,21 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added worker_nodes registry (dedicated workers)")
 
+            # --- dedicated-worker upsell (purchasable add-on) ---
+            # Add-on plans are subscriptions that grant per-user entitlements
+            # (e.g. a dedicated worker) WITHOUT replacing the user's main plan.
+            cur.execute("ALTER TABLE billing_plans ADD COLUMN IF NOT EXISTS is_addon BOOLEAN NOT NULL DEFAULT FALSE")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS dedicated_until TIMESTAMPTZ")
+            cur.execute("ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS region TEXT")
+            cur.execute(
+                """INSERT INTO billing_plans (slug, name, price_monthly_cents, is_addon, features)
+                   VALUES ('dedicated-worker', 'Dedicated Worker', 2900, TRUE,
+                           '["Dedicated 8GB worker", "Region choice", "Isolated compute", "Priority runs"]'::jsonb)
+                   ON CONFLICT (slug) DO UPDATE SET is_addon = TRUE"""
+            )
+            conn.commit()
+            logger.info("✓ Added dedicated-worker add-on plan + region/entitlement columns")
+
             # --- credit_transactions (audit ledger) ---
             cur.execute("""CREATE TABLE IF NOT EXISTS credit_transactions (
                 id SERIAL PRIMARY KEY,

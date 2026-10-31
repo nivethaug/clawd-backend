@@ -2627,6 +2627,11 @@ app.include_router(support_admin_router, prefix="/api/support/admin", tags=["sup
 from api.workers_admin import router as workers_admin_router
 app.include_router(workers_admin_router, prefix="/api/admin/workers", tags=["workers-admin"])
 
+# Dedicated-worker add-on (purchasable upsell) — status + cancel.
+# Purchase rides the existing Razorpay subscription endpoint.
+from api.dedicated_router import router as dedicated_router
+app.include_router(dedicated_router, prefix="/api/billing/dedicated", tags=["dedicated"])
+
 # Managed integrations (project ↔ global-integration links) — isolated
 # package: api/integrations_router.py + services/integrations/. See
 # INTEGRATIONS_PLAN.md. Absolute paths, no prefix.

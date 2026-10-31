@@ -505,6 +505,12 @@ def fulfill_razorpay_subscription(
     elif isinstance(current_end, str) and current_end:
         period_end = current_end  # ISO string passthrough
 
+    # Add-on plans (dedicated worker) NEVER touch the user's main plan —
+    # they grant/extend a per-user entitlement on a pool worker instead.
+    from services.plan_cache import get_plan
+    _plan = get_plan(plan_slug) or {}
+    is_addon = bool(_plan.get("is_addon"))
+
     with get_db() as conn:
         conn.execute(
             """INSERT INTO subscriptions
@@ -520,10 +526,23 @@ def fulfill_razorpay_subscription(
             (user_id, plan_slug,
              period_end, sub_id),
         )
-        conn.execute(
-            "UPDATE users SET subscription_tier = %s WHERE id = %s",
-            (plan_slug, user_id),
-        )
+        if not is_addon:
+            conn.execute(
+                "UPDATE users SET subscription_tier = %s WHERE id = %s",
+                (plan_slug, user_id),
+            )
+        else:
+            # Dedicated-worker activation/renewal: bind a pool worker (region
+            # from notes when given) and extend the entitlement to the paid
+            # period end. Renewals just extend — the worker stays bound.
+            from services import worker_registry
+            if not worker_registry.get_user_dedication(user_id):
+                worker_registry.claim_pool_worker(user_id, notes.get("region"))
+            conn.execute(
+                """UPDATE users SET dedicated_until = %s
+                   WHERE id = %s AND dedicated_worker_id IS NOT NULL""",
+                (period_end, user_id),
+            )
         # Complete the payments intent row created at /subscription time.
         conn.execute(
             """UPDATE payments SET status = 'completed', updated_at = NOW()
@@ -532,8 +551,9 @@ def fulfill_razorpay_subscription(
             (sub_id,),
         )
         conn.commit()
-        assign_plan(conn, user_id, plan_slug)
-        conn.commit()
+        if not is_addon:
+            assign_plan(conn, user_id, plan_slug)
+            conn.commit()
 
     # Record the charge in the payments ledger (idempotent on payment id).
     if payment_entity and payment_entity.get("id"):
@@ -579,30 +599,46 @@ def cancel_razorpay_subscription_locally(sub_id: str, new_status: str = "cancell
 
     with get_db() as conn:
         row = conn.execute(
-            """SELECT user_id FROM subscriptions
-               WHERE external_subscription_id = %s AND provider = 'razorpay'""",
+            """SELECT s.user_id, p.slug, p.is_addon FROM subscriptions s
+               JOIN billing_plans p ON p.id = s.plan_id
+               WHERE s.external_subscription_id = %s AND s.provider = 'razorpay'""",
             (sub_id,),
         ).fetchone()
         if not row:
             return {"fulfilled": False, "reason": "unknown_subscription"}
-        user_id = int((dict(row) if not isinstance(row, dict) else row)["user_id"])
+        d = dict(row) if not isinstance(row, dict) else row
+        user_id = int(d["user_id"])
+        is_addon = bool(d.get("is_addon"))
 
         conn.execute(
             """UPDATE subscriptions SET status = %s, updated_at = NOW()
                WHERE external_subscription_id = %s AND provider = 'razorpay'""",
             (new_status, sub_id),
         )
-        conn.execute(
-            "UPDATE users SET subscription_tier = 'free' WHERE id = %s", (user_id,)
-        )
-        conn.commit()
-        assign_plan(conn, user_id, "free")
-        conn.commit()
+        if is_addon:
+            # Add-on cancellation: keep the user's MAIN plan untouched. The
+            # dedicated worker stays until dedicated_until passes, then the
+            # billing-cron sweep returns it to the pool.
+            conn.commit()
+        else:
+            conn.execute(
+                "UPDATE users SET subscription_tier = 'free' WHERE id = %s", (user_id,)
+            )
+            conn.commit()
+            assign_plan(conn, user_id, "free")
+            conn.commit()
 
     invalidate("all")
-    logger.info("[RAZORPAY] Downgraded user %s to free (sub=%s, %s)", user_id, sub_id, new_status)
-    capture_payment_success(
-        provider="razorpay", event=f"subscription_{new_status}",
-        action="downgraded_to_free", user_id=user_id, subscription_id=sub_id,
-    )
+    if is_addon:
+        logger.info("[RAZORPAY] Add-on subscription %s cancelled for user %s (worker released at expiry)", sub_id, user_id)
+        capture_payment_success(
+            provider="razorpay", event=f"subscription_{new_status}",
+            action="addon_cancelled", user_id=user_id, subscription_id=sub_id,
+        )
+    else:
+        logger.info("[RAZORPAY] Downgraded user %s to free (sub=%s, %s)", user_id, sub_id, new_status)
+        capture_payment_success(
+            provider="razorpay", event=f"subscription_{new_status}",
+            action="downgraded_to_free", user_id=user_id, subscription_id=sub_id,
+        )
     return {"fulfilled": True, "user_id": user_id}

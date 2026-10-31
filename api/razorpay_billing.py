@@ -62,6 +62,8 @@ class RazorpayVerifyRequest(BaseModel):
 class RazorpaySubscriptionRequest(BaseModel):
     plan_slug: str
     promo_code: Optional[str] = None
+    # Dedicated-worker add-on: preferred region for the pool worker.
+    region: Optional[str] = None
 
 
 class RazorpaySubscriptionVerifyRequest(BaseModel):
@@ -323,6 +325,23 @@ async def create_razorpay_subscription(
     if not plan.get("price_monthly_cents"):
         raise HTTPException(status_code=400, detail="Plan is not purchasable")
 
+    # Add-on plans (dedicated worker) never replace the main plan. They grant
+    # a per-user entitlement claimed from the worker pool at fulfillment.
+    is_addon = bool(plan.get("is_addon"))
+    if is_addon:
+        from services import worker_registry
+        if worker_registry.get_user_dedication(user_id):
+            raise HTTPException(status_code=409, detail="Dedicated worker already active for this account")
+        region = (request.region or "").strip() or None
+        available = worker_registry.pool_summary()
+        if region and available.get(region, 0) < 1:
+            raise HTTPException(
+                status_code=409,
+                detail=f"No dedicated worker available in region '{region}' right now",
+            )
+        if not region and sum(available.values()) < 1:
+            raise HTTPException(status_code=409, detail="No dedicated workers available right now")
+
     amount_paise = razorpay_service.usd_cents_to_inr_paise(
         int(plan["price_monthly_cents"])
     )
@@ -367,6 +386,8 @@ async def create_razorpay_subscription(
             request.plan_slug, plan.get("name", request.plan_slug), amount_paise
         )
         notes = {"user_id": str(user_id), "plan_slug": request.plan_slug}
+        if is_addon and request.region:
+            notes["region"] = request.region.strip()
         if promo_context:
             notes["promo_code"] = str(promo_context["promo"]["code"])
         sub = razorpay_service.create_subscription(rzp_plan_id, notes=notes, coupon_id=coupon_id)

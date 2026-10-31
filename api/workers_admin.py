@@ -38,6 +38,7 @@ class WorkerNodeRequest(BaseModel):
     name: str
     api_url: str
     server_ip: Optional[str] = None
+    region: Optional[str] = None
     is_shared: bool = False
     status: str = "active"
 
@@ -105,22 +106,26 @@ async def upsert_worker_node(req: WorkerNodeRequest, authorization: Optional[str
     with get_db() as conn:
         conn.execute(
             """
-            INSERT INTO worker_nodes (id, name, api_url, server_ip, is_shared, status)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO worker_nodes (id, name, api_url, server_ip, region, is_shared, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
                 api_url = EXCLUDED.api_url,
                 server_ip = EXCLUDED.server_ip,
+                region = EXCLUDED.region,
                 is_shared = EXCLUDED.is_shared,
                 status = EXCLUDED.status
             """,
             (node_id, req.name.strip(), req.api_url.strip().rstrip("/"),
-             (req.server_ip or "").strip() or None, req.is_shared, req.status),
+             (req.server_ip or "").strip() or None,
+             (req.region or "").strip().lower() or None,
+             req.is_shared, req.status),
         )
         conn.commit()
     invalidate_cache()
-    logger.info("[WORKERS-ADMIN] admin %s upserted node %s -> %s (%s)", admin_id, node_id, req.api_url, req.status)
-    return {"success": True, "node": {"id": node_id, "api_url": req.api_url.strip().rstrip("/"), "status": req.status}}
+    logger.info("[WORKERS-ADMIN] admin %s upserted node %s -> %s (%s, region=%s)",
+                admin_id, node_id, req.api_url, req.status, req.region or "-")
+    return {"success": True, "node": {"id": node_id, "api_url": req.api_url.strip().rstrip("/"), "status": req.status, "region": req.region or None}}
 
 
 @router.post("/users/{user_id}/dedicated-worker")

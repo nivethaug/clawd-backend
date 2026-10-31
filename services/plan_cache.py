@@ -123,11 +123,18 @@ class _PlanCache:
                 return self._plans_by_id.get(identifier)
             return self._plans.get(identifier)
 
-    def get_all_plans(self) -> Dict[str, Dict[str, Any]]:
-        """Get all active plans keyed by slug."""
+    def get_all_plans(self, include_addons: bool = False) -> Dict[str, Dict[str, Any]]:
+        """Get all active plans keyed by slug.
+
+        Add-on plans (is_addon=true, e.g. dedicated-worker) are EXCLUDED by
+        default — they are entitlements purchased through their own flow and
+        must never render as replaceable main plans.
+        """
         self._load_if_stale()
         with self._lock:
-            return dict(self._plans)
+            if include_addons:
+                return dict(self._plans)
+            return {k: v for k, v in self._plans.items() if not v.get("is_addon")}
 
     def get_plan_grants(self, plan_id: int) -> Dict[str, int]:
         """Get credit grants for a plan: {credit_type: monthly_limit}."""
