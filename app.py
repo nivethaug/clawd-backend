@@ -2153,18 +2153,18 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
 SESSION_MODELS = [
     {"id": "z-ai/glm-5.3-flash", "name": "GLM 5.3 Flash", "tier": "free",
      "vision": True, "multiplier": 1, "default": True},
-    {"id": "claude-haiku-4-5", "name": "Claude Haiku", "tier": "free",
+    {"id": "anthropic/claude-haiku-5.5", "name": "Claude Haiku 5.5", "tier": "free",
      "vision": True, "multiplier": 8},
     {"id": "z-ai/glm-5.3", "name": "GLM 5.3", "tier": "pro",
      "vision": False, "multiplier": 3},
-    {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "tier": "pro",
+    {"id": "anthropic/claude-sonnet-5.5", "name": "Claude Sonnet 5.5", "tier": "pro",
      "vision": True, "multiplier": 20},
     {"id": "claude-opus-4-6", "name": "Claude Opus", "tier": "pro",
      "vision": True, "multiplier": 50},
-    {"id": "minimax/minimax-m2", "name": "MiniMax M2", "tier": "tier2",
+    {"id": "minimax/minimax-m2.7", "name": "MiniMax M2.7", "tier": "tier2",
      "vision": False, "multiplier": 2},
-    {"id": "x-ai/grok-4-fast", "name": "Grok Fast", "tier": "tier2",
-     "vision": False, "multiplier": 2},
+    {"id": "openai/gpt-6-luna", "name": "GPT-6 Luna", "tier": "tier2",
+     "vision": True, "multiplier": 2},
 ]
 _DEFAULT_SESSION_MODEL = "z-ai/glm-5.3-flash"
 # Billing multipliers are OFF until this env is set — all models cost the
