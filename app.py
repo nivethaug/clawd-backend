@@ -2146,6 +2146,42 @@ async def check_message_gate(user_content: str, project_name: str, project_path:
         return None
 
 
+# Session chat model catalog (Model Selection feature).
+# All models route through the Claude CLI --model flag → anthropic-compat
+# proxy (:7861). vision=False models skip image file paths in prompts
+# (the vision preprocessor's text summary is still included).
+SESSION_MODELS = [
+    {"id": "z-ai/glm-5.3-flash", "name": "GLM 5.3 Flash", "tier": "free",
+     "vision": True, "multiplier": 1, "default": True},
+    {"id": "claude-haiku-4-5", "name": "Claude Haiku", "tier": "free",
+     "vision": True, "multiplier": 8},
+    {"id": "z-ai/glm-5.3", "name": "GLM 5.3", "tier": "pro",
+     "vision": False, "multiplier": 3},
+    {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "tier": "pro",
+     "vision": True, "multiplier": 20},
+    {"id": "claude-opus-4-6", "name": "Claude Opus", "tier": "pro",
+     "vision": True, "multiplier": 50},
+    {"id": "minimax/minimax-m2", "name": "MiniMax M2", "tier": "tier2",
+     "vision": False, "multiplier": 2},
+    {"id": "x-ai/grok-4-fast", "name": "Grok Fast", "tier": "tier2",
+     "vision": False, "multiplier": 2},
+]
+_DEFAULT_SESSION_MODEL = "z-ai/glm-5.3-flash"
+# Billing multipliers are OFF until this env is set — all models cost the
+# same 1 credit as today. Flip to "1" only after log-only verification.
+_MODEL_BILLING_ENABLED = os.getenv("MODEL_BILLING_ENABLED", "0").lower() in ("1", "true", "yes")
+
+
+def _resolve_session_model(model_id: Optional[str]) -> dict:
+    """Look up a model from the catalog; invalid/missing → default."""
+    if model_id:
+        info = next((m for m in SESSION_MODELS if m["id"] == model_id), None)
+        if info:
+            return info
+        logger.warning("[MODEL] unknown model %r — falling back to default", model_id)
+    return next(m for m in SESSION_MODELS if m.get("default"))
+
+
 class ChatRequest(BaseModel):
     session_key: str
     messages: list[Message]
@@ -2153,6 +2189,9 @@ class ChatRequest(BaseModel):
     image: Optional[str] = None
     acp_mode: bool = True  # Default to ACP mode for frontend editing via ACPX
     mode: str = "dream"  # "dream", "plan" or "design"
+    # Model selection from the frontend dropdown (catalog id).
+    # None/absent = default (GLM 5.3 Flash) = current behavior unchanged.
+    model: Optional[str] = None
     # Design layer (Path B): {nodes: [...], viewport: {width, height, device}}
     design_context: Optional[Dict[str, Any]] = None
 
@@ -9618,6 +9657,8 @@ async def chat_stream_endpoint(
     # ── BILLING: Reserve AI credits before processing (ACP mode only) ──────
     _chat_charged = []
     _chat_user_id = None
+    _model_info = _resolve_session_model(request.model)
+    _model_multiplier = _model_info.get("multiplier", 1)
     if request.acp_mode:
         try:
             from services.billing_service import reserve_credits
@@ -9629,7 +9670,18 @@ async def chat_stream_endpoint(
                 if prow:
                     _chat_user_id = prow["user_id"] if isinstance(prow, dict) else prow[0]
                 if _chat_user_id:
-                    result = reserve_credits(bconn, _chat_user_id, "ADD_FEATURE", amount=1)
+                    # Model multiplier scales the credit cost — behind env flag.
+                    # Flag off (default): all models cost the same 1 credit.
+                    if _MODEL_BILLING_ENABLED and _model_multiplier > 1:
+                        _charge_amount = _model_multiplier
+                        logger.info("[BILLING] model=%s multiplier=%dx amount=%d",
+                                    _model_info["id"], _model_multiplier, _charge_amount)
+                    else:
+                        _charge_amount = 1
+                        if _model_multiplier > 1:
+                            logger.info("[BILLING] model=%s multiplier=%dx (billing disabled — charged 1)",
+                                        _model_info["id"], _model_multiplier)
+                    result = reserve_credits(bconn, _chat_user_id, "ADD_FEATURE", amount=_charge_amount)
                     bconn.commit()
                     if not result.get("success"):
                         raise HTTPException(
@@ -9670,9 +9722,15 @@ async def chat_stream_endpoint(
                 raise ValueError("Could not initialize ACP handler - project not found or invalid path")
             
             handler.set_session_id(session_id)
-            
+
+            # Model selection: pass the resolved model to the handler so the
+            # agent uses it for this session (handler → agent._settings["model"]
+            # → claude --model <id>). Default = GLM 5.3 Flash when not selected.
+            handler.set_model(_model_info["id"])
+
             logger.info(f"[ACP-STREAM] Handler initialized for project: {handler.project_name}")
             logger.info(f"[ACP-STREAM] Frontend path: {handler.frontend_src_path}")
+            logger.info(f"[ACP-STREAM] Model: {_model_info['name']} ({_model_info['id']}, {_model_multiplier}x)")
 
             # ── PLAN MODE ROUTING ─────────────────────────────────────────────
             mode = getattr(request, 'mode', 'dream')
@@ -9695,8 +9753,28 @@ async def chat_stream_endpoint(
             # Handle image for ACP mode - save to temp file and use path instead of base64
             acp_user_content = user_content
             image_attachment = None
-            
-            if request.image:
+            _model_supports_vision = _model_info.get("vision", True)
+
+            if request.image and not _model_supports_vision:
+                # Non-vision model: text summary only — no file path, no Read
+                # instruction, no design reference. The vision preprocessor's
+                # text description is all the model gets.
+                logger.info("[ACP-STREAM] Image + non-vision model %s — text summary only",
+                            _model_info["id"])
+                try:
+                    _tmp_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-STREAM]")
+                    _vision_summary = await analyze_chat_image_attachment(_tmp_attachment, user_content, "[ACP-STREAM]")
+                    acp_user_content = (
+                        f"{user_content}\n\n"
+                        f"[Image was attached — the current model cannot view images directly. "
+                        f"Description from vision preprocessor:]\n{_vision_summary}"
+                    )
+                    cleanup_chat_image_attachment(_tmp_attachment, "[ACP-STREAM]")
+                except Exception as _img_err:
+                    logger.warning("[ACP-STREAM] vision summary failed for non-vision model: %s", _img_err)
+                    acp_user_content = f"{user_content}\n\n[Image was attached but could not be processed]"
+
+            elif request.image:
                 logger.info(f"[ACP-STREAM] Image detected, preparing inspection file...")
                 try:
                         image_attachment = prepare_chat_image_attachment(request.image, session_id, "[ACP-STREAM]")
@@ -9850,6 +9928,7 @@ async def chat_stream_endpoint(
                         billing_user_id=_chat_user_id,
                         reserved_charges=_chat_charged,
                         image_attachment=image_attachment,
+                        model=_model_info["id"],
                     )
                     run_id = int(run_info["id"])
                     logger.info("[ACP-STREAM] Durable session run queued: %s", run_id)
@@ -10482,6 +10561,16 @@ async def cancel_chat(
     if session_id_for_release:
         SessionLockService.release_processing(int(session_id_for_release))
     return {"success": False, "message": "No active query found"}
+
+
+@app.get("/models")
+async def list_session_models():
+    """Session chat model catalog for the frontend dropdown.
+
+    Public (no auth) — this is static metadata: id, display name, tier
+    (free/pro/tier2), vision capability, cost multiplier, default flag.
+    The frontend uses this to render the model selector."""
+    return {"models": SESSION_MODELS}
 
 
 @app.get("/chat/status")

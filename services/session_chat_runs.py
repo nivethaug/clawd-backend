@@ -58,6 +58,7 @@ def create_run(
     billing_user_id: Optional[int],
     reserved_charges: Optional[List[Dict[str, Any]]] = None,
     image_attachment: Optional[Dict[str, Any]] = None,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_uuid = str(uuid.uuid4())
     with get_db() as conn:
@@ -66,9 +67,9 @@ def create_run(
             INSERT INTO session_chat_runs (
                 run_uuid, session_id, session_key, project_id, user_id, channel,
                 mode, user_message, session_context, billing_user_id,
-                reserved_charges, image_attachment, status, created_at, updated_at
+                reserved_charges, image_attachment, model, status, created_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, 'queued', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, 'queued', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id, run_uuid, status
             """,
             (
@@ -84,6 +85,7 @@ def create_run(
                 billing_user_id,
                 json.dumps(reserved_charges or []),
                 json.dumps(image_attachment) if image_attachment else None,
+                model,
             ),
         ).fetchone()
         conn.commit()
@@ -479,6 +481,11 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
             raise RuntimeError("Could not initialize the project session chat handler.")
 
         handler.set_session_id(session_id)
+        # User-selected model from the dropdown (stored in the run row)
+        _run_model = run.get("model")
+        if _run_model:
+            handler.set_model(_run_model)
+            logger.info("[SESSION-RUN] using model %s for run %s", _run_model, run_id)
         if (run.get("mode") or "dream") == "plan":
             handler._plan_mode = True
             try:

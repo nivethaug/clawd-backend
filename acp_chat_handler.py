@@ -268,6 +268,16 @@ class ACPChatHandler:
         """Set the current session ID (called before each chat)."""
         self.session_id = session_id
 
+    def set_model(self, model_id: str):
+        """Set the model for this session's agent (user dropdown selection).
+
+        The ID is passed through to the ClaudeCodeAgent's settings, which
+        uses it as the `--model` CLI flag. The anthropic-compat proxy
+        routes it to the right upstream (GLM / Claude / OpenRouter).
+        Default (no call or None) = whatever the agent's settings file has.
+        """
+        self._requested_model = model_id
+
     def _get_project_type_str(self) -> str:
         """Return project type string for plan prompt dispatch."""
         if self.is_telegram_bot:
@@ -4538,6 +4548,12 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                     on_progress=on_progress,
                     user_id=_user_id,
                 ) as agent:
+                    # User-selected model (dropdown) overrides the agent's
+                    # default. _settings["model"] becomes the --model CLI flag.
+                    _requested_model = getattr(self, '_requested_model', None)
+                    if _requested_model:
+                        agent._settings["model"] = _requested_model
+                        logger.info("[ACP-CHAT] Using user-selected model: %s", _requested_model)
                     self._active_agent = agent  # Track for cancellation
                     logger.info(f"[ACP-CHAT] ClaudeCodeAgent created, calling query...")
                     try:

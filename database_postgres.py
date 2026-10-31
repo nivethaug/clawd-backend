@@ -1422,6 +1422,11 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added mcp_oauth_flows table")
 
+            # --- session model selection (nullable column on existing table) ---
+            cur.execute("ALTER TABLE session_chat_runs ADD COLUMN IF NOT EXISTS model TEXT")
+            conn.commit()
+            logger.info("✓ Added model column to session_chat_runs")
+
             # --- credit_transactions (audit ledger) ---
             cur.execute("""CREATE TABLE IF NOT EXISTS credit_transactions (
                 id SERIAL PRIMARY KEY,
