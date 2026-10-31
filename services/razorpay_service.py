@@ -600,6 +600,22 @@ def fulfill_razorpay_subscription(
             assign_plan(conn, user_id, plan_slug)
             conn.commit()
 
+    # Enterprise includes the dedicated environment: claim the tenant's
+    # worker on activation/renewal (same parking + hourly retry semantics
+    # as the add-on when the pool is empty).
+    if plan_slug == "enterprise":
+        from services import worker_registry
+        result = worker_registry.extend_or_claim_dedication(user_id, region=None, until=period_end)
+        if result is None:
+            logger.error(
+                "[RAZORPAY] enterprise activated for user %s but dedicated pool EMPTY — parked for claim retry (sub=%s)",
+                user_id, sub_id,
+            )
+            capture_payment_failure(
+                provider="razorpay", event="subscription_charged",
+                reason="dedicated_pool_empty", user_id=user_id, subscription_id=sub_id,
+            )
+
     # Record the charge in the payments ledger (idempotent on payment id).
     if payment_entity and payment_entity.get("id"):
         try:
@@ -680,6 +696,14 @@ def cancel_razorpay_subscription_locally(sub_id: str, new_status: str = "cancell
             conn.commit()
             assign_plan(conn, user_id, "free")
             conn.commit()
+            # Enterprise downgrade: its dedicated environment goes too. The
+            # worker drains (registry) if it homed projects.
+            if d.get("slug") == "enterprise":
+                try:
+                    from services.worker_registry import release_user_worker
+                    release_user_worker(user_id)
+                except Exception as rel_exc:
+                    logger.warning("[RAZORPAY] enterprise worker release failed for user %s: %s", user_id, rel_exc)
 
     invalidate("all")
     if is_addon:

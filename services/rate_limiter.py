@@ -69,6 +69,15 @@ TIERS: Dict[str, TierLimits] = {
         project_create=UNLIMITED,
         max_projects=0,  # unlimited
     ),
+    # Enterprise: 1.5x Dream pricing, 2x credits — same unlimited access
+    # pattern as Dream (project count overridden from billing_plans: 45).
+    "enterprise": TierLimits(
+        name="Enterprise",
+        general_api=UNLIMITED,
+        ai_chat=UNLIMITED,
+        project_create=UNLIMITED,
+        max_projects=45,
+    ),
 }
 
 DEFAULT_TIER = "free"

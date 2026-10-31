@@ -2008,9 +2008,13 @@ def init_schema():
                  json.dumps(["Everything in Pro", "30 Active Projects", "25M AI Tokens",
                              "1000 Monthly Project AI Credits", "Premium Support",
                              "Fastest Queue"])),
-                ('enterprise', 'Enterprise', 0, 0, 0, 0, 0, 0, 3, 3, True, 30,
-                 json.dumps(["Everything in Dream", "Dedicated VPS", "Self Hosted",
-                             "Enterprise Support"])),
+                # Enterprise = 1.5x Dream: price and limits; credits 2x Dream.
+                ('enterprise', 'Enterprise', 5850, 45, 0, 0, 0, 3, 3, 3, True, 30,
+                 json.dumps(["Everything in Dream", "Dedicated Environment (8GB+)",
+                             "Custom AI Models — OpenRouter • Anthropic • GLM",
+                             "Custom Git Projects + Self-Hosted Git",
+                             "45 Active Projects", "2200 Monthly Project AI Credits",
+                             "Enterprise Support & SLA"])),
             ]
             for slug, name, price, max_proj, stor, bw, dep, dom, prio, sort, premium, sort_o, feats in seed_plans:
                 cur.execute(
@@ -2204,8 +2208,9 @@ def init_schema():
                 ('pro', 'edit_token', 20000000),
                 ('dream', 'project_ai', 1100),
                 ('dream', 'edit_token', 50000000),
-                ('enterprise', 'project_ai', 0),
-                ('enterprise', 'edit_token', 0),
+                # Enterprise: 2x Dream monthly credits
+                ('enterprise', 'project_ai', 2200),
+                ('enterprise', 'edit_token', 100000000),
             ]
             for slug, ctype, limit in seed_grants:
                 pid = plan_map.get(slug)
@@ -2218,6 +2223,44 @@ def init_schema():
                     )
             conn.commit()
             logger.info("✓ Seeded plan_credit_grants")
+
+            # Enterprise repricing (1.5x Dream price/limits, 2x Dream credits,
+            # purchasable): the DO NOTHING seeds above won't touch an existing
+            # enterprise row — force it.
+            cur.execute(
+                """UPDATE billing_plans SET
+                       price_monthly_cents = 5850,
+                       max_active_projects = 45,
+                       custom_domains = 3,
+                       priority_queue = 3,
+                       premium_models = TRUE,
+                       features = %s::jsonb,
+                       updated_at = NOW()
+                   WHERE slug = 'enterprise'""",
+                (json.dumps([
+                    "Everything in Dream", "Dedicated Environment (8GB+)",
+                    "Custom AI Models — OpenRouter • Anthropic • GLM",
+                    "Custom Git Projects + Self-Hosted Git",
+                    "45 Active Projects", "2200 Monthly Project AI Credits",
+                    "Enterprise Support & SLA",
+                ]),),
+            )
+            cur.execute(
+                """UPDATE plan_credit_grants g SET monthly_limit = %s
+                   FROM billing_plans p
+                   WHERE p.id = g.plan_id AND p.slug = 'enterprise'
+                     AND g.credit_type = 'project_ai'""",
+                (2200,),
+            )
+            cur.execute(
+                """UPDATE plan_credit_grants g SET monthly_limit = %s
+                   FROM billing_plans p
+                   WHERE p.id = g.plan_id AND p.slug = 'enterprise'
+                     AND g.credit_type = 'edit_token'""",
+                (100000000,),
+            )
+            conn.commit()
+            logger.info("✓ Enterprise plan repriced (1.5x Dream, 2x credits)")
 
             # Seed ai_operations
             seed_ops = [
