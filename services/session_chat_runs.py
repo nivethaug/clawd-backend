@@ -61,15 +61,25 @@ def create_run(
     model: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_uuid = str(uuid.uuid4())
+    # Dedicated-worker routing (enterprise isolation): stamp the bound node so
+    # ONLY that worker can claim this run. No binding / shared registry miss →
+    # NULL → any shared worker claims (legacy behavior).
+    try:
+        from services.worker_registry import resolve_for_user
+
+        assigned_worker_id = resolve_for_user(billing_user_id or user_id)
+    except Exception:
+        assigned_worker_id = None
     with get_db() as conn:
         row = conn.execute(
             """
             INSERT INTO session_chat_runs (
                 run_uuid, session_id, session_key, project_id, user_id, channel,
                 mode, user_message, session_context, billing_user_id,
-                reserved_charges, image_attachment, model, status, created_at, updated_at
+                reserved_charges, image_attachment, model, assigned_worker_id,
+                status, created_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, 'queued', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, 'queued', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id, run_uuid, status
             """,
             (
@@ -86,10 +96,14 @@ def create_run(
                 json.dumps(reserved_charges or []),
                 json.dumps(image_attachment) if image_attachment else None,
                 model,
+                assigned_worker_id,
             ),
         ).fetchone()
         conn.commit()
-    logger.info("[SESSION-RUN] queued run id=%s session=%s channel=%s", _row_value(row, "id"), session_id, channel)
+    logger.info(
+        "[SESSION-RUN] queued run id=%s session=%s channel=%s worker=%s",
+        _row_value(row, "id"), session_id, channel, assigned_worker_id or "shared",
+    )
     return {"id": _row_value(row, "id"), "run_uuid": _row_value(row, "run_uuid", 1), "status": _row_value(row, "status", 2)}
 
 
@@ -296,7 +310,17 @@ def is_cancel_requested(run_id: int) -> bool:
     return _row_value(row, "status") == "cancel_requested"
 
 
-def claim_next_run(worker_id: str) -> Optional[Dict[str, Any]]:
+def claim_next_run(worker_id: str, node_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Claim the next queued run for THIS node.
+
+    Hard isolation: a shared node claims only unstamped (NULL) runs; a
+    dedicated node claims only runs stamped with its id. Dedicated-worker
+    outages leave their runs queued — never spilled to the shared pool.
+    """
+    from services.worker_registry import is_shared_node
+
+    shared = is_shared_node(node_id)
+    effective_node = (node_id or "shared").strip() or "shared"
     pool = get_connection_pool()
     conn = pool.getconn()
     try:
@@ -305,10 +329,15 @@ def claim_next_run(worker_id: str) -> Optional[Dict[str, Any]]:
                 """
                 SELECT id FROM session_chat_runs
                 WHERE status = 'queued'
+                  AND (
+                        (assigned_worker_id IS NULL AND %s)
+                        OR assigned_worker_id = %s
+                  )
                 ORDER BY created_at ASC, id ASC
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
-                """
+                """,
+                (shared, effective_node),
             )
             row = cur.fetchone()
             if not row:
@@ -675,6 +704,42 @@ async def wait_for_run(run_id: int, poll_seconds: float = 2.0, timeout_seconds: 
         if status == "queued" and not _inline_executed:
             elapsed = (datetime.utcnow() - start).total_seconds()
             if elapsed > 3:
+                from services import worker_registry
+
+                # Hard isolation: a run assigned to a dedicated node must be
+                # executed by THAT node only. If it hasn't claimed the run, the
+                # node is likely down — leave the run queued (stale recovery
+                # will interrupt + refund) rather than spilling to shared.
+                assigned_node = run.get("assigned_worker_id")
+                if assigned_node:
+                    target_url = worker_registry.url_for_node(assigned_node)
+                    if not target_url:
+                        logger.warning(
+                            "[SESSION-RUN] run %s assigned to inactive node %s — leaving queued (hard isolation)",
+                            run_id, assigned_node,
+                        )
+                        _inline_executed = True  # do not retry every poll
+                    else:
+                        logger.info("[SESSION-RUN] No claim for run %s — nudging assigned node %s", run_id, assigned_node)
+                        _inline_executed = True
+                        try:
+                            import httpx
+                            _secret = os.getenv("INTERNAL_API_SECRET", "").strip()
+                            async with httpx.AsyncClient(timeout=1800) as client:
+                                resp = await client.post(
+                                    f"{target_url}/internal/chat-execute",
+                                    json={"run_id": run_id},
+                                    headers={"X-Internal-Secret": _secret} if _secret else {},
+                                    timeout=1800,
+                                )
+                                if resp.status_code != 200:
+                                    logger.error(
+                                        "[SESSION-RUN] assigned node %s returned %s: %s",
+                                        assigned_node, resp.status_code, resp.text[:200],
+                                    )
+                        except Exception as e:
+                            logger.error("[SESSION-RUN] nudge to %s failed for run %s: %s", assigned_node, run_id, e)
+                    continue
                 logger.info("[SESSION-RUN] No worker claimed run %s after %.1fs — proxying to worker-api", run_id, elapsed)
                 _inline_executed = True
                 try:

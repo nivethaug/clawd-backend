@@ -1427,6 +1427,42 @@ def init_schema():
             conn.commit()
             logger.info("✓ Added model column to session_chat_runs")
 
+            # --- dedicated worker nodes (enterprise isolation) ---
+            # Registry of all workers. Runs stamped with assigned_worker_id are
+            # claimable ONLY by that node (hard isolation); NULL = shared pool.
+            cur.execute("""CREATE TABLE IF NOT EXISTS worker_nodes (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                api_url TEXT NOT NULL,
+                server_ip TEXT,
+                is_shared BOOLEAN NOT NULL DEFAULT FALSE,
+                status TEXT NOT NULL DEFAULT 'active',
+                last_heartbeat_at TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS dedicated_worker_id TEXT REFERENCES worker_nodes(id)")
+            cur.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS worker_id TEXT")
+            cur.execute("ALTER TABLE session_chat_runs ADD COLUMN IF NOT EXISTS assigned_worker_id TEXT")
+            cur.execute("ALTER TABLE project_creation_runs ADD COLUMN IF NOT EXISTS assigned_worker_id TEXT")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scr_assigned_worker ON session_chat_runs(assigned_worker_id, status)")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pcr_assigned_worker ON project_creation_runs(assigned_worker_id, status)")
+            # Seed the legacy shared worker from env so existing routing is unchanged
+            _legacy_worker_url = (
+                os.getenv("WORKER_VPS_URL") or os.getenv("DREAMPILOT_WORKER_API_URL") or ""
+            ).strip().rstrip("/")
+            if _legacy_worker_url:
+                cur.execute(
+                    """INSERT INTO worker_nodes (id, name, api_url, is_shared, status)
+                       VALUES ('shared', 'Shared worker (legacy)', %s, TRUE, 'active')
+                       ON CONFLICT (id) DO NOTHING""",
+                    (_legacy_worker_url,),
+                )
+            conn.commit()
+            logger.info("✓ Added worker_nodes registry (dedicated workers)")
+
             # --- credit_transactions (audit ledger) ---
             cur.execute("""CREATE TABLE IF NOT EXISTS credit_transactions (
                 id SERIAL PRIMARY KEY,

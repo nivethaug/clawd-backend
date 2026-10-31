@@ -53,12 +53,14 @@ def main() -> None:
 
     init_schema()
     wid = worker_id()
-    logger.info("[PROJECT-WORKER] started worker_id=%s", wid)
+    from services.worker_registry import NODE_ID
+
+    logger.info("[PROJECT-WORKER] started worker_id=%s node=%s", wid, NODE_ID)
     recover_stale_runs(STALE_AFTER_MINUTES)
 
     while not _stop:
         try:
-            run = claim_next_run(wid)
+            run = claim_next_run(wid, NODE_ID)
             if not run:
                 time.sleep(POLL_SECONDS)
                 continue

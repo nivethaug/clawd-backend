@@ -89,6 +89,15 @@ def enqueue_project_creation_run(
 ) -> Dict[str, Any]:
     """Create the project row and queue a durable creation run."""
     run_uuid = str(uuid.uuid4())
+    # Dedicated-worker routing (enterprise isolation): the creating user's
+    # bound node claims this run exclusively, and the project is homed on
+    # that node from birth (proxy routing uses projects.worker_id).
+    try:
+        from services.worker_registry import resolve_for_user
+
+        assigned_worker_id = resolve_for_user(user_id)
+    except Exception:
+        assigned_worker_id = None
     payload = {
         "name": name,
         "domain": domain,
@@ -108,11 +117,11 @@ def enqueue_project_creation_run(
     with get_db() as conn:
         row = conn.execute(
             """
-            INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name, worker_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
-            (user_id, name, domain, description, "", type_id, "creating", None),
+            (user_id, name, domain, description, "", type_id, "creating", None, assigned_worker_id),
         ).fetchone()
         if not row:
             conn.rollback()
@@ -122,15 +131,18 @@ def enqueue_project_creation_run(
         conn.execute(
             """
             INSERT INTO project_creation_runs (
-                run_uuid, project_id, user_id, type_id, status, payload, created_at, updated_at
+                run_uuid, project_id, user_id, type_id, status, payload, assigned_worker_id, created_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, 'queued', %s::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, 'queued', %s::jsonb, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
-            (run_uuid, project["id"], user_id, type_id, _json_dumps(payload)),
+            (run_uuid, project["id"], user_id, type_id, _json_dumps(payload), assigned_worker_id),
         )
         conn.commit()
 
-    logger.info("[PROJECT-RUN] queued run=%s project=%s type=%s", run_uuid, project["id"], type_id)
+    logger.info(
+        "[PROJECT-RUN] queued run=%s project=%s type=%s worker=%s",
+        run_uuid, project["id"], type_id, assigned_worker_id or "shared",
+    )
     return project
 
 
@@ -180,7 +192,16 @@ def append_chunk(run_id: int, chunk_type: str, content: str) -> int:
         pool.putconn(conn)
 
 
-def claim_next_run(worker_id: str) -> Optional[Dict[str, Any]]:
+def claim_next_run(worker_id: str, node_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Claim the next queued creation run for THIS node (hard isolation).
+
+    Shared nodes claim unstamped runs; dedicated nodes claim only runs
+    stamped with their id — same contract as session_chat_runs.
+    """
+    from services.worker_registry import is_shared_node
+
+    shared = is_shared_node(node_id)
+    effective_node = (node_id or "shared").strip() or "shared"
     pool = get_connection_pool()
     conn = pool.getconn()
     try:
@@ -189,10 +210,15 @@ def claim_next_run(worker_id: str) -> Optional[Dict[str, Any]]:
                 """
                 SELECT id FROM project_creation_runs
                 WHERE status = 'queued'
+                  AND (
+                        (assigned_worker_id IS NULL AND %s)
+                        OR assigned_worker_id = %s
+                  )
                 ORDER BY created_at ASC, id ASC
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
-                """
+                """,
+                (shared, effective_node),
             )
             row = cur.fetchone()
             if not row:

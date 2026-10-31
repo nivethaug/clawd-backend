@@ -2622,6 +2622,11 @@ app.include_router(support_chat_router, prefix="/api/support", tags=["support"])
 from api.support.admin_router import router as support_admin_router
 app.include_router(support_admin_router, prefix="/api/support/admin", tags=["support-admin"])
 
+# Dedicated-worker registry admin (enterprise isolation) — register nodes,
+# bind users. api/workers_admin.py
+from api.workers_admin import router as workers_admin_router
+app.include_router(workers_admin_router, prefix="/api/admin/workers", tags=["workers-admin"])
+
 # Managed integrations (project ↔ global-integration links) — isolated
 # package: api/integrations_router.py + services/integrations/. See
 # INTEGRATIONS_PLAN.md. Absolute paths, no prefix.
@@ -8052,11 +8057,29 @@ async def _resolve_origin_ip(project_id: int) -> str:
     For main-hosted projects, runs _get_server_ip() locally (this VPS's IP).
     For worker-hosted projects, asks the worker via /internal/custom-domain/server-ip
     (the worker runs _get_server_ip() locally and returns its own IP).
+    Dedicated workers: the project's registered node server_ip is preferred
+    (no HTTP roundtrip), else we ask that node directly.
     """
+    from services import worker_registry
+
+    node = worker_registry.resolve_for_project(project_id)
+    if node:
+        if node.get("server_ip"):
+            return str(node["server_ip"])
+        try:
+            from services.project_proxy import get_from_worker
+            data = await get_from_worker("/internal/custom-domain/server-ip", timeout=15.0, project_id=project_id)
+            ip = data.get("ip")
+            if ip:
+                return ip
+            logger.warning("[CUSTOM_DOMAIN] node %s server-ip returned no ip: %s", node.get("id"), data)
+        except Exception as exc:
+            logger.warning("[CUSTOM_DOMAIN] failed to fetch node %s IP: %s", node.get("id"), exc)
+        return custom_domain_service._get_server_ip()
     if _project_lives_on_worker(project_id):
         try:
             from services.project_proxy import get_from_worker
-            data = await get_from_worker("/internal/custom-domain/server-ip", timeout=15.0)
+            data = await get_from_worker("/internal/custom-domain/server-ip", timeout=15.0, project_id=project_id)
             ip = data.get("ip")
             if ip:
                 return ip
@@ -8179,6 +8202,19 @@ async def _run_custom_domain_provision(
         "project_folder": project_folder,
         "dist_path": dist_path,
     }
+    from services import worker_registry as _wr
+
+    if _wr.resolve_for_project(project_id):
+        # Dedicated worker: certbot/nginx must run on that node.
+        try:
+            from services.project_proxy import post_to_worker
+            # certbot can take ~30-60s; allow generous timeout.
+            return await post_to_worker(
+                "/internal/custom-domain/provision", payload, timeout=180.0, project_id=project_id
+            )
+        except Exception as exc:
+            logger.error(f"[CUSTOM_DOMAIN] node provision call failed: {exc}")
+            return {"success": False, "message": f"Worker provision failed: {exc}"}
     if _project_lives_on_worker(project_id):
         try:
             from services.project_proxy import post_to_worker
@@ -8206,11 +8242,13 @@ async def _run_custom_domain_nginx_regen(
         "project_folder": project_folder,
         "dist_path": dist_path,
     }
-    if _project_lives_on_worker(project_id):
+    from services import worker_registry as _wr
+
+    if _wr.resolve_for_project(project_id) or _project_lives_on_worker(project_id):
         try:
             from services.project_proxy import post_to_worker
             data = await post_to_worker(
-                "/internal/custom-domain/remove-nginx", payload, timeout=60.0
+                "/internal/custom-domain/remove-nginx", payload, timeout=60.0, project_id=project_id
             )
             return bool(data.get("success", False))
         except Exception as exc:
