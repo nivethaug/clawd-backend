@@ -1,0 +1,67 @@
+# Dedicated Worker — full stack.
+#
+# One image (build once), four services, all on the HOST network so the
+# localhost:7861 wrapper is reachable from project containers and :8003
+# binds directly for the main-VPS proxy.
+#
+# Shared mounts (host paths are IDENTICAL inside — the code relies on
+# absolute paths):
+#   /var/run/docker.sock  → create/manage project containers on host docker
+#   /workspaces           → project files (bind host:/workspaces)
+#   /root/.claude         → Claude/ACPX agent configs (provisioned once)
+#   /root/dreampilot      → website template + dreampilotvenv (provisioned once)
+#   /opt/wrapper          → wrapper-v2 source (provisioned once)
+#
+# Bootstrap a fresh host: deploy/worker/bootstrap.sh
+
+name: clawd-worker
+
+x-worker-base: &worker-base
+  image: clawd-worker:latest
+  restart: unless-stopped
+  network_mode: host          # wrapper on localhost:7861; :8003 for main proxy
+  privileged: true            # bwrap user-namespace sandboxes need SYS_ADMIN
+  env_file: worker.env
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /workspaces:/workspaces
+    - /root/.claude:/root/.claude
+    - /root/dreampilot:/root/dreampilot
+    - /opt/wrapper:/opt/wrapper
+  logging:
+    driver: json-file
+    options: { max-size: "50m", max-file: "5" }
+
+services:
+  # Internal API — main VPS proxies file/chat/internal routes here (:8003)
+  worker-api:
+    <<: *worker-base
+    container_name: clawd-worker-api
+    command: >
+      bash -c "cd /opt/clawd-backend
+      && exec uvicorn app:app --host 0.0.0.0 --port 8003 --workers 2 --log-level info"
+    environment:
+      DREAMAGENT_ROLE: worker-api
+
+  # Session-chat poller — claims queued chat runs from the master Postgres
+  session-chat-worker:
+    <<: *worker-base
+    container_name: clawd-session-chat-worker
+    command: bash -c "cd /opt/clawd-backend && exec python session_chat_worker.py"
+
+  # Project-creation poller — scale with: docker compose up -d --scale project-creation-worker=2
+  project-creation-worker:
+    <<: *worker-base
+    container_name: clawd-project-creation-worker
+    command: bash -c "cd /opt/clawd-backend && exec python project_creation_worker.py"
+
+  # wrapper-v2 — anthropic-compat proxy (:7861) → z.ai / OpenRouter tiers.
+  # Has its own venv baked into /opt/wrapper/venv by bootstrap.sh.
+  wrapper:
+    <<: *worker-base
+    container_name: clawd-wrapper
+    command: >
+      bash -c "source /opt/wrapper/venv/bin/activate
+      && cd /opt/wrapper
+      && PYTHONPATH=/opt/wrapper/src exec python -m uvicorn wrapper_v2.api:app
+         --host 0.0.0.0 --port 7861 --workers 1 --log-level info"

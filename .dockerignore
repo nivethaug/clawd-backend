@@ -1,0 +1,12 @@
+.git
+.venv
+venv/
+node_modules/
+**/__pycache__/
+**/*.pyc
+*.log
+.env
+.env.postgres
+deploy/worker/worker.env
+dist/
+.worktrees/
