@@ -2342,6 +2342,10 @@ app = FastAPI(
 # proxied — which is the DENY direction, so it cannot bypass the guard.
 # ---------------------------------------------------------------------------
 INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "").strip()
+# Per-worker secret (hardened fleet): when set, THIS box accepts its own
+# secret in addition to the fleet-wide INTERNAL_API_SECRET (transition
+# compat). Registered in worker_nodes.secret on main.
+WORKER_INTERNAL_SECRET = os.getenv("WORKER_INTERNAL_SECRET", "").strip()
 
 
 @app.middleware("http")
@@ -2355,14 +2359,19 @@ async def internal_routes_guard(request: Request, call_next):
         if path == "/internal/pm2-restart" and request.headers.get("x-project-secret"):
             return await call_next(request)
         secret = request.headers.get("x-internal-secret", "")
-        if INTERNAL_API_SECRET:
-            # Fail closed: ONLY the shared secret authenticates internal
-            # calls. The previous no-XFF heuristic treated ANY headerless
-            # direct connection as trusted — with 8003 reachable from the
-            # internet that made /internal/delete-user-data, /internal/
-            # pm2-restart, /internal/email/send and /internal/scrape an
-            # unauthenticated admin API (verified live 2026-10-14).
-            if secret and secrets.compare_digest(secret, INTERNAL_API_SECRET):
+        if INTERNAL_API_SECRET or WORKER_INTERNAL_SECRET:
+            # Fail closed: internal calls authenticate with EITHER this box's
+            # per-worker secret or the fleet-wide shared secret. The previous
+            # no-XFF heuristic treated ANY headerless direct connection as
+            # trusted — with 8003 reachable from the internet that made
+            # /internal/delete-user-data, /internal/pm2-restart,
+            # /internal/email/send and /internal/scrape an unauthenticated
+            # admin API (verified live 2026-10-14).
+            ok = bool(
+                (WORKER_INTERNAL_SECRET and secrets.compare_digest(secret, WORKER_INTERNAL_SECRET))
+                or (INTERNAL_API_SECRET and secrets.compare_digest(secret, INTERNAL_API_SECRET))
+            )
+            if ok:
                 return await call_next(request)
             client_host = request.client.host if request.client else "unknown"
             logger.warning(

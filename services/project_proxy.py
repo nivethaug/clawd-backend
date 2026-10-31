@@ -125,19 +125,20 @@ async def post_to_worker(path: str, json_payload: Optional[dict] = None,
                          project_id: Optional[int] = None) -> dict:
     """POST json to the worker's internal API and return the parsed JSON.
 
-    project_id routes the call to that project's dedicated worker when one
-    is registered; otherwise the legacy shared WORKER_VPS_URL is used.
-    Raises RuntimeError if no worker is configured or the call fails.
+    project_id routes the call to that project's dedicated worker (with its
+    per-node secret) when one is registered; otherwise the legacy shared
+    WORKER_VPS_URL is used. Raises RuntimeError on failure.
     """
-    base = _worker_url_for_project(project_id)
+    base, secret = _worker_url_for_project(project_id)
     if not base:
         raise RuntimeError("No worker configured (WORKER_VPS_URL not set)")
+    headers = {"X-Internal-Secret": secret} if secret else {}
     client = _get_client()
     try:
         resp = await client.post(
             f"{base}{path}",
             json=json_payload or {},
-            headers=_internal_secret_headers(),
+            headers=headers,
             timeout=timeout if timeout is not None else httpx.USE_DEFAULT,
         )
         return resp.json()
@@ -149,18 +150,19 @@ async def get_from_worker(path: str, timeout: Optional[float] = None,
                           project_id: Optional[int] = None) -> dict:
     """GET from the worker's internal API and return the parsed JSON.
 
-    project_id routes the call to that project's dedicated worker when one
-    is registered; otherwise the legacy shared WORKER_VPS_URL is used.
-    Raises RuntimeError if no worker is configured or the call fails.
+    project_id routes the call to that project's dedicated worker (with its
+    per-node secret) when one is registered; otherwise the legacy shared
+    WORKER_VPS_URL is used. Raises RuntimeError on failure.
     """
-    base = _worker_url_for_project(project_id)
+    base, secret = _worker_url_for_project(project_id)
     if not base:
         raise RuntimeError("No worker configured (WORKER_VPS_URL not set)")
+    headers = {"X-Internal-Secret": secret} if secret else {}
     client = _get_client()
     try:
         resp = await client.get(
             f"{base}{path}",
-            headers=_internal_secret_headers(),
+            headers=headers,
             timeout=timeout if timeout is not None else httpx.USE_DEFAULT,
         )
         return resp.json()
@@ -168,18 +170,23 @@ async def get_from_worker(path: str, timeout: Optional[float] = None,
         raise RuntimeError(f"Worker GET {path} failed: {exc}") from exc
 
 
-def _worker_url_for_project(project_id: Optional[int]) -> Optional[str]:
-    """Worker URL for a project: its registered node, else the env default."""
+def _worker_url_for_project(project_id: Optional[int]) -> Optional[tuple]:
+    """(worker URL, internal secret) for a project: its registered node
+    (with that node's per-worker secret), else the legacy env pair."""
     if project_id is not None:
         try:
             from services import worker_registry
 
             node = worker_registry.resolve_for_project(project_id)
             if node and node.get("api_url"):
-                return str(node["api_url"]).rstrip("/")
+                url = str(node["api_url"]).rstrip("/")
+                secret = str(node["secret"]) if node.get("secret") else None
+                if secret is None:
+                    secret = os.getenv("INTERNAL_API_SECRET", "").strip() or None
+                return (url, secret or "")
         except Exception:
             pass
-    return _get_worker_url()
+    return (_get_worker_url() or "", os.getenv("INTERNAL_API_SECRET", "").strip())
 
 
 def _parse_project_id(path: str) -> Optional[int]:

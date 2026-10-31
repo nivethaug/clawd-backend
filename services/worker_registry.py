@@ -49,11 +49,11 @@ def _load_nodes() -> Dict[str, Dict[str, Any]]:
             if not _table_exists(conn):
                 return nodes
             rows = conn.execute(
-                "SELECT id, name, api_url, server_ip, region, is_shared, status FROM worker_nodes"
+                "SELECT id, name, api_url, server_ip, region, is_shared, status, secret FROM worker_nodes"
             ).fetchall()
         for row in rows:
             d = row if isinstance(row, dict) else dict(zip(
-                ("id", "name", "api_url", "server_ip", "region", "is_shared", "status"), row))
+                ("id", "name", "api_url", "server_ip", "region", "is_shared", "status", "secret"), row))
             nodes[str(d["id"])] = d
         with _cache_lock:
             _cache["ts"] = now
@@ -89,6 +89,19 @@ def legacy_worker_url() -> Optional[str]:
     """The pre-registry single-worker URL (env), for legacy fallback."""
     url = (os.getenv("WORKER_VPS_URL") or os.getenv("DREAMPILOT_WORKER_API_URL") or "").strip().rstrip("/")
     return url or None
+
+
+def internal_secret_for_node(node_id: Optional[str]) -> Optional[str]:
+    """The secret main uses for /internal/* calls to a node.
+
+    Per-node secret when set (hardened fleet), else the legacy fleet-wide
+    INTERNAL_API_SECRET. None when nothing is configured — matching the
+    legacy no-secret behavior.
+    """
+    node = get_node(node_id)
+    if node and node.get("secret"):
+        return str(node["secret"])
+    return os.getenv("INTERNAL_API_SECRET", "").strip() or None
 
 
 def url_for_node(node_id: Optional[str]) -> Optional[str]:

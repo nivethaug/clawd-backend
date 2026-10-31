@@ -41,6 +41,9 @@ class WorkerNodeRequest(BaseModel):
     region: Optional[str] = None
     is_shared: bool = False
     status: str = "active"
+    # Per-worker internal-API secret. Also set as WORKER_INTERNAL_SECRET in
+    # that worker's env — it accepts this OR the fleet-wide secret.
+    secret: Optional[str] = None
 
 
 class DedicatedWorkerRequest(BaseModel):
@@ -80,7 +83,8 @@ async def list_worker_nodes(authorization: Optional[str] = Header(None)):
     return {
         "nodes": [
             {
-                **node,
+                **{k: v for k, v in node.items() if k != "secret"},
+                "secret_set": bool(node.get("secret")),
                 "queue": queue.get(str(node["id"]), {}),
             }
             for node in nodes.values()
@@ -106,25 +110,28 @@ async def upsert_worker_node(req: WorkerNodeRequest, authorization: Optional[str
     with get_db() as conn:
         conn.execute(
             """
-            INSERT INTO worker_nodes (id, name, api_url, server_ip, region, is_shared, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO worker_nodes (id, name, api_url, server_ip, region, is_shared, status, secret)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
                 api_url = EXCLUDED.api_url,
                 server_ip = EXCLUDED.server_ip,
                 region = EXCLUDED.region,
                 is_shared = EXCLUDED.is_shared,
-                status = EXCLUDED.status
+                status = EXCLUDED.status,
+                secret = COALESCE(EXCLUDED.secret, worker_nodes.secret)
             """,
             (node_id, req.name.strip(), req.api_url.strip().rstrip("/"),
              (req.server_ip or "").strip() or None,
              (req.region or "").strip().lower() or None,
-             req.is_shared, req.status),
+             req.is_shared, req.status,
+             (req.secret or "").strip() or None),
         )
         conn.commit()
     invalidate_cache()
-    logger.info("[WORKERS-ADMIN] admin %s upserted node %s -> %s (%s, region=%s)",
-                admin_id, node_id, req.api_url, req.status, req.region or "-")
+    logger.info("[WORKERS-ADMIN] admin %s upserted node %s -> %s (%s, region=%s, secret=%s)",
+                admin_id, node_id, req.api_url, req.status, req.region or "-",
+                "set" if req.secret else "kept")
     return {"success": True, "node": {"id": node_id, "api_url": req.api_url.strip().rstrip("/"), "status": req.status, "region": req.region or None}}
 
 

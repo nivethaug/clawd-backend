@@ -1469,6 +1469,11 @@ def init_schema():
             cur.execute("ALTER TABLE billing_plans ADD COLUMN IF NOT EXISTS is_addon BOOLEAN NOT NULL DEFAULT FALSE")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS dedicated_until TIMESTAMPTZ")
             cur.execute("ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS region TEXT")
+            # Per-worker internal-API secret. When set, main sends THIS node's
+            # secret on /internal/* calls to it; the worker accepts its own
+            # secret (WORKER_INTERNAL_SECRET) or the legacy fleet-wide
+            # INTERNAL_API_SECRET during transition. NULL → legacy secret.
+            cur.execute("ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS secret TEXT")
             cur.execute(
                 """INSERT INTO billing_plans (slug, name, price_monthly_cents, is_addon, features)
                    VALUES ('dedicated-worker', 'Dedicated Worker', 2900, TRUE,

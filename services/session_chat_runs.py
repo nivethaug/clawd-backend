@@ -724,7 +724,7 @@ async def wait_for_run(run_id: int, poll_seconds: float = 2.0, timeout_seconds: 
                         _inline_executed = True
                         try:
                             import httpx
-                            _secret = os.getenv("INTERNAL_API_SECRET", "").strip()
+                            _secret = worker_registry.internal_secret_for_node(assigned_node) or ""
                             async with httpx.AsyncClient(timeout=1800) as client:
                                 resp = await client.post(
                                     f"{target_url}/internal/chat-execute",
