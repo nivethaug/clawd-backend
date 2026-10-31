@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         postgresql-client \
         acl \
         jq unzip \
-        tini \
+        sudo tini \
     && rm -rf /var/lib/apt/lists/*
 
 # pnpm (build tooling for generated projects)
