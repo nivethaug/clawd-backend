@@ -17,10 +17,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # ── System layer: everything the manual runbook installs ──────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.12 python3.12-venv python3-pip \
+        python3 python3-venv python3-pip \
         nodejs npm \
         git curl wget ca-certificates gnupg lsb-release \
-        bwrap util-linux \
+        bubblewrap util-linux \
         nginx-light certbot python3-certbot-nginx \
         docker.io \
         postgresql-client \
@@ -35,7 +35,7 @@ RUN npm install -g pnpm@latest && npm cache clean --force
 # ── Backend layer ──────────────────────────────────────────────────────────
 WORKDIR /opt/clawd-backend
 COPY requirements.txt ./
-RUN python3.12 -m venv /opt/venv \
+RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
     && /opt/venv/bin/pip install -r requirements.txt
 ENV PATH="/opt/venv/bin:${PATH}"
