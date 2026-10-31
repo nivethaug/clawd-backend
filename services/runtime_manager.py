@@ -82,6 +82,10 @@ _CONTAINER_ENV_ALLOWLIST = frozenset({
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
+    # Claude Tier 1 routing: when a claude-* model is selected, this env var
+    # overrides the settings.json proxy URL so the CLI goes to api.anthropic.com
+    # directly (using Claude Code subscription auth — no per-token cost).
+    "ANTHROPIC_BASE_URL",
     # OpenRouter (wrapper-v2 may use this as the upstream provider)
     "OPENROUTER_API_KEY",
     # Z.AI (zai-mcp-server injected by Claude's settings.json)

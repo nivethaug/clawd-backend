@@ -915,6 +915,25 @@ class ClaudeCodeAgent:
             env.update(self._settings["env"])
             logger.debug(f"Applied custom env vars: {self._settings['env']}")
 
+        # ── CLAUDE TIER 1 ROUTING ─────────────────────────────────────────
+        # When a Claude model (claude-*) is selected, point ANTHROPIC_BASE_URL
+        # at Anthropic's real API so the CLI uses its built-in Claude Code
+        # subscription auth (Tier 1 — included in Pro/Max plans, no per-token
+        # cost). For all other models (z-ai/*, minimax, grok), keep the
+        # wrapper proxy from settings.json (routes to z.ai or OpenRouter).
+        # The env override here takes precedence over claude.settings.json
+        # inside the container (docker exec -e beats settings file).
+        _model_id = self._settings.get("model", "")
+        if _model_id.startswith("claude-"):
+            env["ANTHROPIC_BASE_URL"] = "https://api.anthropic.com"
+            logger.info("[CLAUDE-AGENT] Claude model %s — routing to Anthropic direct "
+                        "(Tier 1, Claude Code auth)", _model_id)
+        elif _model_id and not _model_id.startswith("z-ai/"):
+            # Non-Claude, non-GLM model (minimax, grok) — goes through wrapper
+            # which routes to OpenRouter (Tier 2). Log for observability.
+            logger.info("[CLAUDE-AGENT] Model %s — routing through wrapper (Tier 2, "
+                        "OpenRouter)", _model_id)
+
         # Build command: claude -p "prompt" --dangerously-skip-permissions
         # Using -p for one-shot prompt mode (non-interactive)
         command = [claude_path]
