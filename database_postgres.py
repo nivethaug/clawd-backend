@@ -2010,7 +2010,7 @@ def init_schema():
                              "Fastest Queue"])),
                 # Enterprise = 1.5x Dream: price and limits; credits 2x Dream.
                 ('enterprise', 'Enterprise', 5850, 45, 0, 0, 0, 3, 3, 3, True, 30,
-                 json.dumps(["Everything in Dream", "Dedicated Environment (8GB+)",
+                 json.dumps(["Everything in Dream", "Dedicated VPS Add-on Available",
                              "Custom AI Models — OpenRouter • Anthropic • GLM",
                              "Custom Git Projects + Self-Hosted Git",
                              "45 Active Projects", "2200 Monthly Project AI Credits",
@@ -2238,7 +2238,7 @@ def init_schema():
                        updated_at = NOW()
                    WHERE slug = 'enterprise'""",
                 (json.dumps([
-                    "Everything in Dream", "Dedicated Environment (8GB+)",
+                    "Everything in Dream", "Dedicated VPS Add-on Available",
                     "Custom AI Models — OpenRouter • Anthropic • GLM",
                     "Custom Git Projects + Self-Hosted Git",
                     "45 Active Projects", "2200 Monthly Project AI Credits",
