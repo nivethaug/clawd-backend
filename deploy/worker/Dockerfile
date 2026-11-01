@@ -52,6 +52,9 @@ RUN /opt/venv/bin/pip install requests sqlalchemy
 # App code (baked in; mount a fresh checkout over it for live updates)
 COPY . /opt/clawd-backend
 
+# long *.dreamagent.cloud subdomains overflow the default name hash
+RUN echo "server_names_hash_bucket_size 128;" > /etc/nginx/conf.d/00-hash.conf
+
 # dreampilot venv symlinks to /usr/local/bin/python3.12 (created on the legacy
 # worker whose python lives there) — bridge to this image's /usr/bin/python3
 RUN ln -sf /usr/bin/python3 /usr/local/bin/python3.12
