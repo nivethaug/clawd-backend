@@ -1626,13 +1626,24 @@ server {{
                 logger.error(f"Nginx config test failed: {test_result.stderr}")
                 return False
 
-            # Reload nginx using systemctl
-            result = subprocess.run(
-                ["/usr/bin/systemctl", "reload", "nginx"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            # Reload nginx: systemctl on VPS hosts, direct signal inside
+            # containers (no systemd — dedicated worker stack runs nginx in
+            # the compose containers).
+            result = None
+            if os.path.exists("/usr/bin/systemctl"):
+                result = subprocess.run(
+                    ["/usr/bin/systemctl", "reload", "nginx"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+            else:
+                result = subprocess.run(
+                    ["nginx", "-s", "reload"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
 
             if result.returncode == 0:
                 logger.info("✓ Nginx reloaded successfully")
