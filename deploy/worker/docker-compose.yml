@@ -18,7 +18,7 @@ name: clawd-worker
 
 x-worker-base: &worker-base
   build:
-    context: ..
+    context: ../..
     dockerfile: deploy/worker/Dockerfile
   image: clawd-worker:latest
   restart: unless-stopped
