@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # pnpm (build tooling for generated projects)
-RUN npm install -g pnpm@latest && npm cache clean --force
+RUN npm install -g pnpm@latest pm2 && npm cache clean --force
 
 # ── Backend layer ──────────────────────────────────────────────────────────
 WORKDIR /opt/clawd-backend
