@@ -35,7 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN echo '#!/bin/bash' > /usr/local/bin/systemctl     && echo '[ "$1" = "reload" ] || [ "$1" = "restart" ] && shift && [ "$1" = "nginx" ] && (nginx -t >/dev/null 2>&1 || true) && (nginx -s reload >/dev/null 2>&1 || true); exit 0' >> /usr/local/bin/systemctl     && chmod +x /usr/local/bin/systemctl     && ln -sf /usr/local/bin/systemctl /usr/bin/systemctl
 
 # pnpm (build tooling for generated projects)
-RUN npm install -g pnpm@latest pm2 && npm cache clean --force
+RUN npm install -g pnpm@latest pm2 \n    # Claude CLI for the ACPX/AI-editor path (chat path uses the user container)
+    && npm install -g @anthropic-ai/claude-code@2.1.27 && npm cache clean --force
 
 # ── Backend layer ──────────────────────────────────────────────────────────
 WORKDIR /opt/clawd-backend
