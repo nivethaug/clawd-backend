@@ -53,6 +53,79 @@ def _vultr(method: str, path: str, body: Optional[dict] = None) -> Optional[dict
         return None
 
 
+def _ssh_run(ip: str, cmd: str, timeout: int = 60, stdin_text: Optional[str] = None):
+    """Run a command on the spawned worker as root (main's baked SSH key)."""
+    import subprocess
+    return subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+         "-o", "ConnectTimeout=10", f"root@{ip}", cmd],
+        input=stdin_text, capture_output=True, text=True, timeout=timeout,
+    )
+
+
+def _enroll_via_api(ip: str) -> Optional[dict]:
+    """Call main's own enrollment endpoint for this IP. Returns node_id + worker_env."""
+    token = os.getenv("WORKER_ENROLL_TOKEN", "").strip()
+    if not token:
+        return None
+    body = json.dumps({"server_ip": ip}).encode()
+    req = urllib.request.Request(
+        "http://127.0.0.1:8002/api/workers/enroll", data=body, method="POST",
+        headers={"Content-Type": "application/json", "X-Enroll-Token": token},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+    except Exception as exc:
+        logger.error("[FLEET] enroll call failed for %s: %s", ip, exc)
+        return None
+
+
+def _provision_instance(instance_id: str) -> None:
+    """Wait for the spawned instance to accept SSH, then enroll + restart its
+    stack with fresh identity. Golden-image cloud-init is NOT relied upon
+    (snapshot cloud-init skips runcmd — verified live)."""
+    deadline = time.time() + 720  # 12 min max
+    ip = None
+    while time.time() < deadline:
+        res = _vultr("GET", f"/instances/{instance_id}")
+        inst = (res or {}).get("instance") or {}
+        cand = inst.get("main_ip")
+        if cand and cand != "0.0.0.0" and inst.get("status") == "active":
+            try:
+                if _ssh_run(cand, "echo ok", timeout=20).returncode == 0:
+                    ip = cand
+                    break
+            except Exception:
+                pass
+        time.sleep(20)
+    if not ip:
+        logger.error("[FLEET] instance %s never became SSHable — leaving for destroy sweep", instance_id)
+        return
+
+    enrolled = _enroll_via_api(ip)
+    if not enrolled:
+        logger.error("[FLEET] enrollment failed for %s — leaving for destroy sweep", ip)
+        return
+
+    r = _ssh_run(
+        ip, "cat > /opt/worker/clawd-backend/deploy/worker/worker.env",
+        timeout=30, stdin_text=enrolled["worker_env"],
+    )
+    if r.returncode != 0:
+        logger.error("[FLEET] env push failed for %s: %s", ip, r.stderr[:200])
+        return
+    r = _ssh_run(
+        ip,
+        "cd /opt/worker/clawd-backend/deploy/worker && docker compose up -d --force-recreate",
+        timeout=300,
+    )
+    if r.returncode != 0:
+        logger.error("[FLEET] stack restart failed for %s: %s", ip, r.stderr[:200])
+        return
+    logger.info("[FLEET] worker %s provisioned at %s (node=%s)", instance_id, ip, enrolled.get("node_id"))
+
+
 def _spawn_worker() -> Optional[str]:
     """Create a Vultr instance from the golden snapshot. Returns instance id."""
     snapshot_id = os.getenv("VULTR_SNAPSHOT_ID", "").strip()
@@ -86,6 +159,8 @@ runcmd:
     iid = inst.get("id")
     if iid:
         logger.info("[FLEET] spawned Vultr instance %s (plan=%s region=%s)", iid, plan, region)
+        # Provision in the background: wait SSH → enroll → push env → restart
+        threading.Thread(target=_provision_instance, args=(iid,), daemon=True).start()
     return iid
 
 
