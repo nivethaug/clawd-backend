@@ -108,6 +108,8 @@ def _provision_instance(instance_id: str) -> None:
         logger.error("[FLEET] enrollment failed for %s — leaving for destroy sweep", ip)
         return
 
+    # User containers bind /srv/cache (npm/pip cache) — must exist on host
+    _ssh_run(ip, "mkdir -p /srv/cache && chmod 777 /srv/cache", timeout=30)
     r = _ssh_run(
         ip, "cat > /opt/worker/clawd-backend/deploy/worker/worker.env",
         timeout=30, stdin_text=enrolled["worker_env"],
