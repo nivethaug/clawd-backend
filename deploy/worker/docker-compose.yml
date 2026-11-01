@@ -31,6 +31,7 @@ x-worker-base: &worker-base
     - /root/.claude:/root/.claude
     - /root/dreampilot:/root/dreampilot
     - /opt/wrapper:/opt/wrapper
+    - /etc/letsencrypt:/etc/letsencrypt:ro
   logging:
     driver: json-file
     options: { max-size: "50m", max-file: "5" }
