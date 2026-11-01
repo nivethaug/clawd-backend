@@ -51,6 +51,29 @@ async def dedicated_status(authorization: Optional[str] = Header(None)):
     }
 
 
+@router.post("/admin-activate")
+async def dedicated_admin_activate(authorization: Optional[str] = Header(None)):
+    """Admin bypass: claim a pool worker WITHOUT payment.
+
+    Admin-grant semantics — no subscription, dedicated_until=NULL (never
+    swept). Release via the admin bind endpoint (worker_id null) or the
+    card's Cancel button (which falls back to release for admins).
+    """
+    user_id = get_user_id_from_token(authorization)
+    from app import require_admin
+    require_admin(user_id)
+
+    from database_adapter import get_db
+    from services import worker_registry
+
+    if worker_registry.get_user_dedication(user_id):
+        raise HTTPException(status_code=409, detail="Dedicated worker already active for this account")
+    node_id = worker_registry.claim_pool_worker(user_id, None)
+    if not node_id:
+        raise HTTPException(status_code=409, detail="No dedicated workers available right now")
+    return {"success": True, "worker_id": node_id, "message": f"Admin-activated dedicated worker '{node_id}' (no charge)"}
+
+
 @router.post("/cancel")
 async def dedicated_cancel(authorization: Optional[str] = Header(None)):
     """Cancel the dedicated-worker subscription at Razorpay.
@@ -75,7 +98,16 @@ async def dedicated_cancel(authorization: Optional[str] = Header(None)):
                ORDER BY s.updated_at DESC LIMIT 1""",
             (user_id, ADDON_SLUG),
         ).fetchone()
+
+    # No Razorpay subscription: admin-granted (or already lapsed) dedication —
+    # release the worker immediately for admins instead of a dead-end 404.
     if not row:
+        from app import _is_admin_user
+        if _is_admin_user(user_id):
+            from services import worker_registry
+            released = worker_registry.release_user_worker(user_id)
+            if released:
+                return {"success": True, "message": f"Dedicated worker '{released}' released (admin grant)."}
         raise HTTPException(status_code=404, detail="No active dedicated-worker subscription")
     sub_id = (dict(row) if not isinstance(row, dict) else row)["external_subscription_id"]
 
