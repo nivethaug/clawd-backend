@@ -109,7 +109,7 @@ def _provision_instance(instance_id: str) -> None:
         return
 
     # User containers bind /srv/cache (npm/pip cache) — must exist on host
-    _ssh_run(ip, "mkdir -p /srv/cache && chmod 777 /srv/cache", timeout=30)
+    _ssh_run(ip, "mkdir -p /srv/cache && chmod 777 /srv/cache; docker network create dreamagent-net 2>/dev/null; true", timeout=60)
     r = _ssh_run(
         ip, "cat > /opt/worker/clawd-backend/deploy/worker/worker.env",
         timeout=30, stdin_text=enrolled["worker_env"],
