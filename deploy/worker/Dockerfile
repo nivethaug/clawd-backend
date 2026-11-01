@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         docker.io \
         postgresql-client \
         acl \
-        jq unzip \
+        jq unzip rsync \
         sudo tini \
     && rm -rf /var/lib/apt/lists/*
 
