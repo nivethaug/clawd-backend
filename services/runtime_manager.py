@@ -82,6 +82,9 @@ _CONTAINER_ENV_ALLOWLIST = frozenset({
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
+    # Claude CLI timeout — large creation prompts need 5 min, CLI default is 60s
+    "ANTHROPIC_TIMEOUT",
+    "CLAUDE_CODE_API_TIMEOUT",
     # Claude Tier 1 routing: when a claude-* model is selected, this env var
     # overrides the settings.json proxy URL so the CLI goes to api.anthropic.com
     # directly (using Claude Code subscription auth — no per-token cost).
