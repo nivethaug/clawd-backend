@@ -40,9 +40,7 @@ services:
   worker-api:
     <<: *worker-base
     container_name: clawd-worker-api
-    command: >
-      bash -c "cd /opt/clawd-backend
-      && exec uvicorn app:app --host 0.0.0.0 --port 8003 --workers 2 --log-level info"
+    command: bash -c "cd /opt/clawd-backend && exec uvicorn app:app --host 0.0.0.0 --port 8003 --workers 2 --log-level info"
     environment:
       DREAMAGENT_ROLE: worker-api
 
@@ -63,8 +61,4 @@ services:
   wrapper:
     <<: *worker-base
     container_name: clawd-wrapper
-    command: >
-      bash -c "source /opt/wrapper/venv/bin/activate
-      && cd /opt/wrapper
-      && PYTHONPATH=/opt/wrapper/src exec python -m uvicorn wrapper_v2.api:app
-         --host 0.0.0.0 --port 7861 --workers 1 --log-level info"
+    command: bash -c "source /opt/wrapper/venv/bin/activate && cd /opt/wrapper && PYTHONPATH=/opt/wrapper/src exec python -m uvicorn wrapper_v2.api:app --host 0.0.0.0 --port 7861 --workers 1 --log-level info"
