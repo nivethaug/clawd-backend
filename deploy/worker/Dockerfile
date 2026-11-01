@@ -51,6 +51,10 @@ RUN /opt/venv/bin/pip install requests sqlalchemy
 # App code (baked in; mount a fresh checkout over it for live updates)
 COPY . /opt/clawd-backend
 
+# dreampilot venv symlinks to /usr/local/bin/python3.12 (created on the legacy
+# worker whose python lives there) — bridge to this image's /usr/bin/python3
+RUN ln -sf /usr/bin/python3 /usr/local/bin/python3.12
+
 # dreampilot runtime dirs (template + venv are bind-mounted from the host —
 # they are per-install artifacts shared with project sandboxes)
 RUN mkdir -p /workspaces /root/.claude /root/dreampilot /var/log/clawd
