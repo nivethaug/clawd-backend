@@ -936,6 +936,11 @@ class ClaudeCodeAgent:
 
         # Build command: claude -p "prompt" --dangerously-skip-permissions
         # Using -p for one-shot prompt mode (non-interactive)
+        # In container mode, the HOST-resolved claude path is meaningless
+        # inside the user container (different filesystem) — use the bare
+        # command name and let the container's PATH resolve it.
+        if os.environ.get("EXECUTION_MODE") == "container":
+            claude_path = "claude"
         command = [claude_path]
 
         # Apply model configuration if present in settings (as CLI flag, not env var)
