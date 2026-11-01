@@ -32,6 +32,7 @@ x-worker-base: &worker-base
     - /root/dreampilot:/root/dreampilot
     - /opt/wrapper:/opt/wrapper
     - /etc/letsencrypt:/etc/letsencrypt:ro
+    - /opt/nginx:/etc/nginx
   logging:
     driver: json-file
     options: { max-size: "50m", max-file: "5" }
@@ -63,3 +64,11 @@ services:
     <<: *worker-base
     container_name: clawd-wrapper
     command: bash -c "source /opt/wrapper/venv/bin/activate && cd /opt/wrapper && PYTHONPATH=/opt/wrapper/src exec python -m uvicorn wrapper_v2.api:app --host 0.0.0.0 --port 7861 --workers 1 --log-level info"
+
+  # Public edge: serves deployed project domains (:80/:443, host network).
+  # Reload loop picks up site configs the creation-worker drops into the
+  # shared /opt/nginx volume (no cross-container systemctl exists).
+  nginx:
+    <<: *worker-base
+    container_name: clawd-nginx
+    command: bash -c "nginx -g 'daemon off;' & sleep 5; while true; do nginx -s reload >/dev/null 2>&1 || true; sleep 20; done"
