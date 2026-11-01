@@ -61,13 +61,19 @@ def create_run(
     model: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_uuid = str(uuid.uuid4())
-    # Dedicated-worker routing (enterprise isolation): stamp the bound node so
-    # ONLY that worker can claim this run. No binding / shared registry miss →
-    # NULL → any shared worker claims (legacy behavior).
+    # Dedicated-worker routing (enterprise isolation): a run must execute
+    # WHERE THE PROJECT'S FILES LIVE. Projects homed on a registered node
+    # (projects.worker_id — set at creation for dedicated users) stamp that
+    # node; legacy shared-hosted projects stay NULL (shared pool claims).
+    # NOT stamped by user: an upgraded user's OLD projects still live on the
+    # shared worker and their chats must keep running there.
+    assigned_worker_id = None
     try:
-        from services.worker_registry import resolve_for_user
+        from services.worker_registry import resolve_for_project
 
-        assigned_worker_id = resolve_for_user(billing_user_id or user_id)
+        _node = resolve_for_project(project_id)
+        if _node:
+            assigned_worker_id = str(_node["id"])
     except Exception:
         assigned_worker_id = None
     with get_db() as conn:
