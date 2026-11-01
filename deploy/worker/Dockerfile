@@ -40,6 +40,9 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install -r requirements.txt
 ENV PATH="/opt/venv/bin:${PATH}"
 
+# openclaw_wrapper.py + infra scripts need these; absent from requirements.txt
+RUN /opt/venv/bin/pip install requests sqlalchemy
+
 # App code (baked in; mount a fresh checkout over it for live updates)
 COPY . /opt/clawd-backend
 
