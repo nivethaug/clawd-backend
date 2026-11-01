@@ -78,7 +78,7 @@ runcmd:
 """
     res = _vultr("POST", "/instances", {
         "region": region, "plan": plan, "snapshot_id": snapshot_id,
-        "user_data": user_data,
+        "user_data": __import__("base64").b64encode(user_data.encode()).decode(),
         "hostname": "ent-auto", "label": "ent-auto (fleet)",
         "enable_ipv6": True, "tags": ["dreamagent", "auto-worker"],
     })
