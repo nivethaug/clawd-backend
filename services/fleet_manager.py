@@ -154,6 +154,14 @@ def _destroy_idle_auto_nodes() -> int:
     return destroyed
 
 
+def _existing_auto_instances() -> int:
+    """Active/pending Vultr instances tagged auto-worker (any of them may be
+    mid-enrollment). Prevents runaway respawns when enrollment is slow/fails."""
+    res = _vultr("GET", "/instances?tag=auto-worker")
+    insts = (res or {}).get("instances") or []
+    return sum(1 for i in insts if i.get("status") in ("active", "pending", "installing"))
+
+
 def fleet_tick() -> None:
     """One pass: destroy idle auto nodes, spawn when demand exceeds pool."""
     global _pending_spawn_until
@@ -174,8 +182,17 @@ def fleet_tick() -> None:
                 if time.time() < _pending_spawn_until:
                     return
                 _pending_spawn_until = time.time() + 300
+            # NEVER stack instances: if one is already booting/enrolling, wait
+            # for it (or its destroy sweep) instead of spawning another.
+            if _existing_auto_instances() > 0:
+                logger.info("[FLEET] demand=%d but an auto instance is mid-flight — waiting", demand)
+                return
             logger.info("[FLEET] demand=%d pool=0 — spawning dedicated worker", demand)
             _spawn_worker()
+        elif demand > 0 and free > 0:
+            # A worker exists but nobody claimed it yet — activate now
+            from services.worker_registry import retry_pending_dedication_claims
+            retry_pending_dedication_claims()
     except Exception as exc:
         logger.error("[FLEET] tick failed: %s", exc)
 
