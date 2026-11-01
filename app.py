@@ -2530,6 +2530,13 @@ async def start_background_workers():
     except Exception as e:
         logger.error(f"[STARTUP] Failed to start billing cron: {e}")
 
+    try:
+        from services.fleet_manager import start_fleet_manager
+        start_fleet_manager()
+        logger.info("[STARTUP] Fleet manager started (auto dedicated workers on demand)")
+    except Exception as e:
+        logger.error(f"[STARTUP] Failed to start fleet manager: {e}")
+
 
 @app.middleware("http")
 async def sentry_context_middleware(request: Request, call_next):
@@ -2640,6 +2647,10 @@ app.include_router(workers_admin_router, prefix="/api/admin/workers", tags=["wor
 # Purchase rides the existing Razorpay subscription endpoint.
 from api.dedicated_router import router as dedicated_router
 app.include_router(dedicated_router, prefix="/api/billing/dedicated", tags=["dedicated"])
+
+# Fleet worker self-enrollment (golden-image workers call this at boot).
+from api.worker_enroll import router as worker_enroll_router
+app.include_router(worker_enroll_router, tags=["worker-enroll"])
 
 # Managed integrations (project ↔ global-integration links) — isolated
 # package: api/integrations_router.py + services/integrations/. See

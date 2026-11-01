@@ -1474,6 +1474,13 @@ def init_schema():
             # secret (WORKER_INTERNAL_SECRET) or the legacy fleet-wide
             # INTERNAL_API_SECRET during transition. NULL → legacy secret.
             cur.execute("ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS secret TEXT")
+            # Auto-fleet: nodes spawned on demand by the fleet manager
+            cur.execute("ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS auto_managed BOOLEAN NOT NULL DEFAULT FALSE")
+            cur.execute("ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS provider TEXT")
+            cur.execute("ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS provider_instance_id TEXT")
+            # Admin on-demand activation marker (pool empty → spawn → claim)
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS dedicated_pending BOOLEAN NOT NULL DEFAULT FALSE")
+            cur.execute("ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
             cur.execute(
                 """INSERT INTO billing_plans (slug, name, price_monthly_cents, is_addon, features)
                    VALUES ('dedicated-worker', 'Dedicated Worker', 2900, TRUE,

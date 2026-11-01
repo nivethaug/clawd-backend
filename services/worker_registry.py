@@ -332,7 +332,7 @@ def _drain_if_orphaned(node_id: str) -> None:
             d = row if isinstance(row, dict) else dict(zip(("bound", "homed"), row))
             if not d.get("bound") and d.get("homed"):
                 conn.execute(
-                    "UPDATE worker_nodes SET status = 'drained' WHERE id = %s AND is_shared = FALSE",
+                    "UPDATE worker_nodes SET status = 'drained', updated_at = NOW() WHERE id = %s AND is_shared = FALSE",
                     (node_id,),
                 )
                 logger.info("[WORKER-REGISTRY] node %s drained (released with homed projects — wipe before re-pooling)", node_id)
@@ -366,11 +366,14 @@ def release_user_worker(user_id: int) -> Optional[str]:
 
 
 def retry_pending_dedication_claims() -> int:
-    """Re-try pool claims for PAID add-on subscribers who have no worker.
+    """Re-try pool claims for users owed a dedicated worker.
 
-    Covers the pool-empty-at-charge-time case: the subscription is active
-    and paid, but fulfillment parked it. Runs hourly from the billing cron;
-    succeeds automatically once the pool is refilled.
+    Two groups:
+      1. PAID subscribers (add-on/enterprise) parked when the pool was empty
+      2. ADMINS who hit on-demand activation (dedicated_pending) while the
+         fleet was spawning their worker
+    Runs from the billing cron; the fleet manager spawns workers for this
+    demand — this sweep claims them the moment they enroll.
     """
     try:
         from database_postgres import get_db
@@ -378,27 +381,41 @@ def retry_pending_dedication_claims() -> int:
         with get_db() as conn:
             if not _table_exists(conn):
                 return 0
+            # 1) paid subs without a worker
             rows = conn.execute(
                 """
-                SELECT s.user_id, s.current_period_end
+                SELECT s.user_id, s.current_period_end, FALSE AS via_pending
                 FROM subscriptions s
                 JOIN billing_plans p ON p.id = s.plan_id
-                WHERE p.slug = 'dedicated-worker'
+                WHERE p.slug IN ('dedicated-worker', 'enterprise')
                   AND s.status = 'active'
                   AND s.current_period_end > NOW()
                   AND NOT EXISTS (
                       SELECT 1 FROM users u
                       WHERE u.id = s.user_id AND u.dedicated_worker_id IS NOT NULL
                   )
+                UNION ALL
+                -- 2) pending admins without a worker
+                SELECT u.id, NULL, TRUE FROM users u
+                WHERE u.dedicated_pending AND u.dedicated_worker_id IS NULL
                 """
             ).fetchall()
         claimed = 0
-        for row in rows:
-            d = row if isinstance(row, dict) else dict(zip(("user_id", "current_period_end"), row))
-            result = extend_or_claim_dedication(int(d["user_id"]), region=None, until=d.get("current_period_end"))
+        for row in rows or []:
+            d = row if isinstance(row, dict) else dict(zip(("user_id", "current_period_end", "via_pending"), row))
+            result = extend_or_claim_dedication(
+                int(d["user_id"]), region=None, until=d.get("current_period_end")
+            )
             if result and result.get("claimed"):
-                logger.info("[WORKER-REGISTRY] pending claim retry succeeded for user %s -> %s", d["user_id"], result["node_id"])
+                logger.info("[WORKER-REGISTRY] pending claim succeeded for user %s -> %s", d["user_id"], result["node_id"])
                 claimed += 1
+                if d.get("via_pending"):
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE users SET dedicated_pending = FALSE WHERE id = %s",
+                            (int(d["user_id"]),),
+                        )
+                        conn.commit()
         return claimed
     except Exception as exc:
         logger.error("[WORKER-REGISTRY] pending claim retry failed: %s", exc)

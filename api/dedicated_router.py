@@ -70,7 +70,27 @@ async def dedicated_admin_activate(authorization: Optional[str] = Header(None)):
         raise HTTPException(status_code=409, detail="Dedicated worker already active for this account")
     node_id = worker_registry.claim_pool_worker(user_id, None)
     if not node_id:
-        raise HTTPException(status_code=409, detail="No dedicated workers available right now")
+        # Pool empty → on-demand: mark pending (the claim sweep activates the
+        # moment a worker enrolls) and wake the fleet manager to spawn one.
+        from database_postgres import get_db as _gdb
+
+        with _gdb() as conn:
+            conn.execute(
+                "UPDATE users SET dedicated_pending = TRUE WHERE id = %s",
+                (user_id,),
+            )
+            conn.commit()
+        try:
+            from services.fleet_manager import fleet_tick
+            import threading
+            threading.Thread(target=fleet_tick, daemon=True).start()
+        except Exception:
+            pass
+        return {
+            "success": True,
+            "spawning": True,
+            "message": "No idle workers — spawning a dedicated worker now (~3-5 min). The card activates automatically when it's ready.",
+        }
     return {"success": True, "worker_id": node_id, "message": f"Admin-activated dedicated worker '{node_id}' (no charge)"}
 
 
