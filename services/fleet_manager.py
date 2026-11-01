@@ -119,7 +119,13 @@ def _free_pool_count() -> int:
 
 
 def _destroy_idle_auto_nodes() -> int:
-    """Drained auto-managed nodes with no demand → Vultr destroy + row delete."""
+    """Auto-managed nodes with no tenant AND no homed projects, idle >15 min.
+
+    Zero-idle-cost invariant: the free pool for AUTO nodes is always empty —
+    demand spawns, release reaps. (Manually registered nodes are never
+    touched.) Nodes that homed projects are skipped here — they stay drained
+    until wiped/re-registered by an operator.
+    """
     from database_adapter import get_db
     from services.worker_registry import invalidate_cache
 
@@ -128,9 +134,10 @@ def _destroy_idle_auto_nodes() -> int:
         rows = conn.execute(
             """
             SELECT id, provider_instance_id FROM worker_nodes
-            WHERE auto_managed AND status = 'drained'
+            WHERE auto_managed
               AND updated_at < NOW() - INTERVAL '15 minutes'
               AND NOT EXISTS (SELECT 1 FROM users u WHERE u.dedicated_worker_id = worker_nodes.id)
+              AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.worker_id = worker_nodes.id)
             """
         ).fetchall()
         for r in rows or []:
