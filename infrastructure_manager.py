@@ -1644,6 +1644,15 @@ server {{
                     text=True,
                     timeout=30
                 )
+                if result.returncode != 0:
+                    # No master running yet (fresh container) — start daemon
+                    logger.info("nginx master not running — starting daemon")
+                    result = subprocess.run(
+                        ["nginx"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
 
             if result.returncode == 0:
                 logger.info("✓ Nginx reloaded successfully")
