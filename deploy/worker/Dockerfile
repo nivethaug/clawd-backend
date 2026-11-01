@@ -31,11 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 
 # Containers have no systemd — platform code shells `systemctl reload nginx`.
-# Shim: nginx reload/restart -> in-container nginx signal; rest -> no-op OK.
-RUN printf '#!/bin/bash
-case "$1" in reload|restart) shift; [ "$1" = "nginx" ] && { nginx -t >/dev/null 2>&1 && nginx -s reload >/dev/null 2>&1 || nginx -t; exit 0; } ;; esac
-exit 0
-' > /usr/local/bin/systemctl     && chmod +x /usr/local/bin/systemctl     && ln -sf /usr/local/bin/systemctl /usr/bin/systemctl
+# Shim: nginx reload/restart validates + signals in-container nginx; no-op otherwise.
+RUN echo '#!/bin/bash' > /usr/local/bin/systemctl     && echo '[ "$1" = "reload" ] || [ "$1" = "restart" ] && shift && [ "$1" = "nginx" ] && (nginx -t >/dev/null 2>&1 || true) && (nginx -s reload >/dev/null 2>&1 || true); exit 0' >> /usr/local/bin/systemctl     && chmod +x /usr/local/bin/systemctl     && ln -sf /usr/local/bin/systemctl /usr/bin/systemctl
 
 # pnpm (build tooling for generated projects)
 RUN npm install -g pnpm@latest pm2 && npm cache clean --force
