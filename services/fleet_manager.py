@@ -144,7 +144,7 @@ def _destroy_idle_auto_nodes() -> int:
             d = r if isinstance(r, dict) else dict(zip(("id", "provider_instance_id"), r))
             iid = d.get("provider_instance_id")
             if iid:
-                _vultr("POST", f"/instances/{iid}/destroy")
+                _vultr("DELETE", f"/instances/{iid}")
             conn.execute("DELETE FROM worker_nodes WHERE id = %s", (d["id"],))
             destroyed += 1
             logger.info("[FLEET] destroyed idle auto node %s (instance %s)", d["id"], iid)
