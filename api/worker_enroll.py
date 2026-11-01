@@ -99,7 +99,9 @@ async def enroll_worker(req: EnrollRequest, x_enroll_token: Optional[str] = Head
             env[k] = v
     g = env.get
     worker_env = "\n".join([
-        f"DB_HOST={g('DB_HOST', '195.200.14.37')}",
+        # NEVER inherit main's DB_HOST (localhost on main) — workers always
+        # reach the master DB via main's public IP.
+        "DB_HOST=195.200.14.37",
         "DB_PORT=5432",
         "DB_NAME=dreampilot",
         "DB_USER=clawd_worker",
