@@ -85,6 +85,29 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
     && chmod -R a-w /usr/lib/node_modules/@anthropic-ai/claude-code
 
 # ─────────────────────────────────────────────────────────────────────
+# Pre-warm npm cache with frontend build dependencies.
+# Without this, the AI editor wastes 10-20 min on first creation fixing
+# npm install issues (cold cache, @swc/core native bindings, permissions).
+# Pre-installing these in the image means `npm ci` in the project finds
+# them in the cache instantly.
+# ─────────────────────────────────────────────────────────────────────
+RUN mkdir -p /cache/npm /cache/pip \
+    && cd /tmp \
+    && npm init -y >/dev/null 2>&1 \
+    && npm install --cache /cache/npm --prefer-offline --no-audit --no-fund \
+        react react-dom @types/react @types/react-dom \
+        vite @vitejs/plugin-react \
+        tailwindcss@3 postcss autoprefixer \
+        lucide-react framer-motion \
+        @tanstack/react-query \
+        react-router-dom \
+        class-variance-authority clsx tailwind-merge \
+        @swc/core @swc/cli \
+        2>&1 | tail -1 \
+    && rm -rf /tmp/package*.json node_modules \
+    && chown -R 1001:1001 /cache
+
+# ─────────────────────────────────────────────────────────────────────
 # Non-root user. Matches worker's dreampilot uid/gid (1001) so bind-mounted
 # files from /workspaces/user_<id> are owned by the same uid inside and
 # outside the container. NO sudo, NO shadowutils — privilege escalation
