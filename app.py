@@ -2174,8 +2174,23 @@ _DEFAULT_SESSION_MODEL = "z-ai/glm-5.3-flash"
 _MODEL_BILLING_ENABLED = os.getenv("MODEL_BILLING_ENABLED", "0").lower() in ("1", "true", "yes")
 
 
-def _resolve_session_model(model_id: Optional[str]) -> dict:
-    """Look up a model from the catalog; invalid/missing → default."""
+def _resolve_session_model(model_id: Optional[str], user_id: Optional[int] = None) -> dict:
+    """Look up a model from the catalog; invalid/missing → default.
+
+    Free-tier users are locked to the default (GLM 5.3 Flash) — any other
+    model selection is silently overridden, matching the disabled UI state.
+    Pro/dream/enterprise/admin can use any catalog model.
+    """
+    # Free-tier gate: force default model regardless of what was requested
+    if user_id:
+        try:
+            from services.rate_limiter import get_user_tier_and_role
+            tier, role = get_user_tier_and_role(user_id)
+            if tier == "free" and role != "admin":
+                return next(m for m in SESSION_MODELS if m.get("default"))
+        except Exception:
+            pass  # tier lookup failure → don't block, allow the request
+
     if model_id:
         info = next((m for m in SESSION_MODELS if m["id"] == model_id), None)
         if info:
@@ -9767,7 +9782,7 @@ async def chat_stream_endpoint(
     # ── BILLING: Reserve AI credits before processing (ACP mode only) ──────
     _chat_charged = []
     _chat_user_id = None
-    _model_info = _resolve_session_model(request.model)
+    _model_info = _resolve_session_model(request.model, _chat_user_id)
     _model_multiplier = _model_info.get("multiplier", 1)
     if request.acp_mode:
         try:
@@ -10674,12 +10689,29 @@ async def cancel_chat(
 
 
 @app.get("/models")
-async def list_session_models():
+async def list_session_models(authorization: Optional[str] = Header(None)):
     """Session chat model catalog for the frontend dropdown.
 
-    Public (no auth) — this is static metadata: id, display name, tier
-    (free/pro/tier2), vision capability, cost multiplier, default flag.
-    The frontend uses this to render the model selector."""
+    Free-tier users see ONLY the default model (GLM 5.3 Flash) — all other
+    models are hidden. Pro/dream/enterprise/admin see the full catalog.
+    Unauthenticated requests see the full catalog (public pricing page)."""
+    user_id = None
+    if authorization:
+        try:
+            user_id = get_user_id_from_token(authorization)
+        except Exception:
+            pass
+
+    if user_id:
+        try:
+            from services.rate_limiter import get_user_tier_and_role
+            tier, role = get_user_tier_and_role(user_id)
+            if tier == "free" and role != "admin":
+                # Free tier: only the default model
+                return {"models": [m for m in SESSION_MODELS if m.get("default")]}
+        except Exception:
+            pass
+
     return {"models": SESSION_MODELS}
 
 
