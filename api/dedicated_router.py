@@ -51,6 +51,117 @@ async def dedicated_status(authorization: Optional[str] = Header(None)):
     }
 
 
+@router.get("/health")
+async def dedicated_worker_health(authorization: Optional[str] = Header(None)):
+    """Enterprise user: real-time health of THEIR dedicated worker (only).
+
+    Shows RAM, storage, CPU, uptime, Docker containers, and OOM events for
+    the worker assigned to this user. No access to other workers or main.
+    """
+    user_id = get_user_id_from_token(authorization)
+
+    from services import worker_registry
+
+    dedication = worker_registry.get_user_dedication(user_id)
+    if not dedication or not dedication.get("dedicated_worker_id"):
+        raise HTTPException(status_code=404, detail="No dedicated worker active")
+
+    node = worker_registry.get_node(dedication["dedicated_worker_id"])
+    if not node:
+        raise HTTPException(status_code=503, detail="Dedicated worker is not responding")
+
+    ip = node.get("server_ip") or ""
+    if not ip:
+        raise HTTPException(status_code=503, detail="Worker has no IP registered")
+
+    # Fetch stats via SSH from the worker
+    import subprocess as sp
+
+    try:
+        result = sp.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", f"root@{ip}",
+             "free -m | awk 'NR==2{print $2,$3,$7}'; "
+             "df -h / | awk 'NR==2{print $2,$3,$5}' | tr ' ' '|'; "
+             "cat /proc/loadavg | awk '{print $1,$2,$3}'; "
+             "nproc; "
+             "cat /proc/uptime | awk '{print $1}'; "
+             "dmesg 2>/dev/null | grep -c 'Out of memory' || echo 0; "
+             "docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}|{{.CPUPerc}}' 2>/dev/null | head -20"],
+            capture_output=True, text=True, timeout=20,
+        )
+        lines = result.stdout.strip().split("\n")
+        if len(lines) < 7 or result.returncode != 0:
+            raise HTTPException(status_code=503, detail="Worker health check failed")
+
+        # Parse: mem_total|mem_used|mem_available
+        mem_parts = lines[0].split()
+        total_mb, used_mb, avail_mb = int(mem_parts[0]), int(mem_parts[1]), int(mem_parts[2])
+
+        # Parse: disk_total|disk_used|disk_pct
+        disk_parts = lines[1].split("|")
+        disk_total = disk_parts[0].replace("G", "").replace(",", ".")
+        disk_used = disk_parts[1].replace("G", "").replace(",", ".")
+        disk_pct = float(disk_parts[2].replace("%", "").replace(",", "."))
+
+        # Parse: load1 load5 load15
+        load_parts = lines[2].split()
+        load1 = float(load_parts[0])
+        cores = int(lines[3])
+
+        # Uptime
+        uptime_sec = float(lines[4])
+        days = int(uptime_sec // 86400)
+        hours = int((uptime_sec % 86400) // 3600)
+
+        # OOM
+        oom = int(lines[5].strip() or 0)
+
+        # Docker containers (remaining lines)
+        containers = []
+        for line in lines[6:]:
+            if "|" in line:
+                parts = line.split("|")
+                if len(parts) >= 3:
+                    containers.append({
+                        "name": parts[0].strip(),
+                        "memory": parts[1].strip(),
+                        "cpu": parts[2].strip(),
+                    })
+
+        return {
+            "worker": {
+                "id": node["id"],
+                "name": node.get("name", node["id"]),
+                "ip": ip,
+                "region": node.get("region"),
+                "status": node.get("status"),
+            },
+            "memory": {
+                "total_mb": total_mb,
+                "used_mb": used_mb,
+                "available_mb": avail_mb,
+                "usage_pct": round(100 * used_mb / total_mb, 1) if total_mb else 0,
+            },
+            "storage": {
+                "total_gb": float(disk_total),
+                "used_gb": float(disk_used),
+                "usage_pct": disk_pct,
+            },
+            "cpu": {
+                "cores": cores,
+                "load_1m": load1,
+                "load_pct": round(100 * load1 / cores, 1) if cores else 0,
+            },
+            "uptime": {"days": days, "hours": hours},
+            "oom_events": oom,
+            "docker": containers,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Worker unreachable: {str(exc)[:100]}")
+
+
 @router.post("/admin-activate")
 async def dedicated_admin_activate(authorization: Optional[str] = Header(None)):
     """Admin bypass: claim a pool worker WITHOUT payment.
