@@ -29,12 +29,14 @@ echo "==> [2/8] Firewall"
 ufw default deny incoming
 ufw allow from $MAIN_VPS to any port 22 comment main
 ufw allow from $MAIN_VPS to any port 8003 comment main-api
+ufw allow from 172.16.0.0/12 to any port 7861 comment docker-wrapper
+ufw allow from 172.16.0.0/12 to any port 8003 comment docker-worker-api
 ufw allow 80,443/tcp
 ufw --force enable
 
 echo "==> [3/8] Host artifacts from shared worker (via main jump)"
 mkdir -p /root/.claude /root/dreampilot /opt/wrapper /srv/cache /workspaces
-chmod 777 /srv/cache
+chmod 777 /srv/cache && chown -R 1001:1001 /srv/cache
 ssh -o StrictHostKeyChecking=accept-new -J root@$MAIN_VPS root@$SHARED_WORKER \
   "tar -C /root -czf - .claude dreampilot" | tar -C /root -xz
 ssh -o StrictHostKeyChecking=accept-new -J root@$MAIN_VPS root@$SHARED_WORKER \
