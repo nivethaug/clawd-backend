@@ -1382,7 +1382,14 @@ def _run_git_project_pipeline(
     append_chunk(run_id, "progress", "Repository cloned successfully")
 
     # Seed creation session
-    _seed_creation_session(project_id, user_id, payload.get("name", "Git Project"), "gitproject")
+    _seed_creation_session(
+        project_id, user_id,
+        payload.get("name", "Git Project"),
+        payload.get("domain", ""),
+        payload.get("type_id", 1),
+        f"Repository cloned from {origin_url} (branch: {branch}). Ready for AI editing.",
+        project_path,
+    )
     append_chunk(run_id, "text", f"Repository cloned. You can now chat with the AI to explore and edit the codebase.")
     logger.info("[GIT-PROJECT] project %s ready — repo at %s", project_id, project_path)
 
@@ -1717,7 +1724,11 @@ def execute_run(run_id: int) -> Dict[str, Any]:
         _record_charge(run_id, operation_code, charge, charge_result)
 
         project_path = _create_project_folder(run_id, project_id, name, type_id, user_id=user_id)
-        _create_github_repo(run_id, project_id, project_path, payload.get("domain") or "", name)
+        # Skip platform GitHub repo creation for Git Projects — the user's repo
+        # is the origin; creating a platform repo would clobber origin semantics.
+        _is_git_project = bool(payload.get("git_origin_url"))
+        if not _is_git_project:
+            _create_github_repo(run_id, project_id, project_path, payload.get("domain") or "", name)
         selected_template_id = _select_template(
             run_id,
             project_id,
@@ -1760,10 +1771,10 @@ def execute_run(run_id: int) -> Dict[str, Any]:
                 raise RuntimeError("; ".join(errors or ["Project pipeline failed"]))
 
         # Push the final project code to GitHub (after all edits/builds/deploy).
-        # The repo was created earlier in _create_github_repo but only the
-        # remote was attached — no push happened. This pushes the complete
-        # project state including ACPX-generated code, builds, and configs.
-        _push_to_github(run_id, project_id, project_path)
+        # Skip for Git Projects — the user's repo is the origin; pushing to a
+        # platform repo would clobber the user's remote.
+        if not _is_git_project:
+            _push_to_github(run_id, project_id, project_path)
 
         # DB-level handoff: create the project's first session and insert the
         # creation prompt (user) + formal deployment confirmation with the

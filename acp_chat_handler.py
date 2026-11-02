@@ -222,15 +222,17 @@ class ACPChatHandler:
         # Custom Git Projects — user's own repo, framework-neutral prompt
         self.is_git_project = False
         try:
-            from database_postgres import get_db
+            from database_adapter import get_db
             with get_db() as conn:
                 _git_row = conn.execute(
-                    "SELECT git_origin_url FROM projects WHERE id = %s",
+                    "SELECT git_origin_url, git_default_branch FROM projects WHERE id = %s",
                     (self.project_id,),
                 ).fetchone()
             if _git_row:
                 _git_url = _git_row.get("git_origin_url") if isinstance(_git_row, dict) else _git_row[0]
                 self.is_git_project = bool(_git_url)
+                self.git_origin_url = _git_url or ""
+                self.git_default_branch = (_git_row.get("git_default_branch") if isinstance(_git_row, dict) else (_git_row[1] if len(_git_row) > 1 else "main")) or "main"
         except Exception:
             pass
 
@@ -4122,7 +4124,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
                 full_prompt = self._build_chat_prompt_scheduler(user_message, session_context)
                 logger.info(f"[CLAUDE-AGENT] Using SCHEDULER prompt for scheduler project")
             else:
-                full_prompt = self._build_chat_prompt(user_message, session_context)
+                full_prompt = (self._build_chat_prompt_git(user_message, session_context)
+                      if getattr(self, 'is_git_project', False)
+                      else self._build_chat_prompt(user_message, session_context))
                 logger.info(f"[CLAUDE-AGENT] Using WEBSITE prompt for web project")
             
             logger.info(f"[CLAUDE-AGENT] Running for project: {self.project_name}")
@@ -4212,7 +4216,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             prompt = self._build_chat_prompt_scheduler(user_message, session_context)
             logger.info(f"[ACP-CHAT] Using SCHEDULER prompt for scheduler project")
         else:
-            prompt = self._build_chat_prompt(user_message, session_context)
+            prompt = (self._build_chat_prompt_git(user_message, session_context)
+                      if getattr(self, 'is_git_project', False)
+                      else self._build_chat_prompt(user_message, session_context))
             logger.info(f"[ACP-CHAT] Using WEBSITE prompt for web project")
         
         # Log prompt structure
@@ -4516,7 +4522,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             elif self.is_scheduler:
                 prompt = self._build_chat_prompt_scheduler(user_message, session_context)
             else:
-                prompt = self._build_chat_prompt(user_message, session_context)
+                prompt = (self._build_chat_prompt_git(user_message, session_context)
+                      if getattr(self, 'is_git_project', False)
+                      else self._build_chat_prompt(user_message, session_context))
 
         # Attribute wrapper usage records to THIS query. agent.query() also
         # injects an id, but some paths (ACPX fallback) reach the wrapper
@@ -4860,7 +4868,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             elif self.is_scheduler:
                 prompt = self._build_chat_prompt_scheduler(user_message, session_context)
             else:
-                prompt = self._build_chat_prompt(user_message, session_context)
+                prompt = (self._build_chat_prompt_git(user_message, session_context)
+                      if getattr(self, 'is_git_project', False)
+                      else self._build_chat_prompt(user_message, session_context))
 
         # Attribute wrapper usage records to THIS query (ACPX path has no
         # agent.query() to do it). Idempotent — safe if an id is present.

@@ -72,9 +72,13 @@ class GitUrlValidator:
         if parsed.username or parsed.password:
             return False, "Credentials in URL are not allowed"
 
-        # Port check
-        if parsed.port and parsed.port not in ALLOWED_PORTS:
-            return False, f"Port {parsed.port} not allowed (HTTPS only)"
+        # Port check (parsed.port raises ValueError for malformed ports like :abc)
+        try:
+            port = parsed.port
+        except ValueError:
+            return False, "Invalid port number"
+        if port and port not in ALLOWED_PORTS:
+            return False, f"Port {port} not allowed (HTTPS only)"
 
         # Path check (must look like a git repo path)
         path = parsed.path or ""

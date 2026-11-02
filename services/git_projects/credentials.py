@@ -12,14 +12,18 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def _get_secret_box():
-    """Get or create the SecretBox for git credentials."""
-    from secure_value import SecretBox
-    return SecretBox()
-
-
 class GitCredentialService:
     """Manage per-user Git provider credentials (multi-account)."""
+
+    @staticmethod
+    def _encrypt(token: str) -> str:
+        from secure_value import encrypt_value
+        return encrypt_value(token)
+
+    @staticmethod
+    def _decrypt(encrypted: str) -> str:
+        from secure_value import decrypt_value
+        return decrypt_value(encrypted)
 
     @staticmethod
     def connect(
@@ -31,13 +35,11 @@ class GitCredentialService:
         scopes: Optional[str] = None,
     ) -> dict:
         """Save a credential (upsert by user+provider+account_ref)."""
-        box = _get_secret_box()
-        encrypted = box.encrypt(token)
+        encrypted = GitCredentialService._encrypt(token)
 
         from database_adapter import get_db
 
         with get_db() as conn:
-            # If this is the first credential for this provider, make it default
             existing = conn.execute(
                 """SELECT COUNT(*) as n FROM git_credentials
                    WHERE user_id = %s AND provider = %s AND status = 'active'""",
@@ -63,22 +65,18 @@ class GitCredentialService:
 
     @staticmethod
     def disconnect(user_id: int, credential_id: int) -> bool:
-        """Remove a credential (soft-delete)."""
         from database_adapter import get_db
-
         with get_db() as conn:
-            conn.execute(
-                "UPDATE git_credentials SET status = 'disconnected' WHERE id = %s AND user_id = %s",
+            result = conn.execute(
+                "UPDATE git_credentials SET status = 'disconnected' WHERE id = %s AND user_id = %s RETURNING id",
                 (credential_id, user_id),
-            )
+            ).fetchone()
             conn.commit()
-        return True
+        return bool(result)
 
     @staticmethod
     def list_credentials(user_id: int) -> list:
-        """List active credentials for a user (masked — no tokens)."""
         from database_adapter import get_db
-
         with get_db() as conn:
             rows = conn.execute(
                 """SELECT id, provider, account_ref, display_label, is_default,
@@ -106,12 +104,7 @@ class GitCredentialService:
 
     @staticmethod
     def get_token(user_id: int, credential_id: Optional[int] = None) -> Optional[str]:
-        """Decrypt and return a token (in-memory only, never logged).
-        
-        If credential_id is None, returns the default credential's token.
-        """
         from database_adapter import get_db
-
         with get_db() as conn:
             if credential_id:
                 row = conn.execute(
@@ -129,22 +122,17 @@ class GitCredentialService:
 
         if not row:
             return None
-
         encrypted = row["token_encrypted"] if isinstance(row, dict) else row[0]
-        box = _get_secret_box()
         try:
-            return box.decrypt(encrypted)
+            return GitCredentialService._decrypt(encrypted)
         except Exception as exc:
-            logger.error("[GIT-CRED] decrypt failed for user %s cred %s: %s", user_id, credential_id, exc)
+            logger.error("[GIT-CRED] decrypt failed for user %s: %s", user_id, exc)
             return None
 
     @staticmethod
     def set_default(user_id: int, credential_id: int) -> bool:
-        """Set a credential as the default for its provider."""
         from database_adapter import get_db
-
         with get_db() as conn:
-            # Get the provider of this credential
             row = conn.execute(
                 "SELECT provider FROM git_credentials WHERE id = %s AND user_id = %s",
                 (credential_id, user_id),
@@ -152,14 +140,10 @@ class GitCredentialService:
             if not row:
                 return False
             provider = row["provider"] if isinstance(row, dict) else row[0]
-
-            # Clear existing default
             conn.execute(
-                """UPDATE git_credentials SET is_default = FALSE
-                   WHERE user_id = %s AND provider = %s AND is_default = TRUE""",
+                "UPDATE git_credentials SET is_default = FALSE WHERE user_id = %s AND provider = %s AND is_default = TRUE",
                 (user_id, provider),
             )
-            # Set new default
             conn.execute(
                 "UPDATE git_credentials SET is_default = TRUE WHERE id = %s",
                 (credential_id,),

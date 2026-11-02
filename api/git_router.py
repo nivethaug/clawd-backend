@@ -103,6 +103,17 @@ async def list_repos(
     if not token:
         raise HTTPException(status_code=404, detail="No Git credential connected")
 
+    # Get the credential's provider to avoid sending tokens to the wrong IdP
+    from database_adapter import get_db as _gdb
+    with _gdb() as _conn:
+        _cred = _conn.execute(
+            "SELECT provider FROM git_credentials WHERE user_id = %s AND status = 'active' ORDER BY is_default DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+    _provider = (_cred.get("provider") if isinstance(_cred, dict) else _cred[0]) if _cred else "github"
+    if _provider != "github":
+        raise HTTPException(status_code=400, detail=f"Repo listing not supported for {_provider} yet — paste a URL instead")
+
     import urllib.request
     req = urllib.request.Request(
         "https://api.github.com/user/repos?per_page=30&sort=updated",
@@ -218,6 +229,8 @@ async def git_push(project_id: int, req: PushRequest, authorization: Optional[st
             "SELECT project_path, git_credential_id FROM projects WHERE id = %s",
             (project_id,),
         ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
     d = row if isinstance(row, dict) else dict(zip(("project_path", "git_credential_id"), row))
     if not d.get("project_path"):
         raise HTTPException(status_code=404, detail="Project not found")
@@ -260,7 +273,11 @@ async def git_pull(project_id: int, authorization: Optional[str] = Header(None))
             "SELECT project_path, git_credential_id FROM projects WHERE id = %s",
             (project_id,),
         ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
     d = row if isinstance(row, dict) else dict(zip(("project_path", "git_credential_id"), row))
+    if not d.get("project_path"):
+        raise HTTPException(status_code=404, detail="Project not found")
 
     token = GitCredentialService.get_token(user_id, d.get("git_credential_id"))
     transport = GitTransport(user_id, d["project_path"])

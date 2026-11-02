@@ -1,12 +1,14 @@
 """Git transport — clone/fetch/pull/push/checkout inside the user's container.
 
 All git operations run inside the user's Docker container via docker exec.
-Credentials are injected via GIT_CONFIG_KEY/VALUE env vars (never in
-process arguments, repo config, or on disk).
+Credentials are injected via a temporary GIT_ASKPASS script (never in
+process arguments, repo config, or on persistent disk).
 """
 import logging
 import os
+import shlex
 import subprocess
+import tempfile
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -20,48 +22,74 @@ class GitTransport:
         self.project_path = project_path  # host path
         self.container = f"dreamagent-user-{user_id}"
 
+    def _container_path(self) -> str:
+        """Translate host project_path to container path using the platform helper."""
+        from services.container_storage import to_container_path
+        return to_container_path(self.project_path)
+
     def _exec(
         self,
         command: str,
         token: Optional[str] = None,
         timeout: int = 300,
-        cwd: Optional[str] = None,
     ) -> subprocess.CompletedProcess:
-        """Run a command inside the container. Token injected via env if provided."""
+        """Run a command inside the container. Token via temporary askpass script."""
         env_flags = []
-        if token:
-            # Inject as git http extraheader (auth without storing in config)
-            import base64
-            auth = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-            env_flags = [
-                "-e", f"GIT_CONFIG_COUNT=1",
-                "-e", f"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
-                "-e", f"GIT_CONFIG_VALUE_0=Authorization: Basic {auth}",
+        askpass_local = None
+        try:
+            if token:
+                # Write a one-shot askpass script on the host, mount it via stdin
+                # (never in argv — not visible in ps)
+                askpass_local = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".sh", delete=False, prefix="gitask_",
+                )
+                askpass_local.write(f"#!/bin/bash\necho '{token}'\n")
+                askpass_local.close()
+                os.chmod(askpass_local.name, 0o700)
+
+                # Copy askpass into the container's /tmp
+                copy = subprocess.run(
+                    ["docker", "cp", askpass_local.name, f"{self.container}:/tmp/.gitask"],
+                    capture_output=True, timeout=10,
+                )
+                if copy.returncode == 0:
+                    subprocess.run(
+                        ["docker", "exec", self.container, "chmod", "700", "/tmp/.gitask"],
+                        capture_output=True, timeout=5,
+                    )
+                    env_flags = ["-e", "GIT_ASKPASS=/tmp/.gitask", "-e", "GIT_TERMINAL_PROMPT=0"]
+
+            cmd = [
+                "docker", "exec", "-i",
+                "--user", "1001:1001",
+                "--workdir", self._container_path(),
+                *env_flags,
+                self.container,
+                "bash", "-c", command,
             ]
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(cmd, 124, "", f"Timeout after {timeout}s")
+        except Exception as exc:
+            return subprocess.CompletedProcess(cmd, 1, "", str(exc))
+        finally:
+            if askpass_local:
+                try:
+                    os.unlink(askpass_local.name)
+                except Exception:
+                    pass
+                subprocess.run(
+                    ["docker", "exec", self.container, "rm", "-f", "/tmp/.gitask"],
+                    capture_output=True, timeout=5,
+                )
 
-        workdir = cwd or self.project_path
-        # Translate host path to container path
-        container_path = workdir.replace("/workspaces/user_", "/workspace/user_")
-        # Actually the mount maps /workspaces/user_{id} → /workspace
-        # So /workspaces/user_24/website/... → /workspace/website/...
-        if "/workspaces/user_" in workdir:
-            parts = workdir.split("/", 3)  # ['', 'workspaces', 'user_24', 'rest...']
-            if len(parts) >= 4:
-                container_path = "/" + parts[3]
-
-        cmd = [
-            "docker", "exec",
-            "-i",
-            "--user", "1001:1001",
-            "--workdir", container_path,
-            *env_flags,
-            self.container,
-            "bash", "-c", command,
-        ]
-
-        return subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-        )
+    @staticmethod
+    def _safe_branch(branch: str) -> str:
+        """Validate branch name (no shell metacharacters)."""
+        import re
+        if not re.match(r"^[A-Za-z0-9._/-]+$", branch or ""):
+            raise ValueError(f"Invalid branch name: {branch!r}")
+        return branch
 
     def clone(
         self,
@@ -69,46 +97,64 @@ class GitTransport:
         branch: Optional[str] = None,
         shallow: bool = False,
         token: Optional[str] = None,
-        dest_dir: str = ".",
     ) -> dict:
-        """Clone a repository (full history by default)."""
-        depth_flag = "--depth 1" if shallow else ""
-        branch_flag = f"--branch {branch}" if branch else ""
+        """Clone a repository into the project path (full history by default)."""
+        branch = self._safe_branch(branch or "main")
+        depth = "--depth 1" if shallow else ""
+        url_q = shlex.quote(url)
+        branch_q = shlex.quote(branch)
 
+        # Clone into the project directory
         cmd = (
-            f"git clone {depth_flag} {branch_flag} "
+            f"git clone {depth} --branch {branch_q} "
             f"--config http.followRedirects=false "
-            f"--config protocol.ext.allow=never "
-            f"--config protocol.file.allow=never "
-            f"{url} {dest_dir} 2>&1"
+            f"{url_q} . 2>&1"
         )
 
-        result = self._exec(cmd, token=token, timeout=600, cwd="/tmp")
-        success = result.returncode == 0
-
+        result = self._exec(cmd, token=token, timeout=600)
         return {
-            "success": success,
-            "output": result.stdout[-2000:] if result.stdout else result.stderr[-2000:],
+            "success": result.returncode == 0,
+            "output": (result.stdout or result.stderr)[-2000:],
         }
 
     def status(self) -> dict:
-        """Get working tree status."""
-        result = self._exec("git status --porcelain 2>&1 && git branch --show-current")
+        """Get working tree status (runs commands separately)."""
+        porcelain = self._exec("git status --porcelain 2>&1")
+        branch = self._exec("git branch --show-current 2>&1")
+        dirty = bool(porcelain.stdout.strip()) if porcelain.returncode == 0 else False
+        branch_name = branch.stdout.strip() if branch.returncode == 0 else "unknown"
         return {
-            "success": result.returncode == 0,
-            "output": result.stdout,
-            "dirty": bool(result.stdout.strip().split("\n")[0]),
+            "success": porcelain.returncode == 0,
+            "output": f"{porcelain.stdout}\n{branch_name}",
+            "dirty": dirty,
+            "branch": branch_name,
         }
 
     def commit(self, message: str, paths: Optional[str] = None) -> dict:
-        """Stage and commit changes."""
-        add_cmd = f"git add {paths}" if paths else "git add -A"
-        result = self._exec(f"{add_cmd} && git commit -m '{message}' && git rev-parse HEAD")
-        return {
-            "success": result.returncode == 0,
-            "output": result.stdout,
-            "sha": result.stdout.strip().split("\n")[-1] if result.returncode == 0 else None,
-        }
+        """Stage and commit changes (message passed via file, not shell)."""
+        # Write message to a temp file to avoid shell injection
+        msg_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".msg", delete=False, prefix="gitmsg_",
+        )
+        msg_file.write(message[:500])
+        msg_file.close()
+
+        try:
+            subprocess.run(
+                ["docker", "cp", msg_file.name, f"{self.container}:/tmp/.gitmsg"],
+                capture_output=True, timeout=10,
+            )
+            add_cmd = f"git add {shlex.quote(paths)}" if paths else "git add -A"
+            result = self._exec(
+                f"{add_cmd} && git commit -F /tmp/.gitmsg && git rev-parse HEAD && rm -f /tmp/.gitmsg"
+            )
+            return {
+                "success": result.returncode == 0,
+                "output": result.stdout,
+                "sha": result.stdout.strip().split("\n")[-1] if result.returncode == 0 else None,
+            }
+        finally:
+            os.unlink(msg_file.name)
 
     def push(self, token: Optional[str] = None, force: bool = False) -> dict:
         """Push to origin."""
@@ -116,7 +162,7 @@ class GitTransport:
         result = self._exec(f"git push {force_flag} origin HEAD 2>&1", token=token, timeout=120)
         return {
             "success": result.returncode == 0,
-            "output": result.stdout[-1000:] + result.stderr[-1000:],
+            "output": (result.stdout or "")[-1000:] + (result.stderr or "")[-1000:],
         }
 
     def pull(self, token: Optional[str] = None, rebase: bool = True) -> dict:
@@ -125,26 +171,24 @@ class GitTransport:
         result = self._exec(f"git pull {rebase_flag} origin 2>&1", token=token, timeout=120)
         return {
             "success": result.returncode == 0,
-            "output": result.stdout[-1000:] + result.stderr[-1000:],
+            "output": (result.stdout or "")[-1000:] + (result.stderr or "")[-1000:],
         }
 
     def ahead_behind(self) -> dict:
-        """Get ahead/behind counts vs origin."""
         result = self._exec(
             "git rev-list --left-right --count HEAD...origin/$(git branch --show-current) 2>/dev/null"
         )
         if result.returncode == 0 and result.stdout.strip():
             parts = result.stdout.strip().split()
-            return {"ahead": int(parts[0]), "behind": int(parts[1])}
+            if len(parts) >= 2:
+                return {"ahead": int(parts[0]), "behind": int(parts[1])}
         return {"ahead": 0, "behind": 0}
 
     def diff(self, staged: bool = False) -> str:
-        """Get diff of changes."""
         flag = "--cached" if staged else ""
         result = self._exec(f"git diff {flag}")
         return result.stdout
 
     def log(self, count: int = 10) -> str:
-        """Get recent commit log."""
-        result = self._exec(f"git log --oneline -{count}")
+        result = self._exec(f"git log --oneline -{int(count)}")
         return result.stdout

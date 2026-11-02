@@ -3049,6 +3049,21 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
         try:
             from services.project_creation_runs import enqueue_project_creation_run
 
+            # Git Projects: validate URL + dedicated worker gate BEFORE enqueue
+            if request.git_origin_url:
+                from services.git_projects.urls import GitUrlValidator
+                _valid, _err = GitUrlValidator.validate(request.git_origin_url)
+                if not _valid:
+                    raise HTTPException(status_code=400, detail=f"Invalid Git URL: {_err}")
+                # Branch name must be alphanumeric + ./-/_ (no shell metacharacters)
+                import re as _re
+                if request.git_default_branch and not _re.match(r"^[A-Za-z0-9._/-]+$", request.git_default_branch):
+                    raise HTTPException(status_code=400, detail="Invalid branch name")
+                # Enterprise gate: must have a dedicated worker
+                from services import worker_registry as _wr
+                if not _wr.resolve_for_user(user_id):
+                    raise HTTPException(status_code=403, detail="Custom Git Projects require a Dedicated Worker")
+
             logger.info("[PROJECT] queueing durable project creation run")
             final_project = enqueue_project_creation_run(
                 user_id=user_id,
