@@ -2658,6 +2658,10 @@ app.include_router(support_admin_router, prefix="/api/support/admin", tags=["sup
 from api.workers_admin import router as workers_admin_router
 app.include_router(workers_admin_router, prefix="/api/admin/workers", tags=["workers-admin"])
 
+# System health monitoring (admin-only VPS stats)
+from api.system_health import router as system_health_router
+app.include_router(system_health_router, tags=["system-health"])
+
 # Dedicated-worker add-on (purchasable upsell) — status + cancel.
 # Purchase rides the existing Razorpay subscription endpoint.
 from api.dedicated_router import router as dedicated_router
