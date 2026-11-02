@@ -227,8 +227,14 @@ class ContainerManager:
             "--name", self.container_name,
             "--network", CONTAINER_NETWORK,
             "--restart", "unless-stopped",
-            # Hardening (non-optional — see docs/container_isolation.md §13)
+            # Hardening: drop most capabilities but keep SYS_CHROOT (needed by
+            # @swc/core and other native Node.js modules for mmap/threading).
+            # Dropping ALL caused vite build failures on dedicated workers —
+            # the AI editor would write pages, the build would fail, and the
+            # pipeline would roll back to the blank template every time.
             "--cap-drop=ALL",
+            "--cap-add=SYS_CHROOT",
+            "--cap-add=DAC_OVERRIDE",
             "--security-opt=no-new-privileges",
             "--read-only",
             # /tmp must be large enough for npm cache (~300MB) + build artifacts.
