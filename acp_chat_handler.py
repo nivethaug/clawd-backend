@@ -219,6 +219,21 @@ class ACPChatHandler:
         self.is_scheduler = (project_type_id == 5) or self.is_agent
         self.is_bot_project = self.is_telegram_bot or self.is_discord_bot or self.is_scheduler
 
+        # Custom Git Projects — user's own repo, framework-neutral prompt
+        self.is_git_project = False
+        try:
+            from database_postgres import get_db
+            with get_db() as conn:
+                _git_row = conn.execute(
+                    "SELECT git_origin_url FROM projects WHERE id = %s",
+                    (self.project_id,),
+                ).fetchone()
+            if _git_row:
+                _git_url = _git_row.get("git_origin_url") if isinstance(_git_row, dict) else _git_row[0]
+                self.is_git_project = bool(_git_url)
+        except Exception:
+            pass
+
         # Bot projects have code in a subdirectory (telegram/, discord/).
         # Scheduler is different — its agent/ folder lives at the project root,
         # not inside a scheduler/ subdir. Used by the message gate to resolve
@@ -1887,6 +1902,72 @@ btc_price, eth_price, btc_price_num, eth_price_num, weather, news — add your o
     # ------------------------------------------------------------------
     # Prompt builders
     # ------------------------------------------------------------------
+
+    def _build_chat_prompt_git(self, user_message: str, session_context: str = "") -> str:
+        """Framework-neutral prompt for Custom Git Projects.
+
+        The repo is the user's own code — no platform template, no buildpublish,
+        no ai_index mandates, no chrome-verify. The AI reads, understands, and
+        edits the codebase. Commits and pushes are USER-INITIATED only.
+        """
+        context_section = ""
+        if session_context:
+            context_section = f"""
+## CONVERSATION HISTORY
+
+{session_context}
+
+---
+"""
+        return f"""{self._workflow_meta_block(operation="edit", prompt_kind="git_project_edit")}
+{self._env_rules_block()}
+{self._superpowers_tools_block()}
+You are an AI coding assistant working on the user's own Git repository.
+
+---
+## PROJECT
+
+Project: **{self.project_name}**
+Path: `{self.project_path}`
+Origin: `{getattr(self, 'git_origin_url', 'user repository')}`
+Branch: `{getattr(self, 'git_default_branch', 'main')}`
+
+This is the USER'S OWN CODE — treat it as production code. Understand the
+architecture before making changes. Match existing code style, conventions,
+and patterns.
+
+{context_section}
+## YOUR ROLE
+
+1. Read and understand the codebase structure
+2. Answer questions about the code
+3. Fix bugs and implement features
+4. Refactor and improve code quality
+5. Write tests
+6. Explain what you changed and why
+
+## GIT CONDUCT RULES (MANDATORY)
+
+- ✅ You CAN: `git status`, `git diff`, `git log`, `git branch`, `git show`
+- ❌ You CANNOT: `git commit`, `git push`, `git remote`, `git reset`, `git checkout -b`
+- Changes stay in the WORKING TREE — the user reviews and commits via the UI
+- NEVER force any git state change
+
+## BUILD & TEST RULES
+
+- Build and test INSIDE the container only (your current environment)
+- Install dependencies if needed (npm install, pip install, etc.)
+- Run the project's own test suite if present
+- NEVER start long-running servers on ports without asking first
+- NEVER access external APIs or services not already configured in the repo
+
+## LANGUAGE RULE
+
+Always respond in the SAME LANGUAGE as the user's LATEST message.
+
+---
+
+User: {user_message}"""
 
     def _build_chat_prompt(self, user_message: str, session_context: str = "") -> str:
         """
@@ -4028,7 +4109,10 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         
         try:
             # Build prompt based on project type
-            if self.is_telegram_bot:
+            if getattr(self, 'is_git_project', False):
+                full_prompt = self._build_chat_prompt_git(user_message, session_context)
+                logger.info("[CLAUDE-AGENT] Using GIT PROJECT prompt")
+            elif self.is_telegram_bot:
                 full_prompt = self._build_chat_prompt_telegram(user_message, session_context)
                 logger.info(f"[CLAUDE-AGENT] Using TELEGRAM prompt for bot project")
             elif self.is_discord_bot:

@@ -339,6 +339,8 @@ def init_schema():
                 # Agent = the evolution of Scheduler (new slug; type-5 keeps
                 # running untouched for existing projects).
                 ('agent', 'Agent', 'templates/agent.md'),
+                # Enterprise Git Projects — import user's own repos
+                ('gitproject', 'Custom Git Project', 'templates/gitproject.md'),
             ]
             
             for type_slug, display_name, template_path in default_types:
@@ -1449,6 +1451,43 @@ def init_schema():
                 "CREATE INDEX IF NOT EXISTS idx_scr_assigned_worker ON session_chat_runs(assigned_worker_id, status)")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_pcr_assigned_worker ON project_creation_runs(assigned_worker_id, status)")
+
+            # --- Custom Git Projects (enterprise) ---
+            cur.execute("""CREATE TABLE IF NOT EXISTS git_credentials (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                provider TEXT NOT NULL,
+                account_ref TEXT NOT NULL,
+                token_encrypted TEXT NOT NULL,
+                display_label TEXT,
+                scopes TEXT,
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                status TEXT NOT NULL DEFAULT 'active',
+                connected_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                UNIQUE (user_id, provider, account_ref)
+            )""")
+            cur.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS git_provider TEXT")
+            cur.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS git_origin_url TEXT")
+            cur.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS git_default_branch TEXT")
+            cur.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS git_credential_id INTEGER")
+            cur.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS git_push_policy JSONB")
+            cur.execute("""CREATE TABLE IF NOT EXISTS git_audit_events (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                project_id INTEGER,
+                event TEXT NOT NULL,
+                detail JSONB,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_git_audit_user_time ON git_audit_events(user_id, created_at)")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_git_audit_project ON git_audit_events(project_id, created_at)")
             # Seed the legacy shared worker from env so existing routing is unchanged
             _legacy_worker_url = (
                 os.getenv("WORKER_VPS_URL") or os.getenv("DREAMPILOT_WORKER_API_URL") or ""

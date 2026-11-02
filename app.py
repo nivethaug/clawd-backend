@@ -1123,6 +1123,11 @@ class CreateProjectRequest(BaseModel):
     discord_webhook_url: Optional[str] = None  # Discord webhook URL
     email_to: Optional[str] = None  # Default email recipient (SMTP is shared)
     api_endpoint: Optional[str] = None  # Default API endpoint URL
+    # Custom Git Projects (enterprise-only)
+    git_origin_url: Optional[str] = None
+    git_default_branch: Optional[str] = None
+    git_credential_id: Optional[int] = None
+    git_provider: Optional[str] = None
     environment_variables: Optional[List[InitialEnvironmentVariable]] = None
     # Global Integrations to import (server-side resolve; values never transit the client)
     global_integration_ids: Optional[List[int]] = None
@@ -2662,6 +2667,10 @@ app.include_router(workers_admin_router, prefix="/api/admin/workers", tags=["wor
 from api.system_health import router as system_health_router
 app.include_router(system_health_router, tags=["system-health"])
 
+# Custom Git Projects (enterprise-only)
+from api.git_router import router as git_router
+app.include_router(git_router, tags=["git-projects"])
+
 # Dedicated-worker add-on (purchasable upsell) — status + cancel.
 # Purchase rides the existing Razorpay subscription endpoint.
 from api.dedicated_router import router as dedicated_router
@@ -3054,6 +3063,10 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                 discord_webhook_url=request.discord_webhook_url,
                 email_to=request.email_to,
                 api_endpoint=request.api_endpoint,
+                git_origin_url=request.git_origin_url,
+                git_default_branch=request.git_default_branch,
+                git_credential_id=request.git_credential_id,
+                git_provider=request.git_provider,
                 description_for_worker=description_for_worker,
                 initial_environment_variables=initial_environment_variables,
             )
@@ -17251,6 +17264,16 @@ async def _auto_commit_and_push(project_id: int, session_id: int, handler, mode:
         # Skip plan mode — it's read-only, no files change
         if mode == "plan":
             logger.info(f"[AUTO-COMMIT] Skipping — plan mode (read-only)")
+            return
+
+        # Skip Git Projects — commits/pushes are USER-INITIATED only
+        from database_adapter import get_db as _gdb
+        with _gdb() as _conn:
+            _row = _conn.execute(
+                "SELECT git_origin_url FROM projects WHERE id = %s", (project_id,)
+            ).fetchone()
+        if _row and (_row.get("git_origin_url") if isinstance(_row, dict) else _row[0]):
+            logger.info("[GIT-PROJECT] auto-commit disabled — user commits via UI")
             return
 
         # Check if the model actually wrote/edited files

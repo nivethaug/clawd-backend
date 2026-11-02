@@ -84,6 +84,10 @@ def enqueue_project_creation_run(
     discord_webhook_url: Optional[str],
     email_to: Optional[str],
     api_endpoint: Optional[str],
+    git_origin_url: Optional[str] = None,
+    git_default_branch: Optional[str] = None,
+    git_credential_id: Optional[int] = None,
+    git_provider: Optional[str] = None,
     description_for_worker: str,
     initial_environment_variables: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
@@ -111,6 +115,10 @@ def enqueue_project_creation_run(
         "discord_webhook_url": discord_webhook_url,
         "email_to": email_to,
         "api_endpoint": api_endpoint,
+        "git_origin_url": git_origin_url,
+        "git_default_branch": git_default_branch,
+        "git_credential_id": git_credential_id,
+        "git_provider": git_provider,
         "initial_environment_variables": initial_environment_variables or [],
     }
 
@@ -1318,6 +1326,67 @@ def _select_template(run_id: int, project_id: int, name: str, description: str, 
     return selected_template_id
 
 
+def _run_git_project_pipeline(
+    run_id: int, project_id: int, project_path: str, payload: dict, user_id: int,
+):
+    """Custom Git Project: clone user's repo into their container.
+
+    No template copy, no PM2, no nginx, no domain, no per-project DB.
+    The repo IS the project — AI edits files, user commits/pushes via UI.
+    """
+    from services.git_projects.urls import GitUrlValidator
+    from services.git_projects.credentials import GitCredentialService
+    from services.git_projects.transport import GitTransport
+    from services.git_projects.audit import audit_event
+
+    origin_url = payload.get("git_origin_url", "")
+    branch = payload.get("git_default_branch") or "main"
+    credential_id = payload.get("git_credential_id")
+
+    logger.info("[GIT-PROJECT] cloning %s branch=%s for project %s", origin_url, branch, project_id)
+    append_chunk(run_id, "progress", f"Cloning {origin_url} (branch: {branch})...")
+
+    # Validate URL
+    is_valid, error = GitUrlValidator.validate(origin_url)
+    if not is_valid:
+        audit_event(user_id, "validation_failed", project_id, {"url": origin_url, "error": error})
+        raise RuntimeError(f"Invalid Git URL: {error}")
+
+    # Get credential token
+    token = GitCredentialService.get_token(user_id, credential_id)
+    if not token:
+        raise RuntimeError("No Git credential found — connect a provider first")
+
+    # Clone inside the user's container
+    transport = GitTransport(user_id, project_path)
+    result = transport.clone(origin_url, branch=branch, token=token)
+
+    if not result["success"]:
+        audit_event(user_id, "clone_failed", project_id, {"error": result["output"][:200]})
+        raise RuntimeError(f"Git clone failed: {result['output'][:200]}")
+
+    # Record git metadata on the project
+    from database_postgres import get_db
+
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE projects SET
+               git_provider = %s, git_origin_url = %s, git_default_branch = %s,
+               git_credential_id = %s
+               WHERE id = %s""",
+            (payload.get("git_provider", "generic"), origin_url, branch, credential_id, project_id),
+        )
+        conn.commit()
+
+    audit_event(user_id, "clone", project_id, {"url": origin_url, "branch": branch})
+    append_chunk(run_id, "progress", "Repository cloned successfully")
+
+    # Seed creation session
+    _seed_creation_session(project_id, user_id, payload.get("name", "Git Project"), "gitproject")
+    append_chunk(run_id, "text", f"Repository cloned. You can now chat with the AI to explore and edit the codebase.")
+    logger.info("[GIT-PROJECT] project %s ready — repo at %s", project_id, project_path)
+
+
 def _run_website_pipeline(
     run_id: int,
     project_id: int,
@@ -1658,7 +1727,12 @@ def execute_run(run_id: int) -> Dict[str, Any]:
             payload.get("template_id"),
         )
 
-        if type_id == 1:
+        # ── Custom Git Projects: clone user's repo, no template/PM2/nginx ──
+        git_origin = payload.get("git_origin_url") or ""
+        if git_origin:
+            _run_git_project_pipeline(run_id, project_id, project_path, payload, user_id)
+            _set_project_status(project_id, "ready")
+        elif type_id == 1:
             _run_website_pipeline(
                 run_id,
                 project_id,
