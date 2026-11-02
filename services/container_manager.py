@@ -63,16 +63,41 @@ SHARED_CACHE_HOST: str = os.getenv("SHARED_CACHE_HOST", "/srv/cache")
 SHARED_CACHE_TARGET: str = os.getenv("SHARED_CACHE_TARGET", "/cache")
 
 # Resource limits — non-optional. Documented in docs/container_isolation.md §13.
-CONTAINER_MEMORY: str = os.getenv("CONTAINER_MEMORY", "2g")
-CONTAINER_CPUS: str = os.getenv("CONTAINER_CPUS", "2")
+# On DEDICATED workers (one enterprise tenant owns the box), these should be
+# set to near-host capacity — the customer paid for the full VPS. Set
+# CONTAINER_MEMORY=0 to auto-detect host RAM minus 1GB overhead for platform
+# services. Set CONTAINER_CPUS=0 to use all host cores.
+_DEDICATED_MODE = os.getenv("WORKER_NODE_ID", "shared") != "shared"
+
+if _DEDICATED_MODE and not os.getenv("CONTAINER_MEMORY"):
+    try:
+        with open("/proc/meminfo") as f:
+            _host_mem_mb = int(next(line for line in f if line.startswith("MemTotal:")).split()[1]) // 1024
+        # Reserve 1GB for platform services (wrapper, API, pollers, postgres, nginx)
+        _container_mem_mb = max(1024, _host_mem_mb - 1024)
+        CONTAINER_MEMORY = f"{_container_mem_mb}m"
+    except Exception:
+        CONTAINER_MEMORY = "3g"  # safe fallback for typical 4GB dedicated
+else:
+    CONTAINER_MEMORY = os.getenv("CONTAINER_MEMORY", "2g")
+
+if _DEDICATED_MODE and not os.getenv("CONTAINER_CPUS"):
+    try:
+        _host_cpus = os.cpu_count() or 2
+        CONTAINER_CPUS = str(_host_cpus)
+    except Exception:
+        CONTAINER_CPUS = "2"
+else:
+    CONTAINER_CPUS = os.getenv("CONTAINER_CPUS", "2")
+
 # PID limit. 512 was the original single-operation limit, but when a chat
 # and a project creation run in parallel inside the same container they
 # legitimately need ~600-800 PIDs (two Claude instances, npm install,
 # vite/esbuild workers, chrome-devtools-mcp). Hitting the limit makes the
 # kernel SIGKILL processes — usually the biggest one (Claude) dies first
 # with exit code 137. 1024 gives headroom for parallel work without
-# unbounded growth. Override via env var if needed.
-CONTAINER_PIDS_LIMIT: int = int(os.getenv("CONTAINER_PIDS_LIMIT", "1024"))
+# unbounded growth. Dedicated workers get double (more projects running).
+CONTAINER_PIDS_LIMIT: int = int(os.getenv("CONTAINER_PIDS_LIMIT", "2048" if _DEDICATED_MODE else "1024"))
 
 # User mapping inside the container.
 CONTAINER_USER_UID: int = int(os.getenv("CONTAINER_USER_UID", "1001"))
