@@ -104,6 +104,11 @@ class GitTransport:
         url_q = shlex.quote(url)
         branch_q = shlex.quote(branch)
 
+        # Clear the destination (the platform's _create_project_folder leaves
+        # README/git artifacts that make `git clone .` fail on non-empty dir)
+        clear_cmd = "rm -rf .git README.md .gitignore changerule.md 2>/dev/null; rm -rf * .[!.]* 2>/dev/null || true"
+        self._exec(clear_cmd, timeout=30)
+
         # Clone into the project directory
         cmd = (
             f"git clone {depth} --branch {branch_q} "
