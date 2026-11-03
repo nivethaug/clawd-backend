@@ -37,16 +37,13 @@ class GitTransport:
         env_flags = []
         try:
             if token:
-                # Write askpass script INSIDE the container as user 1001
-                # (docker cp preserves root ownership; --cap-drop ALL blocks chown)
-                write = subprocess.run(
-                    ["docker", "exec", "--user", "1001:1001", self.container,
-                     "bash", "-c",
-                     f"printf '#!/bin/bash\\necho {token}\\n' > /tmp/.gitask && chmod 700 /tmp/.gitask"],
-                    capture_output=True, timeout=10,
-                )
-                if write.returncode == 0:
-                    env_flags = ["-e", "GIT_ASKPASS=/tmp/.gitask", "-e", "GIT_TERMINAL_PROMPT=0"]
+                # Embed auth as git http header (works reliably inside containers
+                # where askpass scripts hit permission issues with cap-drop)
+                import base64 as _b64
+                _auth = _b64.b64encode(f"x-access-token:{token}".encode()).decode()
+                env_flags = ["-e", f"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+                             "-e", f"GIT_CONFIG_VALUE_0=Authorization: Basic {_auth}",
+                             "-e", "GIT_CONFIG_COUNT=1"]
 
             cmd = [
                 "docker", "exec", "-i",
@@ -62,11 +59,7 @@ class GitTransport:
         except Exception as exc:
             return subprocess.CompletedProcess(cmd, 1, "", str(exc))
         finally:
-            # Clean up askpass script inside the container
-            subprocess.run(
-                ["docker", "exec", self.container, "rm", "-f", "/tmp/.gitask"],
-                capture_output=True, timeout=5,
-                )
+            pass  # auth via env vars — no cleanup needed
 
     @staticmethod
     def _safe_branch(branch: str) -> str:
