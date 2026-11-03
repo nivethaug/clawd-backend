@@ -47,14 +47,16 @@ class GitTransport:
                 askpass_local.close()
                 os.chmod(askpass_local.name, 0o700)
 
-                # Copy askpass into the container's /tmp
+                # Copy askpass into the container's /tmp (as root, then fix perms for uid 1001)
                 copy = subprocess.run(
                     ["docker", "cp", askpass_local.name, f"{self.container}:/tmp/.gitask"],
                     capture_output=True, timeout=10,
                 )
                 if copy.returncode == 0:
+                    # chown to 1001 and chmod 755 so the container user can execute it
                     subprocess.run(
-                        ["docker", "exec", self.container, "chmod", "700", "/tmp/.gitask"],
+                        ["docker", "exec", "--user", "0:0", self.container,
+                         "sh", "-c", "chown 1001:1001 /tmp/.gitask && chmod 755 /tmp/.gitask"],
                         capture_output=True, timeout=5,
                     )
                     env_flags = ["-e", "GIT_ASKPASS=/tmp/.gitask", "-e", "GIT_TERMINAL_PROMPT=0"]
