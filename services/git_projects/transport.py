@@ -106,8 +106,13 @@ class GitTransport:
 
         # Clear the destination (the platform's _create_project_folder leaves
         # README/git artifacts that make `git clone .` fail on non-empty dir)
-        clear_cmd = "rm -rf .git README.md .gitignore changerule.md 2>/dev/null; rm -rf * .[!.]* 2>/dev/null || true"
-        self._exec(clear_cmd, timeout=30)
+        # Use find to handle hidden files properly, and log what's removed
+        clear_result = self._exec(
+            "pwd && ls -la && find . -mindepth 1 -delete 2>/dev/null; ls -la",
+            timeout=30,
+        )
+        logger.info("[GIT-TRANSPORT] cleared %s: %s", self._container_path(),
+                    clear_result.stdout[-300:] if clear_result.stdout else "no output")
 
         # Clone into the project directory
         cmd = (
