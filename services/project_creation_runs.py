@@ -479,6 +479,7 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
                     "website": "website", "telegrambot": "Telegram bot",
                     "discordbot": "Discord bot", "tradingbot": "Trading bot",
                     "scheduler": "scheduler", "agent": "AI agent", "custom": "custom",
+                    "gitproject": "Git repository",
                 }.get(slug)
             except Exception as label_err:
                 logger.warning("[PROJECT-RUN] type label lookup failed for %s: %s", type_id, label_err)
