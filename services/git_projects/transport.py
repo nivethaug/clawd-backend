@@ -35,30 +35,17 @@ class GitTransport:
     ) -> subprocess.CompletedProcess:
         """Run a command inside the container. Token via temporary askpass script."""
         env_flags = []
-        askpass_local = None
         try:
             if token:
-                # Write a one-shot askpass script on the host, mount it via stdin
-                # (never in argv — not visible in ps)
-                askpass_local = tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".sh", delete=False, prefix="gitask_",
-                )
-                askpass_local.write(f"#!/bin/bash\necho '{token}'\n")
-                askpass_local.close()
-                os.chmod(askpass_local.name, 0o700)
-
-                # Copy askpass into the container's /tmp (as root, then fix perms for uid 1001)
-                copy = subprocess.run(
-                    ["docker", "cp", askpass_local.name, f"{self.container}:/tmp/.gitask"],
+                # Write askpass script INSIDE the container as user 1001
+                # (docker cp preserves root ownership; --cap-drop ALL blocks chown)
+                write = subprocess.run(
+                    ["docker", "exec", "--user", "1001:1001", self.container,
+                     "bash", "-c",
+                     f"printf '#!/bin/bash\\necho {token}\\n' > /tmp/.gitask && chmod 700 /tmp/.gitask"],
                     capture_output=True, timeout=10,
                 )
-                if copy.returncode == 0:
-                    # chown to 1001 and chmod 755 so the container user can execute it
-                    subprocess.run(
-                        ["docker", "exec", "--user", "0:0", self.container,
-                         "sh", "-c", "chown 1001:1001 /tmp/.gitask && chmod 755 /tmp/.gitask"],
-                        capture_output=True, timeout=5,
-                    )
+                if write.returncode == 0:
                     env_flags = ["-e", "GIT_ASKPASS=/tmp/.gitask", "-e", "GIT_TERMINAL_PROMPT=0"]
 
             cmd = [
@@ -75,14 +62,10 @@ class GitTransport:
         except Exception as exc:
             return subprocess.CompletedProcess(cmd, 1, "", str(exc))
         finally:
-            if askpass_local:
-                try:
-                    os.unlink(askpass_local.name)
-                except Exception:
-                    pass
-                subprocess.run(
-                    ["docker", "exec", self.container, "rm", "-f", "/tmp/.gitask"],
-                    capture_output=True, timeout=5,
+            # Clean up askpass script inside the container
+            subprocess.run(
+                ["docker", "exec", self.container, "rm", "-f", "/tmp/.gitask"],
+                capture_output=True, timeout=5,
                 )
 
     @staticmethod
