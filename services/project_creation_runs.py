@@ -1357,6 +1357,29 @@ def _run_git_project_pipeline(
     if not token:
         raise RuntimeError("No Git credential found — connect a provider first")
 
+    # Clear the project directory on the HOST (root can delete what _create_project_folder left;
+    # the container user 1001 cannot delete root-owned files)
+    import shutil as _shutil
+    if os.path.isdir(project_path):
+        for entry in os.listdir(project_path):
+            _p = os.path.join(project_path, entry)
+            if os.path.isdir(_p) and not os.path.islink(_p):
+                _shutil.rmtree(_p, ignore_errors=True)
+            else:
+                try:
+                    os.unlink(_p)
+                except Exception:
+                    pass
+        # Ensure the container user owns the now-empty dir
+        try:
+            os.chown(project_path, 1001, 1001)
+        except Exception:
+            pass
+    else:
+        os.makedirs(project_path, exist_ok=True)
+        os.chown(project_path, 1001, 1001)
+    logger.info("[GIT-PROJECT] cleared %s on host", project_path)
+
     # Clone inside the user's container
     transport = GitTransport(user_id, project_path)
     result = transport.clone(origin_url, branch=branch, token=token)
