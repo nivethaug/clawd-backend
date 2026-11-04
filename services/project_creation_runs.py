@@ -1418,6 +1418,148 @@ def _run_git_project_pipeline(
     logger.info("[GIT-PROJECT] project %s ready — repo at %s", project_id, project_path)
 
 
+def _recover_infrastructure(run_id: int, project_id: int, project_path: str, payload: dict, name: str, type_id: int):
+    """Provision missing infrastructure when the AI-phase interrupted the pipeline.
+
+    Checks and provisions: frontend build, PM2 backend, nginx config, DNS records,
+    per-project database. Idempotent — skips anything that already exists.
+    Called when the pipeline is about to mark a project "ready" but nginx/DNS
+    are missing (the AI-phase ran long or errored mid-build).
+    """
+    import subprocess as sp
+    import os as _os
+
+    domain = payload.get("domain") or name.lower().replace(" ", "-")
+    logger.info("[INFRA-RECOVERY] starting for project %s domain=%s", project_id, domain)
+
+    # 1. Frontend build (if dist/ missing)
+    frontend_dir = _os.path.join(project_path, "frontend")
+    dist_index = _os.path.join(frontend_dir, "dist", "index.html")
+    if not _os.path.exists(dist_index):
+        if _os.path.exists(_os.path.join(frontend_dir, "package.json")):
+            logger.info("[INFRA-RECOVERY] building frontend")
+            sp.run(
+                f"cd {frontend_dir} && npm install --no-audit --no-fund --silent && npx vite build --logLevel error",
+                shell=True, capture_output=True, timeout=300,
+            )
+            if _os.path.exists(dist_index):
+                logger.info("[INFRA-RECOVERY] frontend built")
+            else:
+                logger.warning("[INFRA-RECOVERY] frontend build failed — continuing")
+
+    # 2. Ports
+    backend_port = 8000 + (project_id % 200)
+
+    # 3. Per-project database
+    if type_id == 1:
+        try:
+            from database_adapter import get_db
+            with get_db() as conn:
+                db_name = domain.replace("-", "_").lower()
+                db_user = f"u{project_id}"
+                db_pass = f"p{project_id}"
+                try:
+                    conn.execute(f'CREATE ROLE "{db_user}" LOGIN PASSWORD \'{db_pass}\'')
+                except Exception:
+                    pass
+                try:
+                    conn.execute(f'CREATE DATABASE "{db_name}" OWNER "{db_user}"')
+                except Exception:
+                    pass
+                conn.commit()
+                logger.info("[INFRA-RECOVERY] database %s ready", db_name)
+        except Exception as exc:
+            logger.warning("[INFRA-RECOVERY] database provisioning failed: %s", exc)
+
+    # 4. PM2 backend process
+    backend_dir = _os.path.join(project_path, "backend")
+    if _os.path.exists(_os.path.join(backend_dir, "main.py")):
+        pm2_name = f"{domain}-backend"
+        check = sp.run(["pm2", "describe", pm2_name], capture_output=True, text=True)
+        if check.returncode != 0:
+            logger.info("[INFRA-RECOVERY] starting PM2 backend %s on port %s", pm2_name, backend_port)
+            env_file = _os.path.join(backend_dir, ".env")
+            if not _os.path.exists(env_file):
+                db_name = domain.replace("-", "_").lower()
+                with open(env_file, "w") as f:
+                    f.write(f"DATABASE_URL=postgresql://u{project_id}:p{project_id}@localhost:5432/{db_name}\n")
+                    f.write(f"HOST=0.0.0.0\nPORT={backend_port}\n")
+            start_script = f"/opt/pm2-start-{domain}.sh"
+            with open(start_script, "w") as f:
+                f.write("#!/bin/bash\n")
+                f.write(f"cd {backend_dir}\n")
+                f.write(f"exec /root/dreampilot/dreampilotvenv/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port {backend_port}\n")
+            _os.chmod(start_script, 0o755)
+            sp.run(["pm2", "start", start_script, "--name", pm2_name], capture_output=True)
+            sp.run(["pm2", "save"], capture_output=True)
+            logger.info("[INFRA-RECOVERY] PM2 backend started")
+
+    # 5. Nginx config
+    nginx_conf = f"/etc/nginx/sites-available/{domain}.conf"
+    if not _os.path.exists(nginx_conf) and _os.path.exists(dist_index):
+        logger.info("[INFRA-RECOVERY] writing nginx config for %s", domain)
+        conf_content = (
+            f"server {{\n"
+            f"    listen 80;\n"
+            f"    server_name {domain}.dreamagent.cloud;\n"
+            f"    root {frontend_dir}/dist;\n"
+            f"    index index.html;\n"
+            f"    location / {{ try_files $uri $uri/ /index.html; }}\n"
+            f"}}\n"
+            f"server {{\n"
+            f"    listen 80;\n"
+            f"    server_name {domain}-api.dreamagent.cloud;\n"
+            f"    location / {{\n"
+            f"        proxy_pass http://127.0.0.1:{backend_port};\n"
+            f"        proxy_set_header Host $host;\n"
+            f"    }}\n"
+            f"}}\n"
+        )
+        with open(nginx_conf, "w") as f:
+            f.write(conf_content)
+        sites_enabled = f"/etc/nginx/sites-enabled/{domain}.conf"
+        if not _os.path.islink(sites_enabled):
+            _os.symlink(nginx_conf, sites_enabled)
+        test = sp.run(["nginx", "-t"], capture_output=True, text=True)
+        if test.returncode == 0:
+            sp.run(["nginx", "-s", "reload"], capture_output=True)
+            logger.info("[INFRA-RECOVERY] nginx configured and reloaded")
+        else:
+            logger.error("[INFRA-RECOVERY] nginx test failed: %s", test.stderr[:100])
+
+    # 6. DNS records
+    nginx_exists = _os.path.exists(nginx_conf) or _os.path.exists(f"/etc/nginx/sites-enabled/{domain}.conf")
+    if nginx_exists:
+        try:
+            from dns_manager import create_a_record
+            import dotenv
+            dotenv.load_dotenv("/root/clawd-backend/.env.postgres")
+            from domain_config import SERVER_IP as _DNS_IP
+            r1 = create_a_record("dreamagent.cloud", domain, _DNS_IP)
+            r2 = create_a_record("dreamagent.cloud", f"{domain}-api", _DNS_IP)
+            logger.info("[INFRA-RECOVERY] DNS: %s | %s",
+                        "ok" if r1.get("success") else "fail",
+                        "ok" if r2.get("success") else "fail")
+        except Exception as exc:
+            logger.warning("[INFRA-RECOVERY] DNS creation failed: %s", exc)
+
+    # 7. SSL (best-effort)
+    if nginx_exists:
+        ssl = sp.run(
+            ["certbot", "--nginx", "-d", f"{domain}.dreamagent.cloud",
+             "-d", f"{domain}-api.dreamagent.cloud",
+             "--non-interactive", "--agree-tos", "--redirect"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if ssl.returncode == 0:
+            logger.info("[INFRA-RECOVERY] SSL provisioned")
+        else:
+            logger.warning("[INFRA-RECOVERY] SSL failed (DNS may need propagation)")
+
+    append_chunk(run_id, "progress", "Infrastructure recovery completed")
+    logger.info("[INFRA-RECOVERY] completed for project %s", project_id)
+
+
 def _run_website_pipeline(
     run_id: int,
     project_id: int,
@@ -1785,6 +1927,25 @@ def execute_run(run_id: int) -> Dict[str, Any]:
             # commonly by the 45-min AI-phase timeout, whose handler intentionally
             # continues the run with the AI-edited files kept.
             if project and project.get("status") not in ("ready", "failed"):
+                # Verify infrastructure actually provisioned: nginx config + DNS
+                # exist. Prevents marking "ready" when the AI-phase ran long and
+                # infrastructure phases (ports/DB/PM2/nginx/DNS) never executed.
+                _infra_ok = True
+                _domain = project.get("domain") or payload.get("domain") or ""
+                if _domain:
+                    import os as _os
+                    _nginx_conf = f"/etc/nginx/sites-enabled/{_domain}.conf"
+                    if not _os.path.exists(_nginx_conf):
+                        _nginx_alt = f"/etc/nginx/sites-enabled/{_domain}-frontend.conf"
+                        if not _os.path.exists(_nginx_alt):
+                            logger.warning(
+                                "[PROJECT-RUN] project %s: nginx config missing for %s — running infra recovery",
+                                project_id, _domain,
+                            )
+                            try:
+                                _recover_infrastructure(run_id, project_id, project_path, payload, name, type_id)
+                            except Exception as _infra_err:
+                                logger.error("[PROJECT-RUN] infra recovery failed for %s: %s", project_id, _infra_err)
                 _set_project_status(project_id, "ready")
         else:
             success, result = _run_bot_or_scheduler_pipeline(run_id, project_id, project_path, payload, type_id)
