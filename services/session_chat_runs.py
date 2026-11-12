@@ -385,8 +385,12 @@ def update_heartbeat(run_id: int) -> None:
 
 
 def mark_completed(run_id: int, assistant_message_id: Optional[int], token_usage: Optional[dict], has_writes: bool) -> None:
+    # Status guard (audit T6): a run already finalized (e.g. marked
+    # 'interrupted' by stale recovery, or 'cancelled') must not be flipped
+    # back to 'completed' by a late writer — that would resurrect dead runs
+    # and double-fire engine notifications.
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             """
             UPDATE session_chat_runs
             SET status = 'completed',
@@ -395,11 +399,15 @@ def mark_completed(run_id: int, assistant_message_id: Optional[int], token_usage
                 assistant_message_id = %s,
                 token_usage = %s::jsonb,
                 has_writes = %s
-            WHERE id = %s
+            WHERE id = %s AND status IN ('queued', 'running', 'cancel_requested')
             """,
             (assistant_message_id, json.dumps(token_usage) if token_usage else None, bool(has_writes), run_id),
         )
+        rowcount = getattr(cur, "rowcount", None)
         conn.commit()
+    if rowcount == 0:
+        logger.warning("[SESSION-RUN] mark_completed(%s) matched no active run (already finalized) — notify suppressed", run_id)
+        return
 
     # Dev-cycle engine wake-up (fire-and-forget; no-op when no cycle task
     # references this run — the engine ignores unrelated run ids).
@@ -412,16 +420,22 @@ def mark_completed(run_id: int, assistant_message_id: Optional[int], token_usage
 
 def mark_failed(run_id: int, status: str, error: str) -> None:
     final_status = status if status in {"failed", "cancelled", "interrupted"} else "failed"
+    # Status guard (audit T6): never overwrite a 'completed' run with a
+    # failure (late failure handler after a successful finalize).
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             """
             UPDATE session_chat_runs
             SET status = %s, error = %s, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
+            WHERE id = %s AND status NOT IN ('completed')
             """,
             (final_status, error[:2000], run_id),
         )
+        rowcount = getattr(cur, "rowcount", None)
         conn.commit()
+    if rowcount == 0:
+        logger.warning("[SESSION-RUN] mark_failed(%s, %s) matched no non-completed run — notify suppressed", run_id, final_status)
+        return
 
     try:
         from services.dev_cycles.notify import notify_session_run
@@ -442,6 +456,11 @@ def recover_stale_runs(stale_after_minutes: int = 20, project_id: Optional[int] 
     cutoff = datetime.utcnow() - timedelta(minutes=stale_after_minutes)
     project_filter = " AND project_id = %s" if project_id is not None else ""
     recovered = 0
+    # TODO(audit T6c): when a 'running' run is interrupted here, the agent
+    # subprocess may still be alive in ANOTHER worker process. No safe
+    # cross-process kill hook exists yet (active_handlers and
+    # kill_orphan_processes are per-process only) — NEEDS DECISION before
+    # recovery may actively kill a possibly-live worker subprocess.
     with get_db() as conn:
         rows = conn.execute(
             """
@@ -527,6 +546,7 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
     session_key = run["session_key"]
     channel_label = str(run.get("channel") or "worker").title()
     handler = None
+    _heartbeat_task = None
     assistant_saved = False
     assistant_message_id = None
     image_attachment = _json_loads(run.get("image_attachment"), None)
@@ -571,6 +591,20 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
                 logger.warning("[SESSION-RUN] plan context lookup failed: %s", e)
 
         chunks_for_response: List[str] = []
+
+        # Heartbeat watchdog (audit T6): ticks every 15s regardless of chunk
+        # flow. The in-loop floor below only fires when a chunk arrives — a
+        # silent long tool phase (build, MCP call) used to age the heartbeat
+        # out and let recover_stale_runs kill a LIVE run at 20 min.
+        async def _heartbeat_loop():
+            while True:
+                await asyncio.sleep(15.0)
+                try:
+                    update_heartbeat(run_id)
+                except Exception as hb_err:
+                    logger.warning("[SESSION-RUN] watchdog heartbeat failed (non-fatal): %s", hb_err)
+
+        _heartbeat_task = asyncio.create_task(_heartbeat_loop())
 
         # Heartbeat the run periodically so recover_stale_runs (20-min default)
         # doesn't mark it 'interrupted' while Claude is still working. Long
@@ -737,6 +771,8 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
             pass
         return {"status": "error", "message": error_message}
     finally:
+        if _heartbeat_task is not None:
+            _heartbeat_task.cancel()
         if image_attachment:
             try:
                 from app import cleanup_chat_image_attachment
