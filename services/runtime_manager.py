@@ -218,6 +218,7 @@ class ProjectRuntimeManager:
         env: Dict[str, str],
         stdout_limit: int = 10 * 1024 * 1024,
         run_as_root: bool = False,
+        stdin_pipe: bool = False,
     ) -> RuntimeSpawnResult:
         """Async spawn with stdout/stderr pipes — the Claude Code path.
 
@@ -262,7 +263,9 @@ class ProjectRuntimeManager:
             )
             process = await asyncio.create_subprocess_exec(
                 *effective,
-                stdin=asyncio.subprocess.DEVNULL,
+                # stdin_pipe (audit T14): large prompts (claude -p -) are
+                # written via stdin; wrap_exec already adds `docker exec -i`.
+                stdin=asyncio.subprocess.PIPE if stdin_pipe else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 limit=stdout_limit,
@@ -284,7 +287,7 @@ class ProjectRuntimeManager:
 
         process = await asyncio.create_subprocess_exec(
             *effective,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE if stdin_pipe else asyncio.subprocess.DEVNULL,  # audit T14
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(cwd),

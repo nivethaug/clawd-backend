@@ -1111,19 +1111,25 @@ class ClaudeCodeAgent:
             cwd=str(self.repo_path),
             env=env,
             stdout_limit=10 * 1024 * 1024,  # 10MB limit for large JSON lines (screenshots)
+            stdin_pipe=_use_stdin_prompt,   # audit T14: -p - prompts need a real pipe
         )
         process = spawn.process
         effective_command = spawn.effective_command
 
         # Feed a large prompt via stdin (spawned with `-p -` above).
-        if _use_stdin_prompt and process.stdin:
+        # A missing stdin or failed write must RAISE (audit T14): silently
+        # continuing would send the agent an EMPTY prompt and burn the run.
+        if _use_stdin_prompt:
+            if process.stdin is None:
+                raise RuntimeError(
+                    "stdin prompt requested but subprocess has no stdin pipe "
+                    "(stdin_pipe was not passed to exec_subprocess_stream)")
             try:
                 process.stdin.write(prompt.encode("utf-8"))
                 await process.stdin.drain()
                 process.stdin.close()
             except Exception as stdin_err:
-                logger.warning("[CLAUDE-AGENT] stdin prompt write failed: %s",
-                               stdin_err)
+                raise RuntimeError(f"stdin prompt write failed: {stdin_err}") from stdin_err
 
         # Mark container as having an active Claude process (PID file for reaper).
         # The reaper checks this PID to decide whether the container can be
