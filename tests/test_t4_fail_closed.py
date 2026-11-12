@@ -25,7 +25,7 @@ def _setup(monkeypatch, *, owner_row=True, reserve_raises=False):
     monkeypatch.setattr(app, "_self_heal_project_lock", lambda *_a: True)
     monkeypatch.setattr(app, "_resolve_session_model",
                         lambda mid, uid=None: {"id": "z-ai/glm-5.3-flash",
-                                               "multiplier": 1})
+                                               "name": "GLM", "multiplier": 1})
     monkeypatch.setattr(app, "_resolve_reasoning_effort",
                         lambda eff, uid=None: "low")
 

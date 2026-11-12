@@ -10138,6 +10138,33 @@ async def get_session_messages(
 
     return message_responses
 
+# ── Gate-answer rate limiting (audit T5) ────────────────────────────────
+# Gate-answered messages are free for the user; cap them per user so the
+# free path cannot be spammed. Simple in-memory sliding window (per worker).
+import time as _gate_time
+
+_GATE_ANSWER_LIMIT = 20           # gate-answered messages per user…
+_GATE_ANSWER_WINDOW = 60.0        # …per 60 seconds
+_GATE_ANSWER_HITS: dict = {}      # user_id -> [monotonic timestamps]
+
+
+def _gate_answer_rate_limited(user_id) -> bool:
+    now = _gate_time.monotonic()
+    hits = [t for t in _GATE_ANSWER_HITS.get(user_id, [])
+            if now - t < _GATE_ANSWER_WINDOW]
+    if len(hits) >= _GATE_ANSWER_LIMIT:
+        _GATE_ANSWER_HITS[user_id] = hits
+        return True
+    hits.append(now)
+    _GATE_ANSWER_HITS[user_id] = hits
+    # bound memory
+    if len(_GATE_ANSWER_HITS) > 10000:
+        cutoff = now - _GATE_ANSWER_WINDOW
+        for uid in [u for u, ts in _GATE_ANSWER_HITS.items() if all(t < cutoff for t in ts)]:
+            _GATE_ANSWER_HITS.pop(uid, None)
+    return False
+
+
 @app.post("/chat/stream")
 async def chat_stream_endpoint(
     request: ChatRequest,
@@ -10480,7 +10507,22 @@ async def chat_stream_endpoint(
             
             # If gate handled it, return direct response
             if direct_response:
-                # Refund the pre-charge — gate handled it without Claude Code
+                # Non-greeting gate answers are free for the user — rate-limit
+                # them so the free path cannot be spammed (audit T5).
+                if not _is_stream_free_msg and _chat_user_id:
+                    if _gate_answer_rate_limited(_chat_user_id):
+                        logger.warning(f"[GATE] rate-limited gate answers for user {_chat_user_id}")
+                        SessionLockService.release_processing(session_id)
+                        SessionLockService.release_lock(project_id, session_id)
+                        raise HTTPException(
+                            status_code=429,
+                            detail={"error": "rate_limited",
+                                    "message": "Too many quick replies. Please slow down or send a full request."},
+                        )
+                # Refund the pre-charge — the free path covers ONLY greetings
+                # and the gate's canned security/credential replies (read-only
+                # LLM answering is disabled in check_message_gate, so no other
+                # gate-answer flavor exists today; audit T5).
                 if _chat_charged and _chat_user_id:
                     try:
                         from services.billing_service import refund_credits
@@ -10996,6 +11038,10 @@ async def chat_stream_endpoint(
                     "X-Accel-Buffering": "no",
                 }
             )
+        except HTTPException:
+            # Real HTTP responses (e.g. the gate 429) must reach the client as
+            # status codes, not be converted into SSE error payloads (audit T5).
+            raise
         except Exception as e:
             logger.error(f"[STREAM ENDPOINT] ACP mode error: {e}")
             if processing_acquired:
