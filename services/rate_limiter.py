@@ -391,8 +391,12 @@ def check_project_limit(user_id: int) -> Dict[str, any]:
                 (user_id,)
             ).fetchone()
         current = row["cnt"] if isinstance(row, dict) else row[0]
-    except Exception:
-        current = 0
+    except Exception as limit_err:
+        # Fail CLOSED (audit T17a): reporting current=0 would let a DB outage
+        # bypass the tier cap entirely.
+        logger.warning("check_project_limit DB failure for user %s: %s", user_id, limit_err)
+        return {"allowed": False, "error": "limit_check_failed",
+                "current": 0, "max": max_projects, "tier": tier_name, "role": role}
 
     allowed = current < max_projects
     return {

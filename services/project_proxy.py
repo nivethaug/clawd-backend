@@ -229,6 +229,10 @@ class _BodyTooLarge(Exception):
     """Request body exceeds the 15 MB proxy cap (audit T13)."""
 
 
+class _SessionKeyMismatch(Exception):
+    """Query and body session_key differ (audit T17b)."""
+
+
 async def _resolve_project_id_from_request(request: Request) -> Optional[int]:
     """Resolve project_id for ANY proxiable route (path-based OR session-based).
 
@@ -253,7 +257,8 @@ async def _resolve_project_id_from_request(request: Request) -> Optional[int]:
     #    These MUST proxy because the ACP handler reads frontend/src from disk.
     if path in _CHAT_ROUTES:
         session_key = request.query_params.get("session_key")
-        if not session_key:
+        _body_session_key = None
+        if request.method == "POST" and path in ("/chat", "/chat/stream"):
             # POST bodies carry session_key as JSON. Read+cache the body so the
             # downstream handler can still read it (FastAPI caches request.body).
             # Body-size guard (audit T13): reject >15 MB before json.loads —
@@ -270,12 +275,19 @@ async def _resolve_project_id_from_request(request: Request) -> Optional[int]:
                     import json
                     data = json.loads(body)
                     if isinstance(data, dict):
-                        session_key = data.get("session_key")
+                        _body_session_key = data.get("session_key")
+                        if not session_key:
+                            session_key = _body_session_key
             except Exception as body_err:
                 logger.warning(
                     "project_proxy: failed to read body for session_key on %s: %s",
                     path, body_err,
                 )
+        # Query/body mismatch (audit T17b): routing on one key while
+        # authorizing another would let a client reach a different project.
+        if session_key and _body_session_key and session_key != _body_session_key:
+            logger.warning("project_proxy: session_key mismatch on %s (query != body)", path)
+            raise _SessionKeyMismatch()
         if session_key:
             return _project_id_for_session("session_key", session_key)
         logger.warning("project_proxy: no session_key found for %s (query=%s)",
@@ -390,6 +402,10 @@ async def project_proxy_middleware(request: Request, call_next):
         from starlette.responses import JSONResponse
         return JSONResponse({"error": "request_too_large"},
                             status_code=413)
+    except _SessionKeyMismatch:
+        from starlette.responses import JSONResponse
+        return JSONResponse({"error": "session_key_mismatch"},
+                            status_code=400)
     if project_id is None:
         if _is_chat:
             logger.debug("project_proxy DEBUG: %s -> project_id=None (pass-through)", _path)

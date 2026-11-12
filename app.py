@@ -2904,6 +2904,12 @@ async def create_project(
     # Check project count limit for user's tier
     proj_limit = check_project_limit(user_id)
     if not proj_limit.get("allowed"):
+        if proj_limit.get("error") == "limit_check_failed":
+            # DB outage during the limit check — fail closed with 503 (audit T17a)
+            raise HTTPException(
+                status_code=503,
+                detail="Could not verify your project limit. Please try again shortly.",
+            )
         max_p = proj_limit.get("max", "?")
         current_p = proj_limit.get("current", "?")
         raise HTTPException(
@@ -5008,6 +5014,12 @@ async def clone_project(
     # Check project limit
     proj_limit = check_project_limit(user_id)
     if not proj_limit.get("allowed"):
+        if proj_limit.get("error") == "limit_check_failed":
+            # DB outage during the limit check — fail closed with 503 (audit T17a)
+            raise HTTPException(
+                status_code=503,
+                detail="Could not verify your project limit. Please try again shortly.",
+            )
         max_p = proj_limit.get("max", "?")
         current_p = proj_limit.get("current", "?")
         raise HTTPException(
