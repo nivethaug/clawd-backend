@@ -673,19 +673,24 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
 
 
 def mark_completed(run_id: int, has_writes: bool = False) -> None:
+    # Status guard (audit T7): never resurrect a terminal run.
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             """
             UPDATE project_creation_runs
             SET status = 'completed',
                 has_writes = %s,
                 completed_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
+            WHERE id = %s AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
             """,
             (bool(has_writes), run_id),
         )
+        rowcount = getattr(cur, "rowcount", None)
         conn.commit()
+    if rowcount == 0:
+        logger.warning("[PROJECT-RUN] mark_completed(%s) matched no active run — notify suppressed", run_id)
+        return
     prune_terminal_chunks(run_id=run_id)
 
     # Dev-cycle engine wake-up (fire-and-forget)
@@ -698,18 +703,20 @@ def mark_completed(run_id: int, has_writes: bool = False) -> None:
 
 def mark_failed(run_id: int, status: str, error: str, project_id: Optional[int] = None) -> None:
     final_status = status if status in {"failed", "cancelled", "interrupted"} else "failed"
+    # Status guard (audit T7): never overwrite a completed run with a failure.
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             """
             UPDATE project_creation_runs
             SET status = %s,
                 error = %s,
                 completed_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
+            WHERE id = %s AND status NOT IN ('completed')
             """,
             (final_status, error[:2000], run_id),
         )
+        rowcount = getattr(cur, "rowcount", None)
         if project_id:
             # Cover intermediate statuses too (ai_provisioning/building/deploying/
             # verifying), not just "creating" — a failure mid-phase must not leave
@@ -719,6 +726,9 @@ def mark_failed(run_id: int, status: str, error: str, project_id: Optional[int] 
                 ("failed", "creation_worker_failed", project_id),
             )
         conn.commit()
+    if rowcount == 0:
+        logger.warning("[PROJECT-RUN] mark_failed(%s, %s) matched no non-completed run — notify suppressed", run_id, final_status)
+        return
 
     # Dev-cycle engine wake-up (fire-and-forget)
     try:
@@ -815,9 +825,16 @@ def prune_terminal_chunks(run_id: Optional[int] = None) -> None:
         pool.putconn(conn)
 
 
-def _record_charge(run_id: int, operation_code: str, charge: List[Dict[str, Any]], charge_result: Dict[str, Any]) -> None:
-    with get_db() as conn:
-        conn.execute(
+def _record_charge(run_id: int, operation_code: str, charge: List[Dict[str, Any]],
+                   charge_result: Dict[str, Any], conn=None) -> None:
+    """Persist the charge onto the run row.
+
+    When `conn` is given, the UPDATE joins the CALLER's transaction (no
+    commit here) so the charge and its record commit atomically — a crash
+    between them used to leave a charged run with charge NULL (audit T7).
+    """
+    def _sql(c):
+        c.execute(
             """
             UPDATE project_creation_runs
             SET operation_code = %s,
@@ -827,7 +844,13 @@ def _record_charge(run_id: int, operation_code: str, charge: List[Dict[str, Any]
             """,
             (operation_code, _json_dumps({"charged": charge, "cost": charge_result.get("cost")}), run_id),
         )
-        conn.commit()
+
+    if conn is not None:
+        _sql(conn)
+        return
+    with get_db() as own_conn:
+        _sql(own_conn)
+        own_conn.commit()
 
 
 def _set_project_status(project_id: int, status: str, error_code: Optional[str] = None) -> None:
@@ -1827,6 +1850,23 @@ def execute_run(run_id: int) -> Dict[str, Any]:
     user_id = None
     project_path = ""
     charged = False
+
+    # Heartbeat thread (audit T7c): a slow but LIVE creation (long builds)
+    # must not be refunded+failed by recover_stale_runs at 20 min just
+    # because no DB write touched heartbeat_at. Sync code → thread, not task.
+    import threading as _threading
+    _hb_stop = _threading.Event()
+
+    def _hb_loop():
+        while not _hb_stop.wait(15.0):
+            try:
+                update_heartbeat(run_id)
+            except Exception as hb_exc:
+                logger.warning("[PROJECT-RUN] heartbeat tick failed (non-fatal): %s", hb_exc)
+
+    _hb_thread = _threading.Thread(target=_hb_loop, daemon=True, name=f"pcr-hb-{run_id}")
+    _hb_thread.start()
+
     try:
         with get_db() as conn:
             row = conn.execute("SELECT * FROM project_creation_runs WHERE id = %s", (run_id,)).fetchone()
@@ -1906,9 +1946,11 @@ def execute_run(run_id: int) -> Dict[str, Any]:
 
             operation_code = (charge_result.get("operation") or {}).get("code") or "WEBSITE"
             charge = charge_result.get("charged", [])
+            # Record the charge in the SAME transaction as the charge itself
+            # (audit T7): commit of billing + run.charge is now atomic.
+            _record_charge(run_id, operation_code, charge, charge_result, conn=conn)
             conn.commit()
         charged = True
-        _record_charge(run_id, operation_code, charge, charge_result)
 
         project_path = _create_project_folder(run_id, project_id, name, type_id, user_id=user_id)
         # Skip platform GitHub repo creation for Git Projects — the user's repo
@@ -2038,6 +2080,8 @@ def execute_run(run_id: int) -> Dict[str, Any]:
             _refund_if_needed(user_id, _row_value(latest, "operation_code"), _row_value(latest, "charge", 1))
         mark_failed(run_id, "failed", str(exc), project_id)
         return {"status": "error", "message": str(exc)}
+    finally:
+        _hb_stop.set()  # stop the heartbeat thread on every exit path
 
 
 def recover_stale_runs(stale_after_minutes: int = 20) -> int:
