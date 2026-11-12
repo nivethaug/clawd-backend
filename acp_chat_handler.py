@@ -4856,15 +4856,15 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         # Use same logic as run_chat_unified - check USE_CLAUDE_AGENT constant
         if USE_CLAUDE_AGENT:
             logger.info(f"[ACP-CHAT] Using ClaudeCodeAgent streaming backend")
-            try:
-                async for chunk in self.run_claude_chat_streaming(user_message, session_context):
-                    yield chunk
-                return
-            except Exception as e:
-                logger.warning(f"[ACP-CHAT] Claude Agent streaming failed, falling back to ACPX: {e}")
-        
-        # Fallback to ACPX streaming
-        logger.info(f"[ACP-CHAT] Using ACPX streaming backend (fallback)")
+            # No host-ACPX fallback (audit T12): the fallback re-ran partially
+            # streamed work OUTSIDE the container with full os.environ and
+            # --approve-all. Fail loudly instead — the caller surfaces it.
+            async for chunk in self.run_claude_chat_streaming(user_message, session_context):
+                yield chunk
+            return
+
+        # ACPX streaming (only when the Claude agent backend is disabled)
+        logger.info(f"[ACP-CHAT] Using ACPX streaming backend")
         loop = asyncio.get_event_loop()
         stream_gen = self.run_acpx_chat_streaming(user_message, session_context)
         
@@ -4938,7 +4938,15 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             str(prompt)
         ]
 
-        env = os.environ.copy()
+        # Env allowlist (audit T12): a full os.environ copy would hand the
+        # acpx child every provider key on the host. Pass only the basics;
+        # anything secret-looking (KEY/TOKEN/SECRET/PASSWORD/DATABASE) is
+        # explicitly excluded.
+        env = {
+            k: v for k, v in os.environ.items()
+            if k in ("PATH", "HOME", "LANG", "LC_ALL", "TERM")
+            or (not any(s in k.upper() for s in ("KEY", "TOKEN", "SECRET", "PASSWORD", "DATABASE")))
+        }
 
         logger.info(f"[ACP-CHAT] Starting streaming subprocess...")
 
@@ -4958,6 +4966,26 @@ Bad: "Created weather_command() handler in commands/weather.py..."
 
             raw_output = []
             start_time = time.time()
+
+            # Watchdog (audit T12): readline() blocks, so a silent process
+            # was never killed by the after-read timeout check. A timer
+            # kills the process group when the budget is spent.
+            import signal as _signal
+            import threading as _threading
+
+            def _watchdog_kill():
+                logger.warning("[ACP-CHAT] watchdog timeout — killing acpx process group")
+                try:
+                    os.killpg(os.getpgid(process.pid), _signal.SIGKILL)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+
+            _watchdog = _threading.Timer(ACPX_TIMEOUT, _watchdog_kill)
+            _watchdog.daemon = True
+            _watchdog.start()
 
             # Stateful block tracker — tracks depth across lines
             brace_depth = 0
@@ -5030,6 +5058,11 @@ Bad: "Created weather_command() handler in commands/weather.py..."
         except Exception as e:
             logger.error(f"[ACP-CHAT] Stream error: {e}")
             yield f"Error: {str(e)}\n"
+        finally:
+            try:
+                _watchdog.cancel()
+            except Exception:
+                pass
 
 
 async def check_preprocessor(user_message: str, project_name: str, project_path: str = None) -> Optional[str]:
