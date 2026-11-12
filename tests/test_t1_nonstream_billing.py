@@ -46,6 +46,9 @@ def _setup(monkeypatch, *, reserve_result=None, reserve_raises=False,
     monkeypatch.setattr(
         app.SessionLockService, "release_processing",
         staticmethod(lambda *_a: lock_calls.__setitem__("release_proc", lock_calls["release_proc"] + 1)))
+    monkeypatch.setattr(
+        app.SessionLockService, "release_lock",
+        staticmethod(lambda *_a: lock_calls.__setitem__("lock", lock_calls.get("lock", 0) + 1)))
 
     class FakeHandler:
         def __init__(self):

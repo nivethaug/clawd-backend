@@ -70,6 +70,27 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value or {}, ensure_ascii=False)
 
 
+# Creation-in-progress statuses — mirror of app.py's tuple (audit T10:
+# the in-lock guard here must recognize every non-terminal phase).
+_CREATION_IN_PROGRESS_STATUSES = (
+    "creating", "scaffolded", "initializing", "building", "deploying",
+    "verifying", "provisioning", "infrastructure_provisioning",
+    "ai_provisioning", "cloning", "copying_files",
+)
+
+
+class CreationConflictError(Exception):
+    """Another creation is already in progress for this user (→ 409)."""
+
+
+class CreationLimitError(Exception):
+    """The user's tier project limit is exhausted (→ 403)."""
+
+
+class DomainConflictError(Exception):
+    """The requested domain is already taken (→ 409)."""
+
+
 def enqueue_project_creation_run(
     *,
     user_id: int,
@@ -90,6 +111,8 @@ def enqueue_project_creation_run(
     git_provider: Optional[str] = None,
     description_for_worker: str,
     initial_environment_variables: Optional[List[Dict[str, Any]]] = None,
+    idempotency_key: Optional[str] = None,
+    max_projects: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Create the project row and queue a durable creation run."""
     run_uuid = str(uuid.uuid4())
@@ -123,6 +146,75 @@ def enqueue_project_creation_run(
     }
 
     with get_db() as conn:
+        # ── Idempotency replay (audit T10) ─────────────────────────────
+        # Same (user, key) within 10 minutes returns the SAME project instead
+        # of creating another. The table ships in migration 004; when it is
+        # absent this is silently skipped.
+        if idempotency_key:
+            try:
+                replay = conn.execute(
+                    """
+                    SELECT p.* FROM project_create_idempotency i
+                    JOIN projects p ON p.id = i.project_id
+                    WHERE i.user_id = %s AND i.key = %s
+                      AND i.created_at > CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+                    ORDER BY i.id DESC LIMIT 1
+                    """,
+                    (user_id, idempotency_key),
+                ).fetchone()
+            except Exception:
+                replay = None
+            if replay:
+                conn.rollback()
+                logger.info("[PROJECT-RUN] idempotent replay for user %s key %s", user_id, idempotency_key)
+                return dict(replay) if not isinstance(replay, dict) else replay
+
+        # ── Serialize per-user creation (audit T10) ─────────────────────
+        # The active-creation guard + limit + INSERT used to be separate
+        # statements (check-then-insert race → two projects from a double
+        # submit). One transaction under a per-user advisory lock closes it.
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('proj_create:' || %s))", (str(user_id),))
+
+        # Admin bypass for the one-at-a-time guard (same rule as the endpoint).
+        _role_row = conn.execute("SELECT role FROM users WHERE id = %s", (user_id,)).fetchone()
+        _role = (_role_row.get("role") if isinstance(_role_row, dict) else _role_row[0]) if _role_row else "user"
+        if _role != "admin":
+            _statuses = ", ".join("'%s'" % s for s in _CREATION_IN_PROGRESS_STATUSES)
+            _active = conn.execute(
+                f"SELECT id, name, status FROM projects WHERE user_id = %s AND status IN ({_statuses}) LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if _active:
+                conn.rollback()
+                _a = _active if isinstance(_active, dict) else {"name": "?", "status": "?"}
+                raise CreationConflictError(
+                    f"Project creation is already in progress for '{_a.get('name')}' "
+                    f"({_a.get('status')}). Please wait until it finishes before creating another project."
+                )
+            # Tier limit re-check with a FRESH count inside the lock (the
+            # endpoint's pre-check raced the same way). max_projects comes
+            # from the caller's tier lookup; None/0 = unlimited.
+            if max_projects:
+                _cnt = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM projects WHERE user_id = %s AND status NOT IN ('failed')",
+                    (user_id,),
+                ).fetchone()
+                _current = (_cnt.get("cnt") if isinstance(_cnt, dict) else _cnt[0]) if _cnt else 0
+                if _current >= max_projects:
+                    conn.rollback()
+                    raise CreationLimitError(
+                        f"Project limit reached ({_current}/{max_projects}). Upgrade to create more projects."
+                    )
+
+        # Domain uniqueness re-check inside the lock (audit T10/T11).
+        if domain:
+            _dupe = conn.execute(
+                "SELECT id FROM projects WHERE lower(domain) = lower(%s) LIMIT 1", (domain,)
+            ).fetchone()
+            if _dupe:
+                conn.rollback()
+                raise DomainConflictError(f"Domain '{domain}' is already in use. Please choose a different subdomain.")
+
         row = conn.execute(
             """
             INSERT INTO projects (user_id, name, domain, description, project_path, type_id, status, claude_code_session_name, worker_id)
@@ -145,6 +237,20 @@ def enqueue_project_creation_run(
             """,
             (run_uuid, project["id"], user_id, type_id, _json_dumps(payload), assigned_worker_id),
         )
+        # Record the idempotency key in the SAME transaction (best-effort:
+        # skipped silently when migration 004 has not been applied).
+        if idempotency_key:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO project_create_idempotency (user_id, key, project_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, key) DO UPDATE SET project_id = EXCLUDED.project_id, created_at = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, idempotency_key, project["id"]),
+                )
+            except Exception as _idem_err:
+                logger.debug("[PROJECT-RUN] idempotency record skipped: %s", _idem_err)
         conn.commit()
 
     logger.info(

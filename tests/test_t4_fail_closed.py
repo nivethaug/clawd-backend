@@ -80,6 +80,9 @@ def test_t4_missing_owner_404(monkeypatch):
 def test_t4_funded_still_proceeds_past_reservation(monkeypatch):
     from fastapi.testclient import TestClient
     released = _setup(monkeypatch)  # reserve succeeds
+    # Stay OFF the durable-run machinery: an unpatched background durable
+    # task would outlive the test and crash in later test files.
+    monkeypatch.setenv("SESSION_CHAT_DURABLE_RUNS", "0")
     client = TestClient(app.app)
     r = _post(client)
     # Past billing the flow continues (agent/stream machinery is unpatched, so

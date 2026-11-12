@@ -2831,9 +2831,17 @@ async def get_all_projects(
     return response_projects
 
 @app.post("/projects", response_model=ProjectResponse, status_code=201)
-async def create_project(request: CreateProjectRequest, authorization: Optional[str] = Header(None)):
-    # Get user_id from auth token (not request body)
+async def create_project(
+    request: CreateProjectRequest,
+    authorization: Optional[str] = Header(None),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
+    # Get user_id from auth token (not from request body)
     user_id = get_user_id_from_token(authorization)
+    # Idempotency-Key (audit T10): a retried create with the same key within
+    # 10 minutes returns the original project instead of creating another.
+    if idempotency_key and len(idempotency_key) > 64:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must be at most 64 characters")
 
     active_creation = _get_active_project_creation(user_id)
     if active_creation:
@@ -3079,7 +3087,12 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
             )
 
         try:
-            from services.project_creation_runs import enqueue_project_creation_run
+            from services.project_creation_runs import (
+                enqueue_project_creation_run,
+                CreationConflictError,
+                CreationLimitError,
+                DomainConflictError,
+            )
 
             # Git Projects: validate URL + dedicated worker gate BEFORE enqueue
             if request.git_origin_url:
@@ -3116,7 +3129,15 @@ async def create_project(request: CreateProjectRequest, authorization: Optional[
                 git_provider=request.git_provider,
                 description_for_worker=description_for_worker,
                 initial_environment_variables=initial_environment_variables,
+                idempotency_key=idempotency_key,
+                max_projects=(proj_limit.get("max") or None) if isinstance(proj_limit, dict) else None,
             )
+        except (CreationConflictError, DomainConflictError) as conflict:
+            raise HTTPException(status_code=409, detail=str(conflict))
+        except CreationLimitError as limit_err:
+            raise HTTPException(status_code=403, detail=str(limit_err))
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error("[PROJECT] durable project creation enqueue failed: %s", e, exc_info=True)
             raise HTTPException(status_code=500, detail=f"Failed to queue project creation: {str(e)}")
