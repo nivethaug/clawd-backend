@@ -11653,14 +11653,23 @@ async def chat_endpoint(
 
     # acp_mode=false guard (audit R4, applies to BOTH branches here): the
     # non-ACP paths run raw LLM calls with no reservation/usage record.
-    if not request.acp_mode:
-        _uid = _require_session_key_owner(request.session_key, authorization)
-        if not _is_admin_user(_uid):
-            raise HTTPException(
-                status_code=400,
-                detail={"error": "acp_mode_required",
-                        "message": "This endpoint requires agent mode (acp_mode=true)."},
-            )
+    _uid = _require_session_key_owner(request.session_key, authorization)
+    if not request.acp_mode and not _is_admin_user(_uid):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "acp_mode_required",
+                    "message": "This endpoint requires agent mode (acp_mode=true)."},
+        )
+
+    # Non-stream ACP guard (round 3 S1): stream:false + acp_mode:true runs
+    # run_acpx_chat — the HOST acpx path with the server's full environment.
+    # No legitimate caller uses it (grep-verified); reject for non-admins.
+    if not request.stream and request.acp_mode and not _is_admin_user(_uid):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "stream_required",
+                    "message": "This endpoint requires stream=true."},
+        )
 
     # Handle streaming request by delegating to stream endpoint
     if request.stream:
