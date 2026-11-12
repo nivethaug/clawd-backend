@@ -365,6 +365,38 @@ def claim_next_run(worker_id: str, node_id: Optional[str] = None) -> Optional[Di
                 conn.commit()
                 return None
             run_id = row["id"] if isinstance(row, dict) else row[0]
+            # Serialize the cap check per user (audit R6): two workers
+            # claiming concurrently for the same billing user could each pass
+            # the COUNT subquery and exceed the cap. The advisory lock is
+            # xact-scoped — released automatically at commit/rollback, never
+            # held afterwards.
+            cur.execute(
+                "SELECT billing_user_id FROM session_chat_runs WHERE id = %s",
+                (run_id,),
+            )
+            brow = cur.fetchone()
+            cap_uid = (brow.get("billing_user_id") if isinstance(brow, dict)
+                       else brow[0]) if brow else None
+            if cap_uid:
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext('run_claim:' || %s))",
+                    (str(cap_uid),),
+                )
+                # Re-check the cap under the lock: another worker may have
+                # claimed in the gap between the candidate SELECT and now.
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM session_chat_runs
+                    WHERE status = 'running' AND billing_user_id = %s
+                    """,
+                    (cap_uid,),
+                )
+                cnt_row = cur.fetchone()
+                running_now = (cnt_row.get("c") if isinstance(cnt_row, dict)
+                               else cnt_row[0]) if cnt_row else 0
+                if running_now >= _max_per_user:
+                    conn.commit()  # releases the advisory lock; row untouched
+                    return None
             cur.execute(
                 """
                 UPDATE session_chat_runs
