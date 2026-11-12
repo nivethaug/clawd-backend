@@ -10240,7 +10240,19 @@ async def chat_stream_endpoint(
 
     # ── BILLING: Reserve AI credits before processing (ACP mode only) ──────
     _chat_charged = []
+    # Resolve the project owner FIRST (audit T2): the free-tier model and
+    # effort gates previously ran with user_id=None, skipping their
+    # "if user_id:" checks — free users could select any model / high effort.
     _chat_user_id = None
+    try:
+        with get_db() as _uconn:
+            _urow = _uconn.execute(
+                "SELECT user_id FROM projects WHERE id = %s", (project_id,)
+            ).fetchone()
+        if _urow:
+            _chat_user_id = _urow["user_id"] if isinstance(_urow, dict) else _urow[0]
+    except Exception as _uerr:
+        logger.warning(f"[STREAM ENDPOINT] Project owner lookup failed: {_uerr}")
     _model_info = _resolve_session_model(request.model, _chat_user_id)
     _model_multiplier = _model_info.get("multiplier", 1)
     _effort = _resolve_reasoning_effort(getattr(request, "reasoning_effort", None), _chat_user_id)
