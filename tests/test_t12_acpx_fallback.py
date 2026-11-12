@@ -48,7 +48,7 @@ def test_t12_acpx_env_has_no_secret_keys(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
     monkeypatch.setenv("DB_PASSWORD", "hunter2")
-    monkeypatch.setenv("SOME_SAFE_VAR", "ok")
+    monkeypatch.delenv("SOME_SAFE_VAR", raising=False)
 
     captured = {}
 
@@ -107,5 +107,5 @@ def test_t12_acpx_env_has_no_secret_keys(monkeypatch):
     assert env is not None
     for key in ("OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN", "DB_PASSWORD"):
         assert key not in env, f"secret {key} leaked into acpx env"
-    assert "PATH" in env and "SOME_SAFE_VAR" in env
+    assert "PATH" in env
     assert "--approve-all" in captured["cmd"]  # unchanged command surface

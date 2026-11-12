@@ -151,6 +151,22 @@ Before using any external API, image, video, CDN asset, iframe, script, or third
 Final check: public media URL verified, private secrets kept out of frontend, existing internal API reused where possible, and no invented URLs."""
 
 
+# True allowlist (audit R3): the acpx child gets ONLY these variables.
+# The previous substring-denylist (KEY/TOKEN/SECRET/…) still leaked names
+# like DB_PASS, SMTP_PWD, *_CREDENTIALS, SENTRY_DSN. acpx reads its model
+# config from ~/.claude settings files, not env vars — no provider names
+# are allowlisted.
+_ACPX_ENV_ALLOW = {
+    "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ",
+    "USER", "LOGNAME", "SHELL", "TMPDIR",
+}
+
+
+def _acpx_child_env() -> dict:
+    """Build the child-process environment: strictly allowlisted names."""
+    return {k: v for k, v in os.environ.items() if k in _ACPX_ENV_ALLOW}
+
+
 class ACPChatHandler:
     """Handles ACP chat mode for frontend editing."""
     
@@ -4938,15 +4954,7 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             str(prompt)
         ]
 
-        # Env allowlist (audit T12): a full os.environ copy would hand the
-        # acpx child every provider key on the host. Pass only the basics;
-        # anything secret-looking (KEY/TOKEN/SECRET/PASSWORD/DATABASE) is
-        # explicitly excluded.
-        env = {
-            k: v for k, v in os.environ.items()
-            if k in ("PATH", "HOME", "LANG", "LC_ALL", "TERM")
-            or (not any(s in k.upper() for s in ("KEY", "TOKEN", "SECRET", "PASSWORD", "DATABASE")))
-        }
+        env = _acpx_child_env()
 
         logger.info(f"[ACP-CHAT] Starting streaming subprocess...")
 
