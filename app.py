@@ -2314,6 +2314,18 @@ class CompletionResponse(BaseModel):
 # Subdomain Validation
 # ============================================================================
 
+# Reserved subdomains (audit T11): platform/infrastructure names a user
+# project must never take. Checked BEFORE the duplicate lookup.
+RESERVED_SUBDOMAINS = frozenset({
+    "www", "api", "app", "admin", "auth", "login", "signup", "signin",
+    "account", "billing", "pay", "payments", "mail", "smtp", "imap", "ftp",
+    "ns1", "ns2", "mcp", "status", "docs", "help", "support", "blog",
+    "dashboard", "console", "dev", "staging", "test", "static", "cdn",
+    "assets", "media", "files", "git", "github", "dreamagent", "dreampilot",
+    "clawd", "worker", "internal",
+})
+
+
 def validate_subdomain(domain: str) -> bool:
     """
     Validate subdomain format.
@@ -2324,6 +2336,7 @@ def validate_subdomain(domain: str) -> bool:
     - No dots, underscores, spaces, or special characters
     - Must start with a letter
     - Length: 3-50 characters
+    - Not a reserved platform name (RESERVED_SUBDOMAINS)
 
     Args:
         domain: Subdomain string to validate
@@ -2331,6 +2344,10 @@ def validate_subdomain(domain: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
+    # Reserved platform names are never valid (audit T11)
+    if domain.lower().strip() in RESERVED_SUBDOMAINS:
+        return False
+
     # Check length
     if len(domain) < 3 or len(domain) > 50:
         return False
@@ -2940,16 +2957,29 @@ async def create_project(
         # Sanitize project name for GitHub repo format
         domain = github.sanitize_repo_name(request.name)
 
-        # Add random suffix to ensure uniqueness
-        random_suffix = ''.join(__import__('random').choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
+        # Random suffix + collision retry (audit T11): re-check the DB and
+        # regenerate the suffix up to 5 times instead of trusting randomness.
+        for _attempt in range(5):
+            random_suffix = ''.join(__import__('random').choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
 
-        # Safety: truncate domain base if needed so base + suffix stays under 50 chars
-        max_base = 50 - len(random_suffix) - 1  # -1 for the hyphen
-        if len(domain) > max_base:
-            domain = domain[:max_base]
-            logger.info(f"Truncated domain base to {max_base} chars to stay under 50-char limit")
+            # Safety: truncate domain base if needed so base + suffix stays under 50 chars
+            max_base = 50 - len(random_suffix) - 1  # -1 for the hyphen
+            base = domain[:max_base] if len(domain) > max_base else domain
 
-        domain = f"{domain}-{random_suffix}"
+            candidate = f"{base}-{random_suffix}"
+            with get_db() as conn:
+                _clash = conn.execute(
+                    "SELECT id FROM projects WHERE domain = ?", (candidate,)
+                ).fetchone()
+            if not _clash:
+                domain = candidate
+                break
+            logger.info(f"Auto-generated domain collision ({candidate}) — regenerating (attempt {_attempt + 1}/5)")
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not generate a unique subdomain after 5 attempts. Please provide one explicitly.",
+            )
         logger.info(f"Auto-generated domain for project '{request.name}': {domain}")
     else:
         # Sanitize user-provided domain for GitHub compatibility
@@ -2958,7 +2988,7 @@ async def create_project(
         if not validate_subdomain(domain):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter."
+                detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter, and must not be a reserved name (e.g. www, api, admin)."
             )
 
     # user_id is now extracted from auth token above (not from request body)
@@ -5052,7 +5082,7 @@ async def clone_project(
         if not validate_subdomain(clone_domain):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter."
+                detail="Invalid subdomain format. Must be 3-50 characters, lowercase letters, numbers, hyphens only, must start with a letter, and must not be a reserved name (e.g. www, api, admin)."
             )
 
     # Check domain uniqueness
@@ -8576,10 +8606,10 @@ async def _run_custom_domain_nginx_regen(
 # rebuilt with the new API base, and projects.domain is updated.
 # ============================================================================
 
-RESERVED_SUBDOMAINS = {
-    "api", "www", "app", "admin", "mail", "dashboard", "docs", "status",
-    "blog", "support", "cdn", "static", "auth", "login", "staging", "dev",
-}
+# Single canonical RESERVED_SUBDOMAINS lives next to validate_subdomain
+# (defined earlier in this file) — the subdomain-change flow shares it
+# (audit T11: previously a second, smaller list shadowed it here).
+RESERVED_SUBDOMAINS = RESERVED_SUBDOMAINS  # imported name already defined above
 
 
 class SubdomainChangeRequest(BaseModel):
