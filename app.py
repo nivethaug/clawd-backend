@@ -10260,12 +10260,15 @@ async def chat_stream_endpoint(
         try:
             from services.billing_service import reserve_credits
             with get_db() as bconn:
-                # Get user_id from project
+                # Get user_id from project (audit T4: a missing owner row is
+                # a 404 — never run the agent for a project we cannot bill).
                 prow = bconn.execute(
                     "SELECT user_id FROM projects WHERE id = %s", (project_id,)
                 ).fetchone()
                 if prow:
                     _chat_user_id = prow["user_id"] if isinstance(prow, dict) else prow[0]
+                if not prow or not _chat_user_id:
+                    raise HTTPException(status_code=404, detail="Project not found")
                 if _chat_user_id:
                     # Model multiplier scales the credit cost — behind env flag.
                     # Flag off (default): all models cost the same 1 credit.
@@ -10295,9 +10298,20 @@ async def chat_stream_endpoint(
         except HTTPException:
             if processing_acquired:
                 SessionLockService.release_processing(session_id)
+            SessionLockService.release_lock(project_id, session_id)
             raise
         except Exception as bill_err:
-            logger.warning(f"[BILLING] Chat credit reservation failed (allowing request): {bill_err}")
+            # Billing outage: fail CLOSED (audit T4). The old behaviour ran
+            # the agent unbilled while only logging this warning.
+            logger.warning(f"[BILLING] Chat credit reservation failed (denying request): {bill_err}")
+            if processing_acquired:
+                SessionLockService.release_processing(session_id)
+            SessionLockService.release_lock(project_id, session_id)
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "billing_unavailable",
+                        "message": "Billing is temporarily unavailable. Please retry."},
+            )
 
     # Handle ACP mode - route to ACPX for frontend editing with file access
     if request.acp_mode:
