@@ -151,6 +151,10 @@ def enqueue_project_creation_run(
         # of creating another. The table ships in migration 004; when it is
         # absent this is silently skipped.
         if idempotency_key:
+            # Savepoint (audit R2): with migration 004 not yet applied, a
+            # failing statement would otherwise ABORT the whole transaction
+            # ("current transaction is aborted") and break the create flow.
+            conn.execute("SAVEPOINT idem_probe")
             try:
                 replay = conn.execute(
                     """
@@ -162,7 +166,9 @@ def enqueue_project_creation_run(
                     """,
                     (user_id, idempotency_key),
                 ).fetchone()
+                conn.execute("RELEASE SAVEPOINT idem_probe")
             except Exception:
+                conn.execute("ROLLBACK TO SAVEPOINT idem_probe")
                 replay = None
             if replay:
                 conn.rollback()
@@ -240,6 +246,9 @@ def enqueue_project_creation_run(
         # Record the idempotency key in the SAME transaction (best-effort:
         # skipped silently when migration 004 has not been applied).
         if idempotency_key:
+            # Same savepoint pattern (audit R2): an absent table must not
+            # abort the create transaction.
+            conn.execute("SAVEPOINT idem_record")
             try:
                 conn.execute(
                     """
@@ -249,7 +258,9 @@ def enqueue_project_creation_run(
                     """,
                     (user_id, idempotency_key, project["id"]),
                 )
+                conn.execute("RELEASE SAVEPOINT idem_record")
             except Exception as _idem_err:
+                conn.execute("ROLLBACK TO SAVEPOINT idem_record")
                 logger.debug("[PROJECT-RUN] idempotency record skipped: %s", _idem_err)
         conn.commit()
 
