@@ -329,6 +329,11 @@ def claim_next_run(worker_id: str, node_id: Optional[str] = None) -> Optional[Di
 
     shared = is_shared_node(node_id)
     effective_node = (node_id or "shared").strip() or "shared"
+    # Per-user concurrency cap (audit T9): a worker does not claim a queued
+    # run when the SAME billing user already has N runs in 'running' state
+    # (default 2; SESSION_RUN_MAX_PER_USER). FIFO order is preserved among
+    # eligible rows.
+    _max_per_user = int(os.getenv("SESSION_RUN_MAX_PER_USER", "2") or 2)
     pool = get_connection_pool()
     conn = pool.getconn()
     try:
@@ -341,11 +346,19 @@ def claim_next_run(worker_id: str, node_id: Optional[str] = None) -> Optional[Di
                         (assigned_worker_id IS NULL AND %s)
                         OR assigned_worker_id = %s
                   )
+                  AND (
+                        billing_user_id IS NULL
+                        OR (
+                            SELECT COUNT(*) FROM session_chat_runs r2
+                            WHERE r2.status = 'running'
+                              AND r2.billing_user_id = session_chat_runs.billing_user_id
+                        ) < %s
+                  )
                 ORDER BY created_at ASC, id ASC
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
                 """,
-                (shared, effective_node),
+                (shared, effective_node, _max_per_user),
             )
             row = cur.fetchone()
             if not row:
