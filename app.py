@@ -1117,6 +1117,8 @@ class CreateProjectRequest(BaseModel):
     user_id: Optional[int] = None
     type_id: Optional[int] = Field(None, alias="typeId")
     template_id: Optional[str] = Field(None, max_length=100)  # audit T13
+    # Model for the build agent (catalog id). None = platform default (GLM).
+    model: Optional[str] = Field(None, max_length=100)
     bot_token: Optional[str] = None  # Telegram bot token (required for type_id=2)
     # Scheduler sender channels (at least one required for type_id=5)
     telegram_bot_token: Optional[str] = None  # Telegram bot token for scheduler
@@ -3188,6 +3190,7 @@ async def create_project(
                 git_provider=request.git_provider,
                 description_for_worker=description_for_worker,
                 initial_environment_variables=initial_environment_variables,
+                model=request.model,
                 idempotency_key=idempotency_key,
                 max_projects=(proj_limit.get("max") or None) if isinstance(proj_limit, dict) else None,
             )

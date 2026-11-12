@@ -113,6 +113,7 @@ def enqueue_project_creation_run(
     initial_environment_variables: Optional[List[Dict[str, Any]]] = None,
     idempotency_key: Optional[str] = None,
     max_projects: Optional[int] = None,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create the project row and queue a durable creation run."""
     run_uuid = str(uuid.uuid4())
@@ -143,6 +144,7 @@ def enqueue_project_creation_run(
         "git_credential_id": git_credential_id,
         "git_provider": git_provider,
         "initial_environment_variables": initial_environment_variables or [],
+        "model": model,
     }
 
     with get_db() as conn:
@@ -769,6 +771,7 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
                 user_id=user_id,
                 channel="webchat",
                 mode="dream",
+                model=payload.get("model"),
                 user_message=backend_prompt[:6000],
                 session_context=(
                     f"USER: {(creation_prompt or '')[:4000]}\n\n"
