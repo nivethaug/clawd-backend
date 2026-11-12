@@ -10264,6 +10264,20 @@ async def chat_stream_endpoint(
     logger.info(f"[STREAM ENDPOINT] Called with session_key={request.session_key}, stream={request.stream}")
     _require_session_key_owner(request.session_key, authorization)
 
+    # acp_mode=false bypasses the agent pipeline entirely (audit R4): the
+    # non-ACP path runs a raw LLM call with no reservation, no locks, no
+    # usage record — free LLM calls by flipping one JSON field. The frontend
+    # never sends acp_mode=false (grep-verified) and the docs only define
+    # true; reject it for everyone except admins.
+    if not request.acp_mode:
+        _uid = _require_session_key_owner(request.session_key, authorization)
+        if not _is_admin_user(_uid):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "acp_mode_required",
+                        "message": "This endpoint requires agent mode (acp_mode=true)."},
+            )
+
     with get_db() as conn:
         session = conn.execute(
             "SELECT * FROM sessions WHERE session_key = ? AND archived = 0",
@@ -11624,6 +11638,17 @@ async def chat_endpoint(
 ):
     """Handle both streaming and non-streaming chat requests."""
     _require_session_key_owner(request.session_key, authorization)
+
+    # acp_mode=false guard (audit R4, applies to BOTH branches here): the
+    # non-ACP paths run raw LLM calls with no reservation/usage record.
+    if not request.acp_mode:
+        _uid = _require_session_key_owner(request.session_key, authorization)
+        if not _is_admin_user(_uid):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "acp_mode_required",
+                        "message": "This endpoint requires agent mode (acp_mode=true)."},
+            )
 
     # Handle streaming request by delegating to stream endpoint
     if request.stream:
