@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ══════════════════════════════════════════════════════════════════════
+   DreamAgent Agent Dashboard — warm ivory / sage / teal design system
+   (reference: Floating Teal Robot Wave Loop)
+   Background #F5F1E8 · Cards #FFFEFA · Sage #A8DCC0 · Teal #168F86
+   Text #202522 · Borders #E8E2D8
+   ══════════════════════════════════════════════════════════════════════ */
+
+@layer base {
+  :root {
+    --background: 41 36% 94%;          /* warm ivory #F5F1E8 */
+    --foreground: 150 7% 14%;          /* dark charcoal #202522 */
+
+    --card: 50 100% 98%;               /* off-white #FFFEFA */
+    --card-foreground: 150 7% 14%;
+
+    --popover: 50 100% 99%;
+    --popover-foreground: 150 7% 14%;
+
+    --primary: 176 73% 32%;            /* teal #168F86 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 38 26% 92%;           /* warm beige surface */
+    --secondary-foreground: 150 7% 20%;
+
+    --muted: 40 25% 93%;
+    --muted-foreground: 150 5% 42%;    /* warm gray text */
+
+    --accent: 151 43% 76%;             /* sage green #A8DCC0 */
+    --accent-foreground: 176 70% 18%;
+
+    --destructive: 0 62% 48%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 55% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 82% 44%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 38 26% 88%;              /* subtle beige #E8E2D8 */
+    --input: 38 26% 88%;
+    --ring: 176 73% 32%;
+
+    --radius: 0.875rem;                /* 14px — inside the 12–18px band */
+
+    /* soft layered shadows */
+    --shadow-soft: 0 1px 2px hsl(150 7% 14% / 0.04), 0 4px 16px hsl(150 7% 14% / 0.05);
+    --shadow-lift: 0 2px 4px hsl(150 7% 14% / 0.05), 0 10px 28px hsl(150 7% 14% / 0.09);
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  ::selection {
+    background: hsl(var(--accent) / 0.5);
+  }
+}
+
+@layer utilities {
+  .shadow-soft { box-shadow: var(--shadow-soft); }
+  .shadow-lift { box-shadow: var(--shadow-lift); }
+}
+
+/* ── Micro-interaction keyframes (all subtle, 200ms-friendly) ────────── */
+
+@keyframes fade-slide-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.86); }
+}
+
+@keyframes float-sphere {
+  0%, 100% { transform: translate(0, 0); }
+  33% { transform: translate(18px, -26px); }
+  66% { transform: translate(-14px, 12px); }
+}
+
+@keyframes bob-robot {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-12px) rotate(1.5deg); }
+}
+
+@keyframes wave-drift {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@keyframes activity-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes check-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  70% { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Flow chart: dashed current sliding inside each wire */
+@keyframes dashflow {
+  to { stroke-dashoffset: -31; }
+}
+.flow-dash {
+  animation: dashflow 1.4s linear infinite;
+}
+
+/* Robot mascot: occasional blink (SVG paths scale around their own center) */
+@keyframes robot-blink {
+  0%, 91%, 100% { transform: scaleY(1); }
+  94% { transform: scaleY(0.15); }
+}
+.robot-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: robot-blink 4.6s ease-in-out infinite;
+}
+
+/* Entrance helpers (stagger via inline animation-delay) */
+.anim-card-in { animation: fade-slide-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-fade-in { animation: fade-in 0.4s ease-out both; }
+.anim-activity-in { animation: activity-in 0.35s ease-out both; }
+.anim-check-pop { animation: check-pop 0.25s ease-out both; }
+
+/* Reduced motion: kill all kit animations */
+@media (prefers-reduced-motion: reduce) {
+  .anim-card-in, .anim-fade-in, .anim-activity-in, .anim-check-pop,
+  .animate-pulse-soft, .animate-float-sphere, .animate-bob-robot, .robot-eye {
+    animation: none !important;
+  }
+  /* flow chart traveling dots + dashed current off; static wires stay */
+  .flow-dot { display: none; }
+  .flow-dash { animation: none !important; }
+}

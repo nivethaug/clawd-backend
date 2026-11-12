@@ -34,7 +34,10 @@ import threading
 __all__ = ["db", "Collection"]
 
 _DEFAULT_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "agent.db"
+    # storage.py sits at the PROJECT ROOT (not a nested dir) — one dirname,
+    # not two (two climbed into the shared parent: every agent on the
+    # worker wrote into ONE mixed /workspaces/user_X/website/data/agent.db).
+    os.path.dirname(os.path.abspath(__file__)), "data", "agent.db"
 )
 _DB_PATH = os.getenv("AGENT_DB", _DEFAULT_PATH)
 

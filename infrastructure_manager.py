@@ -1259,14 +1259,17 @@ class NginxConfigurator:
     WILDCARD_SSL_CERT = _WC_CERT
     WILDCARD_SSL_KEY = _WC_KEY
 
-    def generate_config(self, domain: str, frontend_port: int, backend_port: int, enable_ssl: bool = True, project_path: str = None, additional_domains: list = None, dist_path: str = None) -> Tuple[str, str]:
+    def generate_config(self, domain: str, frontend_port: int, backend_port: Optional[int] = None, enable_ssl: bool = True, project_path: str = None, additional_domains: list = None, dist_path: str = None) -> Tuple[str, Optional[str], str]:
         """
         Generate nginx configuration for project with wildcard SSL.
 
         Args:
             domain: Domain name (e.g., "ecommerce22")
-            frontend_port: Frontend service port
-            backend_port: Backend service port
+            frontend_port: Frontend service port (unused for static serving —
+                           kept for call-site compatibility)
+            backend_port: Backend service port. **None → FRONTEND-ONLY mode**
+                          (agent dashboards): no /api/ proxy and no backend
+                          vhost are generated; nginx serves dist/ statically.
             enable_ssl: Whether to generate SSL config (default: True, uses wildcard cert)
             project_path: Actual project folder path (e.g., "686_test_20260313_142220").
                           If not provided, falls back to domain name.
@@ -1274,11 +1277,11 @@ class NginxConfigurator:
                                 to append to server_name. Each must have its own SSL
                                 cert provisioned via certbot beforehand.
             dist_path: Full absolute path to the frontend dist directory. If provided,
-                       used directly as the nginx root. If not provided, falls back to
-                       constructing from project_path (legacy behavior).
+                       used directly as the nginx root. If not provided, falls back
+                       to constructing from project_path (legacy behavior).
 
         Returns:
-            Tuple of (frontend_domain, backend_domain, config)
+            Tuple of (frontend_domain, backend_domain or None, config)
         """
         try:
             frontend_domain = f"{domain}.{BASE_DOMAIN}"
@@ -1300,53 +1303,18 @@ class NginxConfigurator:
                 frontend_root = f"/root/dreampilot/projects/website/{website_folder}/frontend/dist"
 
             # Custom domains get appended to server_name as aliases.
-            # These use their own SSL certs (provisioned by certbot), which
+            # These use their own SSL certs (provisioned via certbot), which
             # is handled by separate server blocks generated below.
             custom_domains = additional_domains or []
             extra_server_names = " ".join(custom_domains)
 
-            # Always use wildcard SSL certificate
-            config = f"""# Frontend: {frontend_domain}{' + ' + ', '.join(custom_domains) if custom_domains else ''}
-# HTTP -> HTTPS redirect
-server {{
-    listen 80;
-    server_name {frontend_domain}{' ' + extra_server_names if extra_server_names else ''};
-    return 301 https://$host$request_uri;
-}}
-
-# HTTPS with wildcard SSL
-server {{
-    listen 443 ssl;
-    server_name {frontend_domain};
-
-    # Wildcard SSL certificate
-    ssl_certificate {self.WILDCARD_SSL_CERT};
-    ssl_certificate_key {self.WILDCARD_SSL_KEY};
-
-    # SSL optimization
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-
-    root {frontend_root};
-    index index.html;
-
-    # DreamAgent preview bridge — injects the design-layer script into HTML
-    # responses so the app shell can drive visual editing over postMessage.
-    # The bridge no-ops for normal visitors (window.parent === window).
-    # gzip off keeps sub_filter reliable (it operates on uncompressed
-    # bodies; static files are not pre-compressed on disk).
-    sub_filter '</head>' '<script src="{bridge_url}" defer></script></head>';
-    sub_filter_once on;
-
-    # SPA routing - serve index.html for all routes
-    location / {{
-        gzip off;
-        try_files $uri $uri/ /index.html;
-    }}
-
+            # Frontend-only mode (backend_port=None, agent dashboards): no
+            # /api/ proxy on the frontend vhost and no backend vhost at all.
+            if backend_port is None:
+                api_location = ""
+                backend_vhost = ""
+            else:
+                api_location = f"""
     # API proxy (trailing slash strips /api prefix)
     location /api/ {{
         client_max_body_size 512M;
@@ -1360,9 +1328,8 @@ server {{
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-    }}
-}}
-
+    }}"""
+                backend_vhost = f"""
 # Backend: {backend_domain}
 # HTTP -> HTTPS redirect
 server {{
@@ -1382,7 +1349,7 @@ server {{
 
     # SSL optimization
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
@@ -1408,6 +1375,49 @@ server {{
     }}
 }}
 """
+
+            # Always use wildcard SSL certificate
+            config = f"""# Frontend: {frontend_domain}{' + ' + ', '.join(custom_domains) if custom_domains else ''}
+# HTTP -> HTTPS redirect
+server {{
+    listen 80;
+    server_name {frontend_domain}{' ' + extra_server_names if extra_server_names else ''};
+    return 301 https://$host$request_uri;
+}}
+
+# HTTPS with wildcard SSL
+server {{
+    listen 443 ssl;
+    server_name {frontend_domain};
+
+    # Wildcard SSL certificate
+    ssl_certificate {self.WILDCARD_SSL_CERT};
+    ssl_certificate_key {self.WILDCARD_SSL_KEY};
+
+    # SSL optimization
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    root {frontend_root};
+    index index.html;
+
+    # DreamAgent preview bridge — injects the design-layer script into HTML
+    # responses so the app shell can drive visual editing over postMessage.
+    # The bridge no-ops for normal visitors (window.parent === window).
+    # gzip off keeps sub_filter reliable (it operates on uncompressed
+    # bodies; static files are not pre-compressed on disk).
+    sub_filter '</head>' '<script src="{bridge_url}" defer></script></head>';
+    sub_filter_once on;
+
+    # SPA routing - serve index.html for all routes
+    location / {{
+        gzip off;
+        try_files $uri $uri/ /index.html;
+    }}{api_location}
+}}{backend_vhost}"""
 
             # ----------------------------------------------------------------
             # Custom domain server blocks (one per domain with its own SSL)
@@ -1496,7 +1506,8 @@ server {{
 """
 
             logger.info(f"✓ Nginx config generated for {domain} (SSL: wildcard *.{BASE_DOMAIN}{f', {len(custom_domains)} custom domain(s)' if custom_domains else ''})")
-            return (frontend_domain, backend_domain, config)
+            # Frontend-only mode: report no backend domain alongside the None port
+            return (frontend_domain, backend_domain if backend_port is not None else None, config)
 
         except Exception as e:
             logger.error(f"Failed to generate nginx config: {e}")

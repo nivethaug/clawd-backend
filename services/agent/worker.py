@@ -69,6 +69,100 @@ def _ensure_project_secret(project_id: int, project_path: str) -> Optional[str]:
     return key
 
 
+def provision_agent_dashboard(project_id: int, project_name: str, project_path: str) -> Dict[str, Any]:
+    """Build + deploy the agent's frontend-only dashboard site (best-effort).
+
+    The dashboard template ships inside templates/agent-template/frontend/ and
+    is copied with the rest of the template. This step:
+      1. bakes the token-scoped status URL into src/lib/config.ts
+      2. builds dist/ (host-side npm, shared cache — same as websites' phase 5)
+      3. installs a FRONTEND-ONLY nginx vhost (static dist, no /api proxy,
+         no backend vhost — backend_port=None mode)
+      4. provisions the {domain} DNS record (same as websites)
+
+    No DB, no ports, no PM2, no backend — the agent's data is served by the
+    platform's /api/agent-status/{token} endpoint. Failure here logs and
+    continues: automation is the core artifact, the dashboard is additive.
+    """
+    result: Dict[str, Any] = {"ok": False, "frontend_domain": None, "error": None}
+    try:
+        from database_adapter import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT domain FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+        domain = ((dict(row) if row and not isinstance(row, dict) else row) or {}).get("domain") if row else None
+        if not domain:
+            result["error"] = "project has no domain"
+            return result
+
+        # Token-scoped status URL (trigger token already ensured in step 3)
+        from api.triggers_router import _ensure_trigger_token
+        token = _ensure_trigger_token(project_id)
+        import os as _os
+        backend_base = _os.getenv(
+            "SCHEDULER_BACKEND_URL", "https://api.dreamagent.cloud"
+        ).rstrip("/")
+        status_url = f"{backend_base}/api/agent-status/{token}"
+
+        # 1. Bake the status URL into the bundle source (template placeholder)
+        config_ts = Path(project_path) / "frontend" / "src" / "lib" / "config.ts"
+        if not config_ts.exists():
+            result["error"] = "frontend template missing (legacy project?)"
+            return result
+        content = config_ts.read_text(encoding="utf-8")
+        if "{agent_status_url}" in content:
+            config_ts.write_text(
+                content.replace("{agent_status_url}", status_url), encoding="utf-8"
+            )
+            logger.info("[AGENT] status URL baked into dashboard config for %s", project_id)
+
+        # 2-4. Build + nginx (frontend-only) + DNS via the website machinery
+        from infrastructure_manager import InfrastructureManager
+
+        infra = InfrastructureManager(
+            project_name=project_name,
+            project_path=Path(project_path),
+            domain=domain,
+            project_id=project_id,
+        )
+        # _phase_5_build (not ServiceManager.build_frontend — that's a legacy
+        # stub without project_path): npm ci skipped when the template's
+        # node_modules came along in the copy, vite build, dist verification.
+        if not infra._phase_5_build():
+            result["error"] = "frontend build failed"
+            logger.warning("[AGENT] dashboard build failed for %s", project_id)
+            return result
+
+        dist_path = str(Path(project_path) / "frontend" / "dist")
+        folder_name = Path(project_path).name
+        frontend_domain, _, config = infra.nginx_configurator.generate_config(
+            domain, None, None,  # frontend-only: no ports, no backend vhost
+            project_path=folder_name,
+            dist_path=dist_path,
+        )
+        if not infra.nginx_configurator.install_config(domain, config):
+            result["error"] = "nginx config install failed"
+            return result
+        if not infra.nginx_configurator.reload_nginx():
+            result["error"] = "nginx reload failed"
+            return result
+
+        dns = infra.dns_provisioner.provision_project_dns(domain, project_name)
+        result["ok"] = True
+        result["frontend_domain"] = frontend_domain
+        result["dns"] = dns
+        logger.info(
+            "[AGENT] dashboard live for %s at https://%s", project_id, frontend_domain
+        )
+        return result
+    except Exception as exc:
+        logger.warning("[AGENT] dashboard provisioning failed for %s: %s", project_id, exc)
+        result["error"] = str(exc)
+        return result
+
+
 def run_agent_pipeline(
     project_id: int,
     project_name: str,
@@ -174,6 +268,13 @@ def run_agent_pipeline(
         if not is_valid:
             logger.warning("⚠️ Validation warning: %s", validation_info)
 
+        # Step 7: Frontend-only dashboard site (best-effort — failure never
+        # fails agent creation; automation is the core artifact)
+        dashboard = provision_agent_dashboard(project_id, project_name, project_path)
+        result_info["dashboard"] = dashboard
+        if dashboard.get("ok"):
+            result_info["steps_completed"].append("dashboard_site")
+
         metadata = {
             "project_id": project_id,
             "project_name": project_name,
@@ -181,6 +282,7 @@ def run_agent_pipeline(
             "type": "agent",
             "description": description,
             "scheduler_path": project_path,
+            "frontend_domain": dashboard.get("frontend_domain"),
             "status": "ready",
             "created_at": datetime.utcnow().isoformat(),
         }

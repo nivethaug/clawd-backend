@@ -157,6 +157,14 @@ class ClaudeCodeAgent:
         self._cancelled = False  # Flag to distinguish cancel from real crash
         self._progress_dots_offset = 0  # For dot animation (1-2-3 cycling)
         self._last_token_usage = None  # Token usage from last query result
+        # Direct-run (Tier 1) usage accumulation from the CLI's own stream:
+        # every assistant message reports its API call's usage; summed here
+        # across turns because the result snapshot covers only the last call.
+        self._cli_usage_acc = {"input_tokens": 0, "output_tokens": 0,
+                               "cache_read_input_tokens": 0,
+                               "cache_creation_input_tokens": 0, "model": ""}
+        self._cli_tools_used = set()
+        self._wrapper_usage_found = False
         self._last_session_id: Optional[str] = resume_session_id
         # Track which session id we tried to resume on this run (for stale-detection).
         self._resumed_session_id: Optional[str] = None
@@ -688,6 +696,13 @@ class ClaudeCodeAgent:
         _session_id = self._find_usage_session(prompt) or f"qry_{uuid.uuid4().hex[:16]}"
         _injected_prompt = self._inject_usage_session(prompt, _session_id)
 
+        # Reset per-query usage accounting (wrapper flag + CLI accumulator)
+        self._wrapper_usage_found = False
+        self._cli_usage_acc = {"input_tokens": 0, "output_tokens": 0,
+                               "cache_read_input_tokens": 0,
+                               "cache_creation_input_tokens": 0, "model": ""}
+        self._cli_tools_used = set()
+
         try:
             result = await asyncio.wait_for(
                 self._execute_query(_injected_prompt),
@@ -700,6 +715,8 @@ class ClaudeCodeAgent:
             # Claude CLI strips custom usage fields from the proxy response,
             # so we fetch real usage directly from the wrapper's usage buffer.
             await self._fetch_usage_session(_session_id)
+            # Direct Tier-1 runs have no wrapper records — use CLI totals.
+            self._apply_cli_usage_fallback()
 
             # Filesystem fallback: if the wrapper reports has_writes=False but
             # git shows actual file changes, override to True. This catches
@@ -723,6 +740,8 @@ class ClaudeCodeAgent:
             # Fetch partial usage so tokens consumed before timeout aren't lost.
             # Without this, timed-out queries record zero tokens and zero cost.
             await self._fetch_usage_session(_session_id)
+            # Direct Tier-1: CLI accumulator holds the partial usage instead.
+            self._apply_cli_usage_fallback()
 
             # Filesystem fallback for timeout: git changes prove Claude edited
             # files before the timeout killed it.
@@ -732,6 +751,51 @@ class ClaudeCodeAgent:
                     self._last_token_usage["has_writes"] = True
 
             raise
+
+    def _user_is_admin(self) -> bool:
+        """Claude Tier 1 (subscription auth) is admin-only — the Pro/Max plan
+        is personal (Anthropic terms + weekly caps). Fails CLOSED: missing
+        user_id or any lookup error means NOT admin (wrapper routing)."""
+        uid = getattr(self, "user_id", None)
+        if not uid:
+            return False
+        try:
+            from services.rate_limiter import get_user_tier_and_role
+            return get_user_tier_and_role(int(uid)).get("role") == "admin"
+        except Exception as exc:
+            logger.warning("[CLAUDE-AGENT] admin check failed for user %s: %s", uid, exc)
+            return False
+
+    def _apply_cli_usage_fallback(self) -> None:
+        """Direct Tier-1 runs (Claude via subscription auth) never touch the
+        wrapper — its usage lookup returns nothing. The CLI accumulator
+        (summed across every assistant message in the stream) is then the
+        complete, authoritative source for this query."""
+        if self._wrapper_usage_found or self._cli_usage_acc["output_tokens"] <= 0:
+            return
+        acc = self._cli_usage_acc
+        self._last_token_usage = {
+            "input_tokens": acc["input_tokens"],
+            "output_tokens": acc["output_tokens"],
+            "cache_read_input_tokens": acc["cache_read_input_tokens"],
+            "cache_creation_input_tokens": acc["cache_creation_input_tokens"],
+            "reasoning_tokens": 0,
+            "total_tokens": acc["input_tokens"] + acc["output_tokens"],
+            "cost_usd": 0.0,  # subscription-covered (Tier 1 Pro) — no API cost
+            "model": acc.get("model") or "claude-direct",
+            "has_writes": any(t in self._cli_tools_used
+                              for t in ("Write", "Edit", "MultiEdit")),
+            "all_tools_used": sorted(self._cli_tools_used),
+            "ai_index_tool_count": 0,
+            "source": "claude_cli_tier1",
+        }
+        logger.info(
+            "[CLAUDE-AGENT] Direct Tier-1 usage (claude_cli): "
+            "input=%d, output=%d, cache_read=%d, cache_creation=%d, "
+            "model=%s, tools=%d, cost=$0.000000 (subscription)",
+            acc["input_tokens"], acc["output_tokens"],
+            acc["cache_read_input_tokens"], acc["cache_creation_input_tokens"],
+            self._last_token_usage["model"], len(self._cli_tools_used))
 
     def _check_git_has_changes(self) -> bool:
         """Check if git reports any uncommitted changes in the repo.
@@ -849,6 +913,7 @@ class ClaudeCodeAgent:
 
         data = await asyncio.get_event_loop().run_in_executor(None, _do_get)
         totals = data.get("totals") if data else None
+        self._wrapper_usage_found = bool(totals)
         # Extract model name from totals first, then fall back to records
         model_name = ""
         if totals and totals.get("model"):
@@ -924,15 +989,64 @@ class ClaudeCodeAgent:
         # The env override here takes precedence over claude.settings.json
         # inside the container (docker exec -e beats settings file).
         _model_id = self._settings.get("model", "")
-        if _model_id.startswith("claude-"):
+        _raw_model_id = _model_id  # wrapper/OpenRouter wants the full vendor id
+        # Normalize OpenRouter-style ids ("anthropic/claude-sonnet-5.5") to the
+        # bare claude-* form — the UI dropdown stores the OpenRouter id.
+        if _model_id.startswith("anthropic/"):
+            _model_id = _model_id.split("/", 1)[1]
+
+        # Tier 1 (Claude Code subscription) is ADMIN-ONLY: the Pro/Max plan is
+        # personal (terms + weekly usage caps). Non-admin users selecting a
+        # Claude model route through the wrapper (metered OpenRouter) exactly
+        # like any other paid model.
+        _claude_tier1 = _model_id.startswith("claude-") and self._user_is_admin()
+
+        if _claude_tier1:
+            self._settings["model"] = _model_id
             env["ANTHROPIC_BASE_URL"] = "https://api.anthropic.com"
-            logger.info("[CLAUDE-AGENT] Claude model %s — routing to Anthropic direct "
-                        "(Tier 1, Claude Code auth)", _model_id)
-        elif _model_id and not _model_id.startswith("z-ai/"):
-            # Non-Claude, non-GLM model (minimax, grok) — goes through wrapper
-            # which routes to OpenRouter (Tier 2). Log for observability.
-            logger.info("[CLAUDE-AGENT] Model %s — routing through wrapper (Tier 2, "
-                        "OpenRouter)", _model_id)
+            # Token overrides (wrapper/OpenRouter bearer) would be sent to the
+            # real Anthropic API and 401 — and they PREVENT the CLI from
+            # falling back to its OAuth credentials file. Strip them.
+            env.pop("ANTHROPIC_AUTH_TOKEN", None)
+            env.pop("ANTHROPIC_API_KEY", None)
+            env.pop("ANTHROPIC_MODEL", None)
+            # Vendor ids with dots (claude-sonnet-5.5) are OpenRouter syntax
+            # and 400 on the first-party API. Map to CLI aliases (sonnet /
+            # opus / haiku) which the CLI resolves to current versions.
+            _low = _model_id.lower()
+            if "sonnet" in _low:
+                _alias = "sonnet"
+            elif "opus" in _low:
+                _alias = "opus"
+            elif "haiku" in _low:
+                _alias = "haiku"
+            else:
+                _alias = _model_id.replace(".", "-")  # best-effort first-party id
+            self._settings["model"] = _alias
+            logger.info("[CLAUDE-AGENT] Claude model %s (admin user %s) — routing to "
+                        "Anthropic direct (Tier 1, Claude Code auth, alias %s)",
+                        _model_id, getattr(self, "user_id", None), _alias)
+        elif _model_id:
+            # Non-admin Claude, GLM, minimax, grok — route through the
+            # wrapper's anthropic-compat endpoint (z.ai tier1 / OpenRouter
+            # tier2). The wrapper wants the ORIGINAL vendor id
+            # ("anthropic/claude-…"), so restore it for the --model flag.
+            self._settings["model"] = _raw_model_id
+            _wbase = os.environ.get(
+                "WRAPPER_BASE_URL",
+                "http://host.docker.internal:7861"
+                if os.environ.get("EXECUTION_MODE") == "container"
+                else "http://127.0.0.1:7861",
+            ).rstrip("/")
+            env["ANTHROPIC_BASE_URL"] = _wbase + "/anthropic-compat"
+            if _model_id.startswith("claude-"):
+                logger.info("[CLAUDE-AGENT] Claude model %s for NON-admin user %s — "
+                            "routing through wrapper (Tier 2, metered)",
+                            _raw_model_id, getattr(self, "user_id", None))
+            else:
+                logger.info("[CLAUDE-AGENT] Model %s — routing through wrapper (%s, "
+                            "tier1 z.ai / tier2 OpenRouter)", _raw_model_id,
+                            env["ANTHROPIC_BASE_URL"])
 
         # Build command: claude -p "prompt" --dangerously-skip-permissions
         # Using -p for one-shot prompt mode (non-interactive)
@@ -1101,13 +1215,35 @@ class ClaudeCodeAgent:
                         msg_type = data.get("type", "")
 
                         if msg_type == "assistant":
-                            content = data.get("message", {}).get("content", [])
+                            _msg_obj = data.get("message") or {}
+                            content = _msg_obj.get("content", [])
                             for block in content:
                                 block_type = block.get("type", "")
                                 if block_type == "tool_use":
                                     tool_name = block.get("name", "")
+                                    # Track tools for direct-run usage accounting
+                                    if tool_name:
+                                        self._cli_tools_used.add(tool_name)
                                 elif block_type == "text":
                                     text_content = block.get("text", "").strip()
+
+                            # ── Direct-run usage accounting (Tier 1) ──────
+                            # Every assistant message carries its API call's
+                            # usage. Accumulate across ALL turns — the result
+                            # message's snapshot only covers the LAST request,
+                            # and direct Anthropic runs never touch the wrapper
+                            # (so its usage lookup returns nothing).
+                            _u = _msg_obj.get("usage") or {}
+                            if _u:
+                                acc = self._cli_usage_acc
+                                # Per-message semantics: input_tokens EXCLUDES
+                                # cache fields (they are counted separately).
+                                acc["input_tokens"] += _u.get("input_tokens", 0) or 0
+                                acc["output_tokens"] += _u.get("output_tokens", 0) or 0
+                                acc["cache_read_input_tokens"] += _u.get("cache_read_input_tokens", 0) or 0
+                                acc["cache_creation_input_tokens"] += _u.get("cache_creation_input_tokens", 0) or 0
+                                if _msg_obj.get("model"):
+                                    acc["model"] = _msg_obj["model"]
 
                         elif msg_type == "result":
                             result_seen = True
@@ -1151,7 +1287,13 @@ class ClaudeCodeAgent:
                             continue
 
                     except (json.JSONDecodeError, AttributeError):
-                        # Not JSON - plain text line, use as-is
+                        # Not JSON - plain text line, use as-is — EXCEPT the
+                        # CLI's own diagnostics (e.g. "[claude-code:unrecognized_model]"
+                        # for proxy-routed model ids), which must never surface
+                        # as assistant text or chat chunks.
+                        if line_text.startswith("[claude-code:"):
+                            logger.debug(f"[CLAUDE-AGENT] Skipping CLI diagnostic line: {line_text[:100]}")
+                            continue
                         text_content = line_text
 
                     # Send tool name to on_text for keyword mapping

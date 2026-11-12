@@ -63,6 +63,7 @@ def build_workflow_meta(
     source: str = "db",
     usage_session_id: Optional[str] = None,
     env_config: Optional[Dict[str, Any]] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_type = (project_type or project_type_from_id(project_type_id)).strip().lower()
     resolved_operation = str(operation or "unknown").strip().lower()
@@ -83,6 +84,9 @@ def build_workflow_meta(
         "pages": list(pages) if pages else None,
         "source": source,
         "env_config": env_config,
+        # Per-request reasoning effort (Pro selector). The wrapper reads it
+        # and overrides its tier reasoning params for THIS call only.
+        "reasoning_effort": (reasoning_effort or "").strip().lower() or None,
     }
     meta["checksum"] = checksum_workflow_meta(meta)
     return {key: value for key, value in meta.items() if value is not None}

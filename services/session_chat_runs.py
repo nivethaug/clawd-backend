@@ -59,6 +59,7 @@ def create_run(
     reserved_charges: Optional[List[Dict[str, Any]]] = None,
     image_attachment: Optional[Dict[str, Any]] = None,
     model: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_uuid = str(uuid.uuid4())
     # Dedicated-worker routing (enterprise isolation): a run must execute
@@ -82,10 +83,10 @@ def create_run(
             INSERT INTO session_chat_runs (
                 run_uuid, session_id, session_key, project_id, user_id, channel,
                 mode, user_message, session_context, billing_user_id,
-                reserved_charges, image_attachment, model, assigned_worker_id,
+                reserved_charges, image_attachment, model, reasoning_effort, assigned_worker_id,
                 status, created_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, 'queued', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, 'queued', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id, run_uuid, status
             """,
             (
@@ -102,6 +103,7 @@ def create_run(
                 json.dumps(reserved_charges or []),
                 json.dumps(image_attachment) if image_attachment else None,
                 model,
+                reasoning_effort,
                 assigned_worker_id,
             ),
         ).fetchone()
@@ -399,6 +401,14 @@ def mark_completed(run_id: int, assistant_message_id: Optional[int], token_usage
         )
         conn.commit()
 
+    # Dev-cycle engine wake-up (fire-and-forget; no-op when no cycle task
+    # references this run — the engine ignores unrelated run ids).
+    try:
+        from services.dev_cycles.notify import notify_session_run
+        notify_session_run(run_id, "completed")
+    except Exception:
+        pass
+
 
 def mark_failed(run_id: int, status: str, error: str) -> None:
     final_status = status if status in {"failed", "cancelled", "interrupted"} else "failed"
@@ -412,6 +422,12 @@ def mark_failed(run_id: int, status: str, error: str) -> None:
             (final_status, error[:2000], run_id),
         )
         conn.commit()
+
+    try:
+        from services.dev_cycles.notify import notify_session_run
+        notify_session_run(run_id, final_status)
+    except Exception:
+        pass
 
 
 def recover_stale_runs(stale_after_minutes: int = 20, project_id: Optional[int] = None) -> int:
@@ -521,6 +537,11 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
         if _run_model:
             handler.set_model(_run_model)
             logger.info("[SESSION-RUN] using model %s for run %s", _run_model, run_id)
+        # User-selected reasoning effort from the selector (stored in the run row)
+        _run_effort = run.get("reasoning_effort")
+        if _run_effort:
+            handler.set_reasoning_effort(_run_effort)
+            logger.info("[SESSION-RUN] reasoning effort %s for run %s", _run_effort, run_id)
         if (run.get("mode") or "dream") == "plan":
             handler._plan_mode = True
             try:

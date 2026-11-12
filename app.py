@@ -2190,8 +2190,8 @@ def _resolve_session_model(model_id: Optional[str], user_id: Optional[int] = Non
     if user_id:
         try:
             from services.rate_limiter import get_user_tier_and_role
-            tier, role = get_user_tier_and_role(user_id)
-            if tier == "free" and role != "admin":
+            _tr = get_user_tier_and_role(user_id) or {}
+            if _tr.get("tier") == "free" and _tr.get("role") != "admin":
                 return next(m for m in SESSION_MODELS if m.get("default"))
         except Exception:
             pass  # tier lookup failure → don't block, allow the request
@@ -2204,6 +2204,29 @@ def _resolve_session_model(model_id: Optional[str], user_id: Optional[int] = Non
     return next(m for m in SESSION_MODELS if m.get("default"))
 
 
+REASONING_EFFORTS = ("low", "medium", "high")
+
+
+def _resolve_reasoning_effort(effort: Optional[str], user_id: Optional[int] = None) -> str:
+    """Validate + gate the per-chat reasoning effort. Default/invalid/free → low.
+
+    Pro/dream/enterprise/admin can raise it; free tier is locked to low
+    (matching the locked UI state, same policy as the model lock).
+    """
+    effort = (effort or "low").strip().lower()
+    if effort not in REASONING_EFFORTS:
+        effort = "low"
+    if effort != "low" and user_id:
+        try:
+            from services.rate_limiter import get_user_tier_and_role
+            _tr = get_user_tier_and_role(user_id) or {}
+            if _tr.get("tier") == "free" and _tr.get("role") != "admin":
+                return "low"
+        except Exception:
+            return "low"  # tier unknown → safe default
+    return effort
+
+
 class ChatRequest(BaseModel):
     session_key: str
     messages: list[Message]
@@ -2214,6 +2237,9 @@ class ChatRequest(BaseModel):
     # Model selection from the frontend dropdown (catalog id).
     # None/absent = default (GLM 5.3 Flash) = current behavior unchanged.
     model: Optional[str] = None
+    # Reasoning effort from the frontend selector (low|medium|high).
+    # Pro-only; free tier is forced to low server-side. Default low.
+    reasoning_effort: Optional[str] = None
     # Design layer (Path B): {nodes: [...], viewport: {width, height, device}}
     design_context: Optional[Dict[str, Any]] = None
 
@@ -2619,6 +2645,12 @@ app.include_router(frontend_deps_router, tags=["frontend-deps"])
 # Webhook event triggers (public /api/triggers/{token} + owner info endpoint)
 from api.triggers_router import router as triggers_router
 app.include_router(triggers_router, prefix="/api/triggers", tags=["triggers"])
+
+from api.agent_status_router import router as agent_status_router
+from api.dev_cycles_router import router as dev_cycles_router
+app.include_router(dev_cycles_router, prefix="/api/dev-cycles", tags=["dev-cycles"])
+
+app.include_router(agent_status_router, prefix="/api/agent-status", tags=["agent-status"])
 
 # Register Validation API router
 from api.validate_router import router as validate_router
@@ -6244,6 +6276,147 @@ async def internal_cleanup_project_infrastructure(
     return {"success": True, "results": cleanup_results}
 
 
+# ---------------------------------------------------------------------------
+# Agent dashboard data — read-only access to the project's agent.db (the
+# SQLite document store the agent's handlers write via storage.py). Lives on
+# the worker (same host as the central scheduler that writes it); main's
+# public /api/agent-status/{token} endpoint proxies these reads so the
+# agent's frontend-only dashboard can present its own data.
+# ---------------------------------------------------------------------------
+
+def _agent_db_read(project_id: int, collection: Optional[str] = None, limit: int = 20) -> Dict[str, Any]:
+    """Open {project_path}/data/agent.db read-only and read collections.
+
+    WAL mode makes concurrent reads with the scheduler's writes safe; the
+    mode=ro URI guarantees this endpoint can never write or lock the DB.
+    Missing file/tables → empty structure (a fresh agent has no data yet).
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT project_path FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+    project_path = (dict(row) if row and not isinstance(row, dict) else row or {}).get("project_path") if row else None
+    result: Dict[str, Any] = {"collections": {}}
+    if not project_path:
+        result["error"] = "project not found"
+        return result
+
+    # Delivery channels configured for this project (NAMES only — never values)
+    env_path = os.path.join(str(project_path), ".env")
+    channels: List[str] = []
+    try:
+        if os.path.isfile(env_path):
+            env_keys: Dict[str, str] = {}
+            with open(env_path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        k, _, v = line.partition("=")
+                        env_keys[k.strip()] = v.strip()
+            if env_keys.get("TELEGRAM_BOT_TOKEN") and env_keys.get("TELEGRAM_CHAT_ID"):
+                channels.append("telegram")
+            elif env_keys.get("TELEGRAM_BOT_TOKEN"):
+                channels.append("telegram-pending")
+            if env_keys.get("DISCORD_WEBHOOK_URL"):
+                channels.append("discord")
+            if env_keys.get("EMAIL_TO") or env_keys.get("RESEND_API_KEY"):
+                channels.append("email")
+            if env_keys.get("API_ENDPOINT"):
+                channels.append("webhook-api")
+    except Exception:
+        pass
+    result["channels"] = channels
+
+    db_path = os.path.join(str(project_path), "data", "agent.db")
+    if not os.path.isfile(db_path):
+        return result  # fresh agent — no documents yet
+
+    import sqlite3 as _sq
+
+    try:
+        ro = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+    except _sq.Error:
+        return result
+    try:
+        tables = [r[0] for r in ro.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='docs'"
+        ).fetchall()]
+        if "docs" not in tables:
+            return result
+        cols = [r[0] for r in ro.execute(
+            "SELECT col, COUNT(*) AS n FROM docs GROUP BY col ORDER BY n DESC"
+        ).fetchall()]
+        names = cols  # already plain collection-name strings
+        if collection is not None:
+            names = [collection]
+        limit = max(1, min(int(limit or 20), 200))
+        for name in names:
+            count_row = ro.execute(
+                "SELECT COUNT(*) FROM docs WHERE col = ?", (name,)
+            ).fetchone()
+            docs = []
+            for _id, ts, data in ro.execute(
+                "SELECT _id, ts, data FROM docs WHERE col = ? ORDER BY _id DESC LIMIT ?",
+                (name, limit),
+            ).fetchall():
+                try:
+                    docs.append({"_id": _id, "ts": ts, **(json.loads(data) if data else {})})
+                except (ValueError, TypeError):
+                    docs.append({"_id": _id, "ts": ts})
+            result["collections"][name] = {
+                "count": count_row[0] if count_row else 0,
+                "docs": docs,
+            }
+    except _sq.Error:
+        pass  # unreadable/mid-migration file → serve what we have (empty)
+    finally:
+        ro.close()
+    return result
+
+
+@app.get("/internal/agent-db/{project_id}/collections")
+async def internal_agent_db_collections(
+    project_id: int,
+    limit: int = 20,
+    x_internal_secret: Optional[str] = Header(None),
+):
+    """All collections of an agent's document DB (name → count + latest docs).
+
+    Guarded by the internal_routes_guard middleware (x-internal-secret);
+    the explicit check below is belt-and-suspenders like cleanup-infrastructure.
+    """
+    supplied = x_internal_secret or ""
+    ok = (
+        (INTERNAL_API_SECRET and secrets.compare_digest(supplied, INTERNAL_API_SECRET))
+        or (WORKER_INTERNAL_SECRET and secrets.compare_digest(supplied, WORKER_INTERNAL_SECRET))
+    )
+    if INTERNAL_API_SECRET or WORKER_INTERNAL_SECRET:
+        if not ok:
+            raise HTTPException(status_code=403, detail="Invalid internal secret")
+    return _agent_db_read(project_id, limit=limit)
+
+
+@app.get("/internal/agent-db/{project_id}/collections/{collection}")
+async def internal_agent_db_collection_docs(
+    project_id: int,
+    collection: str,
+    limit: int = 100,
+    x_internal_secret: Optional[str] = Header(None),
+):
+    """Latest documents of ONE collection (dashboard detail fetches)."""
+    supplied = x_internal_secret or ""
+    ok = (
+        (INTERNAL_API_SECRET and secrets.compare_digest(supplied, INTERNAL_API_SECRET))
+        or (WORKER_INTERNAL_SECRET and secrets.compare_digest(supplied, WORKER_INTERNAL_SECRET))
+    )
+    if INTERNAL_API_SECRET or WORKER_INTERNAL_SECRET:
+        if not ok:
+            raise HTTPException(status_code=403, detail="Invalid internal secret")
+    if not re.match(r"^[A-Za-z0-9_.-]+$", collection or ""):
+        raise HTTPException(status_code=400, detail="Invalid collection name")
+    return _agent_db_read(project_id, collection=collection, limit=limit)
+
+
 def _gh_delete_repo_fallback(repo_name: str) -> bool:
     """Direct gh-CLI repository deletion — same semantics as
     GitHubService.delete_repository.
@@ -8375,6 +8548,260 @@ async def _run_custom_domain_nginx_regen(
     return bool(data.get("success", False))
 
 
+# ============================================================================
+# CHANGE FRONTEND SUBDOMAIN (website projects)
+# User requests a new {name}.dreamagent.cloud subdomain; if available, the
+# old nginx vhost + DNS records are replaced with new ones, the frontend is
+# rebuilt with the new API base, and projects.domain is updated.
+# ============================================================================
+
+RESERVED_SUBDOMAINS = {
+    "api", "www", "app", "admin", "mail", "dashboard", "docs", "status",
+    "blog", "support", "cdn", "static", "auth", "login", "staging", "dev",
+}
+
+
+class SubdomainChangeRequest(BaseModel):
+    subdomain: str = Field(..., min_length=3, max_length=50)
+
+
+def _subdomain_availability(subdomain: str, project_id: int) -> Dict[str, Any]:
+    """Shared check: format → reserved → DB unique → DNS free."""
+    if not validate_subdomain(subdomain):
+        return {"available": False, "reason": "invalid",
+                "message": "3-50 chars, lowercase letters/numbers/hyphens, must start with a letter"}
+    if subdomain in RESERVED_SUBDOMAINS:
+        return {"available": False, "reason": "reserved",
+                "message": f"'{subdomain}' is reserved"}
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM projects WHERE domain = %s AND id != %s",
+            (subdomain, project_id),
+        ).fetchone()
+    if row:
+        return {"available": False, "reason": "taken",
+                "message": "Subdomain already in use"}
+    try:
+        from infrastructure_manager import DNSProvisioner
+        exists, _ip = DNSProvisioner().check_subdomain_exists(subdomain)
+        if exists:
+            return {"available": False, "reason": "dns",
+                    "message": "DNS record already exists for this subdomain"}
+    except Exception as dns_err:
+        logger.warning("[SUBDOMAIN] DNS availability check failed (continuing): %s", dns_err)
+    return {"available": True, "message": "available"}
+
+
+@app.post("/projects/{project_id}/subdomain/available")
+async def check_subdomain_available(
+    project_id: int,
+    request: SubdomainChangeRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Live availability probe for the change-subdomain dialog."""
+    _require_project_owner(project_id, authorization)
+    return _subdomain_availability(request.subdomain.strip().lower(), project_id)
+
+
+@app.post("/projects/{project_id}/subdomain")
+async def change_project_subdomain(
+    project_id: int,
+    request: SubdomainChangeRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Change a website project's frontend subdomain (paid tiers).
+
+    Orchestrates the swap on the box hosting the project (worker or local),
+    then updates projects.domain + project.json.
+    """
+    user_id = _require_project_owner(project_id, authorization)
+
+    # Website projects only
+    with get_db() as conn:
+        proj = conn.execute(
+            "SELECT domain, type_id, project_path, backend_port FROM projects WHERE id = %s",
+            (project_id,),
+        ).fetchone()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    proj = dict(proj) if not isinstance(proj, dict) else proj
+    if int(proj.get("type_id") or 0) != 1:
+        raise HTTPException(status_code=400, detail="Subdomain changes are only available for website projects")
+
+    # Paid-tier gate (same as custom domains)
+    _require_custom_domain_allowed(user_id)
+
+    # Rate limit: 1 change per project per 24h (admins: 1h — internal testing)
+    _limit_hours = 1 if _is_admin_user(user_id) else 24
+    with get_db() as conn:
+        rate = conn.execute(
+            "SELECT subdomain_changed_at FROM projects WHERE id = %s", (project_id,)
+        ).fetchone()
+    rate = dict(rate) if rate and not isinstance(rate, dict) else (rate or {})
+    changed_at = rate.get("subdomain_changed_at")
+    if changed_at:
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        try:
+            if isinstance(changed_at, str):
+                changed_at = _dt.fromisoformat(changed_at.replace("Z", "+00:00"))
+            if changed_at.tzinfo is None:
+                changed_at = changed_at.replace(tzinfo=_tz.utc)
+            if _dt.now(_tz.utc) - changed_at < _td(hours=_limit_hours):
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Subdomain can only be changed once every {_limit_hours} hour{'s' if _limit_hours > 1 else ''}",
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # unparseable timestamp — allow the change
+
+    new_sub = request.subdomain.strip().lower()
+    old_sub = (proj.get("domain") or "").strip().lower()
+    if not old_sub:
+        raise HTTPException(status_code=400, detail="Project has no subdomain to change")
+    if new_sub == old_sub:
+        raise HTTPException(status_code=400, detail="New subdomain is the same as the current one")
+
+    # Re-check availability
+    avail = _subdomain_availability(new_sub, project_id)
+    if not avail["available"]:
+        raise HTTPException(status_code=409, detail=avail["message"])
+
+    # Route the infra swap to the box hosting the project
+    payload = {
+        "old_subdomain": old_sub,
+        "new_subdomain": new_sub,
+        "project_path": proj.get("project_path") or "",
+        "backend_port": proj.get("backend_port"),
+    }
+    result = await _run_change_subdomain(project_id, payload)
+    if not result.get("ok"):
+        raise HTTPException(status_code=500, detail=result.get("message", "Subdomain change failed"))
+
+    # Swap verified on the hosting box — now flip the DB (conditional)
+    from domain_config import BASE_DOMAIN
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE projects SET domain = %s, subdomain_changed_at = NOW() WHERE id = %s AND domain = %s",
+            (new_sub, project_id, old_sub),
+        )
+        rowcount = cur.rowcount if hasattr(cur, "rowcount") else 1
+        conn.commit()
+    if rowcount == 0:
+        # Lost a race — revert the infra swap so we don't orphan the new vhost
+        logger.error("[SUBDOMAIN] DB race for project %s — reverting infra swap", project_id)
+        await _run_change_subdomain(project_id, {**payload, "old_subdomain": new_sub, "new_subdomain": old_sub})
+        raise HTTPException(status_code=409, detail="Subdomain changed concurrently — please retry")
+
+    # Keep project.json metadata in sync
+    try:
+        pj_path = Path(proj["project_path"]) / "project.json"
+        if pj_path.exists():
+            meta = json.loads(pj_path.read_text(encoding="utf-8"))
+            domains = meta.get("domains") or {}
+            if "frontend" in domains:
+                domains["frontend"] = f"{new_sub}.{BASE_DOMAIN}"
+            if "backend" in domains:
+                domains["backend"] = f"{new_sub}-api.{BASE_DOMAIN}"
+            meta["domains"] = domains
+            pj_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    except Exception as meta_err:
+        logger.warning("[SUBDOMAIN] project.json update failed: %s", meta_err)
+
+    logger.info("[SUBDOMAIN] project %s: %s → %s", project_id, old_sub, new_sub)
+    return {
+        "success": True,
+        "old_domain": f"{old_sub}.{BASE_DOMAIN}",
+        "new_domain": f"{new_sub}.{BASE_DOMAIN}",
+    }
+
+
+async def _run_change_subdomain(project_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Run the subdomain swap on the box hosting the project.
+
+    Follows the custom-domain routing pattern: registered node → its URL,
+    legacy worker detection → WORKER_VPS_URL, else run locally.
+    """
+    import httpx as _httpx
+
+    def _handle(res: Any) -> Dict[str, Any]:
+        try:
+            return res.json() if res.status_code == 200 else {"ok": False, "message": f"HTTP {res.status_code}: {res.text[:200]}"}
+        except Exception:
+            return {"ok": False, "message": f"HTTP {res.status_code}"}
+
+    # 1. Dedicated node registered for this project
+    try:
+        from services import worker_registry as _wr
+        node = _wr.resolve_for_project(project_id)
+        if node and node.get("api_url"):
+            headers = {}
+            sec = _wr.internal_secret_for_node(node.get("id"))
+            if sec:
+                headers["x-internal-secret"] = sec
+            r = await _httpx.AsyncClient(timeout=600).post(
+                f"{str(node['api_url']).rstrip('/')}/internal/projects/{project_id}/change-subdomain",
+                json=payload, headers=headers,
+            )
+            return _handle(r)
+    except Exception as exc:
+        logger.warning("[SUBDOMAIN] node routing failed: %s", exc)
+
+    # 2. Legacy shared worker (project files not on this box)
+    try:
+        if _project_lives_on_worker(project_id):
+            from services.project_proxy import _get_worker_url
+            wurl = _get_worker_url()
+            if wurl:
+                r = await _httpx.AsyncClient(timeout=600).post(
+                    f"{wurl}/internal/projects/{project_id}/change-subdomain",
+                    json=payload,
+                    headers={"x-internal-secret": INTERNAL_API_SECRET} if INTERNAL_API_SECRET else {},
+                )
+                return _handle(r)
+    except Exception as exc:
+        logger.warning("[SUBDOMAIN] worker routing failed: %s", exc)
+    except Exception as exc:
+        logger.warning("[SUBDOMAIN] worker routing failed: %s", exc)
+
+    # 3. Local execution (main hosts legacy projects)
+    from fastapi.concurrency import run_in_threadpool
+    from services.subdomain_swap import perform_subdomain_swap
+    return await run_in_threadpool(perform_subdomain_swap, payload)
+
+
+class InternalChangeSubdomainRequest(BaseModel):
+    old_subdomain: str
+    new_subdomain: str
+    project_path: str
+    backend_port: Optional[int] = None
+
+
+@app.post("/internal/projects/{project_id}/change-subdomain")
+async def internal_change_subdomain(
+    project_id: int,
+    request: InternalChangeSubdomainRequest,
+    x_internal_secret: Optional[str] = Header(None),
+):
+    """Worker-side subdomain swap: new vhost + DNS first, rebuild, verify,
+    then tear down the old subdomain. Runs where nginx/DNS/files live."""
+    if INTERNAL_API_SECRET:
+        supplied = x_internal_secret or ""
+        if not secrets.compare_digest(supplied, INTERNAL_API_SECRET):
+            raise HTTPException(status_code=403, detail="Invalid internal secret")
+    from fastapi.concurrency import run_in_threadpool
+    from services.subdomain_swap import perform_subdomain_swap
+    return await run_in_threadpool(
+        perform_subdomain_swap,
+        {
+            "old_subdomain": request.old_subdomain,
+            "new_subdomain": request.new_subdomain,
+            "project_path": request.project_path,
+            "backend_port": request.backend_port,
+        },
+    )
+
 @app.get("/projects/{project_id}/custom-domain")
 async def get_custom_domain(
     project_id: int,
@@ -9816,6 +10243,7 @@ async def chat_stream_endpoint(
     _chat_user_id = None
     _model_info = _resolve_session_model(request.model, _chat_user_id)
     _model_multiplier = _model_info.get("multiplier", 1)
+    _effort = _resolve_reasoning_effort(getattr(request, "reasoning_effort", None), _chat_user_id)
     if request.acp_mode:
         try:
             from services.billing_service import reserve_credits
@@ -9884,6 +10312,7 @@ async def chat_stream_endpoint(
             # agent uses it for this session (handler → agent._settings["model"]
             # → claude --model <id>). Default = GLM 5.3 Flash when not selected.
             handler.set_model(_model_info["id"])
+            handler.set_reasoning_effort(_effort)
 
             logger.info(f"[ACP-STREAM] Handler initialized for project: {handler.project_name}")
             logger.info(f"[ACP-STREAM] Frontend path: {handler.frontend_src_path}")
@@ -10086,6 +10515,7 @@ async def chat_stream_endpoint(
                         reserved_charges=_chat_charged,
                         image_attachment=image_attachment,
                         model=_model_info["id"],
+                        reasoning_effort=_effort,
                     )
                     run_id = int(run_info["id"])
                     logger.info("[ACP-STREAM] Durable session run queued: %s", run_id)
@@ -10374,7 +10804,18 @@ async def chat_stream_endpoint(
 
                     # Save complete response to database (with newlines between chunks)
                     assistant_content = '\n'.join(real_chunks).strip()
-                    
+
+                    if not assistant_content:
+                        # All stream chunks were filtered as noise (e.g. the CLI's
+                        # diagnostic lines) but the handler still extracted a full
+                        # answer. Save it — never silently drop a completed reply.
+                        _fallback = getattr(handler, '_last_query_response', None)
+                        if _fallback and _fallback.strip():
+                            logger.warning(
+                                f"[ACP-STREAM] No clean stream chunks; saving handler "
+                                f"answer ({len(_fallback)} chars)")
+                            assistant_content = _fallback.strip()
+
                     if assistant_content:
                         await save_response_to_db(assistant_content)
                         await _auto_commit_and_push(project_id, session_id, handler, msg_mode)
@@ -11340,6 +11781,116 @@ async def get_plan_content(
 # ============================================================================
 # File API Routes
 # ============================================================================
+
+@app.get("/projects/{project_id}/files/uploads")
+async def list_uploaded_files(
+    project_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """List files uploaded to a project's workspace (newest first)."""
+    _require_project_owner(project_id, authorization)
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT id, kind, original_name, filename, container_path, size_bytes, created_at
+               FROM upload_files WHERE project_id = %s
+               ORDER BY created_at DESC, id DESC LIMIT 200""",
+            (project_id,),
+        ).fetchall()
+        type_row = conn.execute(
+            "SELECT type_id FROM projects WHERE id = %s", (project_id,)
+        ).fetchone()
+    type_id = (type_row["type_id"] if type_row else 1) or 1
+    is_website = int(type_id) == 1
+
+    files = []
+    for r in rows:
+        # website projects: public same-origin URL for image/model kinds
+        url = None
+        if is_website and r["kind"] in ("image", "model"):
+            url = (f"/uploads/models/{r['filename']}" if r["kind"] == "model"
+                   else f"/uploads/{r['filename']}")
+        files.append({
+            "id": r["id"],
+            "kind": r["kind"],
+            "name": r["original_name"] or r["filename"],
+            "original_name": r["original_name"],
+            "filename": r["filename"],
+            "container_path": r["container_path"] if "container_path" in r.keys() else None,
+            "url": url,
+            "size_bytes": int(r["size_bytes"]),
+            "created_at": str(r["created_at"]),
+        })
+
+    # Quota context (the uploads panel renders this alongside the list).
+    # NOTE: this route is the AUTHORITATIVE uploads listing — the older
+    # duplicate `GET /projects/{id}/files` uploads handler further down is
+    # shadowed by the file-tree route registered earlier, so panels must
+    # call THIS one (/files/uploads).
+    from services.rate_limiter import get_user_tier_and_role
+    with get_db() as conn:
+        owner_row = conn.execute(
+            "SELECT user_id FROM projects WHERE id = %s", (project_id,)
+        ).fetchone()
+    owner_id = (owner_row["user_id"] if owner_row else None) or 0
+    tier = (get_user_tier_and_role(owner_id).get("tier") or "free").lower()
+    limits = _upload_tier_limits(tier)
+    return {
+        "success": True,
+        "files": files,
+        "quota_used": _upload_quota_used(owner_id),
+        "quota_limit": limits["total_mb"] * 1024 * 1024,
+        "max_file_mb": limits["max_file_mb"],
+    }
+
+
+@app.delete("/projects/{project_id}/files/uploads/{upload_id}")
+async def delete_uploaded_file(
+    project_id: int,
+    upload_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Delete an uploaded file: removes it from disk AND from the quota
+    ledger, so the user's plan quota is freed immediately."""
+    _require_project_owner(project_id, authorization)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, host_path, filename, original_name FROM upload_files "
+            "WHERE id = %s AND project_id = %s",
+            (upload_id, project_id),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    # Path safety: only delete files that live under this project's folder
+    # (the row's host_path is backend-controlled, but stay defensive).
+    host_path = str(row["host_path"] or "")
+    with get_db() as conn:
+        proj = conn.execute(
+            "SELECT project_path FROM projects WHERE id = %s", (project_id,)
+        ).fetchone()
+    project_path = str(proj["project_path"]) if proj and proj["project_path"] else ""
+    real = os.path.realpath(host_path)
+    under_project = project_path and real.startswith(os.path.realpath(project_path) + os.sep)
+    under_uploads = "/public/uploads/" in real.replace("\\", "/") or "/data/uploads/" in real.replace("\\", "/")
+    if not (under_project or under_uploads):
+        raise HTTPException(status_code=403, detail="Refusing to delete: file outside project uploads")
+
+    try:
+        if os.path.isfile(real):
+            os.remove(real)
+    except OSError as e:
+        logger.warning("[UPLOADS] delete: could not remove file %s: %s", real, e)
+        # still remove the ledger row — quota must free up regardless
+
+    with get_db() as conn:
+        conn.execute("DELETE FROM upload_files WHERE id = %s", (upload_id,))
+        conn.commit()
+
+    logger.info(
+        "[UPLOADS] deleted upload=%s project=%s file=%s", upload_id, project_id, row["original_name"]
+    )
+    return {"success": True, "id": upload_id}
+
 
 @app.get("/projects/{project_id}/files", response_model=list[FileNode])
 async def get_project_files(
@@ -12958,6 +13509,7 @@ UPLOAD_IMAGE_TYPES = {
     "image/png": ".png",
     "image/webp": ".webp",
     "image/gif": ".gif",
+    "image/svg+xml": ".svg",  # vector assets (icons/illustrations) — stored as-is
 }
 UPLOAD_DOC_TYPES = {
     "application/pdf": ".pdf",
@@ -13021,9 +13573,11 @@ def _compress_image_bytes(contents: bytes, ext: str) -> tuple[bytes, str]:
     """
     Downscale to max 1920px and recompress as WebP q80 (60-90% smaller).
     GIFs are returned untouched (no safe lossless recompress for animation).
+    SVGs are returned untouched (vector XML — the raster pipeline would
+    destroy them; they're already tiny).
     Returns (bytes, final_ext).
     """
-    if ext == ".gif":
+    if ext in (".gif", ".svg"):
         return contents, ext
     try:
         from io import BytesIO
@@ -13142,7 +13696,7 @@ async def upload_project_file(
             if ext_ok and (ct_ok or content_type in UPLOAD_MODEL_TYPES):
                 kind = "model"
     if kind == "image" and content_type not in UPLOAD_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid image format. Accepted: .jpg, .png, .webp, .gif")
+        raise HTTPException(status_code=400, detail="Invalid image format. Accepted: .jpg, .png, .webp, .gif, .svg")
     if kind == "doc" and content_type not in UPLOAD_DOC_TYPES:
         raise HTTPException(status_code=400, detail="Invalid document format. Accepted: .pdf, .docx, .xlsx")
     if kind == "model":
@@ -13248,94 +13802,6 @@ async def upload_project_file(
         "quota_used": quota_used + bytes_after,
         "quota_limit": total_quota_bytes,
     }
-
-
-@app.get("/projects/{project_id}/files/uploads")
-async def list_uploaded_files(
-    project_id: int,
-    authorization: Optional[str] = Header(None),
-):
-    """List files uploaded to a project's workspace (newest first)."""
-    _require_project_owner(project_id, authorization)
-    with get_db() as conn:
-        rows = conn.execute(
-            """SELECT id, kind, original_name, filename, size_bytes, created_at
-               FROM upload_files WHERE project_id = %s
-               ORDER BY created_at DESC, id DESC LIMIT 200""",
-            (project_id,),
-        ).fetchall()
-        type_row = conn.execute(
-            "SELECT type_id FROM projects WHERE id = %s", (project_id,)
-        ).fetchone()
-    type_id = (type_row["type_id"] if type_row else 1) or 1
-    is_website = int(type_id) == 1
-
-    files = []
-    for r in rows:
-        # website projects: public same-origin URL for image/model kinds
-        url = None
-        if is_website and r["kind"] in ("image", "model"):
-            url = (f"/uploads/models/{r['filename']}" if r["kind"] == "model"
-                   else f"/uploads/{r['filename']}")
-        files.append({
-            "id": r["id"],
-            "kind": r["kind"],
-            "name": r["original_name"] or r["filename"],
-            "filename": r["filename"],
-            "url": url,
-            "size_bytes": int(r["size_bytes"]),
-            "created_at": str(r["created_at"]),
-        })
-    return {"files": files}
-
-
-@app.delete("/projects/{project_id}/files/uploads/{upload_id}")
-async def delete_uploaded_file(
-    project_id: int,
-    upload_id: int,
-    authorization: Optional[str] = Header(None),
-):
-    """Delete an uploaded file: removes it from disk AND from the quota
-    ledger, so the user's plan quota is freed immediately."""
-    _require_project_owner(project_id, authorization)
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT id, host_path, filename, original_name FROM upload_files "
-            "WHERE id = %s AND project_id = %s",
-            (upload_id, project_id),
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Upload not found")
-
-    # Path safety: only delete files that live under this project's folder
-    # (the row's host_path is backend-controlled, but stay defensive).
-    host_path = str(row["host_path"] or "")
-    with get_db() as conn:
-        proj = conn.execute(
-            "SELECT project_path FROM projects WHERE id = %s", (project_id,)
-        ).fetchone()
-    project_path = str(proj["project_path"]) if proj and proj["project_path"] else ""
-    real = os.path.realpath(host_path)
-    under_project = project_path and real.startswith(os.path.realpath(project_path) + os.sep)
-    under_uploads = "/public/uploads/" in real.replace("\\", "/") or "/data/uploads/" in real.replace("\\", "/")
-    if not (under_project or under_uploads):
-        raise HTTPException(status_code=403, detail="Refusing to delete: file outside project uploads")
-
-    try:
-        if os.path.isfile(real):
-            os.remove(real)
-    except OSError as e:
-        logger.warning("[UPLOADS] delete: could not remove file %s: %s", real, e)
-        # still remove the ledger row — quota must free up regardless
-
-    with get_db() as conn:
-        conn.execute("DELETE FROM upload_files WHERE id = %s", (upload_id,))
-        conn.commit()
-
-    logger.info(
-        "[UPLOADS] deleted upload=%s project=%s file=%s", upload_id, project_id, row["original_name"]
-    )
-    return {"success": True, "id": upload_id}
 
 
 @app.get("/projects/{project_id}/files")

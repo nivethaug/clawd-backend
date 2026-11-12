@@ -295,6 +295,16 @@ class ACPChatHandler:
         """
         self._requested_model = model_id
 
+    def set_reasoning_effort(self, effort: str):
+        """Set the per-session reasoning effort (low|medium|high, Pro-only).
+
+        The effort rides the <DREAMPILOT_WORKFLOW_META> block injected into
+        the prompt; the anthropic-compat wrapper reads it per request and
+        overrides its tier reasoning params (tier1: reasoning_effort,
+        tier2: reasoning.max_tokens). Default/low = wrapper env default.
+        """
+        self._reasoning_effort = (effort or "low").lower()
+
     def _get_project_type_str(self) -> str:
         """Return project type string for plan prompt dispatch."""
         if self.is_telegram_bot:
@@ -330,6 +340,7 @@ class ACPChatHandler:
             service_path=to_container_path(str(self.project_path)) if project_type != "website" else None,
             prompt_kind=prompt_kind,
             env_config=env_config,
+            reasoning_effort=getattr(self, "_reasoning_effort", None),
         )
 
     def _env_rules_block(self) -> str:
@@ -1495,6 +1506,41 @@ Before making any code changes, follow this process:
 
 ---
 """
+        # Frontend-only dashboard site (agents created after the dashboard
+        # feature). Legacy agents have no frontend/ — the section is skipped
+        # and the automation-only discipline applies unchanged.
+        frontend_section = ""
+        try:
+            from pathlib import Path as _P
+            if (_P(self.project_path) / "frontend").is_dir():
+                frontend_section = f"""
+---
+
+## FRONTEND SITE (frontend-only dashboard)
+
+This agent has a public dashboard at **https://{self.frontend_domain}**.
+Source: `frontend/` (React + Vite + Tailwind). **Read
+`frontend/agent/README.md` FIRST before any frontend work.**
+
+- **Create/edit pages on request**: add a component under
+  `frontend/src/pages/`, register it in `frontend/src/pages/index.ts`
+  (nav is built from that registry), reuse `useAgentStatus()` /
+  `getCollection()` from `frontend/src/lib/agentDb.ts` for data.
+- **DATA RULE (hard)**: ALL data comes from `AGENT_STATUS_URL`
+  (`frontend/src/lib/config.ts`) — this agent's own jobs, logs, state and
+  document collections. NEVER call external APIs, other backends,
+  localhost, or hardcode data in the frontend. There is NO backend here —
+  never create one.
+- **Agent-side data**: handlers write documents via `storage.py db`
+  (`db.collection("name").insert(...)`) — every collection appears on the
+  dashboard automatically. To show new data on the site, store it in a
+  collection from the handler.
+- **Deploy**: `cd frontend && python3 buildpublish.py` (builds dist/ and
+  reloads nginx — live immediately after).
+"""
+        except Exception:
+            frontend_section = ""
+
         integrations_section = build_external_integrations_block(self.project_id)
         uploads_section = build_uploaded_files_block(self.project_id)
         limits_section = sandbox_limits_block()
@@ -1856,18 +1902,19 @@ btc_price, eth_price, btc_price_num, eth_price_num, weather, news — add your o
 9. AFTER editing any .py file, run py_compile on it (fix failures immediately)
 10. When editing existing jobs, ALWAYS list jobs first for the correct ID
 11. AFTER editing executor.py, run `cd {self.project_path} && python3 buildpublish.py --skip-deps`
-
+{frontend_section}
 ---
 
 ## FINAL CHECKLIST BEFORE RESPONDING
 
 - [ ] Did I read agent/ai_index/index.json before making changes?
-- [ ] Did I modify only executor.py and/or api_client.py?
+- [ ] Did I modify only executor.py and/or api_client.py (frontend/ files only for frontend requests)?
 - [ ] Did I run py_compile on all edited files?
 - [ ] Did I publish changes with `python3 buildpublish.py --skip-deps`?
 - [ ] Did I create/update the job via REST API (with `when` if implied)?
 - [ ] Did I test the job (run now) if possible?
 - [ ] Did I update agent/ai_index/index.json after changes?
+- [ ] Frontend changes: deployed with `cd frontend && python3 buildpublish.py` and data ONLY from AGENT_STATUS_URL?
 
 ⛔ If ANY box is unchecked → STOP and complete it before responding
 

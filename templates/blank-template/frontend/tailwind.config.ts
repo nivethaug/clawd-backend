@@ -84,15 +84,10 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        sans: [
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "Segoe UI",
-          "Roboto",
-          "Helvetica Neue",
-          "Arial",
-          "sans-serif",
-        ],
+        // Design system: Inter (body) + Space Grotesk (display headlines).
+        // Loaded in index.html. Headings use `font-display`, body `font-sans`.
+        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
+        display: ["Space Grotesk", "Inter", "-apple-system", "sans-serif"],
         mono: [
           "SF Mono",
           "Monaco",
@@ -105,6 +100,13 @@ export default {
       fontSize: {
         "2xs": ["0.625rem", { lineHeight: "0.875rem" }],
       },
+      letterSpacing: {
+        tightest: "-0.04em",
+      },
+      boxShadow: {
+        glow: "0 0 24px -6px hsl(var(--primary) / 0.45)",
+        "glow-lg": "0 0 48px -8px hsl(var(--primary) / 0.55)",
+      },
       keyframes: {
         "accordion-down": {
           from: { height: "0" },
@@ -114,10 +116,27 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        // ── Design-system motion (see src/components/motion) ──
+        "gradient-pan": {
+          to: { backgroundPosition: "200% center" },
+        },
+        float: {
+          "0%, 100%": { transform: "translate(0, 0) scale(1)" },
+          "33%": { transform: "translate(30px, -30px) scale(1.05)" },
+          "66%": { transform: "translate(-20px, 20px) scale(0.97)" },
+        },
+        marquee: {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(-50%)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        // ── Design-system motion ──
+        "gradient-pan": "gradient-pan 6s linear infinite",
+        float: "float 14s ease-in-out infinite",
+        marquee: "marquee var(--marquee-speed, 30s) linear infinite",
       },
     },
   },

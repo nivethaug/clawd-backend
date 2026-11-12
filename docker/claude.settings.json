@@ -1,6 +1,5 @@
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "http://host.docker.internal:7861/anthropic-compat",
     "ANTHROPIC_TIMEOUT": "300000",
     "CLAUDE_CODE_API_TIMEOUT": "300000",
     "DREAMPILOT_WORKER_API_URL": "http://host.docker.internal:8003"

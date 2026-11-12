@@ -493,6 +493,13 @@ def _seed_creation_session(project_id: int, user_id: Optional[int], name: str,
             live_line = (
                 f"\n\n🌐 Live at: https://{domain}.{_BASE_DOMAIN}" if domain else "\n\n🌐 Deployed."
             )
+        elif kind_label == "AI agent":
+            # Agents ship a frontend-only dashboard site at {domain} — same
+            # link shape as websites (served by nginx static, no backend).
+            from domain_config import BASE_DOMAIN as _BASE_DOMAIN
+            live_line = (
+                f"\n\n🌐 Dashboard live at: https://{domain}.{_BASE_DOMAIN}" if domain else "\n\n▶️ Deployed."
+            )
         elif type_id == 2:
             live_line = (
                 "\n\n🤖 Your Telegram bot is live — open Telegram and message "
@@ -681,6 +688,13 @@ def mark_completed(run_id: int, has_writes: bool = False) -> None:
         conn.commit()
     prune_terminal_chunks(run_id=run_id)
 
+    # Dev-cycle engine wake-up (fire-and-forget)
+    try:
+        from services.dev_cycles.notify import notify_creation_run
+        notify_creation_run(run_id, None, "completed")
+    except Exception:
+        pass
+
 
 def mark_failed(run_id: int, status: str, error: str, project_id: Optional[int] = None) -> None:
     final_status = status if status in {"failed", "cancelled", "interrupted"} else "failed"
@@ -705,6 +719,13 @@ def mark_failed(run_id: int, status: str, error: str, project_id: Optional[int] 
                 ("failed", "creation_worker_failed", project_id),
             )
         conn.commit()
+
+    # Dev-cycle engine wake-up (fire-and-forget)
+    try:
+        from services.dev_cycles.notify import notify_creation_run
+        notify_creation_run(run_id, project_id, "failed")
+    except Exception:
+        pass
     prune_terminal_chunks(run_id=run_id)
 
 

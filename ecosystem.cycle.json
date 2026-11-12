@@ -1,0 +1,10 @@
+{
+  "apps": [{
+    "name": "dev-cycle-engine",
+    "script": "/root/clawd-backend/start-cycle-engine.sh",
+    "cwd": "/root/clawd-backend",
+    "autorestart": true,
+    "max_restarts": 20,
+    "restart_delay": 5000
+  }]
+}

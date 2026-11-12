@@ -331,3 +331,34 @@
     }
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   DESIGN SYSTEM — Framer-level motion layer (see components/motion/)
+   Fonts: Inter (body, font-sans) + Space Grotesk (headings, font-display)
+   ════════════════════════════════════════════════════════════════════ */
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@keyframes gradient-pan {
+  to { background-position: 200% center; }
+}
+
+/* Headlines: tight tracking + display font is the signature look */
+.font-display {
+  letter-spacing: -0.03em;
+}
+
+/* Polished selection color */
+::selection {
+  background: hsl(var(--primary) / 0.25);
+}
+
+/* Respect users who prefer no motion — kill kit animations globally */
+@media (prefers-reduced-motion: reduce) {
+  [style*="animation"] {
+    animation: none !important;
+  }
+}

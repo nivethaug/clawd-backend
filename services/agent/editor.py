@@ -124,6 +124,14 @@ Built-in helpers in api_client.py (use, don't recreate):
 - proxy_call(...) — Surface 1 above
 - state_get() / state_set(dict) — cross-run memory (below)
 
+STORING RUN DATA: use the project's document DB (storage.py at the project
+root — `from storage import db`):
+    db.collection("checks").insert({{"url": url, "status": "ok", "ms": 120}})
+    db.collection("checks").find({{"status": "critical"}}, limit=50, sort="-ts")
+Store every meaningful reading/observation in a named collection (not state —
+state is for small flags). Collections appear AUTOMATICALLY on the project's
+public dashboard website as live tables.
+
 ==================================================
 DELIVERY CHANNELS (pre-computed — DO NOT READ .env)
 ==================================================

@@ -184,14 +184,24 @@ def get_job(job_id: int) -> Optional[dict]:
 
 def get_due_jobs() -> List[Dict]:
     """
-    Fetch ALL due jobs across ALL scheduler projects.
+    Fetch due jobs for THIS node's scheduler.
     JOINs projects table to get project_path for execution_engine.
 
-    Single query — the core of the centralized scheduler.
+    Node homing (multi-VPS correctness): a job executes on the worker VPS
+    where the project's files live. projects.worker_id names that node
+    (ent-3, ...); NULL = the legacy shared worker. With schedulers polling
+    on every VPS, an unhomed query made each scheduler race for jobs whose
+    project_path only exists on the other VPS (runs failed with
+    "project_path not found"). The filter below gives each scheduler only
+    its own projects.
 
     Returns:
         List of job dicts with project_path and project_name added
     """
+    import os as _os
+
+    node_id = (_os.getenv("WORKER_NODE_ID") or "shared").strip()
+
     with get_db() as cur:
         cur.execute("""
             SELECT j.id, j.project_id, j.job_type, j.schedule_value,
@@ -205,8 +215,12 @@ def get_due_jobs() -> List[Dict]:
               AND p.type_id IN (
                   SELECT id FROM project_types WHERE type IN ('scheduler', 'agent')
               )
+              AND (
+                    (p.worker_id IS NULL AND %(node)s = 'shared')
+                 OR p.worker_id = %(node)s
+              )
             ORDER BY j.next_run ASC
-        """)
+        """, {"node": node_id})
         rows = cur.fetchall()
         return [dict(r) if not isinstance(r, dict) else r for r in rows]
 

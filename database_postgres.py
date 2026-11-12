@@ -635,6 +635,57 @@ def init_schema():
             conn.commit()
             logger.info("Added durable project creation run tables")
 
+            # ----------------------------------------------------------------
+            # Dev Cycle tables — the autonomous delivery orchestrator.
+            # A cycle is a chat-driven intake → plan → task board execution
+            # flow. The engine is LISTEN/NOTIFY driven (channel
+            # dev_cycle_events); all state lives here so restarts resume.
+            # ----------------------------------------------------------------
+            cur.execute("""CREATE TABLE IF NOT EXISTS dev_cycles (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                status TEXT NOT NULL DEFAULT 'intake',
+                requirement_accum TEXT NOT NULL DEFAULT '',
+                plan JSONB DEFAULT '{}',
+                dod JSONB DEFAULT '[]',
+                evidence JSONB DEFAULT '{}',
+                telegram_chat_id TEXT,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS cycle_messages (
+                id SERIAL PRIMARY KEY,
+                cycle_id INTEGER NOT NULL REFERENCES dev_cycles(id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                meta JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS cycle_tasks (
+                id SERIAL PRIMARY KEY,
+                cycle_id INTEGER NOT NULL REFERENCES dev_cycles(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL DEFAULT 0,
+                title TEXT NOT NULL,
+                description TEXT,
+                kind TEXT NOT NULL DEFAULT 'instruct',
+                status TEXT NOT NULL DEFAULT 'todo',
+                dod_item JSONB,
+                payload JSONB DEFAULT '{}',
+                result JSONB DEFAULT '{}',
+                session_run_id INTEGER,
+                creation_run_id INTEGER,
+                repair_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dev_cycles_user ON dev_cycles(user_id, status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_cycle_tasks_cycle ON cycle_tasks(cycle_id, position)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_cycle_tasks_status ON cycle_tasks(status)")
+            conn.commit()
+            logger.info("Added dev cycle tables (dev_cycles, cycle_messages, cycle_tasks)")
+
             # Commit log table — persistent commit history (survives session/message deletion)
             try:
                 cur.execute("""CREATE TABLE IF NOT EXISTS commit_log (

@@ -33,6 +33,39 @@ src/
 
 ---
 
+## 🎨 DESIGN DNA — the motion design system (USE IT)
+
+This template ships a **Framer-level motion kit** at `src/components/motion/`
+(barrel import: `@/components/motion`). Every page you build should use it —
+it is what makes generated sites look premium instead of generic.
+
+```tsx
+import { Reveal, GradientText, Orbs, Marquee, MagneticButton, Counter, SpotlightCard } from "@/components/motion";
+```
+
+| Component | Use for | Pattern |
+|---|---|---|
+| `Reveal` | EVERY section entrance | Wrap section content; stagger children with `delay={0.1}` steps; `variant="fade-up\|fade\|slide-left\|slide-right\|scale"` |
+| `GradientText` | One accent per headline | `<GradientText>key phrase</GradientText>` inside `font-display` headings |
+| `Orbs` | Hero + big feature sections | Parent must be `relative overflow-hidden`; content wrapped in `relative z-10` |
+| `Marquee` | Logo strips, tag rows | `<Marquee items={[…]} />` between bordered sections |
+| `MagneticButton` | Primary CTAs only (1-2 per page) | `variant="primary\|ghost"` — pair a primary with a ghost |
+| `Counter` | Stats rows | `<Counter to={98} suffix="%" />` inside big display numbers |
+| `SpotlightCard` | Feature/pricing cards | Wrap card content; grid of 3 with staggered `Reveal` |
+
+**Non-negotiable style rules:**
+1. **Headlines**: `font-display` class + tight tracking (already built-in) + `text-4xl`/`text-5xl`+ on heroes. Body copy stays `font-sans` at `text-muted-foreground` for hierarchy.
+2. **One GradientText accent per heading** — never gradient the whole headline.
+3. **Section rhythm**: `py-20`+ between sections, `max-w-5xl`/`max-w-6xl` content widths.
+4. **Reduced motion is handled for you** — never add raw CSS animations without a `prefers-reduced-motion` guard; prefer the kit components which already respect it.
+5. **Don't add animation libraries** (framer-motion, GSAP). The kit is CSS-only and dependency-free on purpose — new deps slow every build.
+
+**Reference composition**: `src/pages/Welcome.tsx` shows the full system —
+hero (Orbs + Reveal stagger + MagneticButtons), marquee strip, Counter stats
+row, SpotlightCard feature grid. Copy its patterns, replace its words.
+
+---
+
 ## 🌐 API Integration
 
 ### API Configuration

@@ -17,7 +17,7 @@ NODE_SECRET="${NODE_SECRET:?}"
 
 echo "==> [1/8] System packages + Node 22 + Docker"
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip python3.12-venv \
+apt-get install -y -qq python3 python3-venv python3-pip \
   git curl wget rsync bubblewrap nginx certbot python3-certbot-nginx \
   postgresql-client acl jq unzip sudo openssh-client >/dev/null
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
