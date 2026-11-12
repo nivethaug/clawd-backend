@@ -500,6 +500,23 @@ def recover_stale_runs(stale_after_minutes: int = 20, project_id: Optional[int] 
     return recovered
 
 
+def _run_produced_work(handler) -> bool:
+    """True when the agent already consumed tokens or wrote files during a
+    run that is now cancelling/failing (audit T3). Such runs must be
+    FINALIZED (true-up charge), not refunded."""
+    try:
+        usage = handler.get_last_token_usage() if handler else None
+    except Exception:
+        return False
+    if not usage:
+        return False
+    return bool(
+        usage.get("has_writes")
+        or usage.get("output_tokens")
+        or usage.get("input_tokens")
+    )
+
+
 async def execute_run(run_id: int) -> Dict[str, Any]:
     run = get_run(run_id)
     if not run:
@@ -637,12 +654,30 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
 
     except asyncio.CancelledError:
         if not assistant_saved and billing_user_id and reserved_charges:
-            try:
-                from services.external_session_chat import refund_session_chat_credits
+            if _run_produced_work(handler):
+                # Agent already burned tokens / wrote files before the cancel:
+                # finalize the usage (true-up charge) instead of refunding —
+                # a refund here would make cancel-during-work free (audit T3).
+                try:
+                    from services.external_session_chat import finalize_session_token_usage
 
-                refund_session_chat_credits(billing_user_id, reserved_charges, channel_label)
-            except Exception as e:
-                logger.warning("[SESSION-RUN] failed to refund cancelled run %s: %s", run_id, e)
+                    finalize_session_token_usage(
+                        handler=handler,
+                        project_id=project_id,
+                        session_id=session_id,
+                        billing_user_id=billing_user_id,
+                        precharged_amount=sum(abs(c.get("amount", 0)) for c in reserved_charges),
+                        channel_label=channel_label,
+                    )
+                except Exception as e:
+                    logger.warning("[SESSION-RUN] failed to finalize cancelled run %s: %s", run_id, e)
+            else:
+                try:
+                    from services.external_session_chat import refund_session_chat_credits
+
+                    refund_session_chat_credits(billing_user_id, reserved_charges, channel_label)
+                except Exception as e:
+                    logger.warning("[SESSION-RUN] failed to refund cancelled run %s: %s", run_id, e)
         mark_failed(run_id, "cancelled", "Session chat was cancelled.")
         append_chunk(run_id, "text", "Session chat was cancelled.")
         _release_project_lock_if_owner(project_id, session_id)
@@ -663,13 +698,30 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
                 "has_image": bool(image_attachment),
             },
         )
-        if not assistant_saved:
-            try:
-                from services.external_session_chat import refund_session_chat_credits
+        if not assistant_saved and billing_user_id and reserved_charges:
+            if _run_produced_work(handler):
+                # Failure AFTER work was done: finalize (true-up charge), not
+                # refund — the tokens were consumed either way (audit T3).
+                try:
+                    from services.external_session_chat import finalize_session_token_usage
 
-                refund_session_chat_credits(billing_user_id, reserved_charges, channel_label)
-            except Exception:
-                pass
+                    finalize_session_token_usage(
+                        handler=handler,
+                        project_id=project_id,
+                        session_id=session_id,
+                        billing_user_id=billing_user_id,
+                        precharged_amount=sum(abs(c.get("amount", 0)) for c in reserved_charges),
+                        channel_label=channel_label,
+                    )
+                except Exception as e:
+                    logger.warning("[SESSION-RUN] failed to finalize failed run %s: %s", run_id, e)
+            else:
+                try:
+                    from services.external_session_chat import refund_session_chat_credits
+
+                    refund_session_chat_credits(billing_user_id, reserved_charges, channel_label)
+                except Exception:
+                    pass
         error_message = f"Session chat failed: {str(e)}"
         mark_failed(run_id, "failed", error_message)
         _release_project_lock_if_owner(project_id, session_id)
