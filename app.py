@@ -1,6 +1,7 @@
 import asyncio
 import os
 import secrets
+import time
 import uuid
 import json
 import shutil
@@ -12372,6 +12373,12 @@ def generate_token() -> str:
     return secrets.token_hex(32)
 
 
+# Cache-freshness stamps for AUTH_TOKENS (audit T16) so DB-side
+# invalidation/deletion takes effect within this window.
+_AUTH_TOKEN_CACHED_AT: dict = {}
+_AUTH_TOKEN_CACHE_TTL = 600  # 10 minutes
+
+
 def get_user_id_from_token(authorization: Optional[str] = None) -> int:
     """
     Extract and validate user_id from Authorization header.
@@ -12397,22 +12404,36 @@ def get_user_id_from_token(authorization: Optional[str] = None) -> int:
             hmac.compare_digest(token, ADMIN_METRICS_TOKEN):
         return ADMIN_METRICS_USER_ID
 
-    # 2) Session token (in-memory)
+    # 2) Session token (in-memory) — with cache expiry (audit T16): a cached
+    # entry older than _AUTH_TOKEN_CACHE_TTL seconds is re-validated against
+    # the DB so deletions/expiry take effect. Synthetic proxy tokens
+    # ("proxy-<uid>", injected by the firewalled worker middleware) stay
+    # cache-only — they never have a DB row.
     user_id = AUTH_TOKENS.get(token)
     if user_id:
-        return user_id
+        cached_at = _AUTH_TOKEN_CACHED_AT.get(token)
+        if token.startswith("proxy-") or (
+                cached_at and (time.time() - cached_at) < _AUTH_TOKEN_CACHE_TTL):
+            return user_id
+        # stale cache entry — fall through to the DB re-check below
+        AUTH_TOKENS.pop(token, None)
+        _AUTH_TOKEN_CACHED_AT.pop(token, None)
 
-    # 3) Fallback: check database for the token (survives worker restart)
+    # 3) Fallback: check database for the token (survives worker restart).
+    # Tokens older than AUTH_TOKEN_TTL_DAYS days are rejected (audit T16).
     try:
+        _ttl_days = int(os.getenv("AUTH_TOKEN_TTL_DAYS", "30") or 30)
         with get_db() as conn:
             row = conn.execute(
-                "SELECT user_id FROM auth_tokens WHERE token = ?",
-                (token,)
+                "SELECT user_id FROM auth_tokens "
+                "WHERE token = %s AND created_at > NOW() - make_interval(days => %s)",
+                (token, _ttl_days)
             ).fetchone()
         if row:
             uid = row["user_id"] if isinstance(row, dict) else row[0]
-            # Cache it in memory for future requests
+            # Cache it in memory (with freshness stamp) for future requests
             AUTH_TOKENS[token] = uid
+            _AUTH_TOKEN_CACHED_AT[token] = time.time()
             return uid
     except Exception:
         pass
