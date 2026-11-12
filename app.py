@@ -10188,7 +10188,15 @@ async def chat_stream_endpoint(
 
         session_id = session['id']
         project_id = session['project_id']
-        
+
+        # Validate input BEFORE taking any lock (audit T8): a 400 must not
+        # leak the project lock we haven't taken yet.
+        user_messages = [msg for msg in request.messages if msg.role == 'user']
+        if not user_messages:
+            raise HTTPException(status_code=400, detail="No user message provided")
+        last_user_message = user_messages[-1]
+        user_content = last_user_message.content
+
         # === SESSION LOCK CHECK ===
         # Acquire lock for this project/session
         lock_result = SessionLockService.acquire_lock(project_id, session_id)
@@ -10209,6 +10217,8 @@ async def chat_stream_endpoint(
         from services.session_chat_runs import get_active_run_for_project
         other_active_run = get_active_run_for_project(project_id, exclude_session_id=session_id)
         if other_active_run:
+            # We hold the project lock — release it before rejecting (audit T8).
+            SessionLockService.release_lock(project_id, session_id)
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -10218,18 +10228,12 @@ async def chat_stream_endpoint(
                 },
             )
 
-        user_messages = [msg for msg in request.messages if msg.role == 'user']
-
-        if not user_messages:
-            raise HTTPException(status_code=400, detail="No user message provided")
-
-        last_user_message = user_messages[-1]
-        user_content = last_user_message.content
-
         processing_acquired = False
         if request.acp_mode:
             processing_result = SessionLockService.acquire_processing(session_id, "webchat")
             if not processing_result.get("success"):
+                # We hold the project lock — release it before rejecting (audit T8).
+                SessionLockService.release_lock(project_id, session_id)
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -10554,6 +10558,7 @@ async def chat_stream_endpoint(
                         logger.info(f"[ACP-STREAM] === GATE RESPONSE COMPLETED ===")
                     finally:
                         SessionLockService.release_processing(session_id)
+                        SessionLockService.release_lock(project_id, session_id)  # audit T8
                 
                 return StreamingResponse(
                     gate_response(),
@@ -11601,9 +11606,12 @@ async def chat_endpoint(
                 )
         # === END SESSION LOCK CHECK ===
 
+        # Validate input AFTER lock (kept adjacent to lock for minimal diff
+        # here) but release the lock on the 400 (audit T8).
         user_messages = [msg for msg in request.messages if msg.role == 'user']
 
         if not user_messages:
+            SessionLockService.release_lock(project_id, session_id)
             raise HTTPException(status_code=400, detail="No user message provided")
 
         last_user_message = user_messages[-1]
@@ -11613,6 +11621,7 @@ async def chat_endpoint(
         if request.acp_mode:
             processing_result = SessionLockService.acquire_processing(session_id, "webchat")
             if not processing_result.get("success"):
+                SessionLockService.release_lock(project_id, session_id)
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -11730,6 +11739,8 @@ async def chat_endpoint(
                     # Agent run blew up: keep the 500 semantics but never keep
                     # the reservation for work that did not happen (audit T1).
                     logger.exception(f"[ACP-MODE] ACPX execution crashed")
+                    SessionLockService.release_processing(session_id)
+                    SessionLockService.release_lock(project_id, session_id)
                     if _ns_charged and _ns_user_id:
                         try:
                             from services.billing_service import refund_credits
@@ -11839,6 +11850,7 @@ async def chat_endpoint(
 
             logger.info(f"[ACP-MODE] === ACP MODE COMPLETED ===")
             SessionLockService.release_processing(session_id)
+            SessionLockService.release_lock(project_id, session_id)  # audit T8
             
             return ChatResponse(
                 id=0,
@@ -11879,6 +11891,7 @@ async def chat_endpoint(
 
         if processing_acquired:
             SessionLockService.release_processing(session_id)
+        SessionLockService.release_lock(project_id, session_id)  # audit T8
 
         return ChatResponse(
             id=0,
