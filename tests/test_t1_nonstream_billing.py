@@ -33,6 +33,7 @@ def _setup(monkeypatch, *, reserve_result=None, reserve_raises=False,
     fake_db = make_fake_db(rows)
     monkeypatch.setattr(app, "get_db", fake_db)
     monkeypatch.setattr(app, "_require_session_key_owner", lambda *_a, **_k: 42)
+    monkeypatch.setattr(app, "_is_admin_user", lambda uid: uid == 42)  # S1: non-stream is admin-only now
     monkeypatch.setattr(app, "_self_heal_project_lock", lambda *_a: True)
     monkeypatch.setattr(app, "_load_session_context_budgeted", lambda *_a: "")
 

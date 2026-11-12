@@ -20,6 +20,7 @@ def _setup(monkeypatch, *, active_run=None, processing_ok=True, messages=None):
     ]
     monkeypatch.setattr(app, "get_db", make_fake_db(rows))
     monkeypatch.setattr(app, "_require_session_key_owner", lambda *a, **k: 42)
+    monkeypatch.setattr(app, "_is_admin_user", lambda uid: uid == 42)  # S1: non-stream is admin-only now
     monkeypatch.setattr(app, "_self_heal_project_lock", lambda *_a: True)
     monkeypatch.setattr(app, "_resolve_session_model",
                         lambda mid, uid=None: {"id": "m", "name": "M", "multiplier": 1})

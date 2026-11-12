@@ -4343,7 +4343,9 @@ Bad: "Created weather_command() handler in commands/weather.py..."
             logger.info(f"[ACP-CHAT] acpx found at: {acpx_check.stdout.strip()}")
             
             # Set environment to disable thinking/reasoning output
-            env = os.environ.copy()
+            # Allowlisted child env (round 3 S2): os.environ.copy() handed
+            # the HOST acpx child every provider key / DB credential.
+            env = _acpx_child_env()
             env["CLAUDE_DISABLE_THINKING"] = "1"
             env["DISABLE_THINKING"] = "1"
             env["NO_THINKING"] = "1"
