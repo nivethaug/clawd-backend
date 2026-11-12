@@ -34,6 +34,8 @@ def normalize_initial_environment_variables(items: Any) -> List[Dict[str, str]]:
 
         key = str(item.get("key") or "").strip().upper()
         value = str(item.get("value") or "").strip()
+        if len(value) > 8192:  # audit T13
+            raise ValueError(f"environment_variables[{index}].value exceeds 8192 chars")
         docs_url = str(item.get("docs_url") or "").strip()
         description = str(item.get("description") or "").strip()
 

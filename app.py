@@ -24,7 +24,7 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException, Request, Body, Header, UploadFile, File, Form, Response
 from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import AsyncClient
 
@@ -1047,7 +1047,7 @@ init_schema()
 class Message(BaseModel):
     id: Optional[int] = None
     role: str
-    content: str
+    content: str = Field(..., max_length=20_000)  # audit T13
 
 class MessageResponse(BaseModel):
     id: int
@@ -1112,25 +1112,25 @@ class CreateProjectRequest(BaseModel):
     
     name: str = Field(..., min_length=1, max_length=30, description="Project name (max 30 chars; auto-truncated if longer)")
     domain: Optional[str] = Field(None, min_length=3, max_length=50)
-    description: Optional[str] = None
+    description: Optional[str] = Field(None, max_length=10_000)  # audit T13
     user_id: Optional[int] = None
     type_id: Optional[int] = Field(None, alias="typeId")
-    template_id: Optional[str] = None  # Optional pre-selected template ID (bypasses Task 1)
+    template_id: Optional[str] = Field(None, max_length=100)  # audit T13
     bot_token: Optional[str] = None  # Telegram bot token (required for type_id=2)
     # Scheduler sender channels (at least one required for type_id=5)
     telegram_bot_token: Optional[str] = None  # Telegram bot token for scheduler
-    telegram_chat_id: Optional[str] = None  # Default Telegram chat_id
-    discord_webhook_url: Optional[str] = None  # Discord webhook URL
-    email_to: Optional[str] = None  # Default email recipient (SMTP is shared)
-    api_endpoint: Optional[str] = None  # Default API endpoint URL
+    telegram_chat_id: Optional[str] = Field(None, max_length=64)  # audit T13
+    discord_webhook_url: Optional[str] = Field(None, max_length=2048)  # audit T13
+    email_to: Optional[str] = Field(None, max_length=254)  # audit T13
+    api_endpoint: Optional[str] = Field(None, max_length=2048)  # audit T13
     # Custom Git Projects (enterprise-only)
-    git_origin_url: Optional[str] = None
+    git_origin_url: Optional[str] = Field(None, max_length=2048)  # audit T13
     git_default_branch: Optional[str] = None
     git_credential_id: Optional[int] = None
     git_provider: Optional[str] = None
     environment_variables: Optional[List[InitialEnvironmentVariable]] = None
     # Global Integrations to import (server-side resolve; values never transit the client)
-    global_integration_ids: Optional[List[int]] = None
+    global_integration_ids: Optional[List[int]] = Field(None, max_length=20)  # audit T13
     # Bind the bot token from a saved Global Integration (type 2/3) — server-side
     # decrypt; already verified at save time, no client re-verify needed.
     bot_token_integration_id: Optional[int] = None
@@ -2228,20 +2228,36 @@ def _resolve_reasoning_effort(effort: Optional[str], user_id: Optional[int] = No
 
 
 class ChatRequest(BaseModel):
-    session_key: str
-    messages: list[Message]
+    # Input limits (audit T13): oversized payloads are rejected with 422
+    # before any DB write, lock, or billing touch.
+    session_key: str = Field(..., max_length=128)
+    messages: list[Message] = Field(..., max_length=50)
     stream: bool = False
-    image: Optional[str] = None
+    image: Optional[str] = Field(None, max_length=12_000_000)  # ~9 MB base64
     acp_mode: bool = True  # Default to ACP mode for frontend editing via ACPX
-    mode: str = "dream"  # "dream", "plan" or "design"
+    mode: str = "dream"    # "dream", "plan" or "design"
     # Model selection from the frontend dropdown (catalog id).
     # None/absent = default (GLM 5.3 Flash) = current behavior unchanged.
-    model: Optional[str] = None
+    model: Optional[str] = Field(None, max_length=100)
     # Reasoning effort from the frontend selector (low|medium|high).
     # Pro-only; free tier is forced to low server-side. Default low.
-    reasoning_effort: Optional[str] = None
+    reasoning_effort: Optional[str] = Field(None, max_length=10)
     # Design layer (Path B): {nodes: [...], viewport: {width, height, device}}
     design_context: Optional[Dict[str, Any]] = None
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_must_be_known(cls, v: str) -> str:
+        if v not in {"dream", "plan", "design"}:
+            raise ValueError("mode must be one of dream, plan, design")
+        return v
+
+    @field_validator("design_context")
+    @classmethod
+    def _design_context_size(cls, v):
+        if v is not None and len(json.dumps(v)) > 100_000:
+            raise ValueError("design_context too large (max ~100k chars serialized)")
+        return v
 
 class ChatResponse(BaseModel):
     id: int

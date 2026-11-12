@@ -225,6 +225,10 @@ def _is_proxyable_project_route(path: str, method: str = "") -> bool:
     return False
 
 
+class _BodyTooLarge(Exception):
+    """Request body exceeds the 15 MB proxy cap (audit T13)."""
+
+
 async def _resolve_project_id_from_request(request: Request) -> Optional[int]:
     """Resolve project_id for ANY proxiable route (path-based OR session-based).
 
@@ -252,6 +256,14 @@ async def _resolve_project_id_from_request(request: Request) -> Optional[int]:
         if not session_key:
             # POST bodies carry session_key as JSON. Read+cache the body so the
             # downstream handler can still read it (FastAPI caches request.body).
+            # Body-size guard (audit T13): reject >15 MB before json.loads —
+            # a giant payload must not be parsed just to route.
+            try:
+                content_length = int(request.headers.get("content-length") or 0)
+            except ValueError:
+                content_length = 0
+            if content_length > 15 * 1024 * 1024:
+                raise _BodyTooLarge()
             try:
                 body = await request.body()
                 if body:
@@ -372,7 +384,12 @@ async def project_proxy_middleware(request: Request, call_next):
         )
 
     # Resolve project_id from ANY proxiable route (path or session based).
-    project_id = await _resolve_project_id_from_request(request)
+    try:
+        project_id = await _resolve_project_id_from_request(request)
+    except _BodyTooLarge:
+        from starlette.responses import JSONResponse
+        return JSONResponse({"error": "request_too_large"},
+                            status_code=413)
     if project_id is None:
         if _is_chat:
             logger.debug("project_proxy DEBUG: %s -> project_id=None (pass-through)", _path)
