@@ -769,7 +769,7 @@ async def execute_run(run_id: int) -> Dict[str, Any]:
                     refund_session_chat_credits(billing_user_id, reserved_charges, channel_label)
                 except Exception:
                     pass
-        error_message = f"Session chat failed: {str(e)}"
+        error_message = f"Session chat failed (ref {uuid.uuid4().hex[:8]})"
         mark_failed(run_id, "failed", error_message)
         _release_project_lock_if_owner(project_id, session_id)
         append_chunk(run_id, "text", error_message)
@@ -911,7 +911,7 @@ async def wait_for_run(run_id: int, poll_seconds: float = 2.0, timeout_seconds: 
                             conn.commit()
                     except Exception:
                         pass
-                    return {"status": "error", "message": f"Session chat failed: {e}"}
+                    return {"status": "error", "message": f"Session chat failed (ref {uuid.uuid4().hex[:8]})"}
 
         await asyncio.sleep(poll_seconds)
 

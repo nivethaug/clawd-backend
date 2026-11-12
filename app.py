@@ -2342,6 +2342,12 @@ RESERVED_SUBDOMAINS = frozenset({
 })
 
 
+def _safe_error_ref() -> str:
+    """Opaque error reference (audit T15): the full exception stays in the
+    server log; clients only get a ref id to quote in support."""
+    return uuid.uuid4().hex[:8]
+
+
 def validate_subdomain(domain: str) -> bool:
     """
     Validate subdomain format.
@@ -2930,7 +2936,7 @@ async def create_project(
                 raise HTTPException(status_code=404, detail=f"Global integration {gi_id} not found")
             owner = row["user_id"] if isinstance(row, dict) else row[1]
             if str(owner) != str(user_id) and not _is_admin_user(user_id):
-                raise HTTPException(status_code=403, detail=f"No access to global integration {gi_id}")
+                raise HTTPException(status_code=404, detail="Integration not found")
             d = dict(row) if not isinstance(row, dict) else row
             try:
                 value = decrypt_value(d["value_encrypted"])
@@ -3081,7 +3087,7 @@ async def create_project(
             raise HTTPException(status_code=404, detail="Bot token integration not found")
         d = dict(row) if not isinstance(row, dict) else row
         if str(d.get("user_id")) != str(user_id) and not _is_admin_user(user_id):
-            raise HTTPException(status_code=403, detail="No access to that integration")
+            raise HTTPException(status_code=404, detail="Bot token integration not found")
         try:
             request.bot_token = decrypt_value(d.get("value_encrypted"))
         except ValueError:
@@ -3186,7 +3192,8 @@ async def create_project(
             raise
         except Exception as e:
             logger.error("[PROJECT] durable project creation enqueue failed: %s", e, exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to queue project creation: {str(e)}")
+            _ref = _safe_error_ref()
+            raise HTTPException(status_code=500, detail=f"Failed to queue project creation (ref {_ref}). Please try again.")
 
         return ProjectResponse(
             id=final_project["id"],
@@ -3228,7 +3235,7 @@ async def create_project(
             logger.error(f"[PROJECT] database insert failed: {e}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to create project record: {str(e)}"
+                detail=f"Failed to create project record (ref {_safe_error_ref()}). Please try again."
             )
 
     project_creation_charge = []
@@ -11130,7 +11137,9 @@ async def chat_stream_endpoint(
                 except Exception as refund_err:
                     logger.warning(f"[BILLING] Refund failed: {refund_err}")
 
-            error_content = f"Error: ACP chat failed - {str(e)}"
+            _ref = _safe_error_ref()
+            logger.error(f"ACP stream failed (ref {_ref}): {e}")
+            error_content = f"Something went wrong (ref {_ref}). Please try again."
             state.content = error_content
             save_stream_to_db(state)
 
@@ -11939,7 +11948,9 @@ async def chat_endpoint(
         except Exception as e:
             # CRITICAL: Save error message to database even if API fails
             logger.error(f"Chat API failed for session {session_id}: {e}")
-            assistant_content = f"Error: Unable to process request. Please try again. (Details: {str(e)})"
+            _ref = _safe_error_ref()
+            logger.error(f"Chat failed for session {session_id} (ref {_ref}): {e}", exc_info=True)
+            assistant_content = f"Something went wrong (ref {_ref}). Please try again."
 
         # GUARANTEED: Insert assistant message (even if it's an error message)
         # Note: Image is stored on USER message, not assistant
