@@ -10372,9 +10372,10 @@ async def chat_stream_endpoint(
 
     # ── BILLING: Reserve AI credits before processing (ACP mode only) ──────
     _chat_charged = []
-    # Resolve the project owner FIRST (audit T2): the free-tier model and
-    # effort gates previously ran with user_id=None, skipping their
-    # "if user_id:" checks — free users could select any model / high effort.
+    # Resolve the project owner FIRST (audit T2, hardened R5): the free-tier
+    # model and effort gates previously ran with user_id=None, skipping their
+    # "if user_id:" checks. FAIL CLOSED (R5): a lookup error or a missing
+    # owner row aborts the request — the gates must never see None.
     _chat_user_id = None
     try:
         with get_db() as _uconn:
@@ -10385,6 +10386,17 @@ async def chat_stream_endpoint(
             _chat_user_id = _urow["user_id"] if isinstance(_urow, dict) else _urow[0]
     except Exception as _uerr:
         logger.warning(f"[STREAM ENDPOINT] Project owner lookup failed: {_uerr}")
+        SessionLockService.release_processing(session_id)
+        SessionLockService.release_lock(project_id, session_id)
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "owner_lookup_failed",
+                    "message": "Could not verify project ownership. Please retry."},
+        )
+    if not _chat_user_id:
+        SessionLockService.release_processing(session_id)
+        SessionLockService.release_lock(project_id, session_id)
+        raise HTTPException(status_code=404, detail="Project not found")
     _model_info = _resolve_session_model(request.model, _chat_user_id)
     _model_multiplier = _model_info.get("multiplier", 1)
     _effort = _resolve_reasoning_effort(getattr(request, "reasoning_effort", None), _chat_user_id)
