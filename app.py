@@ -11475,7 +11475,46 @@ async def chat_endpoint(
 
         session_id = session['id']
         project_id = session['project_id']
-        
+
+        # ── BILLING: reserve credits BEFORE acquiring locks (audit T1) ────
+        # The non-streaming ACP branch previously ran the agent with NO
+        # pre-charge and only logged post-run charge failures — a zero-credit
+        # user could run unlimited agent jobs. Reserve exactly like the
+        # streaming path: 402 on insufficient credits, 503 if billing is
+        # unavailable (fail closed — never run the agent unbilled).
+        _ns_charged = []
+        _ns_user_id = None
+        if request.acp_mode:
+            from services.billing_service import reserve_credits
+            prow = conn.execute(
+                "SELECT user_id FROM projects WHERE id = %s", (project_id,)
+            ).fetchone()
+            if not prow:
+                raise HTTPException(status_code=404, detail="Project not found")
+            _ns_user_id = prow["user_id"] if isinstance(prow, dict) else prow[0]
+            try:
+                _ns_result = reserve_credits(conn, _ns_user_id, "ADD_FEATURE", amount=1)
+                conn.commit()
+            except Exception as bill_err:
+                logger.warning(f"[BILLING] Non-stream reservation failed (denying request): {bill_err}")
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error": "billing_unavailable",
+                            "message": "Billing is temporarily unavailable. Please retry."},
+                )
+            if not _ns_result.get("success"):
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "error": "insufficient_credits",
+                        "message": "You don't have enough AI credits for this request.",
+                        "cost": _ns_result.get("cost"),
+                        "available": _ns_result.get("total_available", 0),
+                    },
+                )
+            _ns_charged = _ns_result.get("charged", [])
+            logger.info(f"[BILLING] Reserved non-stream chat credits for user {_ns_user_id}: {_ns_charged}")
+
         # === SESSION LOCK CHECK ===
         # Acquire lock for this project/session
         lock_result = SessionLockService.acquire_lock(project_id, session_id)
@@ -11544,6 +11583,17 @@ async def chat_endpoint(
             if not handler:
                 logger.error(f"[ACP-MODE] Failed to get ACP handler - project not found")
                 assistant_content = "Error: Could not initialize ACP handler - project not found or invalid path"
+                # Nothing ran — refund the reservation (audit T1).
+                if _ns_charged and _ns_user_id:
+                    try:
+                        from services.billing_service import refund_credits
+                        with get_db() as rconn:
+                            refund_credits(rconn, _ns_user_id, "ADD_FEATURE", _ns_charged)
+                            rconn.commit()
+                        logger.info(f"[BILLING] Refunded non-stream reservation (no handler): {_ns_charged}")
+                        _ns_charged = []
+                    except Exception as refund_err:
+                        logger.warning(f"[BILLING] Non-stream refund failed: {refund_err}")
             else:
                 handler.set_session_id(session_id)
                 logger.info(f"[ACP-MODE] Handler initialized for project: {handler.project_name}")
@@ -11591,10 +11641,12 @@ async def chat_endpoint(
                 logger.info(f"[ACP-MODE] ========================")
                 
                 try:
-                    # Run ACPX (synchronous)
+                    # Run ACPX via to_thread — the sync call blocked the event
+                    # loop for up to 300s (audit T1).
                     logger.info(f"[ACP-MODE] Starting ACPX execution (timeout: 300s)...")
-                    result = handler.run_acpx_chat(acp_user_content, session_context)
-                    
+                    result = await asyncio.to_thread(
+                        handler.run_acpx_chat, acp_user_content, session_context)
+
                     logger.info(f"[ACP-MODE] ACPX completed with status: {result.get('status')}")
                     assistant_content = result.get('response', '')
                     if not result.get('success'):
@@ -11602,6 +11654,21 @@ async def chat_endpoint(
                         assistant_content = f"Error: {result.get('error', 'ACPX failed')}"
                     else:
                         logger.info(f"[ACP-MODE] Response length: {len(assistant_content)} chars")
+                except Exception as acpx_err:
+                    # Agent run blew up: keep the 500 semantics but never keep
+                    # the reservation for work that did not happen (audit T1).
+                    logger.exception(f"[ACP-MODE] ACPX execution crashed")
+                    if _ns_charged and _ns_user_id:
+                        try:
+                            from services.billing_service import refund_credits
+                            with get_db() as rconn:
+                                refund_credits(rconn, _ns_user_id, "ADD_FEATURE", _ns_charged)
+                                rconn.commit()
+                            logger.info(f"[BILLING] Refunded non-stream reservation (crash): {_ns_charged}")
+                            _ns_charged = []
+                        except Exception as refund_err:
+                            logger.warning(f"[BILLING] Non-stream refund failed: {refund_err}")
+                    raise
                 finally:
                     # Kill orphan processes after response
                     handler.kill_orphan_processes()
@@ -11659,9 +11726,10 @@ async def chat_endpoint(
                             )
 
                             # ── POST-EDIT TOKEN CHARGE ──────────────────────
-                            # Non-streaming endpoint has no pre-charge, so all
-                            # tokens are charged here. ai_index overhead is
-                            # discounted the same way as the streaming path.
+                            # True-up on top of the T1 pre-charge: actual token
+                            # consumption minus the reserved amount. ai_index
+                            # overhead is discounted the same way as the
+                            # streaming path.
                             if _total_toks > 0:
                                 try:
                                     from services.billing_service import (
@@ -11687,7 +11755,7 @@ async def chat_endpoint(
                                         project_id=project_id,
                                         session_id=session_id,
                                         model=usage_data.get("model"),
-                                        precharged_amount=0,
+                                        precharged_amount=sum(abs(c.get("amount", 0)) for c in _ns_charged),
                                         cache_read_tokens=_cache_read + _index_overhead,
                                     )
                                     tconn.commit()
