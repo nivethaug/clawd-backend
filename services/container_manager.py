@@ -336,6 +336,7 @@ class ContainerManager:
                 # unless-stopped, which bypasses our start() cleanup.)
                 self._check_restart_and_cleanup()
             _set_container_status(self.user_id, "running")
+            self._seed_claude_credentials()
             return self.container_name
 
         # Case 2: need to create.
@@ -390,7 +391,53 @@ class ContainerManager:
             workspace_path=str(self.workspace_host_path),
             status="running",
         )
+        self._seed_claude_credentials()
         return self.container_name
+
+    def _seed_claude_credentials(self) -> None:
+        """Seed the long-lived Claude OAuth credentials into the container.
+
+        Recreated containers lose the tmpfs/home credentials (the documented
+        gap from 2026-11-12: chats returned 'Not logged in · Please run
+        /login'). Called from ensure_container on BOTH the create path and
+        the already-running path — seeding is idempotent (overwrites) and
+        silently skipped when no encrypted store exists on this host.
+        """
+        import subprocess as _sp
+        import json as _json
+        enc = "/root/.secrets/claude_oat.enc"
+        key = "/root/.secrets/claude.key"
+        if not (os.path.isfile(enc) and os.path.isfile(key)):
+            return
+        try:
+            tok = _sp.run(
+                ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d",
+                 "-in", enc, "-pass", "file:" + key],
+                capture_output=True, text=True, timeout=15,
+            ).stdout.strip()
+            if not tok:
+                return
+            creds = _json.dumps({"claudeAiOauth": {
+                "accessToken": tok, "refreshToken": tok,
+                "expiresAt": 4102444800000,
+                "scopes": ["user:inference", "user:profile",
+                            "user:sessions:claude_code", "user:file_upload",
+                            "user:mcp_servers"],
+                "subscriptionType": "pro",
+                "rateLimitTier": "default_claude_ai"}})
+            _sp.run(
+                ["docker", "exec", "-i", "--user", "1001:1001",
+                 self.container_name, "sh", "-c",
+                 "mkdir -p /home/dreampilot/.claude && "
+                 "cat > /home/dreampilot/.claude/.credentials.json && "
+                 "chmod 600 /home/dreampilot/.claude/.credentials.json"],
+                input=creds, text=True, timeout=30,
+            )
+            logger.info("[CONTAINER] seeded Claude credentials into %s",
+                        self.container_name)
+        except Exception as exc:
+            logger.warning("[CONTAINER] credential seeding skipped for %s: %s",
+                           self.container_name, exc)
 
     def _container_exists(self) -> bool:
         """True iff a container with our name exists (any state)."""
