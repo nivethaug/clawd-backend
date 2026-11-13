@@ -251,11 +251,12 @@ Rules:
 - JSON only."""
 
 
-def generate_plan(requirement: str, mode: str = "new") -> Dict[str, Any]:
+def generate_plan(requirement: str, mode: str = "new",
+                  project_type: str = "website") -> Dict[str, Any]:
     try:
         if mode == "existing":
             raw = _chat(PLAN_EXISTING_SYSTEM,
-                        f"Change requirement for the existing site:\n\n{requirement}\n\nProduce the task board JSON (instruct tasks only).",
+                        f"Change requirement for the existing {project_type}:\n\n{requirement}\n\nProduce the task board JSON (instruct tasks only).",
                         2000)
         else:
             raw = _chat(PLAN_SYSTEM, f"Requirement:\n\n{requirement}\n\nProduce the task board JSON.", 2500)

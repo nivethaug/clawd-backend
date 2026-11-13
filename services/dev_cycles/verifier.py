@@ -204,6 +204,57 @@ def verify(dod_item: Dict[str, Any], frontend_domain: str) -> Dict[str, Any]:
     return result
 
 
+def verify_process(cycle: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify a non-website project's runtime is alive (PM2 process check).
+
+    For bots (telegram/discord), agents, and schedulers the "site is live"
+    equivalent is: the project's PM2 process is online and hasn't crashed.
+    """
+    import subprocess as _sp
+    project_id = cycle.get("project_id")
+    if not project_id:
+        return {"verdict": "unverified", "evidence": "no project yet",
+                "user_text": "The project hasn't been created yet", "check": {"kind": "process"}}
+    try:
+        r = _sp.run(
+            ["pm2", "jlist"],
+            capture_output=True, text=True, timeout=10,
+        )
+        procs = json.loads(r.stdout or "[]")
+        # match by name pattern: the project's domain or id appears in the
+        # pm2 process name (e.g. "cycle-7-e1b1-backend")
+        from database_postgres import get_db
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT domain, name FROM projects WHERE id = %s", (project_id,)
+            ).fetchone()
+        d = dict(row) if row else {}
+        domain = (d.get("domain") or "").lower()
+        pname = (d.get("name") or "").lower().replace(" ", "-")
+        for p in procs:
+            pn = (p.get("name") or "").lower()
+            if domain and domain in pn or pname and pname in pn:
+                status = p.get("pm2_env", {}).get("status", "")
+                restarts = p.get("pm2_env", {}).get("restart_time", 0)
+                if status == "online":
+                    return {"verdict": "pass",
+                            "evidence": f"pm2 {pn} online (restarts={restarts})",
+                            "user_text": f"The bot is running (restarted {restarts} time{'s' if restarts != 1 else ''})",
+                            "check": {"kind": "process"}}
+                return {"verdict": "fail",
+                        "evidence": f"pm2 {pn} status={status}",
+                        "user_text": f"The bot isn't running (status: {status})",
+                        "check": {"kind": "process"}}
+        return {"verdict": "unverified",
+                "evidence": f"no pm2 process found for domain={domain} name={pname}",
+                "user_text": "I couldn't find the project's process — it may still be deploying",
+                "check": {"kind": "process"}}
+    except Exception as exc:
+        return {"verdict": "unverified", "evidence": f"pm2 check failed: {exc}",
+                "user_text": "I couldn't check if the project is running",
+                "check": {"kind": "process"}}
+
+
 def verify_all(dod: list, frontend_domain: str,
                on_progress: Optional[Callable[[int, int, Dict[str, Any]], None]] = None) -> Dict[str, Any]:
     """Run every DoD item. Returns {results[], passed, failed, unverified}.

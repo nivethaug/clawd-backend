@@ -69,6 +69,7 @@ async def create_cycle(request: CreateCycleRequest, authorization: Optional[str]
 
     user_id = _uid(authorization)
     _require_paid(user_id)
+    project_type_id = 1  # new-project cycles build websites (type 1)
     if store.has_active_cycle(user_id):
         raise HTTPException(status_code=409,
                              detail="You already have an active dev cycle — finish or stop it first")
@@ -86,10 +87,11 @@ async def create_cycle(request: CreateCycleRequest, authorization: Optional[str]
         proj = dict(proj) if not isinstance(proj, dict) else proj
         if proj["user_id"] != user_id:
             raise HTTPException(status_code=403, detail="Not your project")
-        if int(proj.get("type_id") or 0) != 1:
-            raise HTTPException(status_code=400, detail="Dev Cycles only work with website projects")
+        project_type_id = int(proj.get("type_id") or 1)
 
     cycle = store.create_cycle(user_id, request.telegram_chat_id, request.project_id)
+    from services.dev_cycles.store import update_cycle as _uc
+    _uc(cycle["id"], project_type_id=project_type_id)
     notify_cycle("cycle_created", {"cycle_id": cycle["id"]})
     return {"success": True, "cycle": cycle}
 
@@ -121,7 +123,8 @@ async def cycle_detail(cycle_id: int, authorization: Optional[str] = Header(None
     # Live site URL (known as soon as the project exists) — the page shows it
     # in a preview pane while the build and the checks run.
     site_url = None
-    if cycle.get("project_id"):
+    _ptype = int(cycle.get("project_type_id") or 1)
+    if cycle.get("project_id") and _ptype == 1:
         try:
             from database_postgres import get_db
             from domain_config import BASE_DOMAIN

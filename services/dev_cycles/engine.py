@@ -552,16 +552,29 @@ def _compute_outcome(task: Dict[str, Any], cycle: Dict[str, Any], dod: list,
     """
     from services.dev_cycles.verifier import verify, verify_all
 
-    frontend_domain = _frontend_domain(cycle)
-    single = _j(task.get("dod_item"), {})
-    if single:
+    frontend_domain = _frontend_domain(cycle) if _is_website(cycle) else ""
+    if not _is_website(cycle):
+        # Non-website (bot/agent/scheduler): verify the PM2 process is alive
+        # instead of browser checks. A single check replaces the DoD.
+        from services.dev_cycles.verifier import verify_process
+        r = verify_process(cycle)
+        summary = {"results": [r],
+                   "passed": 1 if r["verdict"] == "pass" else 0,
+                   "failed": 1 if r["verdict"] == "fail" else 0,
+                   "unverified": 1 if r["verdict"] == "unverified" else 0}
+        single = True  # skip the per-check loop below
+    else:
+        single = _j(task.get("dod_item"), {})
+    if single and _is_website(cycle):
         r = verify(single, frontend_domain)
         summary = {"results": [r],
                    "passed": 1 if r["verdict"] == "pass" else 0,
                    "failed": 1 if r["verdict"] == "fail" else 0,
                    "unverified": 1 if r["verdict"] == "unverified" else 0}
-    else:
+    elif _is_website(cycle):
         summary = verify_all(dod, frontend_domain, on_progress)
+    else:
+        summary = {"results": [], "passed": 0, "failed": 0, "unverified": 0}
 
     def _pick(core: bool, verdict: str) -> list:
         return [r for r in summary["results"]
@@ -687,7 +700,8 @@ def _fresh_sweep(tasks: List[Dict[str, Any]], dod: List[Dict[str, Any]]) -> Opti
     return None
 
 
-def _build_receipt(domain: str, sweep: Dict[str, Any], tasks: List[Dict[str, Any]]) -> str:
+def _build_receipt(domain: str, sweep: Dict[str, Any], tasks: List[Dict[str, Any]],
+                   is_website: bool = True) -> str:
     """The delivery message. First line states the real outcome; notes are
     plain-language and clearly non-blocking; never a bare x/y score."""
     results = sweep.get("results") or []
@@ -705,9 +719,9 @@ def _build_receipt(domain: str, sweep: Dict[str, Any], tasks: List[Dict[str, Any
                     if t["status"] == "failed" and _result(t).get("error") != "cancelled"]
     corrections = [t for t in tasks if t["status"] == "done"
                    and _payload(t).get("correction") and not _payload(t).get("receipted")]
-    link = f"https://{domain}"
+    link = f"https://{domain}" if is_website and domain else ""
 
-    if not domain:
+    if not domain and is_website:
         return ("⚠️ The site wasn't created\n"
                 "The build didn't finish, so there's no link yet.\n"
                 "Reply “retry” to build it again.")
@@ -793,7 +807,7 @@ def _finalize(cycle_id: int, force_sweep: bool = False) -> None:
         except Exception as exc:
             logger.warning("[ENGINE] receipt screenshot failed: %s", exc)
 
-    receipt = _build_receipt(domain, sweep, tasks)
+    receipt = _build_receipt(domain, sweep, tasks, is_website=_is_website(cycle))
 
     # This receipt reported the pending corrections and their new checks.
     for t in tasks:
@@ -878,6 +892,16 @@ def _session_id(session_key: str) -> int:
         d = dict(row) if not isinstance(row, dict) else row
         return int(d["id"])
     return 0
+
+
+def _project_type_id(cycle: Dict[str, Any]) -> int:
+    """The type of project this cycle drives (1=website, 2=telegram bot,
+    3=discord bot, 4=scheduler, 5=agent). New-project cycles default to 1."""
+    return int(cycle.get("project_type_id") or 1)
+
+
+def _is_website(cycle: Dict[str, Any]) -> bool:
+    return _project_type_id(cycle) == 1
 
 
 def _frontend_domain(cycle: Dict[str, Any]) -> str:
