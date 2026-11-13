@@ -21,7 +21,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger("services.dev_cycles.verifier")
 
@@ -154,20 +154,28 @@ def verify(dod_item: Dict[str, Any], frontend_domain: str) -> Dict[str, Any]:
     """
     kind = dod_item.get("kind")
     params = dod_item.get("params") or {}
-    result = {"verdict": "unverified", "evidence": "", "check": dod_item}
+    # `evidence` = technical proof (logs, repair prompts). `user_text` =
+    # the same finding in plain words — the only string shown to users.
+    result = {"verdict": "unverified", "evidence": "", "user_text": "", "check": dod_item}
+    if not frontend_domain:
+        result["evidence"] = "infra error: no site domain (project not created)"
+        return result
     url = f"https://{frontend_domain}/{(params.get('path') or '/').lstrip('/')}"
-    max_retries = MAX_RETRIES if kind in ("url_200", "console_clean") else 2
+    is_core = kind in ("url_200", "console_clean")
+    max_retries = MAX_RETRIES if is_core else 2
+    label = str(dod_item.get("description") or kind or "check").strip()
+    label = label[:1].upper() + label[1:]
 
     for attempt in range(1, max_retries + 1):
         try:
             if kind == "url_200":
-                ok, ev = _check_url_200(url)
+                ok, ev, plain = _check_url_200(url)
             elif kind == "console_clean":
-                ok, ev = _check_console(url)
+                ok, ev, plain = _check_console(url)
             elif kind == "dom_exists":
-                ok, ev = _check_dom(url, params)
+                ok, ev, plain = _check_dom(url, params)
             elif kind == "text_present":
-                ok, ev = _check_text(url, params)
+                ok, ev, plain = _check_text(url, params)
             else:
                 result["evidence"] = f"unknown check kind: {kind}"
                 return result
@@ -175,9 +183,11 @@ def verify(dod_item: Dict[str, Any], frontend_domain: str) -> Dict[str, Any]:
             if ok:
                 result["verdict"] = "pass"
                 result["evidence"] = ev + (f" (attempt {attempt})" if attempt > 1 else "")
+                result["user_text"] = plain if is_core else f"{label} — {plain}"
                 return result
 
             result["evidence"] = ev
+            result["user_text"] = plain if is_core else f"{label} — {plain}"
             if attempt < max_retries:
                 logger.info("[VERIFY] %s fail attempt %d/%d, retry in %ds: %s",
                             kind, attempt, max_retries, RETRY_DELAY_S, ev[:80])
@@ -194,9 +204,22 @@ def verify(dod_item: Dict[str, Any], frontend_domain: str) -> Dict[str, Any]:
     return result
 
 
-def verify_all(dod: list, frontend_domain: str) -> Dict[str, Any]:
-    """Run every DoD item. Returns {results[], passed, failed, unverified}."""
-    results = [verify(item, frontend_domain) for item in dod]
+def verify_all(dod: list, frontend_domain: str,
+               on_progress: Optional[Callable[[int, int, Dict[str, Any]], None]] = None) -> Dict[str, Any]:
+    """Run every DoD item. Returns {results[], passed, failed, unverified}.
+
+    on_progress(i, total, item) fires before each check (1-based) so the
+    caller can show "checking 3 of 7" during the sweep. It must never
+    break a sweep — exceptions from it are swallowed.
+    """
+    results = []
+    for i, item in enumerate(dod, 1):
+        if on_progress:
+            try:
+                on_progress(i, len(dod), item)
+            except Exception as exc:
+                logger.debug("[VERIFY] progress callback failed: %s", exc)
+        results.append(verify(item, frontend_domain))
     passed = sum(1 for r in results if r["verdict"] == "pass")
     failed = sum(1 for r in results if r["verdict"] == "fail")
     unverified = sum(1 for r in results if r["verdict"] == "unverified")
@@ -205,26 +228,35 @@ def verify_all(dod: list, frontend_domain: str) -> Dict[str, Any]:
 
 # ── check implementations (live browser DOM) ────────────────────────────
 
-def _check_url_200(url: str) -> Tuple[bool, str]:
+# Each check returns (ok, evidence, plain): `evidence` is the technical
+# proof; `plain` is the finding in words a non-developer understands (for
+# content checks it is a short reason that verify() prefixes with the
+# check's description, e.g. "Contact form — not found on the page").
+
+def _check_url_200(url: str) -> Tuple[bool, str, str]:
     import httpx
     r = httpx.get(url, timeout=20, follow_redirects=True)
-    return r.status_code == 200, f"GET {url} → {r.status_code}"
+    ok = r.status_code == 200
+    return ok, f"GET {url} → {r.status_code}", (
+        "The site loads" if ok else f"The site didn't load (error {r.status_code})")
 
 
-def _check_console(url: str) -> Tuple[bool, str]:
+def _check_console(url: str) -> Tuple[bool, str, str]:
     """Load the page in a real browser, capture console errors."""
     browser = BrowserCheck(url)
     _, errors = browser.run("return document.readyState")
     if not errors:
-        return True, "0 console errors (live browser)"
-    return False, f"{len(errors)} error(s): " + " | ".join(errors[:2])
+        return True, "0 console errors (live browser)", "No errors on the page"
+    n = len(errors)
+    return (False, f"{n} error(s): " + " | ".join(errors[:2]),
+            f"The page has {n} script error{'s' if n > 1 else ''}")
 
 
-def _check_dom(url: str, params: Dict[str, Any]) -> Tuple[bool, str]:
+def _check_dom(url: str, params: Dict[str, Any]) -> Tuple[bool, str, str]:
     """Check that a CSS selector matches a visible element in the live DOM."""
     selector = (params.get("selector") or "").strip()
     if not selector:
-        return False, "no selector given"
+        return False, "no selector given", "couldn't be checked"
 
     # Proper CSS selector + visibility check via the browser engine
     js = (
@@ -249,20 +281,23 @@ def _check_dom(url: str, params: Dict[str, Any]) -> Tuple[bool, str]:
 
     info = json.loads(raw) if isinstance(raw, str) else raw
     if not info.get("found"):
-        return False, f"querySelector('{selector}') → not found in live DOM"
+        return False, f"querySelector('{selector}') → not found in live DOM", "not found on the page"
 
     if not info.get("visible"):
-        return False, f"'{selector}' found but not visible ({info.get('tag')}, {info.get('size')})"
+        return (False, f"'{selector}' found but not visible ({info.get('tag')}, {info.get('size')})",
+                "on the page but hidden")
 
-    return True, f"'{selector}' visible <{info.get('tag')} class='{info.get('cls')}'> {info.get('size')}"
+    return (True, f"'{selector}' visible <{info.get('tag')} class='{info.get('cls')}'> {info.get('size')}",
+            "on the page")
 
 
-def _check_text(url: str, params: Dict[str, Any]) -> Tuple[bool, str]:
+def _check_text(url: str, params: Dict[str, Any]) -> Tuple[bool, str, str]:
     """Check that specific text is visible in an element (live browser)."""
     selector = (params.get("selector") or "").strip()
     text = (params.get("text") or "").strip()
     if not text:
-        return False, "no text to check"
+        return False, "no text to check", "couldn't be checked"
+    shown = text if len(text) <= 60 else text[:57] + "…"
 
     # Title special case: check <title> directly
     if selector.lower() == "title":
@@ -270,7 +305,9 @@ def _check_text(url: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         raw, _ = browser.run("return document.title")
         title = (raw or "").strip()
         found = text.lower() in title.lower()
-        return found, f"'{text}' in <title>('{title[:50]}') -> {'yes' if found else 'no'}"
+        return (found, f"'{text}' in <title>('{title[:50]}') -> {'yes' if found else 'no'}",
+                f"reads “{shown}”" if found
+                else f"the page title is “{title[:60]}”, expected “{shown}”")
 
     # If a selector is given, check that element's text; otherwise body
     if selector:
@@ -300,12 +337,19 @@ def _check_text(url: str, params: Dict[str, Any]) -> Tuple[bool, str]:
     info = json.loads(raw) if isinstance(raw, str) else raw
     where = f" in {selector}" if selector else " in body"
     if info.get("found"):
-        return True, f"'{text}'{where} → found ('{info.get('preview', '')[:50]}')"
+        return (True, f"'{text}'{where} → found ('{info.get('preview', '')[:50]}')",
+                f"reads “{shown}”")
 
     if info.get("reason") == "selector not found":
-        return False, f"querySelector('{selector}') not found; can't check for '{text}'"
+        return (False, f"querySelector('{selector}') not found; can't check for '{text}'",
+                "not found on the page")
 
-    return False, f"'{text}'{where} → not found (element has: '{info.get('preview', '')[:60]}')"
+    preview = " ".join((info.get("preview") or "").split())[:60]
+    if selector and preview:
+        plain = f"the page says “{preview}”, expected “{shown}”"
+    else:
+        plain = f"“{shown}” isn't on the page"
+    return False, f"'{text}'{where} → not found (element has: '{preview}')", plain
 
 
 def _js(s: str) -> str:

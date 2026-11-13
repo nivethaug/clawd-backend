@@ -59,7 +59,7 @@ def has_active_cycle(user_id: int) -> bool:
     with get_db() as conn:
         row = conn.execute(
             """SELECT 1 FROM dev_cycles
-               WHERE user_id = %s AND status NOT IN ('delivered', 'failed')
+               WHERE user_id = %s AND status NOT IN ('delivered', 'failed', 'cancelled')
                LIMIT 1""",
             (user_id,),
         ).fetchone()
@@ -69,9 +69,28 @@ def has_active_cycle(user_id: int) -> bool:
 def active_cycles() -> List[Dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT * FROM dev_cycles WHERE status NOT IN ('delivered', 'failed') ORDER BY id"
+            "SELECT * FROM dev_cycles WHERE status NOT IN ('delivered', 'failed', 'cancelled') ORDER BY id"
         ).fetchall()
     return [_d(r) for r in rows]
+
+
+def cancel_cycle(cycle_id: int) -> None:
+    """User-initiated stop: the cycle leaves the active set (so a new one
+    can start) and every unfinished task is closed. A build run already on
+    the worker is left to finish; its completion event finds no open task."""
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE cycle_tasks SET status = 'failed',
+                      result = '{"error": "cancelled"}'::jsonb,
+                      updated_at = CURRENT_TIMESTAMP
+               WHERE cycle_id = %s AND status NOT IN ('done', 'failed')""",
+            (cycle_id,),
+        )
+        conn.execute(
+            "UPDATE dev_cycles SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+            (cycle_id,),
+        )
+        conn.commit()
 
 
 # ── messages ─────────────────────────────────────────────────────────────
@@ -119,7 +138,12 @@ def add_task(cycle_id: int, position: int, title: str, description: str,
 def get_tasks(cycle_id: int) -> List[Dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT * FROM cycle_tasks WHERE cycle_id = %s ORDER BY position, id",
+            # age_s = seconds since the last status change, computed in SQL:
+            # updated_at is a naive TIMESTAMP, so comparing it to a Python
+            # datetime is timezone-ambiguous (it silently broke the
+            # wall-clock timeout).
+            """SELECT *, EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - updated_at))::int AS age_s
+               FROM cycle_tasks WHERE cycle_id = %s ORDER BY position, id""",
             (cycle_id,),
         ).fetchall()
     return [_d(r) for r in rows]

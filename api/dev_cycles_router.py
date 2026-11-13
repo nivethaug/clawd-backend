@@ -120,6 +120,26 @@ async def cycle_detail(cycle_id: int, authorization: Optional[str] = Header(None
     return {"cycle": cycle, "messages": messages, "tasks": tasks}
 
 
+@router.post("/{cycle_id}/cancel")
+async def cancel_cycle(cycle_id: int, authorization: Optional[str] = Header(None)):
+    """User-initiated stop: closes unfinished tasks and frees the one-active
+    slot. An in-flight build run is left to finish on the worker; its
+    completion event finds no open task and is ignored."""
+    from services.dev_cycles import store
+    from services.dev_cycles.notify import notify_cycle
+
+    user_id = _uid(authorization)
+    cycle = _own_cycle(cycle_id, user_id)
+    if cycle["status"] in ("delivered", "failed", "cancelled"):
+        raise HTTPException(status_code=409, detail="Cycle already finished")
+    store.cancel_cycle(cycle_id)
+    store.add_message(cycle_id, "agent",
+                      "🛑 Cycle cancelled. Your project is kept as-is — start a "
+                      "new cycle anytime.")
+    notify_cycle("cycle_cancelled", {"cycle_id": cycle_id})
+    return {"ok": True, "status": "cancelled"}
+
+
 @router.post("/{cycle_id}/messages")
 async def send_message(cycle_id: int, request: SendMessageRequest,
                        authorization: Optional[str] = Header(None)):
@@ -127,7 +147,10 @@ async def send_message(cycle_id: int, request: SendMessageRequest,
     from services.dev_cycles.notify import notify_cycle
 
     user_id = _uid(authorization)
-    _own_cycle(cycle_id, user_id)
+    cycle = _own_cycle(cycle_id, user_id)
+    if cycle["status"] == "cancelled":
+        raise HTTPException(status_code=409,
+                            detail="This cycle was cancelled — start a new one to continue")
     msg = store.add_message(cycle_id, "user", request.content)
     notify_cycle("user_message", {"cycle_id": cycle_id, "message_id": msg["id"]})
     return {"success": True, "message": msg}
