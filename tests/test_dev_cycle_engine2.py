@@ -36,19 +36,20 @@ CORE_FAIL = {"verdict": "fail", "check": {"kind": "console_clean"},
 def test_receipt_clean():
     r = eng._build_receipt("site.example", _sweep([CORE_OK, CONSOLE_OK, CONTENT_PASS]),
                            [{"title": "Build", "status": "done", "result": "{}", "payload": "{}"}])
-    assert "✅ Your site is live" in r
+    assert r.startswith("✅ Delivered")
     assert "https://site.example" in r
-    assert "1 of 1 page checks" in r
+    assert "final check of the whole site (3 checks) passed" in r
     assert "⚠" not in r
 
 
-def test_receipt_with_notes():
+def test_receipt_content_miss_blocks_delivery():
+    # a promised element missing is no longer a "minor note": not validated
     r = eng._build_receipt("site.example",
                            _sweep([CORE_OK, CONSOLE_OK, CONTENT_FAIL, CONTENT_PASS]),
                            [{"title": "Build", "status": "done", "result": "{}", "payload": "{}"}])
-    assert "✅" in r
-    assert "Worth a look (not blocking)" in r
+    assert r.startswith("⚠️ Needs your attention")
     assert "Contact form" in r
+    assert "retry" in r
 
 
 def test_receipt_corrected():
@@ -65,7 +66,7 @@ def test_receipt_corrected():
 def test_receipt_core_fail():
     r = eng._build_receipt("site.example", _sweep([CORE_OK, CORE_FAIL]),
                            [{"title": "Build", "status": "done", "result": "{}", "payload": "{}"}])
-    assert "not working" in r
+    assert r.startswith("⚠️ Needs your attention")
     assert "script errors" in r
 
 

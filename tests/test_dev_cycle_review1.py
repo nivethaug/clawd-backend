@@ -63,6 +63,7 @@ def test_bug1_long_redo_is_correction_not_command(monkeypatch):
     monkeypatch.setattr(eng.store, "update_cycle", spy.update_cycle)
     monkeypatch.setattr(eng, "_dispatch_next", lambda _c: None)
     monkeypatch.setattr(eng.chat_agent, "patch_dod", lambda dod, text: dod)
+    monkeypatch.setattr(eng.chat_agent, "plan_change", lambda *a, **k: None)  # no network
 
     eng._handle_followup(_cycle(), "Redo the hero section in blue")
     # a correction was acknowledged — the request was NOT swallowed as retry

@@ -1,9 +1,21 @@
 #!/usr/bin/env python3
 """Dev Cycle engine — event-driven orchestrator (LISTEN/NOTIFY).
 
+The cycle, end to end:
+  intake      clarify the full requirement with the client (questions with
+              defaults, a written spec kept in plan["spec"])
+  confirming  the spec is shown; nothing is built until the client says yes
+  planning    the spec becomes MICRO TASKS, each with its own checks
+              (stored in cycle_tasks.dod_item = {"checks": [...]})
+  building    per task: execute → verify ITS checks on the live project →
+              repair (≤ MAX_REPAIRS) until validated
+  delivered   only when every task is validated AND a final regression sweep
+              of everything promised passes
+  needs_attention  anything that could not be validated: the client is told
+              exactly what is blocked and what to do
+
 Wakes on `dev_cycle_events` notifications; 60s reconcile covers lost
-events. State transitions per task: todo → in_progress → under_review →
-done (verifier gate) | failed (repairs exhausted).
+events. Task states: todo → in_progress → under_review → done | failed.
 
 Events are handled on a small thread pool, serialised per cycle by a lock,
 so one cycle's verify sweep or LLM call never delays another user's reply.
@@ -14,7 +26,6 @@ Entry: dev_cycle_engine.py (pm2) → main() here.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -33,8 +44,19 @@ RECONCILE_INTERVAL = 60  # seconds — lost-event safety net
 TASK_WALL_CLOCK_MIN = 30  # a task stuck in_progress longer than this = failed
 MAX_REPAIRS = 2
 MAX_RECHECKS = 5  # automatic re-verifies (one per reconcile) before parking
-SWEEP_REUSE_S = 90  # the last task's sweep doubles as the receipt sweep
+MAX_INTAKE_TURNS = 4  # after this many client replies, go with the defaults
+MAX_REGRESSION_FIXES = 1  # automatic fix rounds when the final sweep finds a break
 CORE_KINDS = {"url_200", "console_clean"}
+CORE_CHECKS = [
+    {"kind": "url_200", "params": {"path": "/"}, "description": "site loads"},
+    {"kind": "console_clean", "params": {}, "description": "no console errors"},
+]
+FOLLOWUP_STATUSES = ("building", "delivered", "failed", "needs_attention")
+
+# A short reply that approves the spec ("yes", "looks good, go").
+APPROVE_RE = re.compile(
+    r"^\W*(yes|yep|yeah|yup|ok|okay|sure|go|go ahead|start|build it|do it|confirm(ed)?|"
+    r"looks good|sounds good|perfect|great|lgtm|approved?)\b", re.I)
 
 # Short follow-up messages that are commands, not change requests.
 RETRY_RE = re.compile(r"^\W*(please\s+)?(retry|try again|again|redo|re-?run)\b", re.I)
@@ -69,9 +91,32 @@ def _dod(cycle: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [d for d in _j(cycle.get("dod"), []) if isinstance(d, dict)]
 
 
-def _dod_sig(dod: List[Dict[str, Any]]) -> str:
-    raw = json.dumps([[d.get("kind"), d.get("params") or {}] for d in dod], sort_keys=True)
-    return hashlib.sha1(raw.encode()).hexdigest()[:12]
+def _plan(cycle: Dict[str, Any]) -> Dict[str, Any]:
+    return _j(cycle.get("plan"), {})
+
+
+def _spec(cycle: Dict[str, Any]) -> Dict[str, Any]:
+    return _j(_plan(cycle).get("spec"), {})
+
+
+def _task_checks(task: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """A task's own acceptance checks. dod_item holds {"checks": [...]};
+    older rows may hold a single check dict or a list."""
+    raw = task.get("dod_item")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = None
+    if isinstance(raw, dict) and isinstance(raw.get("checks"), list):
+        raw = raw["checks"]
+    elif isinstance(raw, dict) and raw.get("kind"):
+        raw = [raw]
+    return [c for c in raw if isinstance(c, dict) and c.get("kind")] if isinstance(raw, list) else []
+
+
+def _ptype_name(cycle: Dict[str, Any]) -> str:
+    return chat_agent.project_type_name(cycle.get("project_type_id"))
 
 
 def _lower_first(text: str) -> str:
@@ -140,13 +185,14 @@ def _on_cycle_created(cycle_id: int) -> None:
         return
     if cycle.get("project_id"):
         _say(cycle_id,
-             "Tell me what to change on your site. I'll make the edit, check the live "
-             "site still works, and confirm when it's done.")
+             "Tell me what you'd like changed. I'll ask anything I need to know, confirm "
+             "the change with you, then do it in small steps — checking each one on the "
+             "live project — and let you know once it's all verified.")
     else:
         _say(cycle_id,
-             "Tell me what you want to build — one sentence is enough (for example "
-             "“a landing page for my bakery with a contact form”). I'll fill in sensible "
-             "defaults, build it, check it in a real browser, and send you the link.")
+             "Tell me what you want to build. I'll ask a few questions until the requirement "
+             "is clear and confirm it with you. Then I'll split it into small steps, build and "
+             "check each one in a real browser, and deliver the link once everything is verified.")
     store.update_cycle(cycle_id, status="intake")
 
 
@@ -169,8 +215,8 @@ def _requirement_text(history: List[Dict[str, str]]) -> str:
 
 
 def _on_user_message(cycle_id: int, message_id: Optional[int] = None) -> None:
-    """Intake turn: clarify (rarely) until ready, then plan → tasks → first
-    dispatch. On a planned cycle every message is a follow-up."""
+    """Route a client message by cycle stage: discovery (intake), spec
+    confirmation, or a follow-up on a planned cycle."""
     cycle = store.get_cycle(cycle_id)
     if not cycle:
         return
@@ -187,66 +233,129 @@ def _on_user_message(cycle_id: int, message_id: Optional[int] = None) -> None:
 
     if status == "planning":
         # The plan step crashed (it normally completes atomically under the
-        # cycle lock) — queue the message instead of dropping it, and let
-        # reconcile/dispatch recover the board (first-review bug 3).
+        # cycle lock) — acknowledge instead of dropping the message, and let
+        # dispatch recover the board.
         _say(cycle_id, "Noted — I'll add that once the plan is set.")
         store.update_cycle(cycle_id, status="building")
         _dispatch_next(cycle_id)
         return
-    if status in ("delivered", "failed", "building"):
+    if status in FOLLOWUP_STATUSES:
         _handle_followup(cycle, msg["content"])
         return
-    if status != "intake":
+    if status == "confirming":
+        text = msg["content"].strip()
+        if len(text.split()) <= 8 and APPROVE_RE.match(text):
+            _start_build(cycle_id)
+            return
+        # Anything else adjusts the spec: one more discovery turn.
+    elif status != "intake":
         return
+    _discovery_turn(cycle, msgs, msg)
 
+
+def _questions_message(questions: List[Dict[str, str]]) -> str:
+    if len(questions) == 1 and not questions[0].get("default"):
+        return questions[0]["q"]
+    lines = ["A few questions so I build exactly what you need:"]
+    for i, q in enumerate(questions, 1):
+        lines.append(f"{i}. {q['q']}")
+        if q.get("default"):
+            lines.append(f"   Suggested: {q['default']}")
+    if any(q.get("default") for q in questions):
+        lines.append("Answer what you like — for anything you skip I'll go with the suggestion.")
+    return "\n".join(lines)
+
+
+def _spec_message(spec: Dict[str, Any], mode: str) -> str:
+    """The written requirement the client confirms before anything is built."""
+    lines = ["📝 Here's what I'll change" if mode == "existing" else "📝 Here's what I'll build"]
+    if spec.get("summary"):
+        lines.append(spec["summary"])
+    for key, label in (("goal", "Goal"), ("audience", "For"), ("content", "Content"), ("style", "Style")):
+        if spec.get(key):
+            lines.append(f"{label}: {spec[key]}")
+    if spec.get("integrations"):
+        lines.append("Connects to: " + ", ".join(spec["integrations"]))
+    for key, label in (("scope", "Changes:" if mode == "existing" else "Includes:"),
+                       ("acceptance", "Done means:")):
+        if spec.get(key):
+            lines.append(label)
+            lines.extend(f"• {x}" for x in spec[key])
+    if spec.get("assumptions"):
+        lines.append("Assumed: " + "; ".join(spec["assumptions"]) + ".")
+    lines.append("Reply “yes” to start, or tell me what to change.")
+    return "\n".join(lines)
+
+
+def _discovery_turn(cycle: Dict[str, Any], msgs: List[Dict[str, Any]], msg: Dict[str, Any]) -> None:
+    """Clarify until the requirement is complete, then show the spec for
+    confirmation. Never builds on its own."""
+    cycle_id = cycle["id"]
     mode = "existing" if cycle.get("project_id") else "new"
     history = [{"role": m["role"], "content": m["content"]}
                for m in msgs if m["role"] in ("user", "agent") and m["id"] <= msg["id"]]
-    verdict = chat_agent.intake_turn(history, mode)
-    # Hard cap for both modes: after the client has answered once, build
-    # with defaults — never a second round of questions.
+    verdict = chat_agent.intake_turn(history, mode, _ptype_name(cycle))
+    # Discovery must end: after MAX_INTAKE_TURNS replies, go with the defaults
+    # (the client still confirms the spec before anything is built).
     user_turns = sum(1 for m in history if m["role"] == "user")
-    if user_turns >= 2:
+    if user_turns >= MAX_INTAKE_TURNS:
         verdict["ready"] = True
         verdict["questions"] = []
-    requirement = _requirement_text(history)[:20000]
-    store.update_cycle(cycle_id, requirement_accum=requirement)
+
+    plan = _plan(cycle)
+    plan["spec"] = verdict["spec"]
+    store.update_cycle(cycle_id, requirement_accum=_requirement_text(history)[:20000],
+                       plan=json.dumps(plan))
 
     if not verdict["ready"]:
-        _say(cycle_id, " ".join(verdict["questions"]) or "What would you like to build?")
+        store.update_cycle(cycle_id, status="intake")
+        _say(cycle_id, _questions_message(verdict["questions"]) or "What would you like to build?")
         return
+    store.update_cycle(cycle_id, status="confirming")
+    _say(cycle_id, _spec_message(verdict["spec"], mode))
 
-    # Ready → plan (frozen until a correction patches the DoD) → tasks
+
+def _start_build(cycle_id: int) -> None:
+    """The client confirmed the spec → micro tasks with their own checks."""
+    cycle = store.get_cycle(cycle_id)
+    mode = "existing" if cycle.get("project_id") else "new"
+    website = _is_website(cycle)
     store.update_cycle(cycle_id, status="planning")
-    plan = chat_agent.generate_plan(requirement, mode)
-    dod = plan["dod"]
-    store.update_cycle(cycle_id, plan=json.dumps(plan), dod=json.dumps(dod), status="building")
+    requirement = (chat_agent.spec_to_text(_spec(cycle))
+                   + "\n\nConversation with the client:\n" + (cycle.get("requirement_accum") or ""))
+    result = chat_agent.generate_plan(requirement[:20000], mode, _ptype_name(cycle))
+
+    plan = _plan(cycle)
+    plan["assumptions"] = result["assumptions"]
+    plan["regression_fixes"] = 0
+    store.update_cycle(cycle_id, plan=json.dumps(plan), dod=json.dumps(result["dod"]), status="building")
 
     lines = []
-    for i, t in enumerate(plan["tasks"]):
-        title = str(t.get("title") or f"Task {i + 1}")[:120]
-        summary = str(t.get("summary") or "").strip()[:140]
-        store.add_task(cycle_id, position=i, title=title,
-                       description=t.get("description", ""), kind=t.get("kind", "instruct"),
-                       payload={"summary": summary} if summary else None)
-        lines.append(f"{i + 1}. {title}" + (f" — {summary}" if summary else ""))
-    _say(cycle_id, _plan_message(plan, lines))
-
+    for i, t in enumerate(result["tasks"]):
+        store.add_task(cycle_id, position=i, title=t["title"], description=t["description"],
+                       kind=t["kind"], payload={"summary": t["summary"]} if t["summary"] else None,
+                       dod_item={"checks": t["checks"]} if t["checks"] else None)
+        lines.append(f"{i + 1}. {t['title']}" + (f" — {t['summary']}" if t["summary"] else ""))
+    _say(cycle_id, _plan_message(result, lines, website))
     _dispatch_next(cycle_id)
 
 
-def _plan_message(plan: Dict[str, Any], lines: List[str]) -> str:
-    msg = "📋 Here's the plan:\n" + "\n".join(lines)
+def _plan_message(plan: Dict[str, Any], lines: List[str], website: bool = True) -> str:
+    n = len(lines)
+    msg = f"📋 Here's the plan — {n} small step{'s' if n != 1 else ''}, each checked before the next:\n"
+    msg += "\n".join(lines)
     if plan.get("assumptions"):
-        msg += "\n\nAssumed: " + ", ".join(plan["assumptions"]) + "."
-    shows = [str(d.get("description")) for d in plan["dod"]
-             if d.get("kind") not in CORE_KINDS and d.get("description")]
-    msg += "\n\nWhen it's built I'll open it in a real browser and check that it loads with no errors"
-    msg += (", and shows: " + ", ".join(shows[:6]) + ".") if shows else "."
+        msg += "\n\nAssumed: " + "; ".join(plan["assumptions"]) + "."
+    if website:
+        msg += ("\n\nAfter each step I check it on the live site and fix anything that fails. "
+                "Once every step is verified, I re-check everything together and send you the link.")
+    else:
+        msg += ("\n\nAfter each step I check the project is running and fix anything that fails. "
+                "You'll hear from me once everything is verified.")
     eta = _eta_minutes(plan["tasks"])
     if eta:
         msg += f"\nBuilds like this usually take about {eta} min."
-    return msg + "\n\nStarting now — reply anytime to change something and I'll queue it."
+    return msg + "\nReply anytime to add or change something — I'll queue it."
 
 
 def _median_run_seconds(kind: str) -> Optional[float]:
@@ -322,10 +431,18 @@ def _handle_followup(cycle: Dict[str, Any], text: str) -> None:
         return
 
     if is_command and RETRY_RE.match(text):
-        failed = [t for t in tasks if t["status"] == "failed"]
+        failed = [t for t in tasks if t["status"] == "failed" and _result(t).get("error") != "cancelled"]
+        plan = _plan(cycle)
+        plan["regression_fixes"] = 0  # an explicit retry earns a fresh fix round
+        store.update_cycle(cycle_id, plan=json.dumps(plan))
         if not failed:
             if waiting:
                 _recheck(cycle_id, waiting[0])
+            elif cycle.get("status") == "needs_attention" and not in_flight:
+                # every step is done but the final check didn't pass → re-check / fix
+                _say(cycle_id, "On it — re-checking everything on the live project.")
+                store.update_cycle(cycle_id, status="building")
+                _finalize(cycle_id, force_sweep=True)
             else:
                 _say(cycle_id, "Nothing failed, so there's nothing to retry — tell me what you'd like changed.")
             return
@@ -376,46 +493,50 @@ def _open_notes(cycle: Dict[str, Any]) -> List[str]:
 
 def _handle_correction(cycle: Dict[str, Any], text: str, tasks: List[Dict[str, Any]],
                        in_flight: Optional[Dict[str, Any]]) -> None:
-    """A change request on a planned cycle → a correction task (or folded
-    into the one already queued), and the DoD is patched to match."""
+    """A change request on a planned cycle → micro tasks with their own
+    checks, appended to the board, and the regression checklist updated so
+    outdated checks never contradict what the client now wants."""
     cycle_id = cycle["id"]
-    instruction = text[:4000]
+    request = text[:4000]
     if NOTES_RE.search(text):
         notes = [n for n in _open_notes(cycle) if n][:6]
         if notes:
-            instruction += "\n\nOpen notes from the last check of the live site:\n" + \
-                           "\n".join(f"- {n}" for n in notes)
+            request += "\n\nOpen issues from the last check of the live project:\n" + \
+                       "\n".join(f"- {n}" for n in notes)
 
-    # Several quick tweaks = one build and one receipt, not three.
-    queued = next((t for t in tasks if t["status"] == "todo" and _payload(t).get("correction")
-                   and not int(t.get("repair_count") or 0)), None)
-    if queued:
-        p = _payload(queued)
-        p["requests"] = (p.get("requests") or []) + [text[:300]]
-        store.update_task(queued["id"], payload=json.dumps(p),
-                          description=((queued.get("description") or "") + "\n\nAlso: " + instruction)[:8000])
-        _say(cycle_id, "Got it — added to the change that's queued next.")
-    else:
-        store.add_task(cycle_id, position=len(tasks), title=f"Change: {text[:60]}",
-                       description=instruction, kind="instruct",
-                       payload={"correction": True, "requests": [text[:300]]})
-        if in_flight:
-            _say(cycle_id, f"Got it — queued right after “{in_flight['title']}”, which is running now.")
-        else:
-            _say(cycle_id, "Got it — making that change now, then re-checking the live site.")
-    store.update_cycle(cycle_id, status="building")
-
-    # Keep the checklist true to what the user now wants: without this the
-    # receipt warns about exactly the thing they asked to change.
     dod = _dod(cycle)
-    patched = chat_agent.patch_dod(dod, text)
-    if patched is None:
-        for d in dod:
-            if d.get("kind") not in CORE_KINDS:
-                d["predates_change"] = True
-        patched = dod
-    store.update_cycle(cycle_id, dod=json.dumps(patched))
+    summary = _spec(cycle).get("summary") or (cycle.get("requirement_accum") or "")[:1500]
+    planned = chat_agent.plan_change(request, summary, dod, _ptype_name(cycle))
+    if planned is None:
+        # LLM unavailable: one task carrying the request as-is; flag checks
+        # that may now be outdated instead of reporting them as failures.
+        new_tasks = [{"title": f"Change: {text[:60]}", "summary": "", "description": request,
+                      "kind": "instruct", "checks": []}]
+        patched = chat_agent.patch_dod(dod, text)
+        if patched is None:
+            for d in dod:
+                if d.get("kind") not in CORE_KINDS:
+                    d["predates_change"] = True
+            patched = dod
+    else:
+        new_tasks, patched = planned["tasks"], planned["dod"]
 
+    for i, t in enumerate(new_tasks):
+        payload = {"correction": True, "requests": [text[:300]]}
+        if t.get("summary"):
+            payload["summary"] = t["summary"]
+        store.add_task(cycle_id, position=len(tasks) + i, title=t["title"],
+                       description=t["description"], kind="instruct", payload=payload,
+                       dod_item={"checks": t["checks"]} if t.get("checks") else None)
+    plan = _plan(cycle)
+    plan["regression_fixes"] = 0
+    store.update_cycle(cycle_id, status="building", dod=json.dumps(patched), plan=json.dumps(plan))
+
+    n = len(new_tasks)
+    steps = "\n".join(f"{i}. {t['title']}" for i, t in enumerate(new_tasks, 1))
+    when = f"right after “{in_flight['title']}”, which is running now" if in_flight else "now"
+    _say(cycle_id, f"Got it — I'll do this in {n} step{'s' if n != 1 else ''}, starting {when}:\n"
+                   f"{steps}\nEach one gets checked on the live project before I move on.")
     _dispatch_next(cycle_id)
 
 
@@ -447,7 +568,8 @@ def _dispatch_next(cycle_id: int) -> None:
             _dispatch_instruct(cycle_id, task)
     except Exception as exc:
         logger.exception("[ENGINE] dispatch failed task %s", task["id"])
-        store.update_task(task["id"], status="failed", result=json.dumps({"error": str(exc)[:500]}))
+        store.update_task(task["id"], status="failed", result=json.dumps(
+            {"error": str(exc)[:500], "reason": "it couldn't start (an internal error on our side)"}))
         _say(cycle_id, f"⚠️ I couldn't start “{task['title']}” (an internal error on our side). "
                        f"Reply “retry” to try again.")
         _dispatch_next(cycle_id)
@@ -527,97 +649,77 @@ def _on_run_completed(kind: str, run_id: int, status: str) -> None:
 
     cycle_id = task["cycle_id"]
     if status != "completed":
-        store.update_task(task["id"], status="failed",
-                          result=json.dumps({"run_status": status}))
         why = _RUN_STATUS_WORDS.get(status, "the build didn't complete")
-        _say(cycle_id, f"⚠️ “{task['title']}” didn't finish ({why}). Reply “retry” to run it again.")
+        store.update_task(task["id"], status="failed",
+                          result=json.dumps({"run_status": status, "reason": why}))
+        _say(cycle_id, f"⚠️ “{task['title']}” didn't finish ({why}). I'll carry on with the other "
+                       f"steps — reply “retry” anytime to run it again.")
         _dispatch_next(cycle_id)
         return
 
     store.update_task(task["id"], status="under_review",
                       result=json.dumps({"phase": "verifying"}))
     task["result"] = {}
-    n = 1 if task.get("dod_item") else len(_dod(store.get_cycle(cycle_id) or {}))
-    _say(cycle_id, f"🔎 Build finished — checking the live site in a real browser "
-                   f"({n} check{'s' if n != 1 else ''}).")
+    cycle = store.get_cycle(cycle_id) or {}
+    if _is_website(cycle):
+        n = len(_checks_for(task))
+        _say(cycle_id, f"🔎 {task['title']} — built. Checking it on the live site "
+                       f"({n} check{'s' if n != 1 else ''}).")
+    else:
+        _say(cycle_id, f"🔎 {task['title']} — built. Checking the project is running.")
     _review_task(cycle_id, task)
 
 
-def _compute_outcome(task: Dict[str, Any], cycle: Dict[str, Any], dod: list,
-                     on_progress=None) -> Dict[str, Any]:
-    """Run the task's checks once and fold into a single outcome dict.
+def _checks_for(task: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """What validates a task: the core checks plus the task's own checks."""
+    out, seen = [], set()
+    for c in CORE_CHECKS + _task_checks(task):
+        sig = chat_agent.check_sig(c)
+        if sig not in seen:
+            seen.add(sig)
+            out.append(c)
+    return out
 
-    Core checks (url_200, console_clean) decide the verdict; content checks
-    only ever produce notes for the receipt.
-    """
-    from services.dev_cycles.verifier import verify, verify_all
 
-    frontend_domain = _frontend_domain(cycle) if _is_website(cycle) else ""
-    if not _is_website(cycle):
-        # Non-website (bot/agent/scheduler): verify the PM2 process is alive
-        # instead of browser checks. A single check replaces the DoD.
+def _counts(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {"results": results,
+            "passed": sum(1 for r in results if r["verdict"] == "pass"),
+            "failed": sum(1 for r in results if r["verdict"] == "fail"),
+            "unverified": sum(1 for r in results if r["verdict"] == "unverified")}
+
+
+def _compute_outcome(task: Dict[str, Any], cycle: Dict[str, Any], on_progress=None) -> Dict[str, Any]:
+    """Run the task's checks once. Every check blocks: a task is validated
+    only when all of its checks pass on the live project."""
+    if _is_website(cycle):
+        from services.dev_cycles.verifier import verify_all
+        results = verify_all(_checks_for(task), _frontend_domain(cycle), on_progress)["results"]
+    else:
+        # Bots / agents / schedulers: the project's process must be alive.
         from services.dev_cycles.verifier import verify_process
-        r = verify_process(cycle)
-        summary = {"results": [r],
-                   "passed": 1 if r["verdict"] == "pass" else 0,
-                   "failed": 1 if r["verdict"] == "fail" else 0,
-                   "unverified": 1 if r["verdict"] == "unverified" else 0}
-        single = True  # skip the per-check loop below
-    else:
-        single = _j(task.get("dod_item"), {})
-    if single and _is_website(cycle):
-        r = verify(single, frontend_domain)
-        summary = {"results": [r],
-                   "passed": 1 if r["verdict"] == "pass" else 0,
-                   "failed": 1 if r["verdict"] == "fail" else 0,
-                   "unverified": 1 if r["verdict"] == "unverified" else 0}
-    elif _is_website(cycle):
-        summary = verify_all(dod, frontend_domain, on_progress)
-    else:
-        summary = {"results": [], "passed": 0, "failed": 0, "unverified": 0}
+        results = [verify_process(cycle)]
 
-    def _pick(core: bool, verdict: str) -> list:
-        return [r for r in summary["results"]
-                if ((r["check"].get("kind") in CORE_KINDS) == core) and r["verdict"] == verdict]
-
-    core_fails = _pick(True, "fail")
-    core_unverified = _pick(True, "unverified")
-    if core_fails:
-        verdict = "fail"
-    elif core_unverified or (summary["results"] and summary["unverified"] == len(summary["results"])):
-        # site reachability itself is unknown — NOT a pass
-        verdict = "unverified"
-    else:
-        verdict = "pass"
-    # Evidence = only what explains the verdict (a dump of every result
-    # used to bury the failing check under passing ones).
-    explains = core_fails or core_unverified or _pick(False, "unverified")
-    evidence = "; ".join(f"{r['check'].get('kind')}: {r['evidence']}" for r in explains)[:800]
-    return {
-        "verdict": verdict,
-        "evidence": evidence,
-        "summary": summary,
-        "core_fails": core_fails,
-        "content_fails": _pick(False, "fail"),
-        "full": not single,
-    }
+    fails = [r for r in results if r["verdict"] == "fail"]
+    # a page that doesn't load explains every other miss → repair that first
+    fails.sort(key=lambda r: 0 if (r.get("check") or {}).get("kind") in CORE_KINDS else 1)
+    unverified = [r for r in results if r["verdict"] == "unverified"]
+    verdict = "fail" if fails else ("unverified" if unverified or not results else "pass")
+    explains = fails or unverified
+    evidence = "; ".join(f"{(r.get('check') or {}).get('kind')}: {r.get('evidence', '')}"
+                         for r in explains)[:800]
+    return {"verdict": verdict, "evidence": evidence, "results": results, "fails": fails,
+            "passed": sum(1 for r in results if r["verdict"] == "pass")}
 
 
 def _review_task(cycle_id: int, task: Dict[str, Any]) -> None:
     """Verifier gate: under_review → done | back to todo (repair) | stays
-    under_review (checks couldn't run).
-
-    Core checks (url_200, console_clean) are BLOCKERS — if the site doesn't
-    load or has console errors, the task genuinely fails and triggers repair.
-    Content checks (dom_exists, text_present) are QUALITY SIGNALS — failures
-    go into the receipt as notes, but don't block the task from completing.
+    under_review (checks couldn't run) | failed (repairs exhausted).
 
     Unverified (browser/CDP down) is never a pass and never re-runs the
     build: the task waits in under_review and reconcile() re-verifies it,
-    up to MAX_RECHECKS times, before parking it for a user "check again".
+    up to MAX_RECHECKS times, before parking it for a "check again".
     """
     cycle = store.get_cycle(cycle_id)
-    dod = _dod(cycle)
     rechecks = int(_result(task).get("recheck_count") or 0)
 
     def _progress(i: int, total: int, item: Dict[str, Any]) -> None:
@@ -626,7 +728,7 @@ def _review_task(cycle_id: int, task: Dict[str, Any]) -> None:
             "label": str(item.get("description") or "")[:80],
             "recheck_count": rechecks}))
 
-    outcome = _compute_outcome(task, cycle, dod, _progress)
+    outcome = _compute_outcome(task, cycle, _progress)
 
     if outcome["verdict"] == "unverified":
         rechecks += 1
@@ -635,167 +737,184 @@ def _review_task(cycle_id: int, task: Dict[str, Any]) -> None:
             "verdict": "unverified", "evidence": outcome["evidence"],
             "recheck_count": rechecks, "parked": parked}))
         if rechecks == 1:
-            _say(cycle_id, f"⏳ “{task['title']}” is built, but my browser check couldn't run just now. "
+            _say(cycle_id, f"⏳ “{task['title']}” is built, but my check couldn't run just now. "
                            f"I'll keep re-checking automatically — nothing needed from you.")
         elif parked:
-            domain = _frontend_domain(cycle)
+            domain = _frontend_domain(cycle) if _is_website(cycle) else ""
             link = f": https://{domain}" if domain else ""
-            _say(cycle_id, f"I still can't check the site, though the build itself finished{link}\n"
+            _say(cycle_id, f"I still can't run the check, though the build itself finished{link}\n"
                            f"Reply “check again” whenever you like.")
         return
 
     if outcome["verdict"] == "pass":
-        notes = len(outcome["content_fails"])
-        result = {"verdict": "pass", "evidence": outcome["evidence"], "content_warnings": notes}
-        if outcome["full"]:
-            # lets _finalize reuse this sweep instead of running it twice
-            result.update({"sweep": outcome["summary"], "sweep_at": time.time(),
-                           "dod_sig": _dod_sig(dod)})
-        store.update_task(task["id"], status="done", result=json.dumps(result)[:100000])
-        tail = f" ({notes} note{'s' if notes > 1 else ''} for the summary.)" if notes else ""
-        _say(cycle_id, f"✅ {task['title']} — done and loading cleanly.{tail}")
+        n = outcome["passed"]
+        store.update_task(task["id"], status="done", result=json.dumps(
+            {"verdict": "pass", "evidence": outcome["evidence"], "checks": n}))
+        _say(cycle_id, f"✅ {task['title']} — verified ({n} check{'s' if n != 1 else ''} passed).")
         _dispatch_next(cycle_id)
         return
 
-    # core fail → repair (≤2) or give up
-    failing = outcome["core_fails"][0]
-    reason = failing.get("user_text") or "The site isn't loading cleanly"
+    # a check failed → repair (≤ MAX_REPAIRS) or give up on this step
+    failing = outcome["fails"][0]
+    reason = failing.get("user_text") or "a check failed on the live project"
     repairs = int(task.get("repair_count") or 0)
     if repairs >= MAX_REPAIRS:
-        store.update_task(task["id"], status="failed",
-                          result=json.dumps({"verdict": "fail", "evidence": outcome["evidence"],
-                                             "repairs": repairs}))
-        _say(cycle_id, f"❌ “{task['title']}” — still not working after {repairs} fixes. {reason}. "
-                       f"Reply “retry” to try again, or tell me what to change.")
+        store.update_task(task["id"], status="failed", result=json.dumps(
+            {"verdict": "fail", "evidence": outcome["evidence"], "repairs": repairs, "reason": reason}))
+        _say(cycle_id, f"❌ “{task['title']}” — still failing after {repairs} fixes: {_lower_first(reason)}. "
+                       f"I'll carry on with the other steps and tell you what needs your attention at the end.")
         _dispatch_next(cycle_id)
         return
 
     try:
-        instruction = chat_agent.repair_instruction(task["title"], failing["check"], outcome["evidence"])
+        instruction = chat_agent.repair_instruction(task["title"], failing.get("check") or {},
+                                                    outcome["evidence"], task.get("description") or "")
     except Exception as exc:
         logger.warning("[ENGINE] repair instruction failed: %s", exc)
         instruction = ""
     if not instruction:
-        instruction = f"The live site has a problem — fix it: {outcome['evidence'][:600]}"
+        instruction = (f"This step isn't working on the live project yet ({reason}). Fix it. "
+                       f"Evidence: {outcome['evidence'][:600]}")
     payload = _payload(task)
     payload["repair_instruction"] = instruction
     store.update_task(task["id"], status="todo", repair_count=repairs + 1, kind="instruct",
                       payload=json.dumps(payload),
-                      result=json.dumps({"verdict": "fail", "evidence": outcome["evidence"]}))
-    _say(cycle_id, f"🔁 The site isn't working cleanly yet — {_lower_first(reason)}. "
+                      result=json.dumps({"verdict": "fail", "evidence": outcome["evidence"], "reason": reason}))
+    _say(cycle_id, f"🔁 {task['title']} — {_lower_first(reason)}. "
                    f"Fixing it (attempt {repairs + 1} of {MAX_REPAIRS}).")
     _dispatch_next(cycle_id)
 
 
-# ── receipt ─────────────────────────────────────────────────────────────
+# ── delivery: validated → delivered, otherwise needs_attention ──────────
 
-def _fresh_sweep(tasks: List[Dict[str, Any]], dod: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """The last task's own sweep, if it just ran against this same DoD."""
-    sig = _dod_sig(dod)
-    for t in reversed(tasks):
-        res = _result(t)
-        if (t["status"] == "done" and res.get("sweep") and res.get("dod_sig") == sig
-                and time.time() - float(res.get("sweep_at") or 0) < SWEEP_REUSE_S):
-            return res["sweep"]
-    return None
+_ERROR_WORDS = {"wall-clock timeout": f"it ran over {TASK_WALL_CLOCK_MIN} minutes",
+                "no project yet": "the project wasn't created"}
+
+
+def _failure_reason(task: Dict[str, Any]) -> str:
+    r = _result(task)
+    return (r.get("reason") or _ERROR_WORDS.get(str(r.get("error") or ""))
+            or ("the build stopped" if r.get("run_status") else "it didn't finish"))
+
+
+def _live_tasks(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [t for t in tasks if _result(t).get("error") != "cancelled"]
+
+
+def _is_validated(sweep: Dict[str, Any], tasks: List[Dict[str, Any]], domain: str,
+                  is_website: bool = True) -> bool:
+    """Deliverable only when every step passed AND the final regression
+    sweep of everything promised passed."""
+    results = sweep.get("results") or []
+    return (bool(results) and (bool(domain) or not is_website)
+            and all(t["status"] == "done" for t in _live_tasks(tasks))
+            and all(r["verdict"] == "pass" for r in results))
 
 
 def _build_receipt(domain: str, sweep: Dict[str, Any], tasks: List[Dict[str, Any]],
                    is_website: bool = True) -> str:
-    """The delivery message. First line states the real outcome; notes are
-    plain-language and clearly non-blocking; never a bare x/y score."""
+    """The closing message. Delivered only when validated; otherwise it says
+    exactly what is blocked and what the client can do about it."""
     results = sweep.get("results") or []
-
-    def _is_core(r) -> bool:
-        return (r.get("check") or {}).get("kind") in CORE_KINDS
-
-    core_fails = [r for r in results if _is_core(r) and r["verdict"] == "fail"]
-    core_unverified = [r for r in results if _is_core(r) and r["verdict"] == "unverified"]
-    content = [r for r in results if not _is_core(r)]
-    content_fails = [r for r in content if r["verdict"] == "fail"]
-    content_passed = sum(1 for r in content if r["verdict"] == "pass")
-    content_unverified = sum(1 for r in content if r["verdict"] == "unverified")
-    failed_tasks = [t["title"] for t in tasks
-                    if t["status"] == "failed" and _result(t).get("error") != "cancelled"]
-    corrections = [t for t in tasks if t["status"] == "done"
-                   and _payload(t).get("correction") and not _payload(t).get("receipted")]
+    noun = "site" if is_website else "project"
     link = f"https://{domain}" if is_website and domain else ""
+    live = _live_tasks(tasks)
+    failed = [t for t in live if t["status"] == "failed"]
+    done = [t for t in live if t["status"] == "done"]
+    sweep_fails = [r for r in results if r["verdict"] == "fail"]
+    sweep_unverified = [r for r in results if r["verdict"] == "unverified"]
 
-    if not domain and is_website:
-        return ("⚠️ The site wasn't created\n"
-                "The build didn't finish, so there's no link yet.\n"
+    if is_website and not domain:
+        return ("⚠️ Needs your attention\n"
+                "The site wasn't created, so there's nothing to check yet.\n"
                 "Reply “retry” to build it again.")
-    if core_fails:
-        why = ". ".join(r.get("user_text") or "The site isn't loading cleanly" for r in core_fails)
-        return (f"⚠️ Built, but not working yet\n{link}\n{why}.\n"
-                "Reply “retry” and I'll have another go, or tell me what to change.")
-    if core_unverified:
-        return (f"⏳ Built — but I couldn't check it\n{link}\n"
-                "My browser check couldn't run, so this one is unconfirmed.\n"
-                "Reply “check again” anytime.")
+    if failed or sweep_fails:
+        lines = ["⚠️ Needs your attention"] + ([link] if link else [])
+        lines.append(f"{len(done)} of {len(live)} steps are built and verified. Not done yet:")
+        lines += [f"• {t['title']} — {_failure_reason(t)}" for t in failed[:5]]
+        lines += [f"• {r.get('user_text') or (r.get('check') or {}).get('description') or 'a check failed'}"
+                  for r in sweep_fails[:5]]
+        lines.append("Reply “retry” and I'll try again, or tell me how you'd like it handled.")
+        return "\n".join(lines)
+    if sweep_unverified or not results:
+        return "\n".join(["⚠️ Needs your attention"] + ([link] if link else []) + [
+            f"Every step is built, but my final check of the {noun} couldn't run, "
+            f"so I can't confirm it all works together yet.",
+            "Reply “check again” and I'll re-check."])
 
-    lines: List[str] = []
+    corrections = [t for t in done if _payload(t).get("correction") and not _payload(t).get("receipted")]
+    lines = []
     if corrections:
-        requests = [r for t in corrections for r in (_payload(t).get("requests") or [])]
+        requests = list(dict.fromkeys(r for t in corrections for r in (_payload(t).get("requests") or [])))
         if len(requests) == 1:
             lines.append(f"✅ Change is live: “{requests[0][:80]}”")
         else:
             lines.append(f"✅ Your {len(requests) or len(corrections)} changes are live")
-        lines.append(link)
-        confirmed = [r.get("user_text") for r in content
-                     if r["verdict"] == "pass" and (r.get("check") or {}).get("new") and r.get("user_text")]
-        if confirmed:
-            lines.append("Confirmed on the page: " + "; ".join(confirmed[:3]) + ".")
-        lines.append("The site still loads cleanly, with no errors.")
     else:
-        lines.append("✅ Your site is live")
+        lines.append("✅ Delivered — every step verified")
+    if link:
         lines.append(link)
-        checked = content_passed + len(content_fails)
-        if checked:
-            lines.append(f"Checked in a real browser: loads, no errors, "
-                         f"{content_passed} of {checked} page checks.")
-        else:
-            lines.append("Checked in a real browser: it loads with no errors.")
-
-    if content_fails:
-        lines.append("Worth a look (not blocking):")
-        for r in content_fails[:4]:
-            note = r.get("user_text") or (r.get("check") or {}).get("description") or "a page check"
-            if (r.get("check") or {}).get("predates_change"):
-                note += " (this check predates your latest change — it may be outdated)"
-            lines.append(f"• {note}")
-        if len(content_fails) > 4:
-            lines.append(f"• …and {len(content_fails) - 4} more")
-    if content_unverified:
-        lines.append(f"{content_unverified} page check{'s' if content_unverified > 1 else ''} "
-                     f"couldn't run this time.")
-    if failed_tasks:
-        lines.append("Didn't finish: " + ", ".join(f"“{t}”" for t in failed_tasks[:3])
-                     + " — reply “retry” to run it again.")
-    if content_fails:
-        lines.append("Reply “fix these” and I'll sort them out, or tell me what to change.")
-    else:
-        lines.append("Reply to change anything.")
+    n, k = len(done), len(results)
+    lines.append(f"All {n} step{'s' if n != 1 else ''} passed their checks, and a final check of the "
+                 f"whole {noun} ({k} check{'s' if k != 1 else ''}) passed"
+                 f"{' in a real browser' if is_website else ''}.")
+    confirmed = [r.get("user_text") for r in results
+                 if (r.get("check") or {}).get("new") and r.get("user_text")]
+    if confirmed:
+        lines.append("Confirmed on the page: " + "; ".join(confirmed[:3]) + ".")
+    lines.append("Reply to change anything.")
     return "\n".join(lines)
 
 
 def _finalize(cycle_id: int, force_sweep: bool = False) -> None:
-    """All tasks terminal → final DoD sweep + screenshot + receipt."""
-    from services.dev_cycles.verifier import verify_all
+    """All tasks terminal → regression sweep of everything promised →
+    one automatic fix round if something broke along the way → delivered
+    (validated) or needs_attention, with a screenshot + Telegram receipt.
+    `force_sweep` is kept for callers; the sweep always runs."""
+    from services.dev_cycles.verifier import verify_all, verify_process
 
     cycle = store.get_cycle(cycle_id)
-    domain = _frontend_domain(cycle)
-    dod = _dod(cycle)
+    website = _is_website(cycle)
+    domain = _frontend_domain(cycle) if website else ""
+    dod = _dod(cycle) or [dict(c) for c in CORE_CHECKS]
     tasks = store.get_tasks(cycle_id)
-    sweep = None if force_sweep else _fresh_sweep(tasks, dod)
-    if sweep is None:
-        if domain:
-            _say(cycle_id, "🔎 Final check of the live site…")
-        sweep = verify_all(dod, domain)
 
-    evidence: Dict[str, Any] = {"sweep": sweep}
+    if website:
+        if domain:
+            _say(cycle_id, f"🔎 All steps done — re-checking everything together on the live site "
+                           f"({len(dod)} checks).")
+        sweep = verify_all(dod, domain)
+    else:
+        sweep = _counts([verify_process(cycle)])
+
+    sweep_fails = [r for r in sweep["results"] if r["verdict"] == "fail"]
+    plan = _plan(cycle)
+    fixes = int(plan.get("regression_fixes") or 0)
+    if (website and domain and sweep_fails and fixes < MAX_REGRESSION_FIXES
+            and all(t["status"] == "done" for t in _live_tasks(tasks))):
+        # A later step broke something an earlier step had verified.
+        plan["regression_fixes"] = fixes + 1
+        problems = [r.get("user_text") or (r.get("check") or {}).get("description") or "a check failed"
+                    for r in sweep_fails]
+        store.add_task(
+            cycle_id, position=len(tasks), title="Fix what the final check found",
+            description=("The final check of the live site found problems in things earlier steps "
+                         "had built. Fix them without breaking anything else:\n"
+                         + "\n".join(f"- {p}" for p in problems)
+                         + "\nEvidence: " + "; ".join(r.get("evidence", "") for r in sweep_fails)[:1500]),
+            kind="instruct",
+            payload={"regression": True, "summary": "Repair anything the final check found broken"},
+            dod_item={"checks": [r["check"] for r in sweep_fails
+                                 if (r.get("check") or {}).get("kind") not in CORE_KINDS][:6]} or None)
+        store.update_cycle(cycle_id, plan=json.dumps(plan), status="building")
+        _say(cycle_id, "🔁 The final check found something that broke along the way:\n"
+                       + "\n".join(f"• {p}" for p in problems[:4]) + "\nFixing it before I deliver.")
+        _dispatch_next(cycle_id)
+        return
+
+    validated = _is_validated(sweep, tasks, domain, website)
     screenshot_path = None
-    if domain:
+    if website and domain:
         try:
             from services.preview_capture import capture_preview_png
             png = capture_preview_png(f"https://{domain}/")
@@ -807,20 +926,19 @@ def _finalize(cycle_id: int, force_sweep: bool = False) -> None:
         except Exception as exc:
             logger.warning("[ENGINE] receipt screenshot failed: %s", exc)
 
-    receipt = _build_receipt(domain, sweep, tasks, is_website=_is_website(cycle))
-
-    # This receipt reported the pending corrections and their new checks.
-    for t in tasks:
-        p = _payload(t)
-        if t["status"] == "done" and p.get("correction") and not p.get("receipted"):
-            p["receipted"] = True
-            store.update_task(t["id"], payload=json.dumps(p))
-    for d in dod:
-        d.pop("new", None)
-    store.update_cycle(cycle_id, status="delivered", dod=json.dumps(dod),
-                       evidence=json.dumps(evidence)[:100000])
+    receipt = _build_receipt(domain, sweep, tasks, is_website=website)
+    if validated:
+        # this receipt reported the pending changes and their new checks
+        for t in tasks:
+            p = _payload(t)
+            if t["status"] == "done" and p.get("correction") and not p.get("receipted"):
+                p["receipted"] = True
+                store.update_task(t["id"], payload=json.dumps(p))
+        for d in dod:
+            d.pop("new", None)
+    store.update_cycle(cycle_id, status="delivered" if validated else "needs_attention",
+                       dod=json.dumps(dod), evidence=json.dumps({"sweep": sweep})[:100000])
     _say(cycle_id, receipt)
-
     _send_telegram(cycle, receipt, screenshot_path)
 
 
