@@ -185,6 +185,14 @@ def _on_user_message(cycle_id: int, message_id: Optional[int] = None) -> None:
     if not msg or msg["role"] != "user":
         return
 
+    if status == "planning":
+        # The plan step crashed (it normally completes atomically under the
+        # cycle lock) — queue the message instead of dropping it, and let
+        # reconcile/dispatch recover the board (first-review bug 3).
+        _say(cycle_id, "Noted — I'll add that once the plan is set.")
+        store.update_cycle(cycle_id, status="building")
+        _dispatch_next(cycle_id)
+        return
     if status in ("delivered", "failed", "building"):
         _handle_followup(cycle, msg["content"])
         return
@@ -298,7 +306,12 @@ def _handle_followup(cycle: Dict[str, Any], text: str) -> None:
                and _result(t).get("verdict") == "unverified"]
     in_flight = next((t for t in tasks if t["status"] in ("in_progress", "under_review")), None)
 
-    if RECHECK_RE.match(text):
+    # Keyword commands ("retry", "check again") only when the message is
+    # short — "Redo the hero section in blue" is a change request, not a
+    # retry command (first-review bug 1).
+    is_command = len(text.split()) <= 4
+
+    if is_command and RECHECK_RE.match(text):
         if waiting:
             _recheck(cycle_id, waiting[0])
         elif in_flight:
@@ -308,7 +321,7 @@ def _handle_followup(cycle: Dict[str, Any], text: str) -> None:
             _finalize(cycle_id, force_sweep=True)
         return
 
-    if RETRY_RE.match(text):
+    if is_command and RETRY_RE.match(text):
         failed = [t for t in tasks if t["status"] == "failed"]
         if not failed:
             if waiting:
@@ -317,7 +330,21 @@ def _handle_followup(cycle: Dict[str, Any], text: str) -> None:
                 _say(cycle_id, "Nothing failed, so there's nothing to retry — tell me what you'd like changed.")
             return
         for t in failed:
-            store.update_task(t["id"], status="todo", repair_count=0, result=json.dumps({}))
+            payload = _payload(t)
+            # Bug 2: drop a stale repair instruction — the retry must run the
+            # task's own description, not the previous failure's fix text.
+            payload.pop("repair_instruction", None)
+            # Bug 4: retrying a failed CREATE must not build a second project
+            # against the user's quota. If the cycle already has a project,
+            # retry as an instruct build on that project instead.
+            if t.get("kind") == "create" and cycle.get("project_id"):
+                payload["create_retry"] = True
+                store.update_task(t["id"], status="todo", repair_count=0,
+                                  result=json.dumps({}), kind="instruct",
+                                  payload=json.dumps(payload))
+            else:
+                store.update_task(t["id"], status="todo", repair_count=0,
+                                  result=json.dumps({}), payload=json.dumps(payload))
         names = ", ".join(f"“{t['title']}”" for t in failed[:3])
         _say(cycle_id, f"On it — retrying {names}.")
         store.update_cycle(cycle_id, status="building")
