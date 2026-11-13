@@ -71,7 +71,7 @@ async def create_cycle(request: CreateCycleRequest, authorization: Optional[str]
     _require_paid(user_id)
     if store.has_active_cycle(user_id):
         raise HTTPException(status_code=409,
-                             detail="You already have an active dev cycle — finish or pause it first")
+                             detail="You already have an active dev cycle — finish or stop it first")
 
     # Existing-project mode: validate the project is the user's website
     if request.project_id is not None:
@@ -117,7 +117,23 @@ async def cycle_detail(cycle_id: int, authorization: Optional[str] = Header(None
     cycle = _own_cycle(cycle_id, user_id)
     messages = store.get_messages(cycle_id)
     tasks = store.get_tasks(cycle_id)
-    return {"cycle": cycle, "messages": messages, "tasks": tasks}
+
+    # Live site URL (known as soon as the project exists) — the page shows it
+    # in a preview pane while the build and the checks run.
+    site_url = None
+    if cycle.get("project_id"):
+        try:
+            from database_postgres import get_db
+            from domain_config import BASE_DOMAIN
+            with get_db() as conn:
+                row = conn.execute("SELECT domain FROM projects WHERE id = %s",
+                                   (cycle["project_id"],)).fetchone()
+            d = (dict(row) if row is not None and not isinstance(row, dict) else row) or {}
+            if d.get("domain"):
+                site_url = f"https://{d['domain']}.{BASE_DOMAIN}"
+        except Exception as exc:
+            logger.warning("[DEV-CYCLES] site_url lookup failed: %s", exc)
+    return {"cycle": cycle, "messages": messages, "tasks": tasks, "site_url": site_url}
 
 
 @router.post("/{cycle_id}/cancel")
