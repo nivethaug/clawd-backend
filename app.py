@@ -2675,6 +2675,8 @@ app.middleware("http")(project_proxy_middleware)
 
 # Register AI Chat routers
 app.include_router(ai_chat_router, prefix="/api/ai", tags=["ai-chat"])
+from api.guide_router import router as guide_router
+app.include_router(guide_router, prefix="/api/guide", tags=["guide"])
 app.include_router(ai_selection_router, prefix="/api/ai", tags=["ai-selection"])
 app.include_router(ai_confirm_router, prefix="/api/ai", tags=["ai-confirm"])
 
